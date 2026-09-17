@@ -9,8 +9,13 @@ mod windows_app {
     use std::mem::{size_of, zeroed};
     use std::path::PathBuf;
     use std::ptr::{null, null_mut};
+    use std::sync::atomic::{AtomicIsize, Ordering};
     use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, GetConsoleWindow,
+        SetConsoleCtrlHandler,
+    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::Dialogs::*;
     use windows_sys::Win32::UI::Controls::SetScrollInfo;
@@ -24,6 +29,31 @@ mod windows_app {
     const TOP: i32 = 8;
     const STATUS: i32 = 27;
     const PAD: i32 = 10;
+    static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+    unsafe extern "system" fn console_control(event: u32) -> i32 {
+        if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+            let hwnd = EDITOR_WINDOW.load(Ordering::Relaxed) as HWND;
+            if !hwnd.is_null() {
+                unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+            }
+            return 1;
+        }
+        0
+    }
+
+    fn connect_parent_console(hwnd: HWND) {
+        unsafe {
+            let attached = AttachConsole(ATTACH_PARENT_PROCESS) != 0;
+            let console = GetConsoleWindow();
+            if attached || !console.is_null() {
+                EDITOR_WINDOW.store(hwnd as isize, Ordering::Relaxed);
+                // Launchers can pass down the inheritable "ignore Ctrl+C" setting.
+                SetConsoleCtrlHandler(None, 0);
+                SetConsoleCtrlHandler(Some(console_control), 1);
+            }
+        }
+    }
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(Some(0)).collect()
@@ -875,6 +905,7 @@ mod windows_app {
         lparam: LPARAM,
     ) -> LRESULT {
         if msg == WM_DESTROY {
+            EDITOR_WINDOW.store(0, Ordering::Relaxed);
             unsafe { PostQuitMessage(0) };
             return 0;
         }
@@ -1084,6 +1115,7 @@ mod windows_app {
                 GWLP_USERDATA,
                 (&mut *app as *mut RefCell<App>) as isize,
             );
+            connect_parent_console(hwnd);
             app.borrow().update_title(hwnd);
             app.borrow().update_scrollbar(hwnd);
             ShowWindow(hwnd, SW_SHOW);

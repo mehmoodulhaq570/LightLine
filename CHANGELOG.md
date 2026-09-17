@@ -9,6 +9,7 @@ Changes to the project are recorded here. Planned architecture is documented sep
 - Recorded the [v0.1 technical direction](docs/ARCHITECTURE.md), including system boundaries, technology candidates, lazy services, optional AI and plugins, performance measures, and the staged roadmap.
 - Added this changelog so architecture and implementation changes can be tracked over time.
 - Added select all, keyboard and mouse selection, copy/cut/paste, word and page navigation, new/close shortcuts, and case-sensitive find in the open file.
+- Connected terminal Ctrl+C/Ctrl+Break to the editor's normal close path when launched from a console.
 
 ### Current prototype
 

@@ -23,7 +23,7 @@ You can pass a UTF-8 file path as the first argument.
 
 Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Find is currently case-sensitive and searches the open file only.
 
-To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. Ctrl+C in the terminal interrupts the run; if an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process my-editor | Stop-Process`.
+To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process my-editor | Stop-Process`.
 
 This is an initial editor core and viewport prototype. It does not yet include syntax highlighting, tabs, split panes, or project-wide search.
 
