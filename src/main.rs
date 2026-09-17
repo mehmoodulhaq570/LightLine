@@ -607,16 +607,6 @@ mod windows_app {
                         1,
                     );
                 }
-                FillRect(
-                    hdc,
-                    &RECT {
-                        left: 0,
-                        top: editor_bottom,
-                        right: rect.right,
-                        bottom: rect.bottom,
-                    },
-                    status_bg,
-                );
                 let visible = self.visible_lines(hwnd) + 1;
                 for row in 0..visible {
                     let index = self.view().first_line + row;
@@ -630,7 +620,22 @@ mod windows_app {
                     let number = format!("{}", index + 1);
                     let num: Vec<u16> = number.encode_utf16().collect();
                     SetTextColor(hdc, 0x00958b81);
-                    TextOutW(hdc, self.scale(12), y, num.as_ptr(), num.len() as i32);
+                    let number_clip = RECT {
+                        left: 0,
+                        top: y,
+                        right: self.scale(GUTTER),
+                        bottom: editor_bottom,
+                    };
+                    ExtTextOutW(
+                        hdc,
+                        self.scale(12),
+                        y,
+                        ETO_CLIPPED,
+                        &number_clip,
+                        num.as_ptr(),
+                        num.len() as u32,
+                        null(),
+                    );
                     let source = self.doc().line(index);
                     if let Some((start, end)) = selection
                         && index >= start.line
@@ -731,6 +736,16 @@ mod windows_app {
                         DeleteObject(caret);
                     }
                 }
+                FillRect(
+                    hdc,
+                    &RECT {
+                        left: 0,
+                        top: editor_bottom,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    },
+                    status_bg,
+                );
                 let label = format!(
                     "{}    Ln {}, Col {}    {} lines",
                     self.status,
