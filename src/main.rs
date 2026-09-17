@@ -4,6 +4,7 @@
 mod windows_app {
     use my_editor::clipboard;
     use my_editor::document::{Document, Pos};
+    use my_editor::syntax::{Color, RustSyntax};
     use std::cell::RefCell;
     use std::io;
     use std::mem::{size_of, zeroed};
@@ -71,13 +72,34 @@ mod windows_app {
     struct Tab {
         document: Document,
         view: EditorView,
+        syntax: Option<RustSyntax>,
     }
 
     impl Tab {
         fn new(document: Document) -> Self {
+            let syntax = Self::is_rust(&document).then(RustSyntax::new);
             Self {
                 document,
                 view: EditorView::default(),
+                syntax,
+            }
+        }
+
+        fn is_rust(document: &Document) -> bool {
+            document
+                .path
+                .as_deref()
+                .and_then(Path::extension)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
+        }
+
+        fn update_syntax_language(&mut self) {
+            if Self::is_rust(&self.document) {
+                if self.syntax.is_none() {
+                    self.syntax = Some(RustSyntax::new());
+                }
+            } else {
+                self.syntax = None;
             }
         }
     }
@@ -162,6 +184,29 @@ mod windows_app {
             self.scale(TAB_HEIGHT + TOP)
         }
 
+        fn syntax_changed(&mut self, line: usize) {
+            if let Some(syntax) = &mut self.tab_mut().syntax {
+                syntax.invalidate_from(line);
+            }
+        }
+
+        fn advance_syntax(&mut self, hwnd: HWND) {
+            let target = (self.view().first_line + self.visible_lines(hwnd))
+                .min(self.doc().line_count().saturating_sub(1));
+            let tab = self.tab_mut();
+            let pending = tab
+                .syntax
+                .as_mut()
+                .is_some_and(|syntax| !syntax.advance_to(&tab.document, target, 2048));
+            unsafe {
+                if pending {
+                    SetTimer(hwnd, 2, 16, None);
+                } else {
+                    KillTimer(hwnd, 2);
+                }
+            }
+        }
+
         fn tab_label(&self, index: usize) -> String {
             let doc = &self.tabs[index].document;
             let name = doc
@@ -192,6 +237,7 @@ mod windows_app {
             self.dragging = false;
             self.update_title(hwnd);
             self.update_scrollbar(hwnd);
+            self.advance_syntax(hwnd);
             unsafe {
                 InvalidateRect(hwnd, null(), 0);
             }
@@ -335,6 +381,7 @@ mod windows_app {
         fn refresh(&mut self, hwnd: HWND) {
             self.update_title(hwnd);
             self.keep_cursor_visible(hwnd);
+            self.advance_syntax(hwnd);
         }
 
         fn selection_range(&self) -> Option<(Pos, Pos)> {
@@ -364,9 +411,14 @@ mod windows_app {
             let (start, end) = self
                 .selection_range()
                 .unwrap_or((self.view().cursor, self.view().cursor));
-            let cursor = self.doc_mut().replace(start, end, text);
-            self.view_mut().cursor = cursor;
+            self.replace_range(start, end, text);
             self.view_mut().selection_anchor = None;
+        }
+
+        fn replace_range(&mut self, start: Pos, end: Pos, text: &str) {
+            let cursor = self.doc_mut().replace(start, end, text);
+            self.syntax_changed(start.line);
+            self.view_mut().cursor = cursor;
         }
 
         fn copy_selection(&mut self, hwnd: HWND) -> bool {
@@ -627,6 +679,35 @@ mod windows_app {
                         chars.len() as u32,
                         null(),
                     );
+                    if source.len() <= 16_384
+                        && let Some(syntax) = &self.tab().syntax
+                    {
+                        for span in syntax.spans(self.doc(), index) {
+                            let color = match span.color {
+                                Color::Comment => 0x009caa82,
+                                Color::String => 0x008fcfba,
+                                Color::Keyword => 0x00e8a57d,
+                                Color::Type => 0x00cfb78e,
+                                Color::Number => 0x00a8c5e8,
+                                Color::Macro => 0x00dbb6d7,
+                            };
+                            SetTextColor(hdc, color);
+                            let left = self.scale(GUTTER + PAD)
+                                + self.text_width(hdc, &source[..span.start]);
+                            let text = source[span.start..span.end].replace('\t', "    ");
+                            let chars: Vec<u16> = text.encode_utf16().collect();
+                            ExtTextOutW(
+                                hdc,
+                                left,
+                                y,
+                                ETO_CLIPPED,
+                                &clip,
+                                chars.as_ptr(),
+                                chars.len() as u32,
+                                null(),
+                            );
+                        }
+                    }
                 }
                 if self.focused && self.caret_on {
                     let line = self.doc().line(self.view().cursor.line);
@@ -750,6 +831,7 @@ mod windows_app {
             }
             match self.doc_mut().save(&path) {
                 Ok(()) => {
+                    self.tab_mut().update_syntax_language();
                     self.status = format!("Saved {}", path.display());
                     self.refresh(hwnd);
                     true
@@ -892,20 +974,23 @@ mod windows_app {
                     }
                     0x5a if shift => {
                         self.view_mut().selection_anchor = None;
-                        if let Some(cursor) = self.doc_mut().redo() {
+                        if let Some((cursor, line)) = self.doc_mut().redo() {
                             self.view_mut().cursor = cursor;
+                            self.syntax_changed(line);
                         }
                     }
                     0x5a => {
                         self.view_mut().selection_anchor = None;
-                        if let Some(cursor) = self.doc_mut().undo() {
+                        if let Some((cursor, line)) = self.doc_mut().undo() {
                             self.view_mut().cursor = cursor;
+                            self.syntax_changed(line);
                         }
                     }
                     0x59 => {
                         self.view_mut().selection_anchor = None;
-                        if let Some(cursor) = self.doc_mut().redo() {
+                        if let Some((cursor, line)) = self.doc_mut().redo() {
                             self.view_mut().cursor = cursor;
+                            self.syntax_changed(line);
                         }
                     }
                     x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
@@ -923,7 +1008,7 @@ mod windows_app {
                             self.replace_selection("");
                         } else {
                             let previous = self.doc().previous_word(cursor);
-                            self.view_mut().cursor = self.doc_mut().replace(previous, cursor, "");
+                            self.replace_range(previous, cursor, "");
                         }
                     }
                     x if x == VK_DELETE as u32 => {
@@ -931,7 +1016,7 @@ mod windows_app {
                             self.replace_selection("");
                         } else {
                             let next = self.doc().next_word(cursor);
-                            self.view_mut().cursor = self.doc_mut().replace(cursor, next, "");
+                            self.replace_range(cursor, next, "");
                         }
                     }
                     _ => return false,
@@ -1025,7 +1110,7 @@ mod windows_app {
                         self.replace_selection("");
                     } else {
                         let previous = self.doc().previous(cursor);
-                        self.view_mut().cursor = self.doc_mut().replace(previous, cursor, "");
+                        self.replace_range(previous, cursor, "");
                     }
                 }
                 x if x == VK_DELETE as u32 => {
@@ -1033,7 +1118,7 @@ mod windows_app {
                         self.replace_selection("");
                     } else {
                         let next = self.doc().next(cursor);
-                        self.view_mut().cursor = self.doc_mut().replace(cursor, next, "");
+                        self.replace_range(cursor, next, "");
                     }
                 }
                 _ => return false,
@@ -1194,6 +1279,7 @@ mod windows_app {
         };
         match msg {
             WM_PAINT => {
+                app.advance_syntax(hwnd);
                 app.paint(hwnd);
                 0
             }
@@ -1243,6 +1329,13 @@ mod windows_app {
                 if app.focused {
                     app.caret_on = !app.caret_on;
                     app.invalidate_caret(hwnd);
+                }
+                0
+            }
+            WM_TIMER if wparam == 2 => {
+                app.advance_syntax(hwnd);
+                unsafe {
+                    InvalidateRect(hwnd, null(), 0);
                 }
                 0
             }

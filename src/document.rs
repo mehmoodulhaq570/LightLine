@@ -321,25 +321,27 @@ impl Document {
         }
     }
 
-    pub fn undo(&mut self) -> Option<Pos> {
+    pub fn undo(&mut self) -> Option<(Pos, usize)> {
         if let Some(edit) = self.undo.pop() {
+            let line = edit.start.line;
             let end = Self::end_of(edit.start, &edit.new);
             let cursor = self.replace_raw(edit.start, end, &edit.old);
             self.revision = edit.before;
             self.redo.push(edit);
-            Some(cursor)
+            Some((cursor, line))
         } else {
             None
         }
     }
 
-    pub fn redo(&mut self) -> Option<Pos> {
+    pub fn redo(&mut self) -> Option<(Pos, usize)> {
         if let Some(edit) = self.redo.pop() {
+            let line = edit.start.line;
             let end = Self::end_of(edit.start, &edit.old);
             let cursor = self.replace_raw(edit.start, end, &edit.new);
             self.revision = edit.after;
             self.undo.push(edit);
-            Some(cursor)
+            Some((cursor, line))
         } else {
             None
         }
@@ -447,9 +449,9 @@ mod tests {
             Pos { line: 1, byte: 1 }
         );
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
-        assert_eq!(doc.undo(), Some(Pos { line: 1, byte: 2 }));
+        assert_eq!(doc.undo(), Some((Pos { line: 1, byte: 2 }, 0)));
         assert_eq!(doc.lines, ["alpha", "beta", "gamma"]);
-        assert_eq!(doc.redo(), Some(Pos { line: 1, byte: 1 }));
+        assert_eq!(doc.redo(), Some((Pos { line: 1, byte: 1 }, 0)));
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
     }
 
@@ -459,7 +461,7 @@ mod tests {
         doc.replace(Pos::default(), Pos::default(), "a");
         doc.saved_revision = doc.revision;
         doc.replace(doc.end(), doc.end(), "b");
-        let cursor = doc.undo().unwrap();
+        let cursor = doc.undo().unwrap().0;
         assert!(!doc.is_dirty());
         doc.replace(cursor, cursor, "c");
         assert!(doc.is_dirty());

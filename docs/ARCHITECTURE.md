@@ -136,20 +136,20 @@ Version labels describe sequence, not release promises.
 | --- | --- |
 | v0.1 | Native window, correct text editing, files, open/save, tabs, search, syntax highlighting |
 | v0.2 | Project/workspace, file tree, recent files |
-| v0.3 | Tree-sitter-backed incremental parsing and highlighting |
+| v0.3 | Scale Tree-sitter parsing beyond small files and expand language coverage |
 | v0.4 | LSP client and one language server first |
 | v0.5 | Git CLI integration and terminal |
 | v0.6 | Debugger |
 | v0.7 | Isolated plugin system |
 | v0.8 | Optional AI subsystem |
 
-The stage order is more important than these numbers. Syntax highlighting can begin with a small implementation in v0.1 and move to Tree-sitter in v0.3. Later languages follow after the first LSP integration is stable.
+The stage order is more important than these numbers. Rust Tree-sitter parsing has begun in v0.1 for small files; a later stage should move parsing off the UI thread and extend it to larger files. Later languages follow after the first LSP integration is stable.
 
 The following are outside the v0.1 target: AI, plugins, debugger, broad language support, cloud sync, collaboration, extension marketplace, complex indexing, and a built-in package manager.
 
 ### Current implementation versus v0.1 target
 
-The repository currently contains a Windows Rust editor prototype with multiple tabs, per-tab view state, UTF-8 open/save, editing, undo/redo, selection, clipboard commands, in-file find, and visible-line GDI painting. It includes a document benchmark and an initial test set. It does **not** yet include split panes, project-wide search, syntax highlighting, GPUI, Tree-sitter, LSP, Git, or a terminal. This gap is intentional and should remain visible in planning and changelogs.
+The repository currently contains a Windows Rust editor prototype with multiple tabs, per-tab view state, UTF-8 open/save, editing, undo/redo, selection, clipboard commands, in-file find, Rust syntax coloring, and visible-line GDI painting. Rust files up to 128 KiB use a background Tree-sitter worker with incremental tree edits and revision-checked results. Larger Rust files use a lexical fallback with lazy line-start state and bounded scanning. The repository also includes document and syntax benchmarks and tests. It does **not** yet include split panes, project-wide search, GPUI, LSP, Git, or a terminal. This gap is intentional and should remain visible in planning and changelogs.
 
 ## Decision rules
 
