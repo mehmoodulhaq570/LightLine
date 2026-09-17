@@ -10,14 +10,15 @@ Changes to the project are recorded here. Planned architecture is documented sep
 - Added this changelog so architecture and implementation changes can be tracked over time.
 - Added select all, keyboard and mouse selection, copy/cut/paste, word and page navigation, new/close shortcuts, and case-sensitive find in the open file.
 - Connected terminal Ctrl+C/Ctrl+Break to the editor's normal close path when launched from a console.
+- Added multiple tabs with per-tab cursor, selection, scroll, and undo state; tab switching and closing by mouse or keyboard; duplicate-open detection; and save prompts for each dirty tab on window close.
 
 ### Current prototype
 
-- Windows Rust editor with UTF-8 open/save, editing, undo/redo, selection, clipboard commands, in-file find, and visible-line painting.
+- Windows Rust editor with UTF-8 open/save, tabs, editing, undo/redo, selection, clipboard commands, in-file find, and visible-line painting.
 - Native DPI handling and visible text caret; close-window path corrected.
 - Document tests and a 100,000-line open/edit/save measurement example.
 
 ### Not yet implemented
 
-- v0.1 target features still outstanding: tabs, syntax highlighting, and broader search.
+- v0.1 target features still outstanding: syntax highlighting and broader search.
 - GPUI, Tree-sitter, LSP, Git, terminal, debugger, plugins, and AI remain future or conditional work.

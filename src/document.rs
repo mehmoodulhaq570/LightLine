@@ -21,7 +21,6 @@ struct Edit {
 pub struct Document {
     lines: Vec<String>,
     pub path: Option<PathBuf>,
-    pub cursor: Pos,
     eol: &'static str,
     bom: bool,
     last_saved: Option<(SystemTime, u64)>,
@@ -43,7 +42,6 @@ impl Document {
         Self {
             lines: vec![String::new()],
             path: None,
-            cursor: Pos::default(),
             eol: "\n",
             bom: false,
             last_saved: None,
@@ -67,7 +65,6 @@ impl Document {
         Ok(Self {
             lines: normalized.split('\n').map(str::to_owned).collect(),
             path: Some(path),
-            cursor: Pos::default(),
             eol,
             bom,
             last_saved: Some((metadata.modified()?, metadata.len())),
@@ -284,15 +281,15 @@ impl Document {
         cursor
     }
 
-    pub fn replace(&mut self, start: Pos, end: Pos, replacement: &str) {
+    pub fn replace(&mut self, start: Pos, end: Pos, replacement: &str) -> Pos {
         let (start, end) = (self.clamp(start), self.clamp(end));
         if start.line > end.line || (start.line == end.line && start.byte > end.byte) {
-            return;
+            return start;
         }
         let replacement = replacement.replace("\r\n", "\n").replace('\r', "\n");
         let old = self.slice(start, end);
         if old == replacement {
-            return;
+            return end;
         }
         let new_end = self.replace_raw(start, end, &replacement);
         let after = self.next_revision;
@@ -305,8 +302,8 @@ impl Document {
             after,
         });
         self.redo.clear();
-        self.cursor = new_end;
         self.revision = after;
+        new_end
     }
 
     fn end_of(start: Pos, text: &str) -> Pos {
@@ -324,21 +321,27 @@ impl Document {
         }
     }
 
-    pub fn undo(&mut self) {
+    pub fn undo(&mut self) -> Option<Pos> {
         if let Some(edit) = self.undo.pop() {
             let end = Self::end_of(edit.start, &edit.new);
-            self.cursor = self.replace_raw(edit.start, end, &edit.old);
+            let cursor = self.replace_raw(edit.start, end, &edit.old);
             self.revision = edit.before;
             self.redo.push(edit);
+            Some(cursor)
+        } else {
+            None
         }
     }
 
-    pub fn redo(&mut self) {
+    pub fn redo(&mut self) -> Option<Pos> {
         if let Some(edit) = self.redo.pop() {
             let end = Self::end_of(edit.start, &edit.old);
-            self.cursor = self.replace_raw(edit.start, end, &edit.new);
+            let cursor = self.replace_raw(edit.start, end, &edit.new);
             self.revision = edit.after;
             self.undo.push(edit);
+            Some(cursor)
+        } else {
+            None
         }
     }
 
@@ -439,11 +442,14 @@ mod tests {
     fn multiline_edit_undo_and_redo() {
         let mut doc = Document::new();
         doc.replace(Pos::default(), Pos::default(), "alpha\nbeta\ngamma");
-        doc.replace(Pos { line: 0, byte: 2 }, Pos { line: 1, byte: 2 }, "X\nY");
+        assert_eq!(
+            doc.replace(Pos { line: 0, byte: 2 }, Pos { line: 1, byte: 2 }, "X\nY"),
+            Pos { line: 1, byte: 1 }
+        );
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
-        doc.undo();
+        assert_eq!(doc.undo(), Some(Pos { line: 1, byte: 2 }));
         assert_eq!(doc.lines, ["alpha", "beta", "gamma"]);
-        doc.redo();
+        assert_eq!(doc.redo(), Some(Pos { line: 1, byte: 1 }));
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
     }
 
@@ -452,10 +458,10 @@ mod tests {
         let mut doc = Document::new();
         doc.replace(Pos::default(), Pos::default(), "a");
         doc.saved_revision = doc.revision;
-        doc.replace(doc.cursor, doc.cursor, "b");
-        doc.undo();
+        doc.replace(doc.end(), doc.end(), "b");
+        let cursor = doc.undo().unwrap();
         assert!(!doc.is_dirty());
-        doc.replace(doc.cursor, doc.cursor, "c");
+        doc.replace(cursor, cursor, "c");
         assert!(doc.is_dirty());
         assert_eq!(doc.line(0), "ac");
     }

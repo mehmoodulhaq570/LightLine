@@ -149,7 +149,7 @@ The following are outside the v0.1 target: AI, plugins, debugger, broad language
 
 ### Current implementation versus v0.1 target
 
-The repository currently contains a Windows Rust editor prototype with one document, UTF-8 open/save, editing, undo/redo, selection, clipboard commands, in-file find, and visible-line GDI painting. It includes a document benchmark and an initial test set. It does **not** yet include tabs, split panes, project-wide search, syntax highlighting, GPUI, Tree-sitter, LSP, Git, or a terminal. This gap is intentional and should remain visible in planning and changelogs.
+The repository currently contains a Windows Rust editor prototype with multiple tabs, per-tab view state, UTF-8 open/save, editing, undo/redo, selection, clipboard commands, in-file find, and visible-line GDI painting. It includes a document benchmark and an initial test set. It does **not** yet include split panes, project-wide search, syntax highlighting, GPUI, Tree-sitter, LSP, Git, or a terminal. This gap is intentional and should remain visible in planning and changelogs.
 
 ## Decision rules
 

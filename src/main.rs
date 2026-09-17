@@ -7,7 +7,7 @@ mod windows_app {
     use std::cell::RefCell;
     use std::io;
     use std::mem::{size_of, zeroed};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicIsize, Ordering};
     use windows_sys::Win32::Foundation::*;
@@ -29,6 +29,8 @@ mod windows_app {
     const TOP: i32 = 8;
     const STATUS: i32 = 27;
     const PAD: i32 = 10;
+    const TAB_HEIGHT: i32 = 34;
+    const TAB_WIDTH: i32 = 180;
     static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
     unsafe extern "system" fn console_control(event: u32) -> i32 {
@@ -59,16 +61,37 @@ mod windows_app {
         s.encode_utf16().chain(Some(0)).collect()
     }
 
-    struct App {
-        document: Document,
+    #[derive(Default)]
+    struct EditorView {
+        cursor: Pos,
+        selection_anchor: Option<Pos>,
         first_line: usize,
+    }
+
+    struct Tab {
+        document: Document,
+        view: EditorView,
+    }
+
+    impl Tab {
+        fn new(document: Document) -> Self {
+            Self {
+                document,
+                view: EditorView::default(),
+            }
+        }
+    }
+
+    struct App {
+        tabs: Vec<Tab>,
+        active: usize,
+        tab_first: usize,
         font: HFONT,
         dpi: u32,
         line_height: i32,
         status: String,
         focused: bool,
         caret_on: bool,
-        selection_anchor: Option<Pos>,
         dragging: bool,
         find_mode: bool,
         find_query: String,
@@ -101,20 +124,127 @@ mod windows_app {
         fn new(hwnd: HWND) -> Self {
             let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
             Self {
-                document: Document::new(),
-                first_line: 0,
+                tabs: vec![Tab::new(Document::new())],
+                active: 0,
+                tab_first: 0,
                 font: Self::font_for_dpi(dpi),
                 dpi,
                 line_height: (24 * dpi as i32 + 48) / 96,
                 status: "Ready".into(),
                 focused: false,
                 caret_on: true,
-                selection_anchor: None,
                 dragging: false,
                 find_mode: false,
                 find_query: String::new(),
                 pending_high_surrogate: None,
             }
+        }
+
+        fn tab(&self) -> &Tab {
+            &self.tabs[self.active]
+        }
+        fn tab_mut(&mut self) -> &mut Tab {
+            &mut self.tabs[self.active]
+        }
+        fn doc(&self) -> &Document {
+            &self.tab().document
+        }
+        fn doc_mut(&mut self) -> &mut Document {
+            &mut self.tab_mut().document
+        }
+        fn view(&self) -> &EditorView {
+            &self.tab().view
+        }
+        fn view_mut(&mut self) -> &mut EditorView {
+            &mut self.tab_mut().view
+        }
+        fn editor_top(&self) -> i32 {
+            self.scale(TAB_HEIGHT + TOP)
+        }
+
+        fn tab_label(&self, index: usize) -> String {
+            let doc = &self.tabs[index].document;
+            let name = doc
+                .path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Untitled".into());
+            format!("{}{}", name, if doc.is_dirty() { " *" } else { "" })
+        }
+
+        fn visible_tab_count(&self, hwnd: HWND) -> usize {
+            let mut rect = RECT::default();
+            unsafe {
+                GetClientRect(hwnd, &mut rect);
+            }
+            (rect.right / self.scale(TAB_WIDTH).max(1)).max(1) as usize
+        }
+
+        fn show_active_tab(&mut self, hwnd: HWND) {
+            let count = self.visible_tab_count(hwnd);
+            if self.active < self.tab_first {
+                self.tab_first = self.active;
+            } else if self.active >= self.tab_first + count {
+                self.tab_first = self.active + 1 - count;
+            }
+            self.find_mode = false;
+            self.dragging = false;
+            self.update_title(hwnd);
+            self.update_scrollbar(hwnd);
+            unsafe {
+                InvalidateRect(hwnd, null(), 0);
+            }
+        }
+
+        fn activate_tab(&mut self, hwnd: HWND, index: usize) {
+            if index < self.tabs.len() {
+                self.active = index;
+                self.show_active_tab(hwnd);
+            }
+        }
+
+        fn same_path(a: &Path, b: &Path) -> bool {
+            let absolute = |path: &Path| {
+                std::fs::canonicalize(path)
+                    .or_else(|_| {
+                        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+                        std::fs::canonicalize(parent)
+                            .map(|p| p.join(path.file_name().unwrap_or_default()))
+                    })
+                    .unwrap_or_else(|_| path.to_path_buf())
+                    .to_string_lossy()
+                    .to_lowercase()
+            };
+            absolute(a) == absolute(b)
+        }
+
+        fn close_tab(&mut self, hwnd: HWND, index: usize) {
+            self.activate_tab(hwnd, index);
+            if !self.can_discard(hwnd) {
+                return;
+            }
+            self.tabs.remove(index);
+            if self.tabs.is_empty() {
+                self.tabs.push(Tab::new(Document::new()));
+                self.active = 0;
+            } else {
+                self.active = index.min(self.tabs.len() - 1);
+            }
+            self.status = "Ready".into();
+            self.show_active_tab(hwnd);
+        }
+
+        fn can_close_window(&mut self, hwnd: HWND) -> bool {
+            for index in 0..self.tabs.len() {
+                if self.tabs[index].document.is_dirty() {
+                    self.activate_tab(hwnd, index);
+                    if !self.can_discard(hwnd) {
+                        return false;
+                    }
+                }
+            }
+            true
         }
 
         fn scale(&self, pixels: i32) -> i32 {
@@ -143,7 +273,7 @@ mod windows_app {
             unsafe {
                 GetClientRect(hwnd, &mut rect);
             }
-            ((rect.bottom - rect.top - self.scale(TOP) - self.scale(STATUS)).max(1)
+            ((rect.bottom - rect.top - self.editor_top() - self.scale(STATUS)).max(1)
                 / self.line_height)
                 .max(1) as usize
         }
@@ -155,12 +285,12 @@ mod windows_app {
                 fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
                 nMin: 0,
                 nMax: self
-                    .document
+                    .doc()
                     .line_count()
                     .saturating_sub(1)
                     .min(i32::MAX as usize) as i32,
                 nPage: visible as u32,
-                nPos: self.first_line.min(i32::MAX as usize) as i32,
+                nPos: self.view().first_line.min(i32::MAX as usize) as i32,
                 nTrackPos: 0,
             };
             unsafe {
@@ -170,12 +300,12 @@ mod windows_app {
 
         fn keep_cursor_visible(&mut self, hwnd: HWND) {
             let visible = self.visible_lines(hwnd);
-            let line = self.document.cursor.line;
-            if line < self.first_line {
-                self.first_line = line;
+            let line = self.view().cursor.line;
+            if line < self.view().first_line {
+                self.view_mut().first_line = line;
             }
-            if line >= self.first_line + visible {
-                self.first_line = line + 1 - visible;
+            if line >= self.view().first_line + visible {
+                self.view_mut().first_line = line + 1 - visible;
             }
             self.update_scrollbar(hwnd);
             self.caret_on = true;
@@ -186,7 +316,7 @@ mod windows_app {
 
         fn update_title(&self, hwnd: HWND) {
             let file = self
-                .document
+                .doc()
                 .path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -195,7 +325,7 @@ mod windows_app {
             let title = format!(
                 "{}{} — My Editor",
                 file,
-                if self.document.is_dirty() { " *" } else { "" }
+                if self.doc().is_dirty() { " *" } else { "" }
             );
             unsafe {
                 SetWindowTextW(hwnd, wide(&title).as_ptr());
@@ -208,8 +338,8 @@ mod windows_app {
         }
 
         fn selection_range(&self) -> Option<(Pos, Pos)> {
-            let anchor = self.selection_anchor?;
-            let cursor = self.document.cursor;
+            let anchor = self.view().selection_anchor?;
+            let cursor = self.view().cursor;
             if anchor == cursor {
                 None
             } else if anchor < cursor {
@@ -220,27 +350,30 @@ mod windows_app {
         }
 
         fn move_cursor(&mut self, pos: Pos, extend: bool) {
+            let cursor = self.view().cursor;
             if extend {
-                self.selection_anchor.get_or_insert(self.document.cursor);
+                self.view_mut().selection_anchor.get_or_insert(cursor);
             } else {
-                self.selection_anchor = None;
+                self.view_mut().selection_anchor = None;
             }
-            self.document.cursor = self.document.clamp(pos);
+            let pos = self.doc().clamp(pos);
+            self.view_mut().cursor = pos;
         }
 
         fn replace_selection(&mut self, text: &str) {
             let (start, end) = self
                 .selection_range()
-                .unwrap_or((self.document.cursor, self.document.cursor));
-            self.document.replace(start, end, text);
-            self.selection_anchor = None;
+                .unwrap_or((self.view().cursor, self.view().cursor));
+            let cursor = self.doc_mut().replace(start, end, text);
+            self.view_mut().cursor = cursor;
+            self.view_mut().selection_anchor = None;
         }
 
         fn copy_selection(&mut self, hwnd: HWND) -> bool {
             let Some((start, end)) = self.selection_range() else {
                 return false;
             };
-            let text = self.document.text_range(start, end);
+            let text = self.doc().text_range(start, end);
             match clipboard::copy(hwnd, &text) {
                 Ok(()) => {
                     self.status = "Copied selection".into();
@@ -260,21 +393,22 @@ mod windows_app {
                 return;
             }
             let match_at = if forward {
-                self.document
-                    .find_forward(self.document.cursor, &self.find_query)
+                self.doc()
+                    .find_forward(self.view().cursor, &self.find_query)
             } else {
                 let origin = self
                     .selection_range()
                     .map(|(start, _)| start)
-                    .unwrap_or(self.document.cursor);
-                self.document.find_backward(origin, &self.find_query)
+                    .unwrap_or(self.view().cursor);
+                self.doc().find_backward(origin, &self.find_query)
             };
             if let Some(start) = match_at {
-                self.selection_anchor = Some(start);
-                self.document.cursor = Pos {
+                let end = Pos {
                     line: start.line,
                     byte: start.byte + self.find_query.len(),
                 };
+                self.view_mut().selection_anchor = Some(start);
+                self.view_mut().cursor = end;
                 self.status = format!("Found: {}", self.find_query);
             } else {
                 self.status = format!("Not found: {}", self.find_query);
@@ -296,13 +430,13 @@ mod windows_app {
             unsafe {
                 let hdc = GetDC(hwnd);
                 let old = SelectObject(hdc, self.font);
-                let line = self.document.line(self.document.cursor.line);
+                let line = self.doc().line(self.view().cursor.line);
                 let x = self.scale(GUTTER + PAD)
-                    + self.text_width(hdc, &line[..self.document.cursor.byte]);
+                    + self.text_width(hdc, &line[..self.view().cursor.byte]);
                 SelectObject(hdc, old);
                 ReleaseDC(hwnd, hdc);
-                let y = self.scale(TOP)
-                    + (self.document.cursor.line as i64 - self.first_line as i64) as i32
+                let y = self.editor_top()
+                    + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
                         * self.line_height;
                 RECT {
                     left: x,
@@ -348,12 +482,79 @@ mod windows_app {
                     hdc,
                     &RECT {
                         left: 0,
-                        top: 0,
+                        top: self.scale(TAB_HEIGHT),
                         right: self.scale(GUTTER),
                         bottom: editor_bottom,
                     },
                     gutter_bg,
                 );
+                let tab_bg = CreateSolidBrush(0x00252220);
+                let active_bg = CreateSolidBrush(0x001d1b19);
+                FillRect(
+                    hdc,
+                    &RECT {
+                        left: 0,
+                        top: 0,
+                        right: rect.right,
+                        bottom: self.scale(TAB_HEIGHT),
+                    },
+                    tab_bg,
+                );
+                let tab_width = self.scale(TAB_WIDTH);
+                let tab_height = self.scale(TAB_HEIGHT);
+                for slot in 0..self.visible_tab_count(hwnd) {
+                    let index = self.tab_first + slot;
+                    if index >= self.tabs.len() {
+                        break;
+                    }
+                    let left = slot as i32 * tab_width;
+                    if left >= rect.right {
+                        break;
+                    }
+                    let bounds = RECT {
+                        left,
+                        top: 0,
+                        right: (left + tab_width).min(rect.right),
+                        bottom: tab_height,
+                    };
+                    if index == self.active {
+                        FillRect(hdc, &bounds, active_bg);
+                    }
+                    let label = self.tab_label(index);
+                    let chars: Vec<u16> = label.encode_utf16().collect();
+                    SetTextColor(
+                        hdc,
+                        if index == self.active {
+                            0x00e3ded8
+                        } else {
+                            0x00a59c92
+                        },
+                    );
+                    let clip = RECT {
+                        left: left + self.scale(12),
+                        top: 0,
+                        right: (left + tab_width - self.scale(30)).min(rect.right),
+                        bottom: tab_height,
+                    };
+                    ExtTextOutW(
+                        hdc,
+                        clip.left,
+                        self.scale(5),
+                        ETO_CLIPPED,
+                        &clip,
+                        chars.as_ptr(),
+                        chars.len() as u32,
+                        null(),
+                    );
+                    let close = wide("×");
+                    TextOutW(
+                        hdc,
+                        left + tab_width - self.scale(23),
+                        self.scale(5),
+                        close.as_ptr(),
+                        1,
+                    );
+                }
                 FillRect(
                     hdc,
                     &RECT {
@@ -366,11 +567,11 @@ mod windows_app {
                 );
                 let visible = self.visible_lines(hwnd) + 1;
                 for row in 0..visible {
-                    let index = self.first_line + row;
-                    if index >= self.document.line_count() {
+                    let index = self.view().first_line + row;
+                    if index >= self.doc().line_count() {
                         break;
                     }
-                    let y = self.scale(TOP) + row as i32 * self.line_height;
+                    let y = self.editor_top() + row as i32 * self.line_height;
                     if y >= editor_bottom {
                         break;
                     }
@@ -378,7 +579,7 @@ mod windows_app {
                     let num: Vec<u16> = number.encode_utf16().collect();
                     SetTextColor(hdc, 0x00958b81);
                     TextOutW(hdc, self.scale(12), y, num.as_ptr(), num.len() as i32);
-                    let source = self.document.line(index);
+                    let source = self.doc().line(index);
                     if let Some((start, end)) = selection
                         && index >= start.line
                         && index <= end.line
@@ -428,13 +629,13 @@ mod windows_app {
                     );
                 }
                 if self.focused && self.caret_on {
-                    let line = self.document.line(self.document.cursor.line);
+                    let line = self.doc().line(self.view().cursor.line);
                     let x = self.scale(GUTTER + PAD)
-                        + self.text_width(hdc, &line[..self.document.cursor.byte]);
-                    let y = self.scale(TOP)
-                        + (self.document.cursor.line as i64 - self.first_line as i64) as i32
+                        + self.text_width(hdc, &line[..self.view().cursor.byte]);
+                    let y = self.editor_top()
+                        + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
                             * self.line_height;
-                    if y >= 0 && y < editor_bottom && x < rect.right {
+                    if y >= self.scale(TAB_HEIGHT) && y < editor_bottom && x < rect.right {
                         let caret = CreateSolidBrush(0x00ffc078);
                         FillRect(
                             hdc,
@@ -452,12 +653,12 @@ mod windows_app {
                 let label = format!(
                     "{}    Ln {}, Col {}    {} lines",
                     self.status,
-                    self.document.cursor.line + 1,
-                    self.document.line(self.document.cursor.line)[..self.document.cursor.byte]
+                    self.view().cursor.line + 1,
+                    self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
                         .chars()
                         .count()
                         + 1,
-                    self.document.line_count()
+                    self.doc().line_count()
                 );
                 let chars: Vec<u16> = label.encode_utf16().collect();
                 SetTextColor(hdc, 0x00e3ded8);
@@ -472,6 +673,8 @@ mod windows_app {
                 DeleteObject(gutter_bg);
                 DeleteObject(status_bg);
                 DeleteObject(selection_bg);
+                DeleteObject(tab_bg);
+                DeleteObject(active_bg);
                 SelectObject(hdc, old_font);
                 EndPaint(hwnd, &ps);
             }
@@ -492,7 +695,7 @@ mod windows_app {
 
         fn dialog(&self, hwnd: HWND, save: bool) -> Option<PathBuf> {
             let mut buffer = [0u16; 32768];
-            if save && let Some(path) = &self.document.path {
+            if save && let Some(path) = &self.doc().path {
                 let name: Vec<u16> = path.file_name()?.to_string_lossy().encode_utf16().collect();
                 buffer[..name.len()].copy_from_slice(&name);
             }
@@ -526,15 +729,26 @@ mod windows_app {
         }
 
         fn save(&mut self, hwnd: HWND, save_as: bool) -> bool {
-            let path = if save_as || self.document.path.is_none() {
+            let path = if save_as || self.doc().path.is_none() {
                 match self.dialog(hwnd, true) {
                     Some(path) => path,
                     None => return false,
                 }
             } else {
-                self.document.path.clone().unwrap()
+                self.doc().path.clone().unwrap()
             };
-            match self.document.save(&path) {
+            if self.tabs.iter().enumerate().any(|(index, tab)| {
+                index != self.active
+                    && tab
+                        .document
+                        .path
+                        .as_deref()
+                        .is_some_and(|other| Self::same_path(other, &path))
+            }) {
+                self.error(hwnd, &"That file is already open in another tab");
+                return false;
+            }
+            match self.doc_mut().save(&path) {
                 Ok(()) => {
                     self.status = format!("Saved {}", path.display());
                     self.refresh(hwnd);
@@ -548,13 +762,13 @@ mod windows_app {
         }
 
         fn can_discard(&mut self, hwnd: HWND) -> bool {
-            if !self.document.is_dirty() {
+            if !self.doc().is_dirty() {
                 return true;
             }
             let answer = unsafe {
                 MessageBoxW(
                     hwnd,
-                    wide("Save changes before continuing?").as_ptr(),
+                    wide(&format!("Save changes to {}?", self.tab_label(self.active))).as_ptr(),
                     wide("My Editor").as_ptr(),
                     MB_YESNOCANCEL | MB_ICONQUESTION,
                 )
@@ -567,19 +781,34 @@ mod windows_app {
         }
 
         fn open(&mut self, hwnd: HWND, path: Option<PathBuf>) {
-            if !self.can_discard(hwnd) {
-                return;
-            }
             let Some(path) = path.or_else(|| self.dialog(hwnd, false)) else {
                 return;
             };
+            if let Some(index) = self.tabs.iter().position(|tab| {
+                tab.document
+                    .path
+                    .as_deref()
+                    .is_some_and(|open| Self::same_path(open, &path))
+            }) {
+                self.activate_tab(hwnd, index);
+                self.status = format!("Already open: {}", path.display());
+                return;
+            }
             match Document::open(path.clone()) {
                 Ok(document) => {
-                    self.document = document;
-                    self.selection_anchor = None;
-                    self.first_line = 0;
+                    if self.tabs.len() == 1
+                        && self.doc().path.is_none()
+                        && !self.doc().is_dirty()
+                        && self.doc().line(0).is_empty()
+                    {
+                        self.tabs[0] = Tab::new(document);
+                        self.active = 0;
+                    } else {
+                        self.tabs.push(Tab::new(document));
+                        self.active = self.tabs.len() - 1;
+                    }
                     self.status = format!("Opened {}", path.display());
-                    self.refresh(hwnd);
+                    self.show_active_tab(hwnd);
                 }
                 Err(error) => self.error(hwnd, &error),
             }
@@ -601,11 +830,12 @@ mod windows_app {
                 }
             }
             if ctrl {
-                let cursor = self.document.cursor;
+                let cursor = self.view().cursor;
                 match key {
                     0x41 => {
-                        self.selection_anchor = Some(Pos::default());
-                        self.document.cursor = self.document.end();
+                        self.view_mut().selection_anchor = Some(Pos::default());
+                        let end = self.doc().end();
+                        self.view_mut().cursor = end;
                     }
                     0x43 => {
                         self.copy_selection(hwnd);
@@ -621,61 +851,87 @@ mod windows_app {
                         Err(error) => self.error(hwnd, &error),
                     },
                     0x4e => {
-                        if self.can_discard(hwnd) {
-                            self.document = Document::new();
-                            self.selection_anchor = None;
-                            self.first_line = 0;
-                            self.status = "New document".into();
-                        }
+                        self.tabs.push(Tab::new(Document::new()));
+                        self.active = self.tabs.len() - 1;
+                        self.status = "New document".into();
+                        self.show_active_tab(hwnd);
+                        return true;
                     }
                     0x46 => {
                         self.find_mode = true;
                         self.find_query.clear();
                         self.status = "Find: ".into();
                     }
-                    0x4f => self.open(hwnd, None),
+                    0x4f => {
+                        self.open(hwnd, None);
+                        return true;
+                    }
                     0x53 => {
                         self.save(hwnd, shift);
                     }
-                    0x57 => unsafe {
-                        PostMessageW(hwnd, WM_CLOSE, 0, 0);
-                    },
+                    0x57 => {
+                        self.close_tab(hwnd, self.active);
+                        return true;
+                    }
+                    x if x == VK_TAB as u32 => {
+                        let next = if shift {
+                            (self.active + self.tabs.len() - 1) % self.tabs.len()
+                        } else {
+                            (self.active + 1) % self.tabs.len()
+                        };
+                        self.activate_tab(hwnd, next);
+                        return true;
+                    }
+                    x if x == VK_PRIOR as u32 => {
+                        self.activate_tab(hwnd, self.active.saturating_sub(1));
+                        return true;
+                    }
+                    x if x == VK_NEXT as u32 => {
+                        self.activate_tab(hwnd, (self.active + 1).min(self.tabs.len() - 1));
+                        return true;
+                    }
                     0x5a if shift => {
-                        self.selection_anchor = None;
-                        self.document.redo();
+                        self.view_mut().selection_anchor = None;
+                        if let Some(cursor) = self.doc_mut().redo() {
+                            self.view_mut().cursor = cursor;
+                        }
                     }
                     0x5a => {
-                        self.selection_anchor = None;
-                        self.document.undo();
+                        self.view_mut().selection_anchor = None;
+                        if let Some(cursor) = self.doc_mut().undo() {
+                            self.view_mut().cursor = cursor;
+                        }
                     }
                     0x59 => {
-                        self.selection_anchor = None;
-                        self.document.redo();
+                        self.view_mut().selection_anchor = None;
+                        if let Some(cursor) = self.doc_mut().redo() {
+                            self.view_mut().cursor = cursor;
+                        }
                     }
                     x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
-                    x if x == VK_END as u32 => self.move_cursor(self.document.end(), shift),
+                    x if x == VK_END as u32 => self.move_cursor(self.doc().end(), shift),
                     x if x == VK_LEFT as u32 => {
-                        let target = self.document.previous_word(cursor);
+                        let target = self.doc().previous_word(cursor);
                         self.move_cursor(target, shift);
                     }
                     x if x == VK_RIGHT as u32 => {
-                        let target = self.document.next_word(cursor);
+                        let target = self.doc().next_word(cursor);
                         self.move_cursor(target, shift);
                     }
                     x if x == VK_BACK as u32 => {
                         if self.selection_range().is_some() {
                             self.replace_selection("");
                         } else {
-                            self.document
-                                .replace(self.document.previous_word(cursor), cursor, "");
+                            let previous = self.doc().previous_word(cursor);
+                            self.view_mut().cursor = self.doc_mut().replace(previous, cursor, "");
                         }
                     }
                     x if x == VK_DELETE as u32 => {
                         if self.selection_range().is_some() {
                             self.replace_selection("");
                         } else {
-                            self.document
-                                .replace(cursor, self.document.next_word(cursor), "");
+                            let next = self.doc().next_word(cursor);
+                            self.view_mut().cursor = self.doc_mut().replace(cursor, next, "");
                         }
                     }
                     _ => return false,
@@ -683,7 +939,7 @@ mod windows_app {
                 self.refresh(hwnd);
                 return true;
             }
-            let cursor = self.document.cursor;
+            let cursor = self.view().cursor;
             match key {
                 x if x == VK_F3 as u32 => {
                     self.find_mode = false;
@@ -691,7 +947,7 @@ mod windows_app {
                     return true;
                 }
                 x if x == VK_ESCAPE as u32 => {
-                    self.selection_anchor = None;
+                    self.view_mut().selection_anchor = None;
                 }
                 x if x == VK_LEFT as u32 => {
                     let target = if !shift {
@@ -699,7 +955,7 @@ mod windows_app {
                     } else {
                         None
                     }
-                    .unwrap_or_else(|| self.document.previous(cursor));
+                    .unwrap_or_else(|| self.doc().previous(cursor));
                     self.move_cursor(target, shift);
                 }
                 x if x == VK_RIGHT as u32 => {
@@ -708,7 +964,7 @@ mod windows_app {
                     } else {
                         None
                     }
-                    .unwrap_or_else(|| self.document.next(cursor));
+                    .unwrap_or_else(|| self.doc().next(cursor));
                     self.move_cursor(target, shift);
                 }
                 x if x == VK_UP as u32 => {
@@ -723,7 +979,7 @@ mod windows_app {
                 x if x == VK_DOWN as u32 => {
                     self.move_cursor(
                         Pos {
-                            line: (cursor.line + 1).min(self.document.line_count() - 1),
+                            line: (cursor.line + 1).min(self.doc().line_count() - 1),
                             byte: cursor.byte,
                         },
                         shift,
@@ -742,7 +998,7 @@ mod windows_app {
                     self.move_cursor(
                         Pos {
                             line: (cursor.line + self.visible_lines(hwnd))
-                                .min(self.document.line_count() - 1),
+                                .min(self.doc().line_count() - 1),
                             byte: cursor.byte,
                         },
                         shift,
@@ -759,7 +1015,7 @@ mod windows_app {
                     self.move_cursor(
                         Pos {
                             line: cursor.line,
-                            byte: self.document.line(cursor.line).len(),
+                            byte: self.doc().line(cursor.line).len(),
                         },
                         shift,
                     );
@@ -768,16 +1024,16 @@ mod windows_app {
                     if self.selection_range().is_some() {
                         self.replace_selection("");
                     } else {
-                        let previous = self.document.previous(cursor);
-                        self.document.replace(previous, cursor, "");
+                        let previous = self.doc().previous(cursor);
+                        self.view_mut().cursor = self.doc_mut().replace(previous, cursor, "");
                     }
                 }
                 x if x == VK_DELETE as u32 => {
                     if self.selection_range().is_some() {
                         self.replace_selection("");
                     } else {
-                        let next = self.document.next(cursor);
-                        self.document.replace(cursor, next, "");
+                        let next = self.doc().next(cursor);
+                        self.view_mut().cursor = self.doc_mut().replace(cursor, next, "");
                     }
                 }
                 _ => return false,
@@ -787,6 +1043,9 @@ mod windows_app {
         }
 
         fn character(&mut self, hwnd: HWND, unit: u16) {
+            if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
+                return;
+            }
             if self.find_mode && unit == 8 {
                 self.find_query.pop();
                 self.status = format!("Find: {}", self.find_query);
@@ -833,13 +1092,13 @@ mod windows_app {
         }
 
         fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
-            let row = ((y - self.scale(TOP)) / self.line_height).max(0) as usize;
-            let line = (self.first_line + row).min(self.document.line_count() - 1);
+            let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
+            let line = (self.view().first_line + row).min(self.doc().line_count() - 1);
             let target = (x - self.scale(GUTTER + PAD)).max(0);
             unsafe {
                 let hdc = GetDC(hwnd);
                 let old = SelectObject(hdc, self.font);
-                let text = self.document.line(line);
+                let text = self.doc().line(line);
                 let boundaries: Vec<usize> = text
                     .char_indices()
                     .map(|(index, _)| index)
@@ -871,6 +1130,18 @@ mod windows_app {
         }
 
         fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+            if y < self.scale(TAB_HEIGHT) {
+                let slot = (x.max(0) / self.scale(TAB_WIDTH).max(1)) as usize;
+                let index = self.tab_first + slot;
+                if index < self.tabs.len() {
+                    if x % self.scale(TAB_WIDTH) >= self.scale(TAB_WIDTH - 30) {
+                        self.close_tab(hwnd, index);
+                    } else {
+                        self.activate_tab(hwnd, index);
+                    }
+                }
+                return;
+            }
             let mut rect = RECT::default();
             unsafe {
                 GetClientRect(hwnd, &mut rect);
@@ -945,6 +1216,10 @@ mod windows_app {
             }
             WM_SIZE => {
                 app.keep_cursor_visible(hwnd);
+                let count = app.visible_tab_count(hwnd);
+                if app.active >= app.tab_first + count {
+                    app.tab_first = app.active + 1 - count;
+                }
                 0
             }
             WM_SETFOCUS => {
@@ -973,7 +1248,17 @@ mod windows_app {
             }
             WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
                 unsafe {
-                    let cursor = LoadCursorW(null_mut(), IDC_IBEAM);
+                    let mut point = POINT::default();
+                    GetCursorPos(&mut point);
+                    ScreenToClient(hwnd, &mut point);
+                    let cursor = LoadCursorW(
+                        null_mut(),
+                        if point.y < app.scale(TAB_HEIGHT) {
+                            IDC_ARROW
+                        } else {
+                            IDC_IBEAM
+                        },
+                    );
                     SetCursor(if cursor.is_null() {
                         LoadCursorW(null_mut(), IDC_ARROW)
                     } else {
@@ -1023,10 +1308,10 @@ mod windows_app {
             WM_MOUSEWHEEL => {
                 let delta = (wparam >> 16) as i16;
                 if delta > 0 {
-                    app.first_line = app.first_line.saturating_sub(3);
+                    app.view_mut().first_line = app.view().first_line.saturating_sub(3);
                 } else if delta < 0 {
-                    app.first_line =
-                        (app.first_line + 3).min(app.document.line_count().saturating_sub(1));
+                    app.view_mut().first_line =
+                        (app.view().first_line + 3).min(app.doc().line_count().saturating_sub(1));
                 }
                 app.update_scrollbar(hwnd);
                 unsafe {
@@ -1036,12 +1321,15 @@ mod windows_app {
             }
             WM_VSCROLL => {
                 let code = (wparam & 0xffff) as i32;
-                let max = app.document.line_count().saturating_sub(1);
-                app.first_line = match code {
-                    SB_LINEUP => app.first_line.saturating_sub(1),
-                    SB_LINEDOWN => (app.first_line + 1).min(max),
-                    SB_PAGEUP => app.first_line.saturating_sub(app.visible_lines(hwnd)),
-                    SB_PAGEDOWN => (app.first_line + app.visible_lines(hwnd)).min(max),
+                let max = app.doc().line_count().saturating_sub(1);
+                app.view_mut().first_line = match code {
+                    SB_LINEUP => app.view().first_line.saturating_sub(1),
+                    SB_LINEDOWN => (app.view().first_line + 1).min(max),
+                    SB_PAGEUP => app
+                        .view()
+                        .first_line
+                        .saturating_sub(app.visible_lines(hwnd)),
+                    SB_PAGEDOWN => (app.view().first_line + app.visible_lines(hwnd)).min(max),
                     SB_THUMBPOSITION | SB_THUMBTRACK => {
                         let mut info = SCROLLINFO {
                             cbSize: size_of::<SCROLLINFO>() as u32,
@@ -1053,7 +1341,7 @@ mod windows_app {
                         }
                         (info.nTrackPos.max(0) as usize).min(max)
                     }
-                    _ => app.first_line,
+                    _ => app.view().first_line,
                 };
                 app.update_scrollbar(hwnd);
                 unsafe {
@@ -1062,7 +1350,7 @@ mod windows_app {
                 0
             }
             WM_CLOSE => {
-                if app.can_discard(hwnd) {
+                if app.can_close_window(hwnd) {
                     unsafe {
                         DestroyWindow(hwnd);
                     }
