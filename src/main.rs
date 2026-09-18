@@ -5,17 +5,25 @@ mod windows_app {
     use lightline::clipboard;
     use lightline::document::{Document, Pos};
     use lightline::syntax::{Color, RustSyntax};
+    use lightline::workflow::{self, Change, DiffRow, SearchHit};
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
     use std::io;
     use std::mem::{size_of, zeroed};
+    use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU32};
     use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::sync::mpsc::{self, Receiver, Sender};
     use std::time::Instant;
     use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
     use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+    };
     use windows_sys::Win32::System::Console::{
         ATTACH_PARENT_PROCESS, AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, GetConsoleWindow,
         SetConsoleCtrlHandler,
@@ -27,6 +35,10 @@ mod windows_app {
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
+    use windows_sys::Win32::UI::Shell::{
+        BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, SHBrowseForFolderW,
+        SHGetPathFromIDListW,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     const RAIL: i32 = 132;
@@ -227,6 +239,22 @@ mod windows_app {
         top: i32,
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum SideView {
+        Files,
+        Search,
+        Review,
+    }
+
+    enum WorkerMessage {
+        Files(PathBuf, Vec<PathBuf>),
+        Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
+        RunLine(PathBuf, String),
+        Run(PathBuf, Result<(), String>),
+        Changes(PathBuf, Result<Vec<Change>, String>),
+        Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
+    }
+
     fn material_icon_for(path: &Path, is_dir: bool, expanded: bool) -> &'static str {
         let file_name = path
             .file_name()
@@ -390,10 +418,44 @@ mod windows_app {
         find_query: String,
         pending_high_surrogate: Option<u16>,
         explorer_visible: bool,
+        sidebar_width: i32,
+        sidebar_from: i32,
+        sidebar_target: i32,
+        sidebar_started: Option<Instant>,
         explorer_first_row: usize,
         workspace_root: Option<PathBuf>,
         expanded_dirs: HashSet<PathBuf>,
         directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
+        welcome: bool,
+        side_view: SideView,
+        quick_open: bool,
+        quick_query: String,
+        quick_selected: usize,
+        quick_files: Vec<PathBuf>,
+        quick_loading: bool,
+        search_input: bool,
+        project_query: String,
+        search_results: Vec<SearchHit>,
+        search_cancel: Option<Arc<AtomicBool>>,
+        run_visible: bool,
+        run_output: String,
+        run_busy: bool,
+        run_cancel: Option<Arc<AtomicBool>>,
+        run_pid: Option<Arc<AtomicU32>>,
+        output_focus: bool,
+        changes: Vec<Change>,
+        review_loading: bool,
+        review_file: Option<PathBuf>,
+        diff_rows: Vec<DiffRow>,
+        diff_first: usize,
+        panel_first: usize,
+        panel_selected: usize,
+        panel_focus: bool,
+        output_scroll: usize,
+        recent: Vec<PathBuf>,
+        worker_tx: Sender<WorkerMessage>,
+        worker_rx: Receiver<WorkerMessage>,
+        pending_workers: usize,
     }
 
     impl App {
@@ -466,6 +528,7 @@ mod windows_app {
         fn new(hwnd: HWND) -> Self {
             let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
             let zoom = 100;
+            let (worker_tx, worker_rx) = mpsc::channel();
             Self {
                 tabs: vec![Tab::new(Document::new())],
                 active: 0,
@@ -487,10 +550,44 @@ mod windows_app {
                 find_query: String::new(),
                 pending_high_surrogate: None,
                 explorer_visible: true,
+                sidebar_width: SIDEBAR,
+                sidebar_from: SIDEBAR,
+                sidebar_target: SIDEBAR,
+                sidebar_started: None,
                 explorer_first_row: 0,
                 workspace_root: None,
                 expanded_dirs: HashSet::new(),
                 directory_cache: HashMap::new(),
+                welcome: true,
+                side_view: SideView::Files,
+                quick_open: false,
+                quick_query: String::new(),
+                quick_selected: 0,
+                quick_files: Vec::new(),
+                quick_loading: false,
+                search_input: false,
+                project_query: String::new(),
+                search_results: Vec::new(),
+                search_cancel: None,
+                run_visible: false,
+                run_output: String::new(),
+                run_busy: false,
+                run_cancel: None,
+                run_pid: None,
+                output_focus: false,
+                changes: Vec::new(),
+                review_loading: false,
+                review_file: None,
+                diff_rows: Vec::new(),
+                diff_first: 0,
+                panel_first: 0,
+                panel_selected: 0,
+                panel_focus: false,
+                output_scroll: 0,
+                recent: workflow::recent_workspaces(),
+                worker_tx,
+                worker_rx,
+                pending_workers: 0,
             }
         }
 
@@ -517,7 +614,43 @@ mod windows_app {
         }
 
         fn editor_left(&self) -> i32 {
-            self.scale(RAIL + if self.explorer_visible { SIDEBAR } else { 0 })
+            self.scale(RAIL + self.sidebar_width)
+        }
+
+        fn set_sidebar_visible(&mut self, hwnd: HWND, visible: bool) {
+            let target = if visible { SIDEBAR } else { 0 };
+            self.explorer_visible = visible;
+            if self.sidebar_width == target {
+                self.sidebar_target = target;
+                self.sidebar_started = None;
+                unsafe { KillTimer(hwnd, 5) };
+            } else {
+                self.sidebar_from = self.sidebar_width;
+                self.sidebar_target = target;
+                self.sidebar_started = Some(Instant::now());
+                unsafe { SetTimer(hwnd, 5, 16, None) };
+            }
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn advance_sidebar(&mut self, hwnd: HWND) {
+            let Some(started) = self.sidebar_started else {
+                return;
+            };
+            let elapsed = started.elapsed().as_millis().min(160) as f32 / 160.0;
+            let ease = 1.0 - (1.0 - elapsed).powi(3);
+            self.sidebar_width = self.sidebar_from
+                + ((self.sidebar_target - self.sidebar_from) as f32 * ease).round() as i32;
+            let visible_tabs = self.visible_tab_count(hwnd);
+            if self.active >= self.tab_first + visible_tabs {
+                self.tab_first = self.active + 1 - visible_tabs;
+            }
+            if elapsed >= 1.0 {
+                self.sidebar_width = self.sidebar_target;
+                self.sidebar_started = None;
+                unsafe { KillTimer(hwnd, 5) };
+            }
+            unsafe { InvalidateRect(hwnd, null(), 0) };
         }
 
         fn code_left(&self) -> i32 {
@@ -587,6 +720,453 @@ mod windows_app {
                 self.workspace_root = Some(root.clone());
                 self.expanded_dirs.insert(root.clone());
                 self.load_directory(&root);
+                workflow::remember_workspace(&root);
+                self.recent = workflow::recent_workspaces();
+            }
+        }
+
+        fn set_workspace(&mut self, hwnd: HWND, root: PathBuf) {
+            let root = std::fs::canonicalize(&root).unwrap_or(root);
+            if !root.is_dir() {
+                return;
+            }
+            self.workspace_root = Some(root.clone());
+            self.directory_cache.clear();
+            self.expanded_dirs.clear();
+            self.expanded_dirs.insert(root.clone());
+            self.explorer_first_row = 0;
+            self.quick_files.clear();
+            self.quick_loading = false;
+            self.cancel_search();
+            self.search_results.clear();
+            self.changes.clear();
+            self.review_loading = false;
+            self.review_file = None;
+            if let Some(cancel) = self.run_cancel.take() {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            self.run_pid = None;
+            self.run_busy = false;
+            self.run_visible = false;
+            self.output_focus = false;
+            self.run_output.clear();
+            self.welcome = false;
+            self.explorer_visible = true;
+            self.sidebar_width = SIDEBAR;
+            self.sidebar_from = SIDEBAR;
+            self.sidebar_target = SIDEBAR;
+            self.sidebar_started = None;
+            unsafe { KillTimer(hwnd, 5) };
+            self.side_view = SideView::Files;
+            self.panel_focus = false;
+            self.load_directory(&root);
+            workflow::remember_workspace(&root);
+            self.recent = workflow::recent_workspaces();
+            self.status = format!(
+                "Workspace: {}",
+                root.file_name().unwrap_or_default().to_string_lossy()
+            );
+            self.show_active_tab(hwnd);
+        }
+
+        fn show_welcome(&mut self, hwnd: HWND) {
+            self.cancel_search();
+            self.welcome = true;
+            self.quick_open = false;
+            self.search_input = false;
+            self.panel_focus = false;
+            self.output_focus = false;
+            self.find_mode = false;
+            self.update_title(hwnd);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn folder_dialog(&self, hwnd: HWND) -> Option<PathBuf> {
+            let mut display = [0u16; 260];
+            let title = wide("Choose a LightLine workspace folder");
+            let info = BROWSEINFOW {
+                hwndOwner: hwnd,
+                pszDisplayName: display.as_mut_ptr(),
+                lpszTitle: title.as_ptr(),
+                ulFlags: BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
+                ..unsafe { zeroed() }
+            };
+            let id = unsafe { SHBrowseForFolderW(&info) };
+            if id.is_null() {
+                return None;
+            }
+            let mut path = [0u16; 260];
+            let ok = unsafe { SHGetPathFromIDListW(id, path.as_mut_ptr()) };
+            unsafe { CoTaskMemFree(id.cast()) };
+            if ok == 0 {
+                return None;
+            }
+            Some(PathBuf::from(String::from_utf16_lossy(
+                &path[..path.iter().position(|ch| *ch == 0)?],
+            )))
+        }
+
+        fn open_folder(&mut self, hwnd: HWND) {
+            if let Some(root) = self.folder_dialog(hwnd) {
+                self.set_workspace(hwnd, root);
+            }
+        }
+
+        fn worker_started(&mut self, hwnd: HWND) {
+            self.pending_workers += 1;
+            unsafe { SetTimer(hwnd, 4, 60, None) };
+        }
+
+        fn show_quick_open(&mut self, hwnd: HWND) {
+            self.quick_open = true;
+            self.panel_focus = false;
+            self.output_focus = false;
+            self.quick_query.clear();
+            self.quick_selected = 0;
+            self.quick_loading = false;
+            if let Some(root) = self.workspace_root.clone() {
+                self.quick_files.clear();
+                self.quick_loading = true;
+                let tx = self.worker_tx.clone();
+                self.worker_started(hwnd);
+                std::thread::spawn(move || {
+                    let _ = tx.send(WorkerMessage::Files(
+                        root.clone(),
+                        workflow::workspace_files(&root),
+                    ));
+                });
+            }
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn quick_commands(&self) -> Vec<(&'static str, u8)> {
+            let query = self
+                .quick_query
+                .trim_start_matches('>')
+                .trim()
+                .to_ascii_lowercase();
+            [
+                ("Search in files", 0),
+                ("Run Rust tests", 1),
+                ("Review Git changes", 2),
+                ("Open folder", 3),
+                ("New file", 4),
+            ]
+            .into_iter()
+            .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
+            .collect()
+        }
+
+        fn quick_count(&self) -> usize {
+            if self.quick_query.starts_with('>') {
+                self.quick_commands().len()
+            } else {
+                self.quick_matches().len()
+            }
+        }
+
+        fn activate_quick_item(&mut self, hwnd: HWND, index: usize) {
+            if self.quick_query.starts_with('>') {
+                let action = self.quick_commands().get(index).map(|(_, action)| *action);
+                self.quick_open = false;
+                self.backbuffer = None;
+                match action {
+                    Some(0) => self.open_project_search(hwnd),
+                    Some(1) => self.run_project(hwnd),
+                    Some(2) => self.show_review(hwnd),
+                    Some(3) => self.open_folder(hwnd),
+                    Some(4) => self.new_file(hwnd),
+                    _ => {}
+                }
+            } else {
+                let path = self.quick_matches().get(index).cloned();
+                self.quick_open = false;
+                if let Some(path) = path {
+                    self.backbuffer = None;
+                    self.open(hwnd, Some(path));
+                }
+            }
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn new_file(&mut self, hwnd: HWND) {
+            self.cancel_search();
+            let from_welcome = self.welcome;
+            self.welcome = false;
+            self.search_input = false;
+            self.panel_focus = false;
+            self.output_focus = false;
+            self.review_file = None;
+            self.side_view = SideView::Files;
+            if !from_welcome
+                || self.doc().path.is_some()
+                || self.doc().is_dirty()
+                || !self.doc().line(0).is_empty()
+            {
+                if !from_welcome {
+                    self.start_transition(hwnd);
+                }
+                self.tabs.push(Tab::new(Document::new()));
+                self.active = self.tabs.len() - 1;
+            }
+            self.status = "New document".into();
+            self.show_active_tab(hwnd);
+        }
+
+        fn open_project_search(&mut self, hwnd: HWND) {
+            if self.workspace_root.is_none() {
+                self.status = "Open a workspace to search files".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            }
+            self.welcome = false;
+            self.set_sidebar_visible(hwnd, true);
+            self.side_view = SideView::Search;
+            self.review_file = None;
+            self.search_input = true;
+            self.panel_focus = true;
+            self.output_focus = false;
+            self.panel_first = 0;
+            self.panel_selected = 0;
+            self.update_title(hwnd);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn quick_matches(&self) -> Vec<PathBuf> {
+            let query = self.quick_query.to_ascii_lowercase();
+            self.quick_files
+                .iter()
+                .filter(|path| {
+                    path.strip_prefix(self.workspace_root.as_deref().unwrap_or(Path::new("")))
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .contains(&query)
+                })
+                .take(8)
+                .cloned()
+                .collect()
+        }
+
+        fn search_project(&mut self, hwnd: HWND) {
+            let Some(root) = self.workspace_root.clone() else {
+                self.status = "Open a workspace to search files".into();
+                return;
+            };
+            let query = self.project_query.clone();
+            if query.is_empty() {
+                self.cancel_search();
+                self.search_results.clear();
+                return;
+            }
+            self.cancel_search();
+            let cancel = Arc::new(AtomicBool::new(false));
+            self.search_cancel = Some(cancel.clone());
+            self.status = format!("Searching for {query}...");
+            self.panel_selected = 0;
+            self.panel_first = 0;
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                let hits = workflow::search_workspace_with_cancel(&root, &query, &cancel);
+                let _ = tx.send(WorkerMessage::Search(root, query, cancel, hits));
+            });
+        }
+
+        fn cancel_search(&mut self) {
+            if let Some(cancel) = self.search_cancel.take() {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
+
+        fn run_project(&mut self, hwnd: HWND) {
+            let Some(root) = self.workspace_root.clone() else {
+                self.status = "Open a Rust workspace to run tests".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            };
+            self.welcome = false;
+            self.run_visible = true;
+            self.output_focus = true;
+            if self.run_busy {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            }
+            self.run_busy = true;
+            let cancel = Arc::new(AtomicBool::new(false));
+            let pid = Arc::new(AtomicU32::new(0));
+            self.run_cancel = Some(cancel.clone());
+            self.run_pid = Some(pid.clone());
+            self.run_output = "$ cargo test --offline\n\n".into();
+            self.output_scroll = 0;
+            self.update_title(hwnd);
+            self.keep_cursor_visible(hwnd);
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                let (line_tx, line_rx) = mpsc::channel();
+                let run_root = root.clone();
+                let runner = std::thread::spawn(move || {
+                    workflow::run_tests_stream(&run_root, line_tx, &cancel, &pid)
+                });
+                for line in line_rx {
+                    let _ = tx.send(WorkerMessage::RunLine(root.clone(), line));
+                }
+                let result = runner
+                    .join()
+                    .unwrap_or_else(|_| Err("Test worker stopped unexpectedly".into()));
+                let _ = tx.send(WorkerMessage::Run(root, result));
+            });
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn stop_run(&mut self, hwnd: HWND) {
+            if let Some(cancel) = &self.run_cancel {
+                cancel.store(true, Ordering::Relaxed);
+                self.status = "Stopping test command...".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+        }
+
+        fn stop_run_before_close(&mut self) {
+            if let Some(cancel) = &self.run_cancel {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            if let Some(pid) = &self.run_pid {
+                let pid = pid.load(Ordering::Relaxed);
+                if pid != 0 {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/T", "/F", "/PID", &pid.to_string()])
+                        .creation_flags(0x0800_0000)
+                        .output();
+                }
+            }
+        }
+
+        fn show_review(&mut self, hwnd: HWND) {
+            let Some(root) = self.workspace_root.clone() else {
+                self.status = "Open a Git workspace to review changes".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            };
+            self.welcome = false;
+            self.cancel_search();
+            self.search_input = false;
+            self.output_focus = false;
+            self.update_title(hwnd);
+            self.set_sidebar_visible(hwnd, true);
+            self.side_view = SideView::Review;
+            self.panel_focus = true;
+            self.panel_selected = 0;
+            self.panel_first = 0;
+            self.status = "Loading Git changes...".into();
+            self.review_loading = true;
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                let result = workflow::git_changes(&root);
+                let _ = tx.send(WorkerMessage::Changes(root, result));
+            });
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn show_diff(&mut self, hwnd: HWND, path: PathBuf) {
+            let Some(root) = self.workspace_root.clone() else {
+                return;
+            };
+            self.review_file = Some(path.clone());
+            self.diff_rows.clear();
+            self.diff_first = 0;
+            self.status = format!("Reviewing {}", path.display());
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                let result = workflow::git_diff(&root, &path);
+                let _ = tx.send(WorkerMessage::Diff(root, path, result));
+            });
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn poll_workers(&mut self, hwnd: HWND) {
+            let mut received = false;
+            while let Ok(message) = self.worker_rx.try_recv() {
+                received = true;
+                if !matches!(&message, WorkerMessage::RunLine(..)) {
+                    self.pending_workers = self.pending_workers.saturating_sub(1);
+                }
+                match message {
+                    WorkerMessage::RunLine(root, line)
+                        if self.workspace_root.as_ref() == Some(&root) =>
+                    {
+                        if self.run_output.len() < 60_000 {
+                            self.run_output.push_str(&line);
+                            self.run_output.push('\n');
+                        }
+                    }
+                    WorkerMessage::Files(root, files)
+                        if self.workspace_root.as_ref() == Some(&root) =>
+                    {
+                        self.quick_loading = false;
+                        self.quick_files = files;
+                    }
+                    WorkerMessage::Search(root, query, cancel, hits)
+                        if self.workspace_root.as_ref() == Some(&root)
+                            && self.project_query == query
+                            && self
+                                .search_cancel
+                                .as_ref()
+                                .is_some_and(|current| Arc::ptr_eq(current, &cancel)) =>
+                    {
+                        self.search_cancel = None;
+                        self.status = format!("{} results for {}", hits.len(), query);
+                        self.search_results = hits;
+                    }
+                    WorkerMessage::Run(root, result)
+                        if self.workspace_root.as_ref() == Some(&root) =>
+                    {
+                        self.run_busy = false;
+                        self.run_cancel = None;
+                        self.run_pid = None;
+                        match result {
+                            Ok(()) => {
+                                self.run_output.push_str("\nTests finished successfully.\n");
+                                self.status = "Tests passed".into();
+                            }
+                            Err(error) => {
+                                self.run_output.push_str(&format!("\n{error}\n"));
+                                self.status = error;
+                            }
+                        }
+                    }
+                    WorkerMessage::Changes(root, result)
+                        if self.workspace_root.as_ref() == Some(&root) =>
+                    {
+                        self.review_loading = false;
+                        match result {
+                            Ok(changes) => {
+                                self.status = format!("{} changed files", changes.len());
+                                self.changes = changes;
+                            }
+                            Err(error) => self.status = error,
+                        }
+                    }
+                    WorkerMessage::Diff(root, path, result)
+                        if self.workspace_root.as_ref() == Some(&root)
+                            && self.review_file.as_ref() == Some(&path) =>
+                    {
+                        match result {
+                            Ok(rows) => self.diff_rows = rows,
+                            Err(error) => self.status = error,
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if self.pending_workers == 0 {
+                unsafe { KillTimer(hwnd, 4) };
+            }
+            if received {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
             }
         }
 
@@ -699,9 +1279,17 @@ mod windows_app {
 
         fn activate_tab(&mut self, hwnd: HWND, index: usize) {
             if index < self.tabs.len() {
+                self.output_focus = false;
+                if self.side_view == SideView::Search {
+                    self.cancel_search();
+                }
                 if index != self.active {
                     self.start_transition(hwnd);
                 }
+                self.side_view = SideView::Files;
+                self.review_file = None;
+                self.search_input = false;
+                self.panel_focus = false;
                 self.active = index;
                 self.show_active_tab(hwnd);
             }
@@ -863,7 +1451,12 @@ mod windows_app {
             unsafe {
                 GetClientRect(hwnd, &mut rect);
             }
-            ((rect.bottom - rect.top - self.editor_top() - self.scale(STATUS)).max(1)
+            ((rect.bottom
+                - rect.top
+                - self.editor_top()
+                - self.scale(STATUS)
+                - if self.run_visible { self.scale(210) } else { 0 })
+            .max(1)
                 / self.line_height)
                 .max(1) as usize
         }
@@ -905,6 +1498,10 @@ mod windows_app {
         }
 
         fn update_title(&self, hwnd: HWND) {
+            if self.welcome {
+                unsafe { SetWindowTextW(hwnd, wide("LightLine").as_ptr()) };
+                return;
+            }
             let file = self
                 .doc()
                 .path
@@ -1096,6 +1693,762 @@ mod windows_app {
             }
         }
 
+        fn paint_welcome(&self, hdc: HDC, rect: RECT) {
+            Self::fill(hdc, rect, EDITOR_BG);
+            let clip = rect;
+            unsafe { SelectObject(hdc, self.brand_font) };
+            Self::label(
+                hdc,
+                "✦  LightLine",
+                self.scale(28),
+                self.scale(24),
+                TEXT,
+                clip,
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+            let x = (rect.right / 2 - self.scale(250)).max(self.scale(28));
+            Self::label(
+                hdc,
+                "PICK UP WHERE YOU LEFT OFF",
+                x,
+                self.scale(136),
+                VIOLET,
+                clip,
+            );
+            unsafe { SelectObject(hdc, self.brand_font) };
+            Self::label(hdc, "Your quiet workbench", x, self.scale(170), TEXT, clip);
+            unsafe { SelectObject(hdc, self.ui_font) };
+            Self::label(
+                hdc,
+                "Open a file, choose a workspace, or start writing.",
+                x,
+                self.scale(207),
+                MUTED,
+                clip,
+            );
+            for (index, label) in ["Open file", "Open folder", "New file"].iter().enumerate() {
+                let left = x + self.scale(index as i32 * 145);
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left,
+                        top: self.scale(251),
+                        right: left + self.scale(135),
+                        bottom: self.scale(289),
+                    },
+                    if index == 0 { SELECT_BG } else { ACTIVE_BG },
+                );
+                Self::label(
+                    hdc,
+                    label,
+                    left + self.scale(14),
+                    self.scale(260),
+                    TEXT,
+                    clip,
+                );
+            }
+            Self::label(hdc, "RECENT WORKSPACES", x, self.scale(322), MUTED, clip);
+            for (index, path) in self.recent.iter().take(5).enumerate() {
+                let top = self.scale(351 + index as i32 * 49);
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: x,
+                        top,
+                        right: (x + self.scale(430)).min(rect.right - self.scale(20)),
+                        bottom: top + self.scale(42),
+                    },
+                    ACTIVE_BG,
+                );
+                Self::label(
+                    hdc,
+                    &path.file_name().unwrap_or_default().to_string_lossy(),
+                    x + self.scale(12),
+                    top + self.scale(7),
+                    TEXT,
+                    clip,
+                );
+                Self::label(
+                    hdc,
+                    &path.display().to_string(),
+                    x + self.scale(115),
+                    top + self.scale(7),
+                    MUTED,
+                    RECT {
+                        left: x + self.scale(115),
+                        top,
+                        right: (x + self.scale(425)).min(rect.right),
+                        bottom: top + self.scale(42),
+                    },
+                );
+            }
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: rect.bottom - self.scale(STATUS),
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+                STATUS_BG,
+            );
+            Self::label(
+                hdc,
+                &format!(
+                    "{}  •  Ctrl+O file  •  Ctrl+N new  •  Ctrl+Shift+O folder",
+                    self.status
+                ),
+                self.scale(16),
+                rect.bottom - self.scale(STATUS) + self.scale(4),
+                MUTED,
+                clip,
+            );
+        }
+
+        fn paint_side_panel(&self, hdc: HDC, editor_left: i32, editor_bottom: i32) {
+            let left = self.scale(RAIL);
+            let clip = RECT {
+                left,
+                top: 0,
+                right: editor_left,
+                bottom: editor_bottom,
+            };
+            let title = if self.side_view == SideView::Search {
+                "SEARCH IN FILES"
+            } else {
+                "CHANGES"
+            };
+            Self::label(
+                hdc,
+                title,
+                left + self.scale(16),
+                self.scale(11),
+                MUTED,
+                clip,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top: self.scale(39),
+                    right: editor_left,
+                    bottom: self.scale(40),
+                },
+                EDGE,
+            );
+            if self.side_view == SideView::Search {
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: left + self.scale(8),
+                        top: self.scale(47),
+                        right: editor_left - self.scale(8),
+                        bottom: self.scale(78),
+                    },
+                    ACTIVE_BG,
+                );
+                let query_label = if self.project_query.is_empty() && !self.search_input {
+                    "Type query, press Enter".to_owned()
+                } else {
+                    format!(
+                        "{}{}",
+                        self.project_query,
+                        if self.search_input && self.focused && self.caret_on {
+                            "|"
+                        } else {
+                            ""
+                        }
+                    )
+                };
+                Self::label(
+                    hdc,
+                    &query_label,
+                    left + self.scale(16),
+                    self.scale(52),
+                    if self.project_query.is_empty() {
+                        MUTED
+                    } else {
+                        TEXT
+                    },
+                    clip,
+                );
+                Self::label(
+                    hdc,
+                    &if self.search_cancel.is_some() {
+                        "SEARCHING...".to_owned()
+                    } else {
+                        format!("{} RESULTS", self.search_results.len())
+                    },
+                    left + self.scale(16),
+                    self.scale(87),
+                    MUTED,
+                    clip,
+                );
+                for (index, hit) in self
+                    .search_results
+                    .iter()
+                    .enumerate()
+                    .skip(self.panel_first)
+                {
+                    let top = self.scale(113 + (index - self.panel_first) as i32 * 48);
+                    if top >= editor_bottom {
+                        break;
+                    }
+                    if self.panel_focus && index == self.panel_selected {
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: left + self.scale(7),
+                                top,
+                                right: editor_left - self.scale(7),
+                                bottom: top + self.scale(45),
+                            },
+                            SELECT_BG,
+                        );
+                    }
+                    Self::label(
+                        hdc,
+                        &format!(
+                            "{}:{}",
+                            hit.path.file_name().unwrap_or_default().to_string_lossy(),
+                            hit.line + 1
+                        ),
+                        left + self.scale(14),
+                        top,
+                        TEXT,
+                        clip,
+                    );
+                    Self::label(
+                        hdc,
+                        &hit.preview,
+                        left + self.scale(14),
+                        top + self.scale(19),
+                        MUTED,
+                        RECT {
+                            left: left + self.scale(14),
+                            top,
+                            right: editor_left - self.scale(8),
+                            bottom: top + self.scale(46),
+                        },
+                    );
+                }
+            } else {
+                Self::label(
+                    hdc,
+                    &if self.review_loading {
+                        "Loading Git changes...".to_owned()
+                    } else {
+                        format!("{} changed files", self.changes.len())
+                    },
+                    left + self.scale(16),
+                    self.scale(52),
+                    MUTED,
+                    clip,
+                );
+                for (index, change) in self.changes.iter().enumerate().skip(self.panel_first) {
+                    let top = self.scale(86 + (index - self.panel_first) as i32 * EXPLORER_ROW);
+                    if top >= editor_bottom {
+                        break;
+                    }
+                    if self.review_file.as_ref() == Some(&change.path)
+                        || self.panel_focus && index == self.panel_selected
+                    {
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: left + self.scale(7),
+                                top,
+                                right: editor_left - self.scale(7),
+                                bottom: top + self.scale(EXPLORER_ROW - 2),
+                            },
+                            SELECT_BG,
+                        );
+                    }
+                    Self::label(hdc, &change.status, left + self.scale(12), top, GREEN, clip);
+                    Self::label(
+                        hdc,
+                        &change.path.display().to_string(),
+                        left + self.scale(37),
+                        top,
+                        TEXT,
+                        RECT {
+                            left: left + self.scale(37),
+                            top,
+                            right: editor_left - self.scale(7),
+                            bottom: top + self.scale(EXPLORER_ROW),
+                        },
+                    );
+                }
+            }
+        }
+
+        fn paint_diff(&self, hdc: HDC, left: i32, right: i32, bottom: i32) {
+            let top = self.editor_top();
+            let mid = left + (right - left) / 2;
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+                EDITOR_BG,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: mid,
+                    top,
+                    right: mid + 1,
+                    bottom,
+                },
+                EDGE,
+            );
+            let name = self
+                .review_file
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            Self::label(
+                hdc,
+                &format!("BEFORE  ·  {name}"),
+                left + self.scale(16),
+                top + self.scale(9),
+                MUTED,
+                RECT {
+                    left,
+                    top,
+                    right: mid,
+                    bottom: top + self.scale(36),
+                },
+            );
+            Self::label(
+                hdc,
+                &format!("AFTER  ·  {name}"),
+                mid + self.scale(16),
+                top + self.scale(9),
+                MUTED,
+                RECT {
+                    left: mid,
+                    top,
+                    right,
+                    bottom: top + self.scale(36),
+                },
+            );
+            unsafe { SelectObject(hdc, self.font) };
+            for (index, row) in self.diff_rows.iter().enumerate().skip(self.diff_first) {
+                let y = top + self.scale(43) + (index - self.diff_first) as i32 * self.line_height;
+                if y >= bottom {
+                    break;
+                }
+                if row.changed && row.before_number.is_some() {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left,
+                            top: y,
+                            right: mid,
+                            bottom: (y + self.line_height).min(bottom),
+                        },
+                        rgb(47, 31, 42),
+                    );
+                }
+                if row.changed && row.after_number.is_some() {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: mid + 1,
+                            top: y,
+                            right,
+                            bottom: (y + self.line_height).min(bottom),
+                        },
+                        rgb(24, 55, 50),
+                    );
+                }
+                if let Some(number) = row.before_number {
+                    Self::label(
+                        hdc,
+                        &number.to_string(),
+                        left + self.scale(10),
+                        y,
+                        MUTED,
+                        RECT {
+                            left,
+                            top: y,
+                            right: mid,
+                            bottom,
+                        },
+                    );
+                }
+                if let Some(number) = row.after_number {
+                    Self::label(
+                        hdc,
+                        &number.to_string(),
+                        mid + self.scale(10),
+                        y,
+                        MUTED,
+                        RECT {
+                            left: mid,
+                            top: y,
+                            right,
+                            bottom,
+                        },
+                    );
+                }
+                Self::label(
+                    hdc,
+                    &row.before,
+                    left + self.scale(50),
+                    y,
+                    TEXT,
+                    RECT {
+                        left: left + self.scale(50),
+                        top: y,
+                        right: mid - self.scale(8),
+                        bottom,
+                    },
+                );
+                Self::label(
+                    hdc,
+                    &row.after,
+                    mid + self.scale(50),
+                    y,
+                    TEXT,
+                    RECT {
+                        left: mid + self.scale(50),
+                        top: y,
+                        right: right - self.scale(8),
+                        bottom,
+                    },
+                );
+            }
+            unsafe { SelectObject(hdc, self.ui_font) };
+            if self.diff_rows.is_empty() {
+                Self::label(
+                    hdc,
+                    "No unstaged text changes in this file.",
+                    left + self.scale(18),
+                    top + self.scale(62),
+                    MUTED,
+                    RECT {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    },
+                );
+            }
+        }
+
+        fn paint_search_preview(&self, hdc: HDC, left: i32, right: i32, bottom: i32) {
+            if self.side_view != SideView::Search || !self.panel_focus || self.search_input {
+                return;
+            }
+            let Some(hit) = self.search_results.get(self.panel_selected) else {
+                return;
+            };
+            let width = self.scale(620).min(right - left - self.scale(30));
+            if width < self.scale(250) {
+                return;
+            }
+            let x = left + self.scale(15);
+            let y = (bottom - self.scale(176)).max(self.editor_top() + self.scale(18));
+            Self::fill(
+                hdc,
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + self.scale(152),
+                },
+                STATUS_BG,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x + self.scale(3),
+                    bottom: y + self.scale(152),
+                },
+                BLUE,
+            );
+            Self::label(
+                hdc,
+                &format!(
+                    "PREVIEW  ·  {}:{}",
+                    hit.path.file_name().unwrap_or_default().to_string_lossy(),
+                    hit.line + 1
+                ),
+                x + self.scale(13),
+                y + self.scale(8),
+                TEXT,
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + self.scale(30),
+                },
+            );
+            unsafe { SelectObject(hdc, self.font) };
+            for (index, (number, line)) in hit.context.iter().enumerate() {
+                let top = y + self.scale(34) + index as i32 * self.scale(21);
+                let color = if *number == hit.line + 1 {
+                    GREEN
+                } else {
+                    MUTED
+                };
+                Self::label(
+                    hdc,
+                    &format!("{number:>4}  {line}"),
+                    x + self.scale(12),
+                    top,
+                    color,
+                    RECT {
+                        left: x + self.scale(12),
+                        top,
+                        right: x + width - self.scale(10),
+                        bottom: y + self.scale(150),
+                    },
+                );
+            }
+            unsafe { SelectObject(hdc, self.ui_font) };
+        }
+
+        fn paint_output(&self, hdc: HDC, left: i32, right: i32, bottom: i32) {
+            let top = bottom - self.scale(210);
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+                SIDEBAR_BG,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top,
+                    right,
+                    bottom: top + self.scale(1),
+                },
+                EDGE,
+            );
+            Self::label(
+                hdc,
+                "OUTPUT  ·  cargo test",
+                left + self.scale(16),
+                top + self.scale(8),
+                TEXT,
+                RECT {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                },
+            );
+            Self::label(
+                hdc,
+                "×",
+                right - self.scale(28),
+                top + self.scale(6),
+                MUTED,
+                RECT {
+                    left: right - self.scale(28),
+                    top,
+                    right,
+                    bottom: top + self.scale(33),
+                },
+            );
+            if self.run_busy {
+                Self::label(
+                    hdc,
+                    "Stop",
+                    right - self.scale(87),
+                    top + self.scale(6),
+                    rgb(234, 159, 155),
+                    RECT {
+                        left: right - self.scale(90),
+                        top,
+                        right: right - self.scale(36),
+                        bottom: top + self.scale(33),
+                    },
+                );
+            }
+            let lines: Vec<&str> = self.run_output.lines().collect();
+            let visible = 8usize;
+            let start = lines.len().saturating_sub(visible + self.output_scroll);
+            for (index, line) in lines.iter().skip(start).take(visible).enumerate() {
+                Self::label(
+                    hdc,
+                    line,
+                    left + self.scale(18),
+                    top + self.scale(39 + index as i32 * 20),
+                    if line.contains("FAILED") || line.contains("error") {
+                        rgb(234, 159, 155)
+                    } else if line.contains("passed") || line.contains("ok") {
+                        GREEN
+                    } else {
+                        TEXT
+                    },
+                    RECT {
+                        left: left + self.scale(18),
+                        top: top + self.scale(38),
+                        right: right - self.scale(12),
+                        bottom,
+                    },
+                );
+            }
+        }
+
+        fn paint_quick_open(&self, hdc: HDC, rect: RECT) {
+            if !self.quick_open {
+                return;
+            }
+            let width = self.scale(560).min(rect.right - self.scale(30));
+            let left = (rect.right - width) / 2;
+            let top = self.scale(52);
+            let bottom = top + self.scale(70 + 8 * 34);
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom,
+                },
+                STATUS_BG,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom: top + self.scale(2),
+                },
+                VIOLET,
+            );
+            Self::label(
+                hdc,
+                &format!(
+                    "Quick Open  ›  {}{}",
+                    self.quick_query,
+                    if self.focused && self.caret_on {
+                        "|"
+                    } else {
+                        ""
+                    }
+                ),
+                left + self.scale(16),
+                top + self.scale(11),
+                TEXT,
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom: top + self.scale(43),
+                },
+            );
+            Self::label(
+                hdc,
+                "Type to filter  ·  Enter opens  ·  Esc closes",
+                left + self.scale(16),
+                top + self.scale(39),
+                MUTED,
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom,
+                },
+            );
+            let items: Vec<String> = if self.quick_query.starts_with('>') {
+                self.quick_commands()
+                    .iter()
+                    .map(|(name, _)| format!(">  {name}"))
+                    .collect()
+            } else {
+                self.quick_matches()
+                    .iter()
+                    .map(|path| {
+                        path.strip_prefix(self.workspace_root.as_deref().unwrap_or(Path::new("")))
+                            .unwrap_or(path)
+                            .display()
+                            .to_string()
+                    })
+                    .collect()
+            };
+            for (index, label) in items.iter().enumerate() {
+                let y = top + self.scale(68 + index as i32 * 34);
+                if index == self.quick_selected {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: left + self.scale(8),
+                            top: y - self.scale(2),
+                            right: left + width - self.scale(8),
+                            bottom: y + self.scale(30),
+                        },
+                        SELECT_BG,
+                    );
+                }
+                Self::label(
+                    hdc,
+                    label,
+                    left + self.scale(18),
+                    y + self.scale(2),
+                    TEXT,
+                    RECT {
+                        left: left + self.scale(18),
+                        top: y,
+                        right: left + width - self.scale(12),
+                        bottom: y + self.scale(29),
+                    },
+                );
+            }
+            if items.is_empty() {
+                Self::label(
+                    hdc,
+                    if self.quick_loading {
+                        "Loading workspace files..."
+                    } else if self.workspace_root.is_none() {
+                        "Open a workspace first (Ctrl+Shift+O)"
+                    } else {
+                        "No matching files or commands"
+                    },
+                    left + self.scale(18),
+                    top + self.scale(80),
+                    MUTED,
+                    RECT {
+                        left,
+                        top,
+                        right: left + width,
+                        bottom,
+                    },
+                );
+            }
+            if !self.quick_query.starts_with('>') {
+                Self::label(
+                    hdc,
+                    "Type > for commands",
+                    left + self.scale(18),
+                    bottom - self.scale(28),
+                    MUTED,
+                    RECT {
+                        left,
+                        top,
+                        right: left + width,
+                        bottom,
+                    },
+                );
+            }
+        }
+
         fn paint(&mut self, hwnd: HWND) {
             unsafe {
                 let mut ps = PAINTSTRUCT::default();
@@ -1118,7 +2471,19 @@ mod windows_app {
                 let old_font = SelectObject(hdc, self.font);
                 SelectObject(hdc, self.ui_font);
                 SetBkMode(hdc, TRANSPARENT as i32);
+                if self.welcome {
+                    self.paint_welcome(hdc, rect);
+                    self.paint_quick_open(hdc, rect);
+                    SelectObject(hdc, old_font);
+                    if hdc != window_dc {
+                        BitBlt(window_dc, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);
+                    }
+                    EndPaint(hwnd, &ps);
+                    return;
+                }
                 let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
+                let code_bottom =
+                    editor_bottom - if self.run_visible { self.scale(210) } else { 0 };
                 let editor_left = self.editor_left();
                 let code_left = self.code_left();
                 let bg = CreateSolidBrush(EDITOR_BG);
@@ -1168,7 +2533,7 @@ mod windows_app {
                     },
                     RAIL_BG,
                 );
-                if self.explorer_visible {
+                if self.sidebar_width > 0 {
                     Self::fill(
                         hdc,
                         RECT {
@@ -1292,6 +2657,25 @@ mod windows_app {
                         1,
                     );
                 }
+                if editor_left
+                    + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
+                    + self.scale(12)
+                    < rect.right - self.scale(207)
+                {
+                    Self::label(
+                        hdc,
+                        "⌕  Quick Open  Ctrl+P",
+                        rect.right - self.scale(207),
+                        self.scale(7),
+                        MUTED,
+                        RECT {
+                            left: rect.right - self.scale(207),
+                            top: 0,
+                            right: rect.right,
+                            bottom: self.scale(TAB_HEIGHT),
+                        },
+                    );
+                }
                 let rail_clip = RECT {
                     left: 0,
                     top: 0,
@@ -1319,7 +2703,7 @@ mod windows_app {
                     },
                     EDGE,
                 );
-                if self.explorer_visible {
+                if self.explorer_visible && self.side_view == SideView::Files {
                     Self::fill(
                         hdc,
                         RECT {
@@ -1331,16 +2715,34 @@ mod windows_app {
                         ACTIVE_BG,
                     );
                 }
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: 0,
-                        top: self.scale(48),
-                        right: self.scale(3),
-                        bottom: self.scale(78),
-                    },
-                    BLUE,
-                );
+                if self.sidebar_width > 0 {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: 0,
+                            top: self.scale(if self.side_view == SideView::Files {
+                                48
+                            } else if self.side_view == SideView::Search {
+                                90
+                            } else {
+                                174
+                            }),
+                            right: self.scale(3),
+                            bottom: self.scale(if self.side_view == SideView::Files {
+                                78
+                            } else if self.side_view == SideView::Search {
+                                120
+                            } else {
+                                204
+                            }),
+                        },
+                        if self.side_view == SideView::Review {
+                            VIOLET
+                        } else {
+                            BLUE
+                        },
+                    );
+                }
                 self.icons.draw(
                     hdc,
                     "folder-open",
@@ -1353,7 +2755,11 @@ mod windows_app {
                     "Explorer",
                     self.scale(42),
                     self.scale(53),
-                    if self.explorer_visible { TEXT } else { MUTED },
+                    if self.explorer_visible && self.side_view == SideView::Files {
+                        TEXT
+                    } else {
+                        MUTED
+                    },
                     rail_clip,
                 );
                 Self::label(hdc, "⌕", self.scale(18), self.scale(95), MUTED, rail_clip);
@@ -1362,7 +2768,33 @@ mod windows_app {
                     "Search",
                     self.scale(42),
                     self.scale(95),
-                    MUTED,
+                    if self.explorer_visible && self.side_view == SideView::Search {
+                        TEXT
+                    } else {
+                        MUTED
+                    },
+                    rail_clip,
+                );
+                Self::label(hdc, "▶", self.scale(18), self.scale(137), GREEN, rail_clip);
+                Self::label(
+                    hdc,
+                    "Run",
+                    self.scale(42),
+                    self.scale(137),
+                    if self.run_visible { TEXT } else { MUTED },
+                    rail_clip,
+                );
+                Self::label(hdc, "◇", self.scale(18), self.scale(179), VIOLET, rail_clip);
+                Self::label(
+                    hdc,
+                    "Review",
+                    self.scale(42),
+                    self.scale(179),
+                    if self.side_view == SideView::Review {
+                        TEXT
+                    } else {
+                        MUTED
+                    },
                     rail_clip,
                 );
                 if let Some(root) = &self.workspace_root {
@@ -1384,7 +2816,12 @@ mod windows_app {
                         rail_clip,
                     );
                 }
-                if self.explorer_visible {
+                let sidebar_state = SaveDC(hdc);
+                IntersectClipRect(hdc, self.scale(RAIL), 0, editor_left, editor_bottom);
+                if self.sidebar_width > 0 && self.side_view != SideView::Files {
+                    self.paint_side_panel(hdc, editor_left, editor_bottom);
+                }
+                if self.sidebar_width > 0 && self.side_view == SideView::Files {
                     let sidebar_clip = RECT {
                         left: self.scale(RAIL),
                         top: 0,
@@ -1536,176 +2973,187 @@ mod windows_app {
                         );
                     }
                 }
-                let visible = self.visible_lines(hwnd) + 1;
-                SelectObject(hdc, self.font);
-                let space_width = self.text_width(hdc, " ").max(1);
-                let guide_brush = CreateSolidBrush(EDGE);
-                for row in 0..visible {
-                    let index = self.view().first_line + row;
-                    if index >= self.doc().line_count() {
-                        break;
-                    }
-                    let y = self.editor_top() + row as i32 * self.line_height;
-                    if y >= editor_bottom {
-                        break;
-                    }
-                    if index == self.view().cursor.line {
-                        Self::fill(
-                            hdc,
-                            RECT {
-                                left: editor_left,
-                                top: y,
-                                right: rect.right,
-                                bottom: (y + self.line_height).min(editor_bottom),
-                            },
-                            LINE_BG,
-                        );
-                    }
-                    let number = format!("{}", index + 1);
-                    let num: Vec<u16> = number.encode_utf16().collect();
-                    SetTextColor(
-                        hdc,
+                RestoreDC(hdc, sidebar_state);
+                if self.side_view == SideView::Review && self.review_file.is_some() {
+                    self.paint_diff(hdc, editor_left, rect.right, code_bottom);
+                } else {
+                    let visible = self.visible_lines(hwnd) + 1;
+                    SelectObject(hdc, self.font);
+                    let space_width = self.text_width(hdc, " ").max(1);
+                    let guide_brush = CreateSolidBrush(EDGE);
+                    for row in 0..visible {
+                        let index = self.view().first_line + row;
+                        if index >= self.doc().line_count() {
+                            break;
+                        }
+                        let y = self.editor_top() + row as i32 * self.line_height;
+                        if y >= code_bottom {
+                            break;
+                        }
                         if index == self.view().cursor.line {
-                            TEXT
-                        } else {
-                            MUTED
-                        },
-                    );
-                    let number_clip = RECT {
-                        left: editor_left,
-                        top: y,
-                        right: editor_left + self.scale(GUTTER),
-                        bottom: editor_bottom,
-                    };
-                    ExtTextOutW(
-                        hdc,
-                        editor_left + self.scale(12),
-                        y,
-                        ETO_CLIPPED,
-                        &number_clip,
-                        num.as_ptr(),
-                        num.len() as u32,
-                        null(),
-                    );
-                    let source = self.doc().line(index);
-                    let indent_columns = source
-                        .chars()
-                        .take_while(|ch| *ch == ' ' || *ch == '\t')
-                        .take(64)
-                        .map(|ch| if ch == '\t' { 4 } else { 1 })
-                        .sum::<usize>();
-                    for level in 1..=(indent_columns / 4).min(8) {
-                        let guide_x = code_left + level as i32 * 4 * space_width - self.scale(4);
-                        if guide_x < rect.right {
-                            FillRect(
+                            Self::fill(
                                 hdc,
-                                &RECT {
-                                    left: guide_x,
+                                RECT {
+                                    left: editor_left,
                                     top: y,
-                                    right: guide_x + 1,
-                                    bottom: (y + self.line_height).min(editor_bottom),
+                                    right: rect.right,
+                                    bottom: (y + self.line_height).min(code_bottom),
                                 },
-                                guide_brush,
+                                LINE_BG,
                             );
                         }
-                    }
-                    if let Some((start, end)) = selection
-                        && index >= start.line
-                        && index <= end.line
-                        && !(index == end.line && end.byte == 0)
-                    {
-                        let from = if index == start.line { start.byte } else { 0 };
-                        let to = if index == end.line {
-                            end.byte
-                        } else {
-                            source.len()
+                        let number = format!("{}", index + 1);
+                        let num: Vec<u16> = number.encode_utf16().collect();
+                        SetTextColor(
+                            hdc,
+                            if index == self.view().cursor.line {
+                                TEXT
+                            } else {
+                                MUTED
+                            },
+                        );
+                        let number_clip = RECT {
+                            left: editor_left,
+                            top: y,
+                            right: editor_left + self.scale(GUTTER),
+                            bottom: code_bottom,
                         };
-                        let x1 = code_left + self.text_width(hdc, &source[..from]);
-                        let x2 = code_left
-                            + self.text_width(hdc, &source[..to])
-                            + if index < end.line { self.scale(8) } else { 0 };
-                        if x2 > x1 && x1 < rect.right {
+                        ExtTextOutW(
+                            hdc,
+                            editor_left + self.scale(12),
+                            y,
+                            ETO_CLIPPED,
+                            &number_clip,
+                            num.as_ptr(),
+                            num.len() as u32,
+                            null(),
+                        );
+                        let source = self.doc().line(index);
+                        let indent_columns = source
+                            .chars()
+                            .take_while(|ch| *ch == ' ' || *ch == '\t')
+                            .take(64)
+                            .map(|ch| if ch == '\t' { 4 } else { 1 })
+                            .sum::<usize>();
+                        for level in 1..=(indent_columns / 4).min(8) {
+                            let guide_x =
+                                code_left + level as i32 * 4 * space_width - self.scale(4);
+                            if guide_x < rect.right {
+                                FillRect(
+                                    hdc,
+                                    &RECT {
+                                        left: guide_x,
+                                        top: y,
+                                        right: guide_x + 1,
+                                        bottom: (y + self.line_height).min(code_bottom),
+                                    },
+                                    guide_brush,
+                                );
+                            }
+                        }
+                        if let Some((start, end)) = selection
+                            && index >= start.line
+                            && index <= end.line
+                            && !(index == end.line && end.byte == 0)
+                        {
+                            let from = if index == start.line { start.byte } else { 0 };
+                            let to = if index == end.line {
+                                end.byte
+                            } else {
+                                source.len()
+                            };
+                            let x1 = code_left + self.text_width(hdc, &source[..from]);
+                            let x2 = code_left
+                                + self.text_width(hdc, &source[..to])
+                                + if index < end.line { self.scale(8) } else { 0 };
+                            if x2 > x1 && x1 < rect.right {
+                                FillRect(
+                                    hdc,
+                                    &RECT {
+                                        left: x1,
+                                        top: y,
+                                        right: x2.min(rect.right),
+                                        bottom: (y + self.line_height).min(code_bottom),
+                                    },
+                                    selection_bg,
+                                );
+                            }
+                        }
+                        let line = source.replace('\t', "    ");
+                        let chars: Vec<u16> = line.encode_utf16().collect();
+                        SetTextColor(hdc, TEXT);
+                        let clip = RECT {
+                            left: code_left,
+                            top: y,
+                            right: rect.right,
+                            bottom: code_bottom,
+                        };
+                        ExtTextOutW(
+                            hdc,
+                            code_left,
+                            y,
+                            ETO_CLIPPED,
+                            &clip,
+                            chars.as_ptr(),
+                            chars.len() as u32,
+                            null(),
+                        );
+                        if source.len() <= 16_384
+                            && let Some(syntax) = &self.tab().syntax
+                        {
+                            for span in syntax.spans(self.doc(), index) {
+                                let color = match span.color {
+                                    Color::Comment => MUTED,
+                                    Color::String => GREEN,
+                                    Color::Keyword => BLUE,
+                                    Color::Type => TEAL,
+                                    Color::Number => rgb(248, 180, 130),
+                                    Color::Macro => VIOLET,
+                                };
+                                SetTextColor(hdc, color);
+                                let left = code_left + self.text_width(hdc, &source[..span.start]);
+                                let text = source[span.start..span.end].replace('\t', "    ");
+                                let chars: Vec<u16> = text.encode_utf16().collect();
+                                ExtTextOutW(
+                                    hdc,
+                                    left,
+                                    y,
+                                    ETO_CLIPPED,
+                                    &clip,
+                                    chars.as_ptr(),
+                                    chars.len() as u32,
+                                    null(),
+                                );
+                            }
+                        }
+                    }
+                    DeleteObject(guide_brush);
+                    if self.focused && self.caret_on {
+                        let line = self.doc().line(self.view().cursor.line);
+                        let x = code_left + self.text_width(hdc, &line[..self.view().cursor.byte]);
+                        let y = self.editor_top()
+                            + (self.view().cursor.line as i64 - self.view().first_line as i64)
+                                as i32
+                                * self.line_height;
+                        if y >= self.editor_top() && y < code_bottom && x < rect.right {
+                            let caret = CreateSolidBrush(BLUE);
                             FillRect(
                                 hdc,
                                 &RECT {
-                                    left: x1,
+                                    left: x,
                                     top: y,
-                                    right: x2.min(rect.right),
-                                    bottom: (y + self.line_height).min(editor_bottom),
+                                    right: x + self.scale(2).max(2),
+                                    bottom: (y + self.line_height).min(code_bottom),
                                 },
-                                selection_bg,
+                                caret,
                             );
-                        }
-                    }
-                    let line = source.replace('\t', "    ");
-                    let chars: Vec<u16> = line.encode_utf16().collect();
-                    SetTextColor(hdc, TEXT);
-                    let clip = RECT {
-                        left: code_left,
-                        top: y,
-                        right: rect.right,
-                        bottom: editor_bottom,
-                    };
-                    ExtTextOutW(
-                        hdc,
-                        code_left,
-                        y,
-                        ETO_CLIPPED,
-                        &clip,
-                        chars.as_ptr(),
-                        chars.len() as u32,
-                        null(),
-                    );
-                    if source.len() <= 16_384
-                        && let Some(syntax) = &self.tab().syntax
-                    {
-                        for span in syntax.spans(self.doc(), index) {
-                            let color = match span.color {
-                                Color::Comment => MUTED,
-                                Color::String => GREEN,
-                                Color::Keyword => BLUE,
-                                Color::Type => TEAL,
-                                Color::Number => rgb(248, 180, 130),
-                                Color::Macro => VIOLET,
-                            };
-                            SetTextColor(hdc, color);
-                            let left = code_left + self.text_width(hdc, &source[..span.start]);
-                            let text = source[span.start..span.end].replace('\t', "    ");
-                            let chars: Vec<u16> = text.encode_utf16().collect();
-                            ExtTextOutW(
-                                hdc,
-                                left,
-                                y,
-                                ETO_CLIPPED,
-                                &clip,
-                                chars.as_ptr(),
-                                chars.len() as u32,
-                                null(),
-                            );
+                            DeleteObject(caret);
                         }
                     }
                 }
-                DeleteObject(guide_brush);
-                if self.focused && self.caret_on {
-                    let line = self.doc().line(self.view().cursor.line);
-                    let x = code_left + self.text_width(hdc, &line[..self.view().cursor.byte]);
-                    let y = self.editor_top()
-                        + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
-                            * self.line_height;
-                    if y >= self.editor_top() && y < editor_bottom && x < rect.right {
-                        let caret = CreateSolidBrush(BLUE);
-                        FillRect(
-                            hdc,
-                            &RECT {
-                                left: x,
-                                top: y,
-                                right: x + self.scale(2).max(2),
-                                bottom: (y + self.line_height).min(editor_bottom),
-                            },
-                            caret,
-                        );
-                        DeleteObject(caret);
-                    }
+                self.paint_search_preview(hdc, editor_left, rect.right, code_bottom);
+                if self.run_visible {
+                    self.paint_output(hdc, editor_left, rect.right, editor_bottom);
                 }
                 FillRect(
                     hdc,
@@ -1718,20 +3166,25 @@ mod windows_app {
                     status_bg,
                 );
                 SelectObject(hdc, self.ui_font);
-                let right_label = format!(
-                    "Ln {}, Col {}     UTF-8     {}",
-                    self.view().cursor.line + 1,
-                    self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
-                        .chars()
-                        .count()
-                        + 1,
-                    self.doc()
-                        .path
-                        .as_deref()
-                        .and_then(Path::extension)
-                        .map(|ext| ext.to_string_lossy().to_uppercase())
-                        .unwrap_or_else(|| "TEXT".into())
-                );
+                let right_label =
+                    if self.side_view == SideView::Review && self.review_file.is_some() {
+                        format!("Git review     {} lines", self.diff_rows.len())
+                    } else {
+                        format!(
+                            "Ln {}, Col {}     UTF-8     {}",
+                            self.view().cursor.line + 1,
+                            self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
+                                .chars()
+                                .count()
+                                + 1,
+                            self.doc()
+                                .path
+                                .as_deref()
+                                .and_then(Path::extension)
+                                .map(|ext| ext.to_string_lossy().to_uppercase())
+                                .unwrap_or_else(|| "TEXT".into())
+                        )
+                    };
                 let right_width = self.text_width(hdc, &right_label);
                 let right_x = (rect.right - right_width - self.scale(16)).max(self.scale(16));
                 Self::label(
@@ -1766,7 +3219,6 @@ mod windows_app {
                 DeleteObject(selection_bg);
                 DeleteObject(tab_bg);
                 DeleteObject(active_bg);
-                SelectObject(hdc, old_font);
                 if let Some(transition) = &self.transition {
                     let elapsed = transition.started.elapsed().as_millis();
                     if elapsed < TRANSITION_MS
@@ -1804,6 +3256,9 @@ mod windows_app {
                         KillTimer(hwnd, 3);
                     }
                 }
+                SelectObject(hdc, self.ui_font);
+                self.paint_quick_open(hdc, rect);
+                SelectObject(hdc, old_font);
                 if hdc != window_dc {
                     BitBlt(window_dc, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);
                 }
@@ -1943,7 +3398,18 @@ mod windows_app {
             }
             match Document::open(path.clone()) {
                 Ok(document) => {
-                    self.start_transition(hwnd);
+                    self.output_focus = false;
+                    let from_welcome = self.welcome;
+                    self.welcome = false;
+                    self.quick_open = false;
+                    if from_welcome {
+                        self.side_view = SideView::Files;
+                        self.review_file = None;
+                        self.search_input = false;
+                    }
+                    if !from_welcome {
+                        self.start_transition(hwnd);
+                    }
                     if self.tabs.len() == 1
                         && self.doc().path.is_none()
                         && !self.doc().is_dirty()
@@ -1970,6 +3436,135 @@ mod windows_app {
         fn key(&mut self, hwnd: HWND, key: u32) -> bool {
             let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
             let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
+            if ctrl && key == 0x43 && self.output_focus {
+                self.stop_run(hwnd);
+                return true;
+            }
+            if self.welcome && key == VK_ESCAPE as u32 && self.workspace_root.is_some() {
+                self.welcome = false;
+                self.show_active_tab(hwnd);
+                return true;
+            }
+            if self.quick_open {
+                match key {
+                    x if x == VK_ESCAPE as u32 => self.quick_open = false,
+                    x if x == VK_UP as u32 => {
+                        self.quick_selected = self.quick_selected.saturating_sub(1)
+                    }
+                    x if x == VK_DOWN as u32 => {
+                        self.quick_selected =
+                            (self.quick_selected + 1).min(self.quick_count().saturating_sub(1))
+                    }
+                    x if x == VK_BACK as u32 => {
+                        self.quick_query.pop();
+                        self.quick_selected = 0;
+                    }
+                    x if x == VK_RETURN as u32 => {
+                        self.activate_quick_item(hwnd, self.quick_selected);
+                    }
+                    _ if !ctrl => return false,
+                    _ => return true,
+                }
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+            }
+            if self.search_input {
+                match key {
+                    x if x == VK_ESCAPE as u32 => {
+                        self.search_input = false;
+                        self.cancel_search();
+                        self.panel_focus = false;
+                        self.set_sidebar_visible(hwnd, false);
+                    }
+                    x if x == VK_RETURN as u32 => {
+                        self.search_input = false;
+                        self.search_project(hwnd);
+                    }
+                    x if x == VK_BACK as u32 => {
+                        self.project_query.pop();
+                        self.search_results.clear();
+                    }
+                    _ if !ctrl => return false,
+                    _ => {}
+                }
+                if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+            }
+            if self.panel_focus && !ctrl {
+                let count = if self.side_view == SideView::Search {
+                    self.search_results.len()
+                } else {
+                    self.changes.len()
+                };
+                match key {
+                    x if x == VK_UP as u32 => {
+                        self.panel_selected = self.panel_selected.saturating_sub(1)
+                    }
+                    x if x == VK_DOWN as u32 => {
+                        self.panel_selected = (self.panel_selected + 1).min(count.saturating_sub(1))
+                    }
+                    x if x == VK_RETURN as u32 => {
+                        if self.side_view == SideView::Search {
+                            if let Some(hit) = self.search_results.get(self.panel_selected).cloned()
+                            {
+                                self.panel_focus = false;
+                                self.open(hwnd, Some(hit.path));
+                                self.move_cursor(
+                                    Pos {
+                                        line: hit.line,
+                                        byte: hit.byte,
+                                    },
+                                    false,
+                                );
+                                self.keep_cursor_visible(hwnd);
+                            }
+                        } else if let Some(change) = self.changes.get(self.panel_selected).cloned()
+                        {
+                            self.panel_focus = false;
+                            self.show_diff(hwnd, change.path);
+                        }
+                        return true;
+                    }
+                    _ => {}
+                }
+                if key == VK_UP as u32 || key == VK_DOWN as u32 {
+                    let visible = if self.side_view == SideView::Search {
+                        10
+                    } else {
+                        20
+                    };
+                    if self.panel_selected < self.panel_first {
+                        self.panel_first = self.panel_selected;
+                    }
+                    if self.panel_selected >= self.panel_first + visible {
+                        self.panel_first = self.panel_selected + 1 - visible;
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+            }
+            if self.side_view == SideView::Review
+                && self.review_file.is_some()
+                && !self.panel_focus
+                && !ctrl
+            {
+                match key {
+                    x if x == VK_UP as u32 => self.diff_first = self.diff_first.saturating_sub(1),
+                    x if x == VK_DOWN as u32 => {
+                        self.diff_first =
+                            (self.diff_first + 1).min(self.diff_rows.len().saturating_sub(1))
+                    }
+                    x if x == VK_ESCAPE as u32 => {
+                        self.review_file = None;
+                        self.panel_focus = true;
+                    }
+                    _ => return true,
+                }
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+            }
             if self.find_mode {
                 match key {
                     x if x == VK_ESCAPE as u32 => {
@@ -1985,6 +3580,30 @@ mod windows_app {
             if ctrl {
                 let cursor = self.view().cursor;
                 match key {
+                    0x48 if shift => {
+                        self.show_welcome(hwnd);
+                        return true;
+                    }
+                    0x50 => {
+                        self.show_quick_open(hwnd);
+                        return true;
+                    }
+                    0x4f if shift => {
+                        self.open_folder(hwnd);
+                        return true;
+                    }
+                    0x46 if shift => {
+                        self.open_project_search(hwnd);
+                        return true;
+                    }
+                    0x47 if shift => {
+                        self.show_review(hwnd);
+                        return true;
+                    }
+                    0x42 if shift => {
+                        self.run_project(hwnd);
+                        return true;
+                    }
                     x if x == VK_OEM_PLUS as u32 || x == VK_ADD as u32 => {
                         self.set_zoom(hwnd, self.zoom + 20);
                         return true;
@@ -2020,20 +3639,23 @@ mod windows_app {
                         Err(error) => self.error(hwnd, &error),
                     },
                     0x4e => {
-                        self.start_transition(hwnd);
-                        self.tabs.push(Tab::new(Document::new()));
-                        self.active = self.tabs.len() - 1;
-                        self.status = "New document".into();
-                        self.show_active_tab(hwnd);
+                        self.new_file(hwnd);
                         return true;
                     }
                     0x46 => {
+                        self.search_input = false;
+                        self.panel_focus = false;
                         self.find_mode = true;
                         self.find_query.clear();
                         self.status = "Find: ".into();
                     }
                     0x42 => {
-                        self.explorer_visible = !self.explorer_visible;
+                        if self.side_view == SideView::Search {
+                            self.cancel_search();
+                        }
+                        self.side_view = SideView::Files;
+                        self.panel_focus = false;
+                        self.set_sidebar_visible(hwnd, !self.explorer_visible);
                         self.show_active_tab(hwnd);
                         return true;
                     }
@@ -2125,6 +3747,22 @@ mod windows_app {
                     return true;
                 }
                 x if x == VK_ESCAPE as u32 => {
+                    if self.run_visible {
+                        self.run_visible = false;
+                        self.output_focus = false;
+                        self.keep_cursor_visible(hwnd);
+                        return true;
+                    }
+                    if self.side_view != SideView::Files {
+                        if self.side_view == SideView::Search {
+                            self.cancel_search();
+                        }
+                        self.side_view = SideView::Files;
+                        self.set_sidebar_visible(hwnd, false);
+                        self.review_file = None;
+                        self.keep_cursor_visible(hwnd);
+                        return true;
+                    }
                     self.view_mut().selection_anchor = None;
                 }
                 x if x == VK_LEFT as u32 => {
@@ -2224,6 +3862,28 @@ mod windows_app {
             if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
                 return;
             }
+            if self.output_focus && !self.quick_open && !self.search_input {
+                return;
+            }
+            if self.quick_open || self.search_input {
+                if unit >= 32
+                    && unit != 127
+                    && let Some(ch) = char::from_u32(unit as u32)
+                {
+                    if self.quick_open {
+                        self.quick_query.push(ch);
+                        self.quick_selected = 0;
+                    } else {
+                        self.project_query.push(ch);
+                        self.search_results.clear();
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
+                return;
+            }
+            if self.side_view == SideView::Review && self.review_file.is_some() {
+                return;
+            }
             if self.find_mode && unit == 8 {
                 self.find_query.pop();
                 self.status = format!("Find: {}", self.find_query);
@@ -2313,24 +3973,113 @@ mod windows_app {
             unsafe {
                 GetClientRect(hwnd, &mut rect);
             }
+            if self.welcome {
+                let left = (rect.right / 2 - self.scale(250)).max(self.scale(28));
+                if y >= self.scale(251) && y < self.scale(289) {
+                    let button = (x - left) / self.scale(145).max(1);
+                    if x >= left && button == 0 {
+                        self.open(hwnd, None);
+                    } else if x >= left && button == 1 {
+                        self.open_folder(hwnd);
+                    } else if x >= left && button == 2 {
+                        self.new_file(hwnd);
+                    }
+                } else if y >= self.scale(351) {
+                    let index = ((y - self.scale(351)) / self.scale(49).max(1)) as usize;
+                    if x >= left
+                        && x < left + self.scale(430)
+                        && let Some(path) = self.recent.get(index).cloned()
+                    {
+                        self.set_workspace(hwnd, path);
+                    }
+                }
+                return;
+            }
+            if self.quick_open {
+                let width = self.scale(560).min(rect.right - self.scale(30));
+                let left = (rect.right - width) / 2;
+                let top = self.scale(52);
+                if x >= left
+                    && x < left + width
+                    && y >= top + self.scale(68)
+                    && y < top + self.scale(70 + 8 * 34)
+                {
+                    let index = ((y - top - self.scale(68)) / self.scale(34).max(1)) as usize;
+                    self.activate_quick_item(hwnd, index);
+                } else if x < left
+                    || x >= left + width
+                    || y < top
+                    || y >= top + self.scale(70 + 8 * 34)
+                {
+                    self.quick_open = false;
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
+                return;
+            }
             if y >= rect.bottom - self.scale(STATUS) {
                 return;
             }
             let rail = self.scale(RAIL);
             let editor_left = self.editor_left();
             if x < rail {
-                if y >= self.scale(46) && y < self.scale(82) {
-                    self.explorer_visible = !self.explorer_visible;
+                if y < self.scale(39) {
+                    self.show_welcome(hwnd);
+                } else if y >= self.scale(46) && y < self.scale(82) {
+                    if self.side_view == SideView::Search {
+                        self.cancel_search();
+                    }
+                    let already_open = self.side_view == SideView::Files && self.explorer_visible;
+                    self.side_view = SideView::Files;
+                    self.panel_focus = false;
+                    self.set_sidebar_visible(hwnd, !already_open);
                     self.show_active_tab(hwnd);
                 } else if y >= self.scale(88) && y < self.scale(124) {
-                    self.find_mode = true;
-                    self.find_query.clear();
-                    self.status = "Find: ".into();
-                    self.refresh(hwnd);
+                    self.open_project_search(hwnd);
+                } else if y >= self.scale(130) && y < self.scale(166) {
+                    self.run_project(hwnd);
+                } else if y >= self.scale(172) && y < self.scale(208) {
+                    self.show_review(hwnd);
                 }
                 return;
             }
-            if self.explorer_visible && x < editor_left {
+            if self.sidebar_width > 0 && x < editor_left {
+                if !self.explorer_visible {
+                    return;
+                }
+                if self.side_view == SideView::Search {
+                    if y >= self.scale(47) && y < self.scale(78) {
+                        self.search_input = true;
+                        return;
+                    }
+                    if y >= self.scale(113) {
+                        let index = self.panel_first
+                            + ((y - self.scale(113)) / self.scale(48).max(1)) as usize;
+                        if let Some(hit) = self.search_results.get(index).cloned() {
+                            self.panel_focus = false;
+                            self.open(hwnd, Some(hit.path));
+                            self.move_cursor(
+                                Pos {
+                                    line: hit.line,
+                                    byte: hit.byte,
+                                },
+                                false,
+                            );
+                            self.keep_cursor_visible(hwnd);
+                        }
+                    }
+                    return;
+                }
+                if self.side_view == SideView::Review {
+                    if y >= self.scale(86) {
+                        let index = self.panel_first
+                            + ((y - self.scale(86)) / self.scale(EXPLORER_ROW).max(1)) as usize;
+                        if let Some(change) = self.changes.get(index).cloned() {
+                            self.panel_focus = false;
+                            self.show_diff(hwnd, change.path);
+                        }
+                    }
+                    return;
+                }
                 if y >= self.scale(EXPLORER_TOP) {
                     let row = self.explorer_first_row
                         + ((y - self.scale(EXPLORER_TOP)) / self.scale(EXPLORER_ROW)) as usize;
@@ -2354,7 +4103,35 @@ mod windows_app {
                 }
                 return;
             }
+            if self.run_visible && y >= rect.bottom - self.scale(STATUS + 210) {
+                self.output_focus = true;
+                if y < rect.bottom - self.scale(STATUS + 176) {
+                    if x >= rect.right - self.scale(40) {
+                        self.run_visible = false;
+                        self.output_focus = false;
+                        self.keep_cursor_visible(hwnd);
+                    } else if x >= rect.right - self.scale(100) && self.run_busy {
+                        self.stop_run(hwnd);
+                    }
+                }
+                return;
+            }
+            if self.side_view == SideView::Review
+                && self.review_file.is_some()
+                && y >= self.editor_top()
+            {
+                return;
+            }
             if y < self.scale(TAB_HEIGHT) {
+                if editor_left
+                    + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
+                    + self.scale(12)
+                    < rect.right - self.scale(207)
+                    && x >= rect.right - self.scale(207)
+                {
+                    self.show_quick_open(hwnd);
+                    return;
+                }
                 let slot = ((x - editor_left).max(0) / self.scale(TAB_WIDTH).max(1)) as usize;
                 let index = self.tab_first + slot;
                 if index < self.tabs.len() {
@@ -2370,6 +4147,8 @@ mod windows_app {
                 return;
             }
             let pos = self.position_at(hwnd, x, y);
+            self.panel_focus = false;
+            self.output_focus = false;
             self.move_cursor(pos, extend);
             self.dragging = true;
             unsafe {
@@ -2481,6 +4260,14 @@ mod windows_app {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 0
             }
+            WM_TIMER if wparam == 4 => {
+                app.poll_workers(hwnd);
+                0
+            }
+            WM_TIMER if wparam == 5 => {
+                app.advance_sidebar(hwnd);
+                0
+            }
             WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
                 unsafe {
                     let mut point = POINT::default();
@@ -2488,11 +4275,19 @@ mod windows_app {
                     ScreenToClient(hwnd, &mut point);
                     let cursor = LoadCursorW(
                         null_mut(),
-                        if point.y < app.editor_top() || point.x < app.editor_left() || {
-                            let mut rect = RECT::default();
-                            GetClientRect(hwnd, &mut rect);
-                            point.y >= rect.bottom - app.scale(STATUS)
-                        } {
+                        if app.welcome
+                            || app.quick_open
+                            || (app.side_view == SideView::Review && app.review_file.is_some())
+                            || point.y < app.editor_top()
+                            || point.x < app.editor_left()
+                            || {
+                                let mut rect = RECT::default();
+                                GetClientRect(hwnd, &mut rect);
+                                point.y
+                                    >= rect.bottom
+                                        - app.scale(STATUS + if app.run_visible { 210 } else { 0 })
+                            }
+                        {
                             IDC_ARROW
                         } else {
                             IDC_IBEAM
@@ -2551,11 +4346,50 @@ mod windows_app {
                     GetCursorPos(&mut point);
                     ScreenToClient(hwnd, &mut point);
                 }
-                if app.explorer_visible && point.x >= app.scale(RAIL) && point.x < app.editor_left()
+                let mut rect = RECT::default();
+                unsafe { GetClientRect(hwnd, &mut rect) };
+                if app.run_visible
+                    && point.x >= app.editor_left()
+                    && point.y >= rect.bottom - app.scale(STATUS + 210)
                 {
-                    let mut rect = RECT::default();
-                    unsafe {
-                        GetClientRect(hwnd, &mut rect);
+                    let max = app.run_output.lines().count().saturating_sub(8);
+                    app.output_scroll = if delta > 0 {
+                        (app.output_scroll + 3).min(max)
+                    } else {
+                        app.output_scroll.saturating_sub(3)
+                    };
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return 0;
+                }
+                if app.sidebar_width > 0
+                    && point.x >= app.scale(RAIL)
+                    && point.x < app.editor_left()
+                {
+                    if !app.explorer_visible {
+                        return 0;
+                    }
+                    if app.side_view != SideView::Files {
+                        let count = if app.side_view == SideView::Search {
+                            app.search_results.len()
+                        } else {
+                            app.changes.len()
+                        };
+                        let rows = if app.side_view == SideView::Search {
+                            48
+                        } else {
+                            EXPLORER_ROW
+                        };
+                        let visible = ((rect.bottom - app.scale(STATUS + 113))
+                            / app.scale(rows).max(1))
+                        .max(1) as usize;
+                        let max = count.saturating_sub(visible);
+                        app.panel_first = if delta > 0 {
+                            app.panel_first.saturating_sub(3)
+                        } else {
+                            (app.panel_first + 3).min(max)
+                        };
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                        return 0;
                     }
                     let visible = ((rect.bottom - app.scale(STATUS + EXPLORER_TOP))
                         / app.scale(EXPLORER_ROW).max(1))
@@ -2569,6 +4403,22 @@ mod windows_app {
                     unsafe {
                         InvalidateRect(hwnd, null(), 0);
                     }
+                    return 0;
+                }
+                if app.side_view == SideView::Review
+                    && app.review_file.is_some()
+                    && point.x >= app.editor_left()
+                {
+                    let visible = ((rect.bottom - app.scale(STATUS) - app.editor_top())
+                        / app.line_height.max(1))
+                    .max(1) as usize;
+                    let max = app.diff_rows.len().saturating_sub(visible);
+                    app.diff_first = if delta > 0 {
+                        app.diff_first.saturating_sub(3)
+                    } else {
+                        (app.diff_first + 3).min(max)
+                    };
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
                     return 0;
                 }
                 if delta > 0 {
@@ -2615,6 +4465,7 @@ mod windows_app {
             }
             WM_CLOSE => {
                 if app.can_close_window(hwnd) {
+                    app.stop_run_before_close();
                     unsafe {
                         DestroyWindow(hwnd);
                     }
@@ -2631,6 +4482,7 @@ mod windows_app {
     pub fn run() -> io::Result<()> {
         unsafe {
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let com_initialized = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) >= 0;
             let instance = GetModuleHandleW(null());
             let class = wide("LightLineWindow");
             let wc = WNDCLASSW {
@@ -2690,6 +4542,9 @@ mod windows_app {
             DeleteObject(app.borrow().font);
             DeleteObject(app.borrow().ui_font);
             DeleteObject(app.borrow().brand_font);
+            if com_initialized {
+                CoUninitialize();
+            }
             Ok(())
         }
     }

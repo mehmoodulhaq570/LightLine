@@ -1,6 +1,6 @@
 # LightLine
 
-A small Windows text editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, and Rust syntax coloring. It paints only the visible lines of the active document.
+A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, Rust syntax coloring, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only the visible lines of the active document.
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
@@ -25,16 +25,22 @@ You can pass a UTF-8 file path as the first argument.
 | Move to file start or end | Ctrl+Home/End |
 | Show or hide the file explorer | Ctrl+B |
 | Zoom the whole interface in or out; reset zoom | Ctrl+Plus / Ctrl+Minus; Ctrl+0 |
+| Open a folder or return to Start | Ctrl+Shift+O; Ctrl+Shift+H |
+| Quick Open files and commands | Ctrl+P; type `>` for commands |
+| Search across workspace files | Ctrl+Shift+F; type a query, press Enter |
+| Run Rust tests; review Git changes | Ctrl+Shift+B; Ctrl+Shift+G |
 
-The explorer opens around the first file you open, preferring a nearby Cargo or Git project root. Click a folder to expand it or a file to open it in a tab. The rail's Search action opens the existing current-file find. The explorer loads only opened folders, so project contents are not indexed at startup.
+The Start screen offers Open File, Open Folder, New File, and recent workspaces. Clicking the LightLine name returns to Start. Opening a file picks a nearby Cargo or Git root; Open Folder chooses one explicitly. Recent workspaces are stored in `%APPDATA%\LightLine\recent-workspaces.txt`. The explorer loads only opened folders, so project contents are not indexed at startup.
+
+Quick Open lists workspace files when requested; type `>` to run a command. The Search drawer searches file contents after Enter, shows a context preview for the selected result, and opens a hit at its line with Enter or a click. Scans skip generated directories, cap file count and size, run off the UI thread, and stop when you leave Search. The Run button streams `cargo test --offline` output in a Rust workspace; click **Stop** or focus the output panel and press Ctrl+C to interrupt it. The Review button reads Git status on demand and presents a side-by-side, read-only diff for tracked and new text files. Escape closes an overlay or returns focus to code. The output panel is a task log; an interactive PTY terminal, debugger, AI, and extension marketplace are later systems.
 
 Zoom changes text, icons, panels, and spacing together in 20% steps from 60% to 200%. Ctrl+0 resets it to 100%. The zoom level lasts for the current session. Switching files uses a short visual transition.
 
-Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Find is currently case-sensitive and searches the active file only.
+Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Ctrl+F and project search are currently case-sensitive.
 
 To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process lightline | Stop-Process`.
 
-Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. Split panes, project-wide search, and LSP language intelligence are not yet included.
+Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. Split editor panes and LSP language intelligence are not yet included.
 
 ## Default icons
 

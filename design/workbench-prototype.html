@@ -171,28 +171,28 @@
     <nav class="scene-nav" aria-label="Design screens">
       <button data-scene="welcome">01 Start</button>
       <button data-scene="focus">02 Focus</button>
-      <button data-scene="explore">03 Explore <small>next</small></button>
-      <button data-scene="search">04 Find <small>next</small></button>
-      <button data-scene="run">05 Run <small>later</small></button>
-      <button data-scene="review">06 Review <small>later</small></button>
+      <button data-scene="explore">03 Explore</button>
+      <button data-scene="search">04 Find</button>
+      <button data-scene="run">05 Run</button>
+      <button data-scene="review">06 Review</button>
     </nav>
     <div class="viewer">
       <div>
         <div class="mock" id="mock" aria-label="Interactive IDE design prototype"></div>
-        <div class="hint-bar"><span><strong>Try the controls.</strong> Click the screen steps or controls inside the mock editor.</span><span>Concept only · current Rust UI is unchanged</span></div>
+        <div class="hint-bar"><span><strong>Try the controls.</strong> Click the screen steps or controls inside the mock editor.</span><span>Visual concept · the native app now implements the core screen workflow</span></div>
       </div>
       <aside class="notes" id="notes" aria-live="polite"></aside>
     </div>
   </main>
   <script>
     const notes = {
-      welcome: { number: '01 / ENTRY', title: 'Start with intent', body: 'A small launch screen offers only the next useful actions. Recent workspaces are visible, while project scanning waits until one is opened.', points: ['Open a file or folder in one step', 'Recent workspaces without a dashboard', 'No startup panels or background services'], phase: 'Visual concept · start screen' },
-      focus: { number: '02 / DEFAULT', title: 'Give code the room', body: 'The everyday screen is a clean editor. A breadcrumb makes location clear. The status bar stays stable: file state on the left, cursor and encoding on the right.', points: ['Active tab has a clear accent', 'Readable type and quiet contrast', 'No sidebar until it is needed'], phase: 'Visual redesign · builds on v0.1' },
-      explore: { number: '03 / PROJECT', title: 'Reveal the project', body: 'The file tree slides into a contextual drawer. It remembers its width but disappears when the developer returns to focus mode.', points: ['Selected file is easy to find', 'Tree is keyboard friendly', 'Workspace appears without full indexing'], phase: 'Concept · project milestone' },
-      search: { number: '04 / NAVIGATION', title: 'Search in context', body: 'Content search gets a compact result drawer next to the code. Quick Open is a separate, lightweight overlay from the title search field.', points: ['Results grouped with file context', 'Preview a result before opening it', 'Escape restores prior focus'], phase: 'Concept · search milestone' },
-      quick: { number: '04A / QUICK OPEN', title: 'Jump without a panel', body: 'A small overlay lets developers jump to files or commands without changing the editor layout. Search in files leads to the full result drawer.', points: ['One field for navigation', 'Clear keyboard hints', 'Enter opens · Escape returns'], phase: 'Concept · navigation milestone' },
-      run: { number: '05 / FEEDBACK', title: 'Output on demand', body: 'A run command opens a short bottom drawer. The result is visible beside the code and can close without rearranging the workspace.', points: ['Task output arrives only when run', 'Success and errors are scannable', 'Terminal process stays dormant otherwise'], phase: 'Concept · developer tooling milestone' },
-      review: { number: '06 / CHANGE', title: 'Review where you work', body: 'A focused diff view puts the changed file at the center, with a small change list on the side. Git starts only when this view is opened.', points: ['Side by side context', 'Changed lines carry restrained color', 'Commit actions stay out of editing mode'], phase: 'Concept · Git milestone' }
+      welcome: { number: '01 / ENTRY', title: 'Start with intent', body: 'A small launch screen offers only the next useful actions. Recent workspaces are visible, while project scanning waits until one is opened.', points: ['Open a file or folder in one step', 'Recent workspaces without a dashboard', 'No startup panels or background services'], phase: 'Native workflow implemented' },
+      focus: { number: '02 / DEFAULT', title: 'Give code the room', body: 'The everyday screen is a clean editor. A breadcrumb makes location clear. The status bar stays stable: file state on the left, cursor and encoding on the right.', points: ['Active tab has a clear accent', 'Readable type and quiet contrast', 'No sidebar until it is needed'], phase: 'Native workflow implemented' },
+      explore: { number: '03 / PROJECT', title: 'Reveal the project', body: 'The file tree slides into a contextual drawer. It remembers its width but disappears when the developer returns to focus mode.', points: ['Selected file is easy to find', 'Tree is keyboard friendly', 'Workspace appears without full indexing'], phase: 'Native workflow implemented' },
+      search: { number: '04 / NAVIGATION', title: 'Search in context', body: 'Content search gets a compact result drawer next to the code. Quick Open is a separate, lightweight overlay from the title search field.', points: ['Results grouped with file context', 'Preview a result before opening it', 'Escape restores prior focus'], phase: 'Native workflow implemented' },
+      quick: { number: '04A / QUICK OPEN', title: 'Jump without a panel', body: 'A small overlay lets developers jump to files or commands without changing the editor layout. Search in files leads to the full result drawer.', points: ['One field for navigation', 'Clear keyboard hints', 'Enter opens · Escape returns'], phase: 'Native workflow implemented' },
+      run: { number: '05 / FEEDBACK', title: 'Output on demand', body: 'A run command opens a short bottom drawer. The result is visible beside the code and can close without rearranging the workspace.', points: ['Task output arrives only when run', 'Success and errors are scannable', 'Terminal process stays dormant otherwise'], phase: 'Native task output implemented' },
+      review: { number: '06 / CHANGE', title: 'Review where you work', body: 'A focused diff view puts the changed file at the center, with a small change list on the side. Git starts only when this view is opened.', points: ['Side by side context', 'Changed lines carry restrained color', 'Commit actions stay out of editing mode'], phase: 'Native workflow implemented' }
     };
     const codeRows = [
       [24, '<span class="comment">// Paint only what the viewport needs.</span>'],
