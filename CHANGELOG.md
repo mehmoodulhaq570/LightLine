@@ -4,6 +4,7 @@ This is LightLine's development history. Dates are the GitHub commit dates in As
 
 ## Unreleased
 
+- Matched the supplied left workbench close-up with a lightning brand mark, `IDE` badge, six-row activity rail, compact explorer header and tree, workspace branch footer, and active-file chip. Updated navigation hit areas; unavailable Extensions and AI entries now explain their status.
 - Added the native Quiet Workbench workflow: Start and recent workspaces, folder selection, a sliding project drawer, Quick Open for files and commands, project search with result previews, streamed and stoppable Rust test output, and read-only Git change review with side-by-side diffs.
 - Added bounded, background workspace scans and on-demand Cargo/Git services; updated the README and reference design notes to distinguish implemented views from later tooling.
 - Matched editor and explorer text sizes more closely, drew larger folder chevrons, and added 60%–200% interface zoom with Ctrl+Plus, Ctrl+Minus, and Ctrl+0.

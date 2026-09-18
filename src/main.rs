@@ -41,8 +41,8 @@ mod windows_app {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    const RAIL: i32 = 132;
-    const SIDEBAR: i32 = 200;
+    const RAIL: i32 = 152;
+    const SIDEBAR: i32 = 180;
     const GUTTER: i32 = 62;
     const TOP: i32 = 7;
     const STATUS: i32 = 27;
@@ -52,6 +52,8 @@ mod windows_app {
     const TAB_WIDTH: i32 = 180;
     const EXPLORER_ROW: i32 = 24;
     const EXPLORER_TOP: i32 = 78;
+    const RAIL_FIRST_ROW: i32 = 48;
+    const RAIL_ROW: i32 = 32;
     const TRANSITION_MS: u128 = 150;
     fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
         ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
@@ -424,6 +426,7 @@ mod windows_app {
         sidebar_started: Option<Instant>,
         explorer_first_row: usize,
         workspace_root: Option<PathBuf>,
+        workspace_branch: Option<String>,
         expanded_dirs: HashSet<PathBuf>,
         directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
         welcome: bool,
@@ -556,6 +559,7 @@ mod windows_app {
                 sidebar_started: None,
                 explorer_first_row: 0,
                 workspace_root: None,
+                workspace_branch: None,
                 expanded_dirs: HashSet::new(),
                 directory_cache: HashMap::new(),
                 welcome: true,
@@ -667,7 +671,7 @@ mod windows_app {
                 .filter_map(Result::ok)
                 .take(400)
                 .filter_map(|entry| {
-                    if matches!(entry.file_name().to_str(), Some(".git" | "target")) {
+                    if entry.file_name().to_str() == Some(".git") {
                         return None;
                     }
                     let is_dir = entry.file_type().ok()?.is_dir();
@@ -718,11 +722,19 @@ mod windows_app {
                     .unwrap_or(&folder)
                     .to_path_buf();
                 self.workspace_root = Some(root.clone());
+                self.workspace_branch = Self::head_branch(&root);
                 self.expanded_dirs.insert(root.clone());
                 self.load_directory(&root);
                 workflow::remember_workspace(&root);
                 self.recent = workflow::recent_workspaces();
             }
+        }
+
+        fn head_branch(root: &Path) -> Option<String> {
+            let head = std::fs::read_to_string(root.join(".git").join("HEAD")).ok()?;
+            head.trim()
+                .strip_prefix("ref: refs/heads/")
+                .map(str::to_owned)
         }
 
         fn set_workspace(&mut self, hwnd: HWND, root: PathBuf) {
@@ -731,6 +743,7 @@ mod windows_app {
                 return;
             }
             self.workspace_root = Some(root.clone());
+            self.workspace_branch = Self::head_branch(&root);
             self.directory_cache.clear();
             self.expanded_dirs.clear();
             self.expanded_dirs.insert(root.clone());
@@ -1654,6 +1667,26 @@ mod windows_app {
             }
         }
 
+        fn rounded_fill(hdc: HDC, rect: RECT, radius: i32, color: u32) {
+            unsafe {
+                let brush = CreateSolidBrush(color);
+                let old_brush = SelectObject(hdc, brush);
+                let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                RoundRect(
+                    hdc,
+                    rect.left,
+                    rect.top,
+                    rect.right,
+                    rect.bottom,
+                    radius,
+                    radius,
+                );
+                SelectObject(hdc, old_pen);
+                SelectObject(hdc, old_brush);
+                DeleteObject(brush);
+            }
+        }
+
         fn label(hdc: HDC, text: &str, x: i32, y: i32, color: u32, clip: RECT) {
             unsafe {
                 let chars: Vec<u16> = text.encode_utf16().collect();
@@ -1691,6 +1724,291 @@ mod windows_app {
                 SelectObject(hdc, previous);
                 DeleteObject(pen);
             }
+        }
+
+        fn rail_icon(&self, hdc: HDC, kind: usize, x: i32, y: i32, color: u32) {
+            if kind == 0 {
+                self.icons.draw(hdc, "folder-open", x, y, self.scale(17));
+                return;
+            }
+            unsafe {
+                let pen = CreatePen(PS_SOLID, self.scale(1).max(1), color);
+                let previous_pen = SelectObject(hdc, pen);
+                let previous_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                let s = |value| self.scale(value);
+                match kind {
+                    1 => {
+                        Ellipse(hdc, x + s(2), y + s(2), x + s(11), y + s(11));
+                        MoveToEx(hdc, x + s(10), y + s(10), null_mut());
+                        LineTo(hdc, x + s(16), y + s(16));
+                    }
+                    2 => {
+                        MoveToEx(hdc, x + s(5), y + s(4), null_mut());
+                        LineTo(hdc, x + s(5), y + s(15));
+                        MoveToEx(hdc, x + s(5), y + s(12), null_mut());
+                        LineTo(hdc, x + s(13), y + s(7));
+                        for (cx, cy) in [(5, 3), (5, 16), (13, 6)] {
+                            Ellipse(
+                                hdc,
+                                x + s(cx - 2),
+                                y + s(cy - 2),
+                                x + s(cx + 2),
+                                y + s(cy + 2),
+                            );
+                        }
+                    }
+                    3 => {
+                        let points = [
+                            POINT {
+                                x: x + s(4),
+                                y: y + s(2),
+                            },
+                            POINT {
+                                x: x + s(14),
+                                y: y + s(9),
+                            },
+                            POINT {
+                                x: x + s(4),
+                                y: y + s(16),
+                            },
+                            POINT {
+                                x: x + s(4),
+                                y: y + s(2),
+                            },
+                        ];
+                        Polyline(hdc, points.as_ptr(), points.len() as i32);
+                    }
+                    4 => {
+                        Rectangle(hdc, x + s(2), y + s(2), x + s(9), y + s(9));
+                        Rectangle(hdc, x + s(10), y + s(2), x + s(17), y + s(9));
+                        Rectangle(hdc, x + s(2), y + s(10), x + s(9), y + s(17));
+                        Rectangle(hdc, x + s(10), y + s(10), x + s(17), y + s(17));
+                    }
+                    5 => {
+                        let points = [
+                            POINT {
+                                x: x + s(9),
+                                y: y + s(1),
+                            },
+                            POINT {
+                                x: x + s(11),
+                                y: y + s(7),
+                            },
+                            POINT {
+                                x: x + s(17),
+                                y: y + s(9),
+                            },
+                            POINT {
+                                x: x + s(11),
+                                y: y + s(11),
+                            },
+                            POINT {
+                                x: x + s(9),
+                                y: y + s(17),
+                            },
+                            POINT {
+                                x: x + s(7),
+                                y: y + s(11),
+                            },
+                            POINT {
+                                x: x + s(1),
+                                y: y + s(9),
+                            },
+                            POINT {
+                                x: x + s(7),
+                                y: y + s(7),
+                            },
+                            POINT {
+                                x: x + s(9),
+                                y: y + s(1),
+                            },
+                        ];
+                        Polyline(hdc, points.as_ptr(), points.len() as i32);
+                    }
+                    _ => {}
+                }
+                SelectObject(hdc, previous_brush);
+                SelectObject(hdc, previous_pen);
+                DeleteObject(pen);
+            }
+        }
+
+        fn paint_rail(&self, hdc: HDC, editor_bottom: i32) {
+            let clip = RECT {
+                left: 0,
+                top: 0,
+                right: self.scale(RAIL),
+                bottom: editor_bottom,
+            };
+            unsafe {
+                let brush = CreateSolidBrush(VIOLET);
+                let old_brush = SelectObject(hdc, brush);
+                let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                Ellipse(
+                    hdc,
+                    self.scale(17),
+                    self.scale(12),
+                    self.scale(36),
+                    self.scale(31),
+                );
+                SelectObject(hdc, GetStockObject(WHITE_BRUSH));
+                let bolt = [
+                    POINT {
+                        x: self.scale(27),
+                        y: self.scale(14),
+                    },
+                    POINT {
+                        x: self.scale(22),
+                        y: self.scale(23),
+                    },
+                    POINT {
+                        x: self.scale(26),
+                        y: self.scale(23),
+                    },
+                    POINT {
+                        x: self.scale(24),
+                        y: self.scale(29),
+                    },
+                    POINT {
+                        x: self.scale(32),
+                        y: self.scale(20),
+                    },
+                    POINT {
+                        x: self.scale(28),
+                        y: self.scale(20),
+                    },
+                ];
+                Polygon(hdc, bolt.as_ptr(), bolt.len() as i32);
+                SelectObject(hdc, old_pen);
+                SelectObject(hdc, old_brush);
+                DeleteObject(brush);
+                SelectObject(hdc, self.brand_font);
+            }
+            Self::label(hdc, "LightLine", self.scale(43), self.scale(9), TEXT, clip);
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: self.scale(118),
+                    top: self.scale(13),
+                    right: self.scale(146),
+                    bottom: self.scale(29),
+                },
+                self.scale(6),
+                rgb(61, 45, 145),
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+            Self::label(hdc, "IDE", self.scale(121), self.scale(12), TEXT, clip);
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: self.scale(40),
+                    right: self.scale(RAIL),
+                    bottom: self.scale(41),
+                },
+                EDGE,
+            );
+
+            let labels = [
+                "Explorer",
+                "Search",
+                "Source Control",
+                "Run & Debug",
+                "Extensions",
+                "AI Assistant",
+            ];
+            let selected = match self.side_view {
+                SideView::Files => self.explorer_visible.then_some(0),
+                SideView::Search => self.explorer_visible.then_some(1),
+                SideView::Review => self.explorer_visible.then_some(2),
+            };
+            for (index, label) in labels.iter().enumerate() {
+                let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
+                let is_selected = selected == Some(index) || (index == 3 && self.run_visible);
+                if is_selected {
+                    Self::rounded_fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(8),
+                            top,
+                            right: self.scale(RAIL - 8),
+                            bottom: top + self.scale(28),
+                        },
+                        self.scale(8),
+                        ACTIVE_BG,
+                    );
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: 0,
+                            top: top + self.scale(3),
+                            right: self.scale(3),
+                            bottom: top + self.scale(25),
+                        },
+                        BLUE,
+                    );
+                }
+                let color = if is_selected {
+                    TEXT
+                } else if index >= 4 {
+                    rgb(111, 134, 166)
+                } else {
+                    MUTED
+                };
+                self.rail_icon(
+                    hdc,
+                    index,
+                    self.scale(23),
+                    top + self.scale(5),
+                    if is_selected { BLUE } else { color },
+                );
+                Self::label(hdc, label, self.scale(48), top + self.scale(5), color, clip);
+            }
+            if let Some(root) = &self.workspace_root {
+                let name = root.file_name().unwrap_or_default().to_string_lossy();
+                Self::label(
+                    hdc,
+                    "◈  Workspace",
+                    self.scale(23),
+                    editor_bottom - self.scale(112),
+                    MUTED,
+                    clip,
+                );
+                Self::label(
+                    hdc,
+                    &name,
+                    self.scale(23),
+                    editor_bottom - self.scale(89),
+                    TEXT,
+                    clip,
+                );
+                if let Some(branch) = &self.workspace_branch {
+                    Self::label(
+                        hdc,
+                        &format!("⑂  {branch}"),
+                        self.scale(23),
+                        editor_bottom - self.scale(65),
+                        MUTED,
+                        clip,
+                    );
+                }
+            }
+            Self::label(
+                hdc,
+                "⚙",
+                self.scale(23),
+                editor_bottom - self.scale(31),
+                MUTED,
+                clip,
+            );
+            Self::label(
+                hdc,
+                "→",
+                self.scale(54),
+                editor_bottom - self.scale(31),
+                MUTED,
+                clip,
+            );
         }
 
         fn paint_welcome(&self, hdc: HDC, rect: RECT) {
@@ -2676,146 +2994,7 @@ mod windows_app {
                         },
                     );
                 }
-                let rail_clip = RECT {
-                    left: 0,
-                    top: 0,
-                    right: self.scale(RAIL),
-                    bottom: editor_bottom,
-                };
-                SelectObject(hdc, self.brand_font);
-                Self::label(hdc, "✦", self.scale(14), self.scale(7), VIOLET, rail_clip);
-                Self::label(
-                    hdc,
-                    "LightLine",
-                    self.scale(36),
-                    self.scale(7),
-                    TEXT,
-                    rail_clip,
-                );
-                SelectObject(hdc, self.ui_font);
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: 0,
-                        top: self.scale(38),
-                        right: self.scale(RAIL),
-                        bottom: self.scale(39),
-                    },
-                    EDGE,
-                );
-                if self.explorer_visible && self.side_view == SideView::Files {
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: self.scale(7),
-                            top: self.scale(46),
-                            right: self.scale(RAIL - 7),
-                            bottom: self.scale(80),
-                        },
-                        ACTIVE_BG,
-                    );
-                }
-                if self.sidebar_width > 0 {
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: 0,
-                            top: self.scale(if self.side_view == SideView::Files {
-                                48
-                            } else if self.side_view == SideView::Search {
-                                90
-                            } else {
-                                174
-                            }),
-                            right: self.scale(3),
-                            bottom: self.scale(if self.side_view == SideView::Files {
-                                78
-                            } else if self.side_view == SideView::Search {
-                                120
-                            } else {
-                                204
-                            }),
-                        },
-                        if self.side_view == SideView::Review {
-                            VIOLET
-                        } else {
-                            BLUE
-                        },
-                    );
-                }
-                self.icons.draw(
-                    hdc,
-                    "folder-open",
-                    self.scale(17),
-                    self.scale(52),
-                    self.scale(18),
-                );
-                Self::label(
-                    hdc,
-                    "Explorer",
-                    self.scale(42),
-                    self.scale(53),
-                    if self.explorer_visible && self.side_view == SideView::Files {
-                        TEXT
-                    } else {
-                        MUTED
-                    },
-                    rail_clip,
-                );
-                Self::label(hdc, "⌕", self.scale(18), self.scale(95), MUTED, rail_clip);
-                Self::label(
-                    hdc,
-                    "Search",
-                    self.scale(42),
-                    self.scale(95),
-                    if self.explorer_visible && self.side_view == SideView::Search {
-                        TEXT
-                    } else {
-                        MUTED
-                    },
-                    rail_clip,
-                );
-                Self::label(hdc, "▶", self.scale(18), self.scale(137), GREEN, rail_clip);
-                Self::label(
-                    hdc,
-                    "Run",
-                    self.scale(42),
-                    self.scale(137),
-                    if self.run_visible { TEXT } else { MUTED },
-                    rail_clip,
-                );
-                Self::label(hdc, "◇", self.scale(18), self.scale(179), VIOLET, rail_clip);
-                Self::label(
-                    hdc,
-                    "Review",
-                    self.scale(42),
-                    self.scale(179),
-                    if self.side_view == SideView::Review {
-                        TEXT
-                    } else {
-                        MUTED
-                    },
-                    rail_clip,
-                );
-                if let Some(root) = &self.workspace_root {
-                    let name = root.file_name().unwrap_or_default().to_string_lossy();
-                    Self::label(
-                        hdc,
-                        "WORKSPACE",
-                        self.scale(16),
-                        editor_bottom - self.scale(60),
-                        MUTED,
-                        rail_clip,
-                    );
-                    Self::label(
-                        hdc,
-                        &name,
-                        self.scale(16),
-                        editor_bottom - self.scale(37),
-                        TEXT,
-                        rail_clip,
-                    );
-                }
+                self.paint_rail(hdc, editor_bottom);
                 let sidebar_state = SaveDC(hdc);
                 IntersectClipRect(hdc, self.scale(RAIL), 0, editor_left, editor_bottom);
                 if self.sidebar_width > 0 && self.side_view != SideView::Files {
@@ -2828,11 +3007,31 @@ mod windows_app {
                         right: editor_left,
                         bottom: editor_bottom,
                     };
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(RAIL + 12),
+                            top: self.scale(15),
+                            right: self.scale(RAIL + 23),
+                            bottom: self.scale(26),
+                        },
+                        EDGE,
+                    );
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(RAIL + 14),
+                            top: self.scale(17),
+                            right: self.scale(RAIL + 21),
+                            bottom: self.scale(24),
+                        },
+                        SIDEBAR_BG,
+                    );
                     Self::label(
                         hdc,
-                        "FILES",
-                        self.scale(RAIL + 16),
-                        self.scale(11),
+                        "×",
+                        editor_left - self.scale(25),
+                        self.scale(8),
                         MUTED,
                         sidebar_clip,
                     );
@@ -2851,17 +3050,18 @@ mod windows_app {
                             .file_name()
                             .map(|name| name.to_string_lossy().into_owned())
                             .unwrap_or_else(|| root.display().to_string());
+                        self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), true);
                         self.icons.draw(
                             hdc,
                             "folder-open",
-                            self.scale(RAIL + 16),
+                            self.scale(RAIL + 23),
                             self.scale(48),
-                            self.scale(18),
+                            self.scale(17),
                         );
                         Self::label(
                             hdc,
                             &root_name,
-                            self.scale(RAIL + 39),
+                            self.scale(RAIL + 43),
                             self.scale(49),
                             TEXT,
                             sidebar_clip,
@@ -2876,7 +3076,7 @@ mod windows_app {
                                 EXPLORER_TOP
                                     + (row - self.explorer_first_row) as i32 * EXPLORER_ROW,
                             );
-                            if top >= editor_bottom {
+                            if top >= editor_bottom - self.scale(38) {
                                 break;
                             }
                             let selected = self
@@ -2885,7 +3085,7 @@ mod windows_app {
                                 .as_deref()
                                 .is_some_and(|path| path == item.entry.path);
                             if selected {
-                                Self::fill(
+                                Self::rounded_fill(
                                     hdc,
                                     RECT {
                                         left: self.scale(RAIL + 7),
@@ -2893,6 +3093,7 @@ mod windows_app {
                                         right: editor_left - self.scale(8),
                                         bottom: top + self.scale(EXPLORER_ROW - 2),
                                     },
+                                    self.scale(7),
                                     SELECT_BG,
                                 );
                             }
@@ -2902,7 +3103,7 @@ mod windows_app {
                                 .file_name()
                                 .unwrap_or_default()
                                 .to_string_lossy();
-                            let left = self.scale(RAIL + 16 + item.depth.min(6) as i32 * 13);
+                            let left = self.scale(RAIL + 10 + item.depth.min(6) as i32 * 13);
                             if item.entry.is_dir {
                                 self.chevron(
                                     hdc,
@@ -2968,6 +3169,60 @@ mod windows_app {
                             "its folder  (Ctrl+O)",
                             self.scale(RAIL + 16),
                             self.scale(73),
+                            MUTED,
+                            sidebar_clip,
+                        );
+                    }
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(RAIL),
+                            top: editor_bottom - self.scale(35),
+                            right: editor_left,
+                            bottom: editor_bottom,
+                        },
+                        SIDEBAR_BG,
+                    );
+                    if self.doc().path.is_some() {
+                        let chip_left = self.scale(RAIL + 7);
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: chip_left,
+                                top: editor_bottom - self.scale(30),
+                                right: (chip_left + self.scale(115)).min(editor_left),
+                                bottom: editor_bottom,
+                            },
+                            ACTIVE_BG,
+                        );
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: chip_left,
+                                top: editor_bottom - self.scale(30),
+                                right: (chip_left + self.scale(115)).min(editor_left),
+                                bottom: editor_bottom - self.scale(29),
+                            },
+                            BLUE,
+                        );
+                        let icon = self
+                            .doc()
+                            .path
+                            .as_deref()
+                            .map(|path| material_icon_for(path, false, false))
+                            .unwrap_or("file");
+                        self.icons.draw(
+                            hdc,
+                            icon,
+                            chip_left + self.scale(6),
+                            editor_bottom - self.scale(24),
+                            self.scale(15),
+                        );
+                        Self::label(
+                            hdc,
+                            &self.tab_label(self.active),
+                            chip_left + self.scale(24),
+                            editor_bottom - self.scale(24),
                             MUTED,
                             sidebar_clip,
                         );
@@ -4024,26 +4279,47 @@ mod windows_app {
             if x < rail {
                 if y < self.scale(39) {
                     self.show_welcome(hwnd);
-                } else if y >= self.scale(46) && y < self.scale(82) {
-                    if self.side_view == SideView::Search {
-                        self.cancel_search();
+                } else if y >= self.scale(RAIL_FIRST_ROW)
+                    && y < self.scale(RAIL_FIRST_ROW + RAIL_ROW * 6)
+                {
+                    let row = (y - self.scale(RAIL_FIRST_ROW)) / self.scale(RAIL_ROW).max(1);
+                    match row {
+                        0 => {
+                            if self.side_view == SideView::Search {
+                                self.cancel_search();
+                            }
+                            let already_open =
+                                self.side_view == SideView::Files && self.explorer_visible;
+                            self.side_view = SideView::Files;
+                            self.panel_focus = false;
+                            self.set_sidebar_visible(hwnd, !already_open);
+                            self.show_active_tab(hwnd);
+                        }
+                        1 => self.open_project_search(hwnd),
+                        2 => self.show_review(hwnd),
+                        3 => self.run_project(hwnd),
+                        4 => {
+                            self.status = "Extensions are planned for a later release".into();
+                            self.refresh(hwnd);
+                        }
+                        5 => {
+                            self.status = "AI Assistant is not installed".into();
+                            self.refresh(hwnd);
+                        }
+                        _ => {}
                     }
-                    let already_open = self.side_view == SideView::Files && self.explorer_visible;
-                    self.side_view = SideView::Files;
-                    self.panel_focus = false;
-                    self.set_sidebar_visible(hwnd, !already_open);
-                    self.show_active_tab(hwnd);
-                } else if y >= self.scale(88) && y < self.scale(124) {
-                    self.open_project_search(hwnd);
-                } else if y >= self.scale(130) && y < self.scale(166) {
-                    self.run_project(hwnd);
-                } else if y >= self.scale(172) && y < self.scale(208) {
-                    self.show_review(hwnd);
+                } else if y >= rect.bottom - self.scale(STATUS + 40) {
+                    self.status = "Settings are not available yet".into();
+                    self.refresh(hwnd);
                 }
                 return;
             }
             if self.sidebar_width > 0 && x < editor_left {
                 if !self.explorer_visible {
+                    return;
+                }
+                if y < self.scale(39) && x >= editor_left - self.scale(36) {
+                    self.set_sidebar_visible(hwnd, false);
                     return;
                 }
                 if self.side_view == SideView::Search {
@@ -4080,7 +4356,11 @@ mod windows_app {
                     }
                     return;
                 }
-                if y >= self.scale(EXPLORER_TOP) {
+                if y >= rect.bottom - self.scale(STATUS + 35) {
+                    self.show_active_tab(hwnd);
+                    return;
+                }
+                if y >= self.scale(EXPLORER_TOP) && y < rect.bottom - self.scale(STATUS + 38) {
                     let row = self.explorer_first_row
                         + ((y - self.scale(EXPLORER_TOP)) / self.scale(EXPLORER_ROW)) as usize;
                     if let Some(item) = self.explorer_rows().get(row) {
@@ -4391,7 +4671,7 @@ mod windows_app {
                         unsafe { InvalidateRect(hwnd, null(), 0) };
                         return 0;
                     }
-                    let visible = ((rect.bottom - app.scale(STATUS + EXPLORER_TOP))
+                    let visible = ((rect.bottom - app.scale(STATUS + EXPLORER_TOP + 38))
                         / app.scale(EXPLORER_ROW).max(1))
                     .max(1) as usize;
                     let max_first = app.explorer_rows().len().saturating_sub(visible);
