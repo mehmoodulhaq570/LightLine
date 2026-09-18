@@ -16,7 +16,7 @@ impl App {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
             let line = self.doc().line(self.view().cursor.line);
-            let x = self.code_left() + self.text_width(hdc, &line[..self.view().cursor.byte]);
+            let x = self.code_left(hwnd) + self.text_width(hdc, &line[..self.view().cursor.byte]);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             let y = self.editor_top()

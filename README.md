@@ -1,6 +1,6 @@
 # LightLine
 
-A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, Rust syntax coloring, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only the visible lines of the active document.
+A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust syntax coloring, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
@@ -18,6 +18,7 @@ You can pass a UTF-8 file path as the first argument.
 | --- | --- |
 | New tab, open file, save, save as, close tab | Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W |
 | Switch tabs | Ctrl+Tab / Ctrl+Shift+Tab, or Ctrl+PageDown / Ctrl+PageUp |
+| Split or unsplit the editor; focus the left or right pane | Ctrl+Backslash; Ctrl+1 / Ctrl+2 |
 | Select all, copy, cut, paste | Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V |
 | Undo, redo | Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z |
 | Find in current file | Ctrl+F, type a query, then Enter; F3 next, Shift+F3 previous; Escape cancels input |
@@ -36,15 +37,15 @@ Quick Open lists workspace files when requested; type `>` to run a command. The 
 
 Zoom changes text, icons, panels, and spacing together in 20% steps from 60% to 200%. Ctrl+0 resets it to 100%. The zoom level lasts for the current session. Switching files uses a short visual transition.
 
-Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Ctrl+F and project search are currently case-sensitive.
+Click a tab to switch to it, or click its × to close it. Each tab retains its undo history and unsaved changes. Opening a file already open in a tab switches to that tab. Use the **Split** button at the top right or Ctrl+Backslash to create two panes. Click a pane or use Ctrl+1 / Ctrl+2 to focus it; drag the divider to resize. Opening or switching files affects the focused pane. When both panes show the same file, they share one document and keep separate cursor, selection, and scroll positions. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Ctrl+F and project search are currently case-sensitive.
 
 To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process lightline | Stop-Process`.
 
-Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. Split editor panes and LSP language intelligence are not yet included.
+Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. LSP language intelligence is not yet included.
 
 ## Default icons
 
-The LightLine app icon comes from [LightLine-icon.png](LightLine-icon.png). Regenerate its multi-size Windows icon after updating the PNG with `python tools/update_app_icon.py` (Pillow required for this developer step). The generated `assets/lightline.ico` is used in the title bar, taskbar, Start screen, and activity rail. On Windows MSVC builds, `build.rs` also embeds it in the executable using the Windows SDK resource compiler so Explorer shows the same icon.
+The LightLine app icon comes from [LightLine-icon2.png](LightLine-icon2.png). Regenerate its multi-size Windows icon after updating the PNG with `python tools/update_app_icon.py` (Pillow required for this developer step). The script draws simplified, crisp artwork at 16–64 px and preserves the supplied artwork at 128–256 px. The generated `assets/lightline.ico` is used in the title bar, taskbar, Start screen, and activity rail. On Windows MSVC builds, `build.rs` also embeds it in the executable using the Windows SDK resource compiler so Explorer shows the same icon.
 
 LightLine bundles a small snapshot of [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) as its default file and folder icons. The pinned version and selected icon names are in [VERSION.json](assets/material-icon-theme/VERSION.json), with the upstream [MIT license](assets/material-icon-theme/LICENSE.txt). The app embeds the icons in its executable; users do not need VS Code, its extension, or a marketplace.
 

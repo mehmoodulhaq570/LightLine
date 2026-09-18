@@ -133,7 +133,14 @@ unsafe extern "system" fn wnd_proc(
                 ScreenToClient(hwnd, &mut point);
                 let cursor = LoadCursorW(
                     null_mut(),
-                    if app.welcome
+                    if app.divider_dragging
+                        || app.split_visible
+                            && !app.welcome
+                            && point.y >= app.scale(TAB_HEIGHT)
+                            && (point.x - app.pane_divider(hwnd)).abs() <= app.scale(6)
+                    {
+                        IDC_SIZEWE
+                    } else if app.welcome
                         || app.quick_open
                         || (app.side_view == SideView::Review && app.review_file.is_some())
                         || point.y < app.editor_top()
@@ -181,7 +188,7 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_MOUSEMOVE => {
-            if app.dragging && wparam & 1 != 0 {
+            if (app.dragging || app.divider_dragging) && wparam & 1 != 0 {
                 app.mouse_drag(
                     hwnd,
                     (lparam as u32 & 0xffff) as i16 as i32,
@@ -192,6 +199,7 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_LBUTTONUP => {
             app.dragging = false;
+            app.divider_dragging = false;
             unsafe {
                 ReleaseCapture();
             }
@@ -274,6 +282,10 @@ unsafe extern "system" fn wnd_proc(
                 };
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return 0;
+            }
+            if app.split_visible && point.x >= app.editor_left() && point.y >= app.editor_top() {
+                let pane = usize::from(point.x >= app.pane_divider(hwnd));
+                app.focus_pane(hwnd, pane);
             }
             if delta > 0 {
                 app.view_mut().first_line = app.view().first_line.saturating_sub(3);
@@ -383,7 +395,7 @@ pub fn run() -> io::Result<()> {
             &dark_titlebar as *const i32 as *const std::ffi::c_void,
             size_of::<i32>() as u32,
         );
-        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large)));
+        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.brand)));
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,

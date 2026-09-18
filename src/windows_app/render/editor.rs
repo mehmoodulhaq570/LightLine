@@ -36,12 +36,10 @@ impl App {
             let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
             let code_bottom = editor_bottom - if self.run_visible { self.scale(210) } else { 0 };
             let editor_left = self.editor_left();
-            let code_left = self.code_left();
             let bg = CreateSolidBrush(EDITOR_BG);
             let gutter_bg = CreateSolidBrush(EDITOR_BG);
             let status_bg = CreateSolidBrush(STATUS_BG);
             let selection_bg = CreateSolidBrush(SELECT_BG);
-            let selection = self.selection_range();
             FillRect(
                 hdc,
                 &RECT {
@@ -116,27 +114,48 @@ impl App {
                 },
                 EDGE,
             );
-            let path_part = self
-                .doc()
-                .path
-                .as_deref()
-                .and_then(Path::parent)
-                .and_then(Path::file_name)
-                .map(|part| part.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Editor".into());
-            Self::label(
-                hdc,
-                &format!("{}  ›  {}", path_part, self.tab_label(self.active)),
-                editor_left + self.scale(18),
-                self.scale(TAB_HEIGHT + 3),
-                MUTED,
-                RECT {
-                    left: editor_left,
-                    top: self.scale(TAB_HEIGHT),
-                    right: rect.right,
-                    bottom: self.editor_top(),
-                },
-            );
+            for pane in 0..if self.split_visible { 2 } else { 1 } {
+                let left = self.pane_left(hwnd, pane);
+                let right = self.pane_right(hwnd, pane);
+                let tab_index = self.tab_for_pane(pane);
+                let path_part = self.tabs[tab_index]
+                    .document
+                    .path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .and_then(Path::file_name)
+                    .map(|part| part.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Editor".into());
+                Self::label(
+                    hdc,
+                    &format!("{}  ›  {}", path_part, self.tab_label(tab_index)),
+                    left + self.scale(18),
+                    self.scale(TAB_HEIGHT + 3),
+                    if pane == self.focused_pane {
+                        TEXT
+                    } else {
+                        MUTED
+                    },
+                    RECT {
+                        left,
+                        top: self.scale(TAB_HEIGHT),
+                        right,
+                        bottom: self.editor_top(),
+                    },
+                );
+                if self.split_visible && pane == self.focused_pane {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left,
+                            top: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT - 2),
+                            right,
+                            bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                        },
+                        BLUE,
+                    );
+                }
+            }
             let tab_width = self.scale(TAB_WIDTH);
             let tab_height = self.scale(TAB_HEIGHT);
             for slot in 0..self.visible_tab_count(hwnd) {
@@ -211,22 +230,39 @@ impl App {
             if editor_left
                 + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                 + self.scale(12)
-                < rect.right - self.scale(207)
+                < rect.right - self.scale(285)
             {
                 Self::label(
                     hdc,
                     "⌕  Quick Open  Ctrl+P",
-                    rect.right - self.scale(207),
+                    rect.right - self.scale(285),
                     self.scale(7),
                     MUTED,
                     RECT {
-                        left: rect.right - self.scale(207),
+                        left: rect.right - self.scale(285),
                         top: 0,
-                        right: rect.right,
+                        right: rect.right - self.scale(112),
                         bottom: self.scale(TAB_HEIGHT),
                     },
                 );
             }
+            Self::label(
+                hdc,
+                if self.split_visible {
+                    "×  Unsplit"
+                } else {
+                    "▥  Split"
+                },
+                rect.right - self.scale(107),
+                self.scale(7),
+                MUTED,
+                RECT {
+                    left: rect.right - self.scale(112),
+                    top: 0,
+                    right: rect.right,
+                    bottom: self.scale(TAB_HEIGHT),
+                },
+            );
             self.paint_rail(hdc, editor_bottom);
             let sidebar_state = SaveDC(hdc);
             IntersectClipRect(hdc, self.scale(RAIL), 0, editor_left, editor_bottom);
@@ -461,179 +497,54 @@ impl App {
             if self.side_view == SideView::Review && self.review_file.is_some() {
                 self.paint_diff(hdc, editor_left, rect.right, code_bottom);
             } else {
-                let visible = self.visible_lines(hwnd) + 1;
-                SelectObject(hdc, self.font);
-                let space_width = self.text_width(hdc, " ").max(1);
-                let guide_brush = CreateSolidBrush(EDGE);
-                for row in 0..visible {
-                    let index = self.view().first_line + row;
-                    if index >= self.doc().line_count() {
-                        break;
-                    }
-                    let y = self.editor_top() + row as i32 * self.line_height;
-                    if y >= code_bottom {
-                        break;
-                    }
-                    if index == self.view().cursor.line {
-                        Self::fill(
-                            hdc,
-                            RECT {
-                                left: editor_left,
-                                top: y,
-                                right: rect.right,
-                                bottom: (y + self.line_height).min(code_bottom),
-                            },
-                            LINE_BG,
-                        );
-                    }
-                    let number = format!("{}", index + 1);
-                    let num: Vec<u16> = number.encode_utf16().collect();
-                    SetTextColor(
-                        hdc,
-                        if index == self.view().cursor.line {
-                            TEXT
-                        } else {
-                            MUTED
-                        },
-                    );
-                    let number_clip = RECT {
+                let divider = if self.split_visible {
+                    self.pane_divider(hwnd)
+                } else {
+                    rect.right
+                };
+                self.paint_code_pane(
+                    hdc,
+                    hwnd,
+                    0,
+                    RECT {
                         left: editor_left,
-                        top: y,
-                        right: editor_left + self.scale(GUTTER),
+                        top: self.editor_top(),
+                        right: divider,
                         bottom: code_bottom,
-                    };
-                    ExtTextOutW(
+                    },
+                    selection_bg,
+                );
+                if self.split_visible {
+                    self.paint_code_pane(
                         hdc,
-                        editor_left + self.scale(12),
-                        y,
-                        ETO_CLIPPED,
-                        &number_clip,
-                        num.as_ptr(),
-                        num.len() as u32,
-                        null(),
+                        hwnd,
+                        1,
+                        RECT {
+                            left: divider,
+                            top: self.editor_top(),
+                            right: rect.right,
+                            bottom: code_bottom,
+                        },
+                        selection_bg,
                     );
-                    let source = self.doc().line(index);
-                    let indent_columns = source
-                        .chars()
-                        .take_while(|ch| *ch == ' ' || *ch == '\t')
-                        .take(64)
-                        .map(|ch| if ch == '\t' { 4 } else { 1 })
-                        .sum::<usize>();
-                    for level in 1..=(indent_columns / 4).min(8) {
-                        let guide_x = code_left + level as i32 * 4 * space_width - self.scale(4);
-                        if guide_x < rect.right {
-                            FillRect(
-                                hdc,
-                                &RECT {
-                                    left: guide_x,
-                                    top: y,
-                                    right: guide_x + 1,
-                                    bottom: (y + self.line_height).min(code_bottom),
-                                },
-                                guide_brush,
-                            );
-                        }
-                    }
-                    if let Some((start, end)) = selection
-                        && index >= start.line
-                        && index <= end.line
-                        && !(index == end.line && end.byte == 0)
-                    {
-                        let from = if index == start.line { start.byte } else { 0 };
-                        let to = if index == end.line {
-                            end.byte
-                        } else {
-                            source.len()
-                        };
-                        let x1 = code_left + self.text_width(hdc, &source[..from]);
-                        let x2 = code_left
-                            + self.text_width(hdc, &source[..to])
-                            + if index < end.line { self.scale(8) } else { 0 };
-                        if x2 > x1 && x1 < rect.right {
-                            FillRect(
-                                hdc,
-                                &RECT {
-                                    left: x1,
-                                    top: y,
-                                    right: x2.min(rect.right),
-                                    bottom: (y + self.line_height).min(code_bottom),
-                                },
-                                selection_bg,
-                            );
-                        }
-                    }
-                    let line = source.replace('\t', "    ");
-                    let chars: Vec<u16> = line.encode_utf16().collect();
-                    SetTextColor(hdc, TEXT);
-                    let clip = RECT {
-                        left: code_left,
-                        top: y,
-                        right: rect.right,
-                        bottom: code_bottom,
-                    };
-                    ExtTextOutW(
+                    Self::fill(
                         hdc,
-                        code_left,
-                        y,
-                        ETO_CLIPPED,
-                        &clip,
-                        chars.as_ptr(),
-                        chars.len() as u32,
-                        null(),
+                        RECT {
+                            left: divider - self.scale(1),
+                            top: self.scale(TAB_HEIGHT),
+                            right: divider + self.scale(1),
+                            bottom: code_bottom,
+                        },
+                        EDGE,
                     );
-                    if source.len() <= 16_384
-                        && let Some(syntax) = &self.tab().syntax
-                    {
-                        for span in syntax.spans(self.doc(), index) {
-                            let color = match span.color {
-                                Color::Comment => MUTED,
-                                Color::String => GREEN,
-                                Color::Keyword => BLUE,
-                                Color::Type => TEAL,
-                                Color::Number => rgb(248, 180, 130),
-                                Color::Macro => VIOLET,
-                            };
-                            SetTextColor(hdc, color);
-                            let left = code_left + self.text_width(hdc, &source[..span.start]);
-                            let text = source[span.start..span.end].replace('\t', "    ");
-                            let chars: Vec<u16> = text.encode_utf16().collect();
-                            ExtTextOutW(
-                                hdc,
-                                left,
-                                y,
-                                ETO_CLIPPED,
-                                &clip,
-                                chars.as_ptr(),
-                                chars.len() as u32,
-                                null(),
-                            );
-                        }
-                    }
-                }
-                DeleteObject(guide_brush);
-                if self.focused && self.caret_on {
-                    let line = self.doc().line(self.view().cursor.line);
-                    let x = code_left + self.text_width(hdc, &line[..self.view().cursor.byte]);
-                    let y = self.editor_top()
-                        + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
-                            * self.line_height;
-                    if y >= self.editor_top() && y < code_bottom && x < rect.right {
-                        let caret = CreateSolidBrush(BLUE);
-                        FillRect(
-                            hdc,
-                            &RECT {
-                                left: x,
-                                top: y,
-                                right: x + self.scale(2).max(2),
-                                bottom: (y + self.line_height).min(code_bottom),
-                            },
-                            caret,
-                        );
-                        DeleteObject(caret);
-                    }
                 }
             }
-            self.paint_search_preview(hdc, editor_left, rect.right, code_bottom);
+            self.paint_search_preview(
+                hdc,
+                self.pane_left(hwnd, self.focused_pane),
+                self.pane_right(hwnd, self.focused_pane),
+                code_bottom,
+            );
             if self.run_visible {
                 self.paint_output(hdc, editor_left, rect.right, editor_bottom);
             }

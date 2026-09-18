@@ -16,16 +16,47 @@ pub(super) enum WorkerMessage {
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct EditorView {
     pub(super) cursor: Pos,
     pub(super) selection_anchor: Option<Pos>,
     pub(super) first_line: usize,
 }
 
+fn remap_position(pos: Pos, start: Pos, end: Pos, inserted_end: Pos) -> Pos {
+    if pos < start {
+        pos
+    } else if pos <= end {
+        inserted_end
+    } else if pos.line == end.line {
+        Pos {
+            line: inserted_end.line,
+            byte: inserted_end.byte + pos.byte - end.byte,
+        }
+    } else {
+        Pos {
+            line: pos
+                .line
+                .saturating_add(inserted_end.line.saturating_sub(end.line))
+                .saturating_sub(end.line.saturating_sub(inserted_end.line)),
+            byte: pos.byte,
+        }
+    }
+}
+
+fn tab_index_after_close(current: usize, closed: usize, remaining: usize) -> usize {
+    if remaining == 0 || current == closed {
+        closed.min(remaining.saturating_sub(1))
+    } else if current > closed {
+        current - 1
+    } else {
+        current
+    }
+}
+
 pub(super) struct Tab {
     pub(super) document: Document,
-    pub(super) view: EditorView,
+    pub(super) views: [EditorView; 2],
     pub(super) syntax: Option<RustSyntax>,
 }
 
@@ -46,7 +77,7 @@ impl Tab {
         let syntax = Self::is_rust(&document).then(RustSyntax::new);
         Self {
             document,
-            view: EditorView::default(),
+            views: [EditorView::default(), EditorView::default()],
             syntax,
         }
     }
@@ -73,6 +104,11 @@ impl Tab {
 pub(super) struct App {
     pub(super) tabs: Vec<Tab>,
     pub(super) active: usize,
+    pub(super) pane_tabs: [usize; 2],
+    pub(super) focused_pane: usize,
+    pub(super) split_visible: bool,
+    pub(super) split_ratio: i32,
+    pub(super) divider_dragging: bool,
     pub(super) tab_first: usize,
     pub(super) font: HFONT,
     pub(super) ui_font: HFONT,
@@ -207,6 +243,11 @@ impl App {
         Self {
             tabs: vec![Tab::new(Document::new())],
             active: 0,
+            pane_tabs: [0, 0],
+            focused_pane: 0,
+            split_visible: false,
+            split_ratio: 50,
+            divider_dragging: false,
             tab_first: 0,
             font: Self::font_for_dpi(dpi, zoom),
             ui_font: Self::ui_font_for_dpi(dpi, zoom),
@@ -281,10 +322,92 @@ impl App {
         &mut self.tab_mut().document
     }
     pub(super) fn view(&self) -> &EditorView {
-        &self.tab().view
+        &self.tab().views[self.focused_pane]
     }
     pub(super) fn view_mut(&mut self) -> &mut EditorView {
-        &mut self.tab_mut().view
+        &mut self.tabs[self.active].views[self.focused_pane]
+    }
+    pub(super) fn tab_for_pane(&self, pane: usize) -> usize {
+        if self.split_visible {
+            self.pane_tabs[pane]
+        } else {
+            self.active
+        }
+    }
+    pub(super) fn view_for_pane(&self, pane: usize) -> &EditorView {
+        &self.tabs[self.tab_for_pane(pane)].views[pane]
+    }
+    pub(super) fn set_active_index(&mut self, index: usize) {
+        self.active = index;
+        self.pane_tabs[self.focused_pane] = index;
+    }
+    pub(super) fn focus_pane(&mut self, hwnd: HWND, pane: usize) {
+        if !self.split_visible || pane > 1 || pane == self.focused_pane {
+            return;
+        }
+        self.focused_pane = pane;
+        self.active = self.pane_tabs[pane];
+        self.show_active_tab(hwnd);
+    }
+    pub(super) fn toggle_split(&mut self, hwnd: HWND) {
+        if self.split_visible {
+            let selected = self.pane_tabs[self.focused_pane];
+            if self.focused_pane == 1 {
+                self.tabs[selected].views[0] = self.tabs[selected].views[1].clone();
+            }
+            self.split_visible = false;
+            self.divider_dragging = false;
+            self.focused_pane = 0;
+            self.pane_tabs = [selected, selected];
+            self.active = selected;
+            self.status = "Split closed".into();
+        } else {
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect) };
+            if rect.right - self.editor_left() < self.scale(430) {
+                self.status = "Widen the window to split the editor".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            }
+            self.tabs[self.active].views[1] = self.tabs[self.active].views[0].clone();
+            self.pane_tabs = [self.active, self.active];
+            self.focused_pane = 0;
+            self.split_visible = true;
+            self.status = "Editor split into two panes".into();
+        }
+        self.cancel_transition(hwnd);
+        self.show_active_tab(hwnd);
+    }
+    pub(super) fn pane_divider(&self, hwnd: HWND) -> i32 {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        let width = (rect.right - self.editor_left()).max(0);
+        let minimum = self.scale(150).min(width / 2);
+        self.editor_left() + (width * self.split_ratio / 100).clamp(minimum, width - minimum)
+    }
+    pub(super) fn resize_split(&mut self, hwnd: HWND, x: i32) {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        let width = (rect.right - self.editor_left()).max(1);
+        self.split_ratio = (((x - self.editor_left()) * 100) / width).clamp(10, 90);
+        self.update_scrollbar(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+    pub(super) fn pane_left(&self, hwnd: HWND, pane: usize) -> i32 {
+        if self.split_visible && pane == 1 {
+            self.pane_divider(hwnd)
+        } else {
+            self.editor_left()
+        }
+    }
+    pub(super) fn pane_right(&self, hwnd: HWND, pane: usize) -> i32 {
+        if self.split_visible && pane == 0 {
+            self.pane_divider(hwnd)
+        } else {
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect) };
+            rect.right
+        }
     }
     pub(super) fn editor_top(&self) -> i32 {
         self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT + TOP)
@@ -330,8 +453,8 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
-    pub(super) fn code_left(&self) -> i32 {
-        self.editor_left() + self.scale(GUTTER + PAD)
+    pub(super) fn code_left(&self, hwnd: HWND) -> i32 {
+        self.pane_left(hwnd, self.focused_pane) + self.scale(GUTTER + PAD)
     }
 
     pub(super) fn show_welcome(&mut self, hwnd: HWND) {
@@ -364,7 +487,7 @@ impl App {
                 self.start_transition(hwnd);
             }
             self.tabs.push(Tab::new(Document::new()));
-            self.active = self.tabs.len() - 1;
+            self.set_active_index(self.tabs.len() - 1);
         }
         self.status = "New document".into();
         self.show_active_tab(hwnd);
@@ -409,7 +532,8 @@ impl App {
         unsafe {
             GetClientRect(hwnd, &mut rect);
         }
-        ((rect.right - self.editor_left()) / self.scale(TAB_WIDTH).max(1)).max(1) as usize
+        ((rect.right - self.editor_left() - self.scale(120)) / self.scale(TAB_WIDTH).max(1)).max(1)
+            as usize
     }
 
     pub(super) fn show_active_tab(&mut self, hwnd: HWND) {
@@ -442,7 +566,7 @@ impl App {
             self.review_file = None;
             self.search_input = false;
             self.panel_focus = false;
-            self.active = index;
+            self.set_active_index(index);
             self.show_active_tab(hwnd);
         }
     }
@@ -471,10 +595,13 @@ impl App {
         self.tabs.remove(index);
         if self.tabs.is_empty() {
             self.tabs.push(Tab::new(Document::new()));
-            self.active = 0;
+            self.pane_tabs = [0, 0];
         } else {
-            self.active = index.min(self.tabs.len() - 1);
+            for tab in &mut self.pane_tabs {
+                *tab = tab_index_after_close(*tab, index, self.tabs.len());
+            }
         }
+        self.active = self.pane_tabs[self.focused_pane];
         self.status = "Ready".into();
         self.show_active_tab(hwnd);
     }
@@ -558,6 +685,9 @@ impl App {
     }
 
     pub(super) fn start_transition(&mut self, hwnd: HWND) {
+        if self.split_visible {
+            return;
+        }
         let Some(backbuffer) = &self.backbuffer else {
             return;
         };
@@ -712,6 +842,39 @@ impl App {
         let cursor = self.doc_mut().replace(start, end, text);
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
+        self.revalidate_other_view(Some((start, end, cursor)));
+    }
+
+    pub(super) fn revalidate_other_view(&mut self, edit: Option<(Pos, Pos, Pos)>) {
+        if !self.split_visible || self.pane_tabs[1 - self.focused_pane] != self.active {
+            return;
+        }
+        let other = 1 - self.focused_pane;
+        let tab = &mut self.tabs[self.active];
+        let old = tab.views[other].clone();
+        let cursor = edit.map_or(old.cursor, |(start, end, inserted)| {
+            remap_position(old.cursor, start, end, inserted)
+        });
+        let anchor = old.selection_anchor.map(|anchor| {
+            edit.map_or(anchor, |(start, end, inserted)| {
+                remap_position(anchor, start, end, inserted)
+            })
+        });
+        tab.views[other].cursor = tab.document.clamp(cursor);
+        tab.views[other].selection_anchor = anchor.map(|pos| tab.document.clamp(pos));
+        tab.views[other].first_line = edit
+            .map_or(old.first_line, |(start, end, inserted)| {
+                if old.first_line > end.line {
+                    old.first_line
+                        .saturating_add(inserted.line.saturating_sub(end.line))
+                        .saturating_sub(end.line.saturating_sub(inserted.line))
+                } else if old.first_line >= start.line {
+                    inserted.line
+                } else {
+                    old.first_line
+                }
+            })
+            .min(tab.document.line_count().saturating_sub(1));
     }
 
     pub(super) fn copy_selection(&mut self, hwnd: HWND) -> bool {
@@ -911,10 +1074,10 @@ impl App {
                     && self.doc().line(0).is_empty()
                 {
                     self.tabs[0] = Tab::new(document);
-                    self.active = 0;
+                    self.set_active_index(0);
                 } else {
                     self.tabs.push(Tab::new(document));
-                    self.active = self.tabs.len() - 1;
+                    self.set_active_index(self.tabs.len() - 1);
                 }
                 self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
@@ -926,5 +1089,41 @@ impl App {
             }
             Err(error) => self.error(hwnd, &error),
         }
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn edits_remap_the_other_panes_cursor_across_lines() {
+        let start = Pos { line: 1, byte: 2 };
+        let end = Pos { line: 3, byte: 1 };
+        let inserted = Pos { line: 2, byte: 4 };
+        assert_eq!(
+            remap_position(Pos { line: 0, byte: 5 }, start, end, inserted),
+            Pos { line: 0, byte: 5 }
+        );
+        assert_eq!(
+            remap_position(Pos { line: 2, byte: 3 }, start, end, inserted),
+            inserted
+        );
+        assert_eq!(
+            remap_position(Pos { line: 3, byte: 6 }, start, end, inserted),
+            Pos { line: 2, byte: 9 }
+        );
+        assert_eq!(
+            remap_position(Pos { line: 5, byte: 7 }, start, end, inserted),
+            Pos { line: 4, byte: 7 }
+        );
+    }
+
+    #[test]
+    fn closing_a_tab_preserves_the_other_panes_reference() {
+        assert_eq!(tab_index_after_close(0, 1, 2), 0);
+        assert_eq!(tab_index_after_close(2, 1, 2), 1);
+        assert_eq!(tab_index_after_close(1, 1, 2), 1);
+        assert_eq!(tab_index_after_close(0, 0, 0), 0);
     }
 }

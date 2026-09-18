@@ -4,6 +4,9 @@ This is LightLine's development history. Dates are the GitHub commit dates in As
 
 ## Unreleased
 
+- Reworked the app icon's small Windows sizes with a clear lightning silhouette and reduced glow; the activity rail now loads a dedicated 24 px icon.
+- Updated the bundled Windows application icon from `LightLine-icon2.png` for the title bar, taskbar, and executable.
+- Added vertical split editor panes with a draggable divider, focused-pane tab switching, separate cursor/selection/scroll state, and shared document text and undo history. Added split controls, keyboard shortcuts, and tests for edit-position and tab-reference updates.
 - Split the Windows UI out of the nearly 5,000-line `main.rs` into app state, workspace, tool panels, input, window setup, icons, and focused rendering modules. The entry point is now small; editor behavior is unchanged.
 - Applied the new LightLine PNG as a multi-size Windows app icon in the title bar, taskbar, Start screen, activity rail, and executable resource. Moved Windows icon loading and file-icon mapping from `main.rs` into a dedicated module.
 - Matched the supplied left workbench close-up with a lightning brand mark, `IDE` badge, six-row activity rail, compact explorer header and tree, workspace branch footer, and active-file chip. Updated navigation hit areas; unavailable Extensions and AI entries now explain their status.

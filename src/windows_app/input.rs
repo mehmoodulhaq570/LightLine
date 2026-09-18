@@ -146,6 +146,18 @@ impl App {
         if ctrl {
             let cursor = self.view().cursor;
             match key {
+                x if x == VK_OEM_5 as u32 => {
+                    self.toggle_split(hwnd);
+                    return true;
+                }
+                0x31 if self.split_visible => {
+                    self.focus_pane(hwnd, 0);
+                    return true;
+                }
+                0x32 if self.split_visible => {
+                    self.focus_pane(hwnd, 1);
+                    return true;
+                }
                 0x48 if shift => {
                     self.show_welcome(hwnd);
                     return true;
@@ -258,6 +270,7 @@ impl App {
                     if let Some((cursor, line)) = self.doc_mut().redo() {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
+                        self.revalidate_other_view(None);
                     }
                 }
                 0x5a => {
@@ -265,6 +278,7 @@ impl App {
                     if let Some((cursor, line)) = self.doc_mut().undo() {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
+                        self.revalidate_other_view(None);
                     }
                 }
                 0x59 => {
@@ -272,6 +286,7 @@ impl App {
                     if let Some((cursor, line)) = self.doc_mut().redo() {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
+                        self.revalidate_other_view(None);
                     }
                 }
                 x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
@@ -499,7 +514,7 @@ impl App {
     pub(super) fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
         let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
         let line = (self.view().first_line + row).min(self.doc().line_count() - 1);
-        let target = (x - self.code_left()).max(0);
+        let target = (x - self.code_left(hwnd)).max(0);
         unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
@@ -710,12 +725,24 @@ impl App {
         {
             return;
         }
+        if self.split_visible
+            && y >= self.scale(TAB_HEIGHT)
+            && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)
+        {
+            self.divider_dragging = true;
+            unsafe { SetCapture(hwnd) };
+            return;
+        }
         if y < self.scale(TAB_HEIGHT) {
+            if x >= rect.right - self.scale(112) {
+                self.toggle_split(hwnd);
+                return;
+            }
             if editor_left
                 + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                 + self.scale(12)
-                < rect.right - self.scale(207)
-                && x >= rect.right - self.scale(207)
+                < rect.right - self.scale(285)
+                && x >= rect.right - self.scale(285)
             {
                 self.show_quick_open(hwnd);
                 return;
@@ -732,7 +759,15 @@ impl App {
             return;
         }
         if y < self.editor_top() {
+            if self.split_visible {
+                let pane = usize::from(x >= self.pane_divider(hwnd));
+                self.focus_pane(hwnd, pane);
+            }
             return;
+        }
+        if self.split_visible {
+            let pane = usize::from(x >= self.pane_divider(hwnd));
+            self.focus_pane(hwnd, pane);
         }
         let pos = self.position_at(hwnd, x, y);
         self.panel_focus = false;
@@ -747,6 +782,10 @@ impl App {
     }
 
     pub(super) fn mouse_drag(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.divider_dragging {
+            self.resize_split(hwnd, x);
+            return;
+        }
         if !self.dragging {
             return;
         }
