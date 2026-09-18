@@ -4,7 +4,7 @@ A small Windows text editor written in Rust. It supports UTF-8 files, editing, u
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
-An interactive future UI proposal is available in the [Quiet Workbench prototype](design/workbench-prototype.html), with [screen flow and implementation notes](design/WORKBENCH_CONCEPT.md). It is separate from the current native editor.
+The native editor's current visual direction is documented in the [reference adaptation](design/REFERENCE_ADAPTATION.md). An earlier interactive concept remains in the [Quiet Workbench prototype](design/workbench-prototype.html).
 
 ## Run
 
@@ -23,6 +23,9 @@ You can pass a UTF-8 file path as the first argument.
 | Find in current file | Ctrl+F, type a query, then Enter; F3 next, Shift+F3 previous; Escape cancels input |
 | Move by word or delete a word | Ctrl+Left/Right, Ctrl+Backspace/Delete |
 | Move to file start or end | Ctrl+Home/End |
+| Show or hide the file explorer | Ctrl+B |
+
+The explorer opens around the first file you open, preferring a nearby Cargo or Git project root. Click a folder to expand it or a file to open it in a tab. The rail's Search action opens the existing current-file find. The explorer loads only opened folders, so project contents are not indexed at startup.
 
 Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Find is currently case-sensitive and searches the active file only.
 

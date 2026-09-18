@@ -9,6 +9,7 @@ tree-sitter-rust = "0.24.2"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_System_DataExchange",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",

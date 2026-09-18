@@ -6,12 +6,14 @@ mod windows_app {
     use my_editor::document::{Document, Pos};
     use my_editor::syntax::{Color, RustSyntax};
     use std::cell::RefCell;
+    use std::collections::{HashMap, HashSet};
     use std::io;
     use std::mem::{size_of, zeroed};
     use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicIsize, Ordering};
     use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
     use windows_sys::Win32::Graphics::Gdi::*;
     use windows_sys::Win32::System::Console::{
         ATTACH_PARENT_PROCESS, AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, GetConsoleWindow,
@@ -26,12 +28,35 @@ mod windows_app {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    const GUTTER: i32 = 64;
-    const TOP: i32 = 8;
+    const RAIL: i32 = 58;
+    const SIDEBAR: i32 = 228;
+    const GUTTER: i32 = 62;
+    const TOP: i32 = 7;
     const STATUS: i32 = 27;
     const PAD: i32 = 10;
-    const TAB_HEIGHT: i32 = 34;
+    const TAB_HEIGHT: i32 = 38;
+    const BREADCRUMB_HEIGHT: i32 = 27;
     const TAB_WIDTH: i32 = 180;
+    const EXPLORER_ROW: i32 = 27;
+    const EXPLORER_TOP: i32 = 86;
+    const fn rgb(r: u8, g: u8, b: u8) -> u32 {
+        r as u32 | ((g as u32) << 8) | ((b as u32) << 16)
+    }
+    const EDITOR_BG: u32 = rgb(12, 21, 35);
+    const RAIL_BG: u32 = rgb(12, 20, 34);
+    const SIDEBAR_BG: u32 = rgb(15, 25, 41);
+    const TAB_BG: u32 = rgb(15, 25, 42);
+    const ACTIVE_BG: u32 = rgb(17, 29, 49);
+    const STATUS_BG: u32 = rgb(18, 31, 51);
+    const LINE_BG: u32 = rgb(21, 35, 57);
+    const SELECT_BG: u32 = rgb(48, 55, 112);
+    const EDGE: u32 = rgb(40, 58, 88);
+    const TEXT: u32 = rgb(218, 228, 248);
+    const MUTED: u32 = rgb(140, 164, 199);
+    const BLUE: u32 = rgb(94, 153, 255);
+    const VIOLET: u32 = rgb(149, 109, 255);
+    const TEAL: u32 = rgb(103, 220, 215);
+    const GREEN: u32 = rgb(111, 220, 163);
     static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
     unsafe extern "system" fn console_control(event: u32) -> i32 {
@@ -75,6 +100,18 @@ mod windows_app {
         syntax: Option<RustSyntax>,
     }
 
+    #[derive(Clone)]
+    struct ExplorerEntry {
+        path: PathBuf,
+        is_dir: bool,
+    }
+
+    struct ExplorerRow {
+        entry: ExplorerEntry,
+        depth: usize,
+        expanded: bool,
+    }
+
     impl Tab {
         fn new(document: Document) -> Self {
             let syntax = Self::is_rust(&document).then(RustSyntax::new);
@@ -109,6 +146,7 @@ mod windows_app {
         active: usize,
         tab_first: usize,
         font: HFONT,
+        ui_font: HFONT,
         dpi: u32,
         line_height: i32,
         status: String,
@@ -118,6 +156,11 @@ mod windows_app {
         find_mode: bool,
         find_query: String,
         pending_high_surrogate: Option<u16>,
+        explorer_visible: bool,
+        explorer_first_row: usize,
+        workspace_root: Option<PathBuf>,
+        expanded_dirs: HashSet<PathBuf>,
+        directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
     }
 
     impl App {
@@ -125,7 +168,29 @@ mod windows_app {
             let font_name = wide("Consolas");
             unsafe {
                 CreateFontW(
-                    -((19 * dpi as i32 + 48) / 96),
+                    -((17 * dpi as i32 + 48) / 96),
+                    0,
+                    0,
+                    0,
+                    400,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    CLEARTYPE_QUALITY as u32,
+                    0,
+                    font_name.as_ptr(),
+                )
+            }
+        }
+
+        fn ui_font_for_dpi(dpi: u32) -> HFONT {
+            let font_name = wide("Segoe UI");
+            unsafe {
+                CreateFontW(
+                    -((15 * dpi as i32 + 48) / 96),
                     0,
                     0,
                     0,
@@ -150,8 +215,9 @@ mod windows_app {
                 active: 0,
                 tab_first: 0,
                 font: Self::font_for_dpi(dpi),
+                ui_font: Self::ui_font_for_dpi(dpi),
                 dpi,
-                line_height: (24 * dpi as i32 + 48) / 96,
+                line_height: (23 * dpi as i32 + 48) / 96,
                 status: "Ready".into(),
                 focused: false,
                 caret_on: true,
@@ -159,6 +225,11 @@ mod windows_app {
                 find_mode: false,
                 find_query: String::new(),
                 pending_high_surrogate: None,
+                explorer_visible: true,
+                explorer_first_row: 0,
+                workspace_root: None,
+                expanded_dirs: HashSet::new(),
+                directory_cache: HashMap::new(),
             }
         }
 
@@ -181,7 +252,99 @@ mod windows_app {
             &mut self.tab_mut().view
         }
         fn editor_top(&self) -> i32 {
-            self.scale(TAB_HEIGHT + TOP)
+            self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT + TOP)
+        }
+
+        fn editor_left(&self) -> i32 {
+            self.scale(RAIL + if self.explorer_visible { SIDEBAR } else { 0 })
+        }
+
+        fn code_left(&self) -> i32 {
+            self.editor_left() + self.scale(GUTTER + PAD)
+        }
+
+        fn load_directory(&mut self, path: &Path) {
+            if self.directory_cache.contains_key(path) {
+                return;
+            }
+            let mut entries: Vec<ExplorerEntry> = std::fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .take(400)
+                .filter_map(|entry| {
+                    let is_dir = entry.file_type().ok()?.is_dir();
+                    Some(ExplorerEntry {
+                        path: entry.path(),
+                        is_dir,
+                    })
+                })
+                .collect();
+            entries.sort_by(|a, b| {
+                b.is_dir.cmp(&a.is_dir).then_with(|| {
+                    a.path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .cmp(
+                            &b.path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_lowercase(),
+                        )
+                })
+            });
+            self.directory_cache.insert(path.to_path_buf(), entries);
+        }
+
+        fn set_workspace_from_file(&mut self, path: &Path) {
+            if self.workspace_root.is_some() {
+                return;
+            }
+            if let Some(parent) = path.parent() {
+                let folder = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+                let root = folder
+                    .ancestors()
+                    .take(8)
+                    .find(|dir| dir.join("Cargo.toml").is_file() || dir.join(".git").exists())
+                    .unwrap_or(&folder)
+                    .to_path_buf();
+                self.workspace_root = Some(root.clone());
+                self.expanded_dirs.insert(root.clone());
+                self.load_directory(&root);
+            }
+        }
+
+        fn explorer_rows(&self) -> Vec<ExplorerRow> {
+            let mut rows = Vec::new();
+            if let Some(root) = &self.workspace_root {
+                self.append_explorer_rows(root, 0, &mut rows);
+            }
+            rows
+        }
+
+        fn append_explorer_rows(&self, dir: &Path, depth: usize, rows: &mut Vec<ExplorerRow>) {
+            if depth > 8 || rows.len() >= 250 {
+                return;
+            }
+            if let Some(entries) = self.directory_cache.get(dir) {
+                for entry in entries {
+                    if rows.len() >= 250 {
+                        break;
+                    }
+                    let expanded = entry.is_dir && self.expanded_dirs.contains(&entry.path);
+                    rows.push(ExplorerRow {
+                        entry: entry.clone(),
+                        depth,
+                        expanded,
+                    });
+                    if expanded {
+                        self.append_explorer_rows(&entry.path, depth + 1, rows);
+                    }
+                }
+            }
         }
 
         fn syntax_changed(&mut self, line: usize) {
@@ -223,7 +386,7 @@ mod windows_app {
             unsafe {
                 GetClientRect(hwnd, &mut rect);
             }
-            (rect.right / self.scale(TAB_WIDTH).max(1)).max(1) as usize
+            ((rect.right - self.editor_left()) / self.scale(TAB_WIDTH).max(1)).max(1) as usize
         }
 
         fn show_active_tab(&mut self, hwnd: HWND) {
@@ -303,15 +466,28 @@ mod windows_app {
                 return;
             }
             let font = Self::font_for_dpi(dpi);
-            if font.is_null() {
+            let ui_font = Self::ui_font_for_dpi(dpi);
+            if font.is_null() || ui_font.is_null() {
+                if !font.is_null() {
+                    unsafe {
+                        DeleteObject(font);
+                    }
+                }
+                if !ui_font.is_null() {
+                    unsafe {
+                        DeleteObject(ui_font);
+                    }
+                }
                 return;
             }
             unsafe {
                 DeleteObject(self.font);
+                DeleteObject(self.ui_font);
             }
             self.font = font;
+            self.ui_font = ui_font;
             self.dpi = dpi;
-            self.line_height = (24 * dpi as i32 + 48) / 96;
+            self.line_height = (23 * dpi as i32 + 48) / 96;
         }
 
         fn visible_lines(&self, hwnd: HWND) -> usize {
@@ -483,8 +659,7 @@ mod windows_app {
                 let hdc = GetDC(hwnd);
                 let old = SelectObject(hdc, self.font);
                 let line = self.doc().line(self.view().cursor.line);
-                let x = self.scale(GUTTER + PAD)
-                    + self.text_width(hdc, &line[..self.view().cursor.byte]);
+                let x = self.code_left() + self.text_width(hdc, &line[..self.view().cursor.byte]);
                 SelectObject(hdc, old);
                 ReleaseDC(hwnd, hdc);
                 let y = self.editor_top()
@@ -506,24 +681,52 @@ mod windows_app {
             }
         }
 
+        fn fill(hdc: HDC, rect: RECT, color: u32) {
+            unsafe {
+                let brush = CreateSolidBrush(color);
+                FillRect(hdc, &rect, brush);
+                DeleteObject(brush);
+            }
+        }
+
+        fn label(hdc: HDC, text: &str, x: i32, y: i32, color: u32, clip: RECT) {
+            unsafe {
+                let chars: Vec<u16> = text.encode_utf16().collect();
+                SetTextColor(hdc, color);
+                ExtTextOutW(
+                    hdc,
+                    x,
+                    y,
+                    ETO_CLIPPED,
+                    &clip,
+                    chars.as_ptr(),
+                    chars.len() as u32,
+                    null(),
+                );
+            }
+        }
+
         fn paint(&self, hwnd: HWND) {
             unsafe {
                 let mut ps = PAINTSTRUCT::default();
                 let hdc = BeginPaint(hwnd, &mut ps);
                 let old_font = SelectObject(hdc, self.font);
+                SelectObject(hdc, self.ui_font);
                 SetBkMode(hdc, TRANSPARENT as i32);
                 let mut rect = RECT::default();
                 GetClientRect(hwnd, &mut rect);
                 let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-                let bg = CreateSolidBrush(0x001d1b19);
-                let gutter_bg = CreateSolidBrush(0x00252220);
-                let status_bg = CreateSolidBrush(0x00322d29);
-                let selection_bg = CreateSolidBrush(0x007d4f33);
+                let editor_left = self.editor_left();
+                let code_left = self.code_left();
+                let bg = CreateSolidBrush(EDITOR_BG);
+                let gutter_bg = CreateSolidBrush(EDITOR_BG);
+                let status_bg = CreateSolidBrush(STATUS_BG);
+                let selection_bg = CreateSolidBrush(SELECT_BG);
                 let selection = self.selection_range();
                 FillRect(
                     hdc,
                     &RECT {
-                        left: 0,
+                        left: editor_left,
                         top: 0,
                         right: rect.right,
                         bottom: editor_bottom,
@@ -533,24 +736,87 @@ mod windows_app {
                 FillRect(
                     hdc,
                     &RECT {
-                        left: 0,
+                        left: editor_left,
                         top: self.scale(TAB_HEIGHT),
-                        right: self.scale(GUTTER),
+                        right: editor_left + self.scale(GUTTER),
                         bottom: editor_bottom,
                     },
                     gutter_bg,
                 );
-                let tab_bg = CreateSolidBrush(0x00252220);
-                let active_bg = CreateSolidBrush(0x001d1b19);
+                let tab_bg = CreateSolidBrush(TAB_BG);
+                let active_bg = CreateSolidBrush(ACTIVE_BG);
                 FillRect(
                     hdc,
                     &RECT {
-                        left: 0,
+                        left: editor_left,
                         top: 0,
                         right: rect.right,
                         bottom: self.scale(TAB_HEIGHT),
                     },
                     tab_bg,
+                );
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: 0,
+                        top: 0,
+                        right: self.scale(RAIL),
+                        bottom: editor_bottom,
+                    },
+                    RAIL_BG,
+                );
+                if self.explorer_visible {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(RAIL),
+                            top: 0,
+                            right: editor_left,
+                            bottom: editor_bottom,
+                        },
+                        SIDEBAR_BG,
+                    );
+                }
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: editor_left,
+                        top: self.scale(TAB_HEIGHT),
+                        right: rect.right,
+                        bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                    },
+                    ACTIVE_BG,
+                );
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: editor_left,
+                        top: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT - 1),
+                        right: rect.right,
+                        bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                    },
+                    EDGE,
+                );
+                let path_part = self
+                    .doc()
+                    .path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .and_then(Path::file_name)
+                    .map(|part| part.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Editor".into());
+                Self::label(
+                    hdc,
+                    &format!("{}  ›  {}", path_part, self.tab_label(self.active)),
+                    editor_left + self.scale(18),
+                    self.scale(TAB_HEIGHT + 3),
+                    MUTED,
+                    RECT {
+                        left: editor_left,
+                        top: self.scale(TAB_HEIGHT),
+                        right: rect.right,
+                        bottom: self.editor_top(),
+                    },
                 );
                 let tab_width = self.scale(TAB_WIDTH);
                 let tab_height = self.scale(TAB_HEIGHT);
@@ -559,7 +825,7 @@ mod windows_app {
                     if index >= self.tabs.len() {
                         break;
                     }
-                    let left = slot as i32 * tab_width;
+                    let left = editor_left + slot as i32 * tab_width;
                     if left >= rect.right {
                         break;
                     }
@@ -571,17 +837,20 @@ mod windows_app {
                     };
                     if index == self.active {
                         FillRect(hdc, &bounds, active_bg);
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left,
+                                top: 0,
+                                right: bounds.right,
+                                bottom: self.scale(2),
+                            },
+                            VIOLET,
+                        );
                     }
                     let label = self.tab_label(index);
                     let chars: Vec<u16> = label.encode_utf16().collect();
-                    SetTextColor(
-                        hdc,
-                        if index == self.active {
-                            0x00e3ded8
-                        } else {
-                            0x00a59c92
-                        },
-                    );
+                    SetTextColor(hdc, if index == self.active { TEXT } else { MUTED });
                     let clip = RECT {
                         left: left + self.scale(12),
                         top: 0,
@@ -607,7 +876,156 @@ mod windows_app {
                         1,
                     );
                 }
+                let rail_clip = RECT {
+                    left: 0,
+                    top: 0,
+                    right: self.scale(RAIL),
+                    bottom: editor_bottom,
+                };
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: 0,
+                        top: self.scale(49),
+                        right: self.scale(3),
+                        bottom: self.scale(91),
+                    },
+                    BLUE,
+                );
+                Self::label(hdc, "▣", self.scale(18), self.scale(15), VIOLET, rail_clip);
+                Self::label(
+                    hdc,
+                    "F",
+                    self.scale(22),
+                    self.scale(54),
+                    if self.explorer_visible { TEXT } else { MUTED },
+                    rail_clip,
+                );
+                Self::label(hdc, "⌕", self.scale(19), self.scale(107), MUTED, rail_clip);
+                if self.explorer_visible {
+                    let sidebar_clip = RECT {
+                        left: self.scale(RAIL),
+                        top: 0,
+                        right: editor_left,
+                        bottom: editor_bottom,
+                    };
+                    Self::label(
+                        hdc,
+                        "EXPLORER",
+                        self.scale(RAIL + 17),
+                        self.scale(10),
+                        TEXT,
+                        sidebar_clip,
+                    );
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(RAIL),
+                            top: self.scale(39),
+                            right: editor_left,
+                            bottom: self.scale(40),
+                        },
+                        EDGE,
+                    );
+                    if let Some(root) = &self.workspace_root {
+                        let root_name = root
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| root.display().to_string());
+                        Self::label(
+                            hdc,
+                            &format!("⌄  {}", root_name),
+                            self.scale(RAIL + 16),
+                            self.scale(54),
+                            MUTED,
+                            sidebar_clip,
+                        );
+                        for (row, item) in self
+                            .explorer_rows()
+                            .iter()
+                            .enumerate()
+                            .skip(self.explorer_first_row)
+                        {
+                            let top = self.scale(
+                                EXPLORER_TOP
+                                    + (row - self.explorer_first_row) as i32 * EXPLORER_ROW,
+                            );
+                            if top >= editor_bottom {
+                                break;
+                            }
+                            let selected = self
+                                .doc()
+                                .path
+                                .as_deref()
+                                .is_some_and(|path| path == item.entry.path);
+                            if selected {
+                                Self::fill(
+                                    hdc,
+                                    RECT {
+                                        left: self.scale(RAIL + 7),
+                                        top,
+                                        right: editor_left - self.scale(8),
+                                        bottom: top + self.scale(EXPLORER_ROW - 2),
+                                    },
+                                    SELECT_BG,
+                                );
+                            }
+                            let name = item
+                                .entry
+                                .path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            let symbol = if item.entry.is_dir {
+                                if item.expanded { "⌄" } else { "›" }
+                            } else {
+                                "·"
+                            };
+                            let label = format!("{}  {}", symbol, name);
+                            let left = self.scale(RAIL + 18 + item.depth.min(6) as i32 * 13);
+                            Self::label(
+                                hdc,
+                                &label,
+                                left,
+                                top + self.scale(2),
+                                if selected {
+                                    TEXT
+                                } else if item.entry.is_dir {
+                                    MUTED
+                                } else {
+                                    rgb(185, 205, 230)
+                                },
+                                RECT {
+                                    left,
+                                    top,
+                                    right: editor_left - self.scale(10),
+                                    bottom: top + self.scale(EXPLORER_ROW),
+                                },
+                            );
+                        }
+                    } else {
+                        Self::label(
+                            hdc,
+                            "Open a file to browse",
+                            self.scale(RAIL + 17),
+                            self.scale(55),
+                            MUTED,
+                            sidebar_clip,
+                        );
+                        Self::label(
+                            hdc,
+                            "its folder  (Ctrl+O)",
+                            self.scale(RAIL + 17),
+                            self.scale(82),
+                            MUTED,
+                            sidebar_clip,
+                        );
+                    }
+                }
                 let visible = self.visible_lines(hwnd) + 1;
+                SelectObject(hdc, self.font);
+                let space_width = self.text_width(hdc, " ").max(1);
+                let guide_brush = CreateSolidBrush(EDGE);
                 for row in 0..visible {
                     let index = self.view().first_line + row;
                     if index >= self.doc().line_count() {
@@ -617,18 +1035,37 @@ mod windows_app {
                     if y >= editor_bottom {
                         break;
                     }
+                    if index == self.view().cursor.line {
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: editor_left,
+                                top: y,
+                                right: rect.right,
+                                bottom: (y + self.line_height).min(editor_bottom),
+                            },
+                            LINE_BG,
+                        );
+                    }
                     let number = format!("{}", index + 1);
                     let num: Vec<u16> = number.encode_utf16().collect();
-                    SetTextColor(hdc, 0x00958b81);
+                    SetTextColor(
+                        hdc,
+                        if index == self.view().cursor.line {
+                            TEXT
+                        } else {
+                            MUTED
+                        },
+                    );
                     let number_clip = RECT {
-                        left: 0,
+                        left: editor_left,
                         top: y,
-                        right: self.scale(GUTTER),
+                        right: editor_left + self.scale(GUTTER),
                         bottom: editor_bottom,
                     };
                     ExtTextOutW(
                         hdc,
-                        self.scale(12),
+                        editor_left + self.scale(12),
                         y,
                         ETO_CLIPPED,
                         &number_clip,
@@ -637,6 +1074,27 @@ mod windows_app {
                         null(),
                     );
                     let source = self.doc().line(index);
+                    let indent_columns = source
+                        .chars()
+                        .take_while(|ch| *ch == ' ' || *ch == '\t')
+                        .take(64)
+                        .map(|ch| if ch == '\t' { 4 } else { 1 })
+                        .sum::<usize>();
+                    for level in 1..=(indent_columns / 4).min(8) {
+                        let guide_x = code_left + level as i32 * 4 * space_width - self.scale(4);
+                        if guide_x < rect.right {
+                            FillRect(
+                                hdc,
+                                &RECT {
+                                    left: guide_x,
+                                    top: y,
+                                    right: guide_x + 1,
+                                    bottom: (y + self.line_height).min(editor_bottom),
+                                },
+                                guide_brush,
+                            );
+                        }
+                    }
                     if let Some((start, end)) = selection
                         && index >= start.line
                         && index <= end.line
@@ -648,8 +1106,8 @@ mod windows_app {
                         } else {
                             source.len()
                         };
-                        let x1 = self.scale(GUTTER + PAD) + self.text_width(hdc, &source[..from]);
-                        let x2 = self.scale(GUTTER + PAD)
+                        let x1 = code_left + self.text_width(hdc, &source[..from]);
+                        let x2 = code_left
                             + self.text_width(hdc, &source[..to])
                             + if index < end.line { self.scale(8) } else { 0 };
                         if x2 > x1 && x1 < rect.right {
@@ -667,16 +1125,16 @@ mod windows_app {
                     }
                     let line = source.replace('\t', "    ");
                     let chars: Vec<u16> = line.encode_utf16().collect();
-                    SetTextColor(hdc, 0x00e3ded8);
+                    SetTextColor(hdc, TEXT);
                     let clip = RECT {
-                        left: self.scale(GUTTER + PAD),
+                        left: code_left,
                         top: y,
                         right: rect.right,
                         bottom: editor_bottom,
                     };
                     ExtTextOutW(
                         hdc,
-                        self.scale(GUTTER + PAD),
+                        code_left,
                         y,
                         ETO_CLIPPED,
                         &clip,
@@ -689,16 +1147,15 @@ mod windows_app {
                     {
                         for span in syntax.spans(self.doc(), index) {
                             let color = match span.color {
-                                Color::Comment => 0x009caa82,
-                                Color::String => 0x008fcfba,
-                                Color::Keyword => 0x00e8a57d,
-                                Color::Type => 0x00cfb78e,
-                                Color::Number => 0x00a8c5e8,
-                                Color::Macro => 0x00dbb6d7,
+                                Color::Comment => MUTED,
+                                Color::String => GREEN,
+                                Color::Keyword => BLUE,
+                                Color::Type => TEAL,
+                                Color::Number => rgb(248, 180, 130),
+                                Color::Macro => VIOLET,
                             };
                             SetTextColor(hdc, color);
-                            let left = self.scale(GUTTER + PAD)
-                                + self.text_width(hdc, &source[..span.start]);
+                            let left = code_left + self.text_width(hdc, &source[..span.start]);
                             let text = source[span.start..span.end].replace('\t', "    ");
                             let chars: Vec<u16> = text.encode_utf16().collect();
                             ExtTextOutW(
@@ -714,15 +1171,15 @@ mod windows_app {
                         }
                     }
                 }
+                DeleteObject(guide_brush);
                 if self.focused && self.caret_on {
                     let line = self.doc().line(self.view().cursor.line);
-                    let x = self.scale(GUTTER + PAD)
-                        + self.text_width(hdc, &line[..self.view().cursor.byte]);
+                    let x = code_left + self.text_width(hdc, &line[..self.view().cursor.byte]);
                     let y = self.editor_top()
                         + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
                             * self.line_height;
-                    if y >= self.scale(TAB_HEIGHT) && y < editor_bottom && x < rect.right {
-                        let caret = CreateSolidBrush(0x00ffc078);
+                    if y >= self.editor_top() && y < editor_bottom && x < rect.right {
+                        let caret = CreateSolidBrush(BLUE);
                         FillRect(
                             hdc,
                             &RECT {
@@ -746,24 +1203,48 @@ mod windows_app {
                     },
                     status_bg,
                 );
-                let label = format!(
-                    "{}    Ln {}, Col {}    {} lines",
-                    self.status,
+                SelectObject(hdc, self.ui_font);
+                let right_label = format!(
+                    "Ln {}, Col {}     UTF-8     {}",
                     self.view().cursor.line + 1,
                     self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
                         .chars()
                         .count()
                         + 1,
-                    self.doc().line_count()
+                    self.doc()
+                        .path
+                        .as_deref()
+                        .and_then(Path::extension)
+                        .map(|ext| ext.to_string_lossy().to_uppercase())
+                        .unwrap_or_else(|| "TEXT".into())
                 );
-                let chars: Vec<u16> = label.encode_utf16().collect();
-                SetTextColor(hdc, 0x00e3ded8);
-                TextOutW(
+                let right_width = self.text_width(hdc, &right_label);
+                let right_x = (rect.right - right_width - self.scale(16)).max(self.scale(16));
+                Self::label(
                     hdc,
-                    self.scale(12),
+                    &self.status,
+                    self.scale(14),
                     editor_bottom + self.scale(4),
-                    chars.as_ptr(),
-                    chars.len() as i32,
+                    TEXT,
+                    RECT {
+                        left: self.scale(14),
+                        top: editor_bottom,
+                        right: (right_x - self.scale(24)).max(self.scale(14)),
+                        bottom: rect.bottom,
+                    },
+                );
+                Self::label(
+                    hdc,
+                    &right_label,
+                    right_x,
+                    editor_bottom + self.scale(4),
+                    MUTED,
+                    RECT {
+                        left: right_x,
+                        top: editor_bottom,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    },
                 );
                 DeleteObject(bg);
                 DeleteObject(gutter_bg);
@@ -847,6 +1328,13 @@ mod windows_app {
             match self.doc_mut().save(&path) {
                 Ok(()) => {
                     self.tab_mut().update_syntax_language();
+                    self.set_workspace_from_file(&path);
+                    if let Some(parent) = path.parent() {
+                        self.directory_cache.remove(parent);
+                        if self.expanded_dirs.contains(parent) {
+                            self.load_directory(parent);
+                        }
+                    }
                     self.status = format!("Saved {}", path.display());
                     self.refresh(hwnd);
                     true
@@ -881,6 +1369,7 @@ mod windows_app {
             let Some(path) = path.or_else(|| self.dialog(hwnd, false)) else {
                 return;
             };
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
             if let Some(index) = self.tabs.iter().position(|tab| {
                 tab.document
                     .path
@@ -904,6 +1393,7 @@ mod windows_app {
                         self.tabs.push(Tab::new(document));
                         self.active = self.tabs.len() - 1;
                     }
+                    self.set_workspace_from_file(&path);
                     self.status = format!("Opened {}", path.display());
                     self.show_active_tab(hwnd);
                 }
@@ -958,6 +1448,11 @@ mod windows_app {
                         self.find_mode = true;
                         self.find_query.clear();
                         self.status = "Find: ".into();
+                    }
+                    0x42 => {
+                        self.explorer_visible = !self.explorer_visible;
+                        self.show_active_tab(hwnd);
+                        return true;
                     }
                     0x4f => {
                         self.open(hwnd, None);
@@ -1194,7 +1689,7 @@ mod windows_app {
         fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
             let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
             let line = (self.view().first_line + row).min(self.doc().line_count() - 1);
-            let target = (x - self.scale(GUTTER + PAD)).max(0);
+            let target = (x - self.code_left()).max(0);
             unsafe {
                 let hdc = GetDC(hwnd);
                 let old = SelectObject(hdc, self.font);
@@ -1230,11 +1725,56 @@ mod windows_app {
         }
 
         fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+            let mut rect = RECT::default();
+            unsafe {
+                GetClientRect(hwnd, &mut rect);
+            }
+            if y >= rect.bottom - self.scale(STATUS) {
+                return;
+            }
+            let rail = self.scale(RAIL);
+            let editor_left = self.editor_left();
+            if x < rail {
+                if y >= self.scale(46) && y < self.scale(94) {
+                    self.explorer_visible = !self.explorer_visible;
+                    self.show_active_tab(hwnd);
+                } else if y >= self.scale(100) && y < self.scale(148) {
+                    self.find_mode = true;
+                    self.find_query.clear();
+                    self.status = "Find: ".into();
+                    self.refresh(hwnd);
+                }
+                return;
+            }
+            if self.explorer_visible && x < editor_left {
+                if y >= self.scale(EXPLORER_TOP) {
+                    let row = self.explorer_first_row
+                        + ((y - self.scale(EXPLORER_TOP)) / self.scale(EXPLORER_ROW)) as usize;
+                    if let Some(item) = self.explorer_rows().get(row) {
+                        let path = item.entry.path.clone();
+                        if item.entry.is_dir {
+                            if self.expanded_dirs.remove(&path) {
+                                self.explorer_first_row = self
+                                    .explorer_first_row
+                                    .min(self.explorer_rows().len().saturating_sub(1));
+                                self.refresh(hwnd);
+                            } else {
+                                self.expanded_dirs.insert(path.clone());
+                                self.load_directory(&path);
+                                self.refresh(hwnd);
+                            }
+                        } else {
+                            self.open(hwnd, Some(path));
+                        }
+                    }
+                }
+                return;
+            }
             if y < self.scale(TAB_HEIGHT) {
-                let slot = (x.max(0) / self.scale(TAB_WIDTH).max(1)) as usize;
+                let slot = ((x - editor_left).max(0) / self.scale(TAB_WIDTH).max(1)) as usize;
                 let index = self.tab_first + slot;
                 if index < self.tabs.len() {
-                    if x % self.scale(TAB_WIDTH) >= self.scale(TAB_WIDTH - 30) {
+                    if (x - editor_left) % self.scale(TAB_WIDTH) >= self.scale(TAB_WIDTH - 30) {
                         self.close_tab(hwnd, index);
                     } else {
                         self.activate_tab(hwnd, index);
@@ -1242,11 +1782,7 @@ mod windows_app {
                 }
                 return;
             }
-            let mut rect = RECT::default();
-            unsafe {
-                GetClientRect(hwnd, &mut rect);
-            }
-            if y >= rect.bottom - self.scale(STATUS) {
+            if y < self.editor_top() {
                 return;
             }
             let pos = self.position_at(hwnd, x, y);
@@ -1361,7 +1897,11 @@ mod windows_app {
                     ScreenToClient(hwnd, &mut point);
                     let cursor = LoadCursorW(
                         null_mut(),
-                        if point.y < app.scale(TAB_HEIGHT) {
+                        if point.y < app.editor_top() || point.x < app.editor_left() || {
+                            let mut rect = RECT::default();
+                            GetClientRect(hwnd, &mut rect);
+                            point.y >= rect.bottom - app.scale(STATUS)
+                        } {
                             IDC_ARROW
                         } else {
                             IDC_IBEAM
@@ -1415,6 +1955,31 @@ mod windows_app {
             }
             WM_MOUSEWHEEL => {
                 let delta = (wparam >> 16) as i16;
+                let mut point = POINT::default();
+                unsafe {
+                    GetCursorPos(&mut point);
+                    ScreenToClient(hwnd, &mut point);
+                }
+                if app.explorer_visible && point.x >= app.scale(RAIL) && point.x < app.editor_left()
+                {
+                    let mut rect = RECT::default();
+                    unsafe {
+                        GetClientRect(hwnd, &mut rect);
+                    }
+                    let visible = ((rect.bottom - app.scale(STATUS + EXPLORER_TOP))
+                        / app.scale(EXPLORER_ROW).max(1))
+                    .max(1) as usize;
+                    let max_first = app.explorer_rows().len().saturating_sub(visible);
+                    app.explorer_first_row = if delta > 0 {
+                        app.explorer_first_row.saturating_sub(3)
+                    } else {
+                        (app.explorer_first_row + 3).min(max_first)
+                    };
+                    unsafe {
+                        InvalidateRect(hwnd, null(), 0);
+                    }
+                    return 0;
+                }
                 if delta > 0 {
                     app.view_mut().first_line = app.view().first_line.saturating_sub(3);
                 } else if delta < 0 {
@@ -1505,6 +2070,13 @@ mod windows_app {
             if hwnd.is_null() {
                 return Err(io::Error::last_os_error());
             }
+            let dark_titlebar: i32 = 1;
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+                &dark_titlebar as *const i32 as *const std::ffi::c_void,
+                size_of::<i32>() as u32,
+            );
             let mut app = Box::new(RefCell::new(App::new(hwnd)));
             SetWindowLongPtrW(
                 hwnd,
@@ -1525,6 +2097,7 @@ mod windows_app {
                 DispatchMessageW(&msg);
             }
             DeleteObject(app.borrow().font);
+            DeleteObject(app.borrow().ui_font);
             Ok(())
         }
     }
