@@ -24,8 +24,11 @@ You can pass a UTF-8 file path as the first argument.
 | Move by word or delete a word | Ctrl+Left/Right, Ctrl+Backspace/Delete |
 | Move to file start or end | Ctrl+Home/End |
 | Show or hide the file explorer | Ctrl+B |
+| Zoom the whole interface in or out; reset zoom | Ctrl+Plus / Ctrl+Minus; Ctrl+0 |
 
 The explorer opens around the first file you open, preferring a nearby Cargo or Git project root. Click a folder to expand it or a file to open it in a tab. The rail's Search action opens the existing current-file find. The explorer loads only opened folders, so project contents are not indexed at startup.
+
+Zoom changes text, icons, panels, and spacing together in 20% steps from 60% to 200%. Ctrl+0 resets it to 100%. The zoom level lasts for the current session. Switching files uses a short visual transition.
 
 Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Find is currently case-sensitive and searches the active file only.
 

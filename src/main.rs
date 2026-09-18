@@ -12,6 +12,7 @@ mod windows_app {
     use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::time::Instant;
     use windows_sys::Win32::Foundation::*;
     use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
     use windows_sys::Win32::Graphics::Gdi::*;
@@ -39,6 +40,10 @@ mod windows_app {
     const TAB_WIDTH: i32 = 180;
     const EXPLORER_ROW: i32 = 24;
     const EXPLORER_TOP: i32 = 78;
+    const TRANSITION_MS: u128 = 150;
+    fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
+        ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
+    }
     const fn rgb(r: u8, g: u8, b: u8) -> u32 {
         r as u32 | ((g as u32) << 8) | ((b as u32) << 16)
     }
@@ -93,8 +98,8 @@ mod windows_app {
     }
 
     impl IconSet {
-        fn new(dpi: u32) -> Self {
-            let size = (18 * dpi as i32 + 48) / 96;
+        fn new(dpi: u32, zoom: i32) -> Self {
+            let size = scaled(18, dpi, zoom);
             let handles = MATERIAL_ICONS
                 .iter()
                 .map(|&(name, data)| (name, Self::load_ico(data, size)))
@@ -168,6 +173,58 @@ mod windows_app {
                 }
             }
         }
+    }
+
+    struct Surface {
+        dc: HDC,
+        bitmap: HBITMAP,
+        previous: HGDIOBJ,
+        width: i32,
+        height: i32,
+    }
+
+    impl Surface {
+        fn new(reference: HDC, width: i32, height: i32) -> Option<Self> {
+            if width <= 0 || height <= 0 {
+                return None;
+            }
+            unsafe {
+                let dc = CreateCompatibleDC(reference);
+                if dc.is_null() {
+                    return None;
+                }
+                let bitmap = CreateCompatibleBitmap(reference, width, height);
+                if bitmap.is_null() {
+                    DeleteDC(dc);
+                    return None;
+                }
+                let previous = SelectObject(dc, bitmap);
+                Some(Self {
+                    dc,
+                    bitmap,
+                    previous,
+                    width,
+                    height,
+                })
+            }
+        }
+    }
+
+    impl Drop for Surface {
+        fn drop(&mut self) {
+            unsafe {
+                SelectObject(self.dc, self.previous);
+                DeleteObject(self.bitmap);
+                DeleteDC(self.dc);
+            }
+        }
+    }
+
+    struct Transition {
+        previous_frame: Surface,
+        started: Instant,
+        left: i32,
+        top: i32,
     }
 
     fn material_icon_for(path: &Path, is_dir: bool, expanded: bool) -> &'static str {
@@ -321,7 +378,10 @@ mod windows_app {
         brand_font: HFONT,
         icons: IconSet,
         dpi: u32,
+        zoom: i32,
         line_height: i32,
+        backbuffer: Option<Surface>,
+        transition: Option<Transition>,
         status: String,
         focused: bool,
         caret_on: bool,
@@ -337,11 +397,11 @@ mod windows_app {
     }
 
     impl App {
-        fn font_for_dpi(dpi: u32) -> HFONT {
+        fn font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
             let font_name = wide("Consolas");
             unsafe {
                 CreateFontW(
-                    -((17 * dpi as i32 + 48) / 96),
+                    -scaled(15, dpi, zoom),
                     0,
                     0,
                     0,
@@ -359,11 +419,11 @@ mod windows_app {
             }
         }
 
-        fn ui_font_for_dpi(dpi: u32) -> HFONT {
+        fn ui_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
             let font_name = wide("Segoe UI");
             unsafe {
                 CreateFontW(
-                    -((13 * dpi as i32 + 48) / 96),
+                    -scaled(14, dpi, zoom),
                     0,
                     0,
                     0,
@@ -381,11 +441,11 @@ mod windows_app {
             }
         }
 
-        fn brand_font_for_dpi(dpi: u32) -> HFONT {
+        fn brand_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
             let font_name = wide("Segoe UI Semibold");
             unsafe {
                 CreateFontW(
-                    -((17 * dpi as i32 + 48) / 96),
+                    -scaled(17, dpi, zoom),
                     0,
                     0,
                     0,
@@ -405,16 +465,20 @@ mod windows_app {
 
         fn new(hwnd: HWND) -> Self {
             let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
+            let zoom = 100;
             Self {
                 tabs: vec![Tab::new(Document::new())],
                 active: 0,
                 tab_first: 0,
-                font: Self::font_for_dpi(dpi),
-                ui_font: Self::ui_font_for_dpi(dpi),
-                brand_font: Self::brand_font_for_dpi(dpi),
-                icons: IconSet::new(dpi),
+                font: Self::font_for_dpi(dpi, zoom),
+                ui_font: Self::ui_font_for_dpi(dpi, zoom),
+                brand_font: Self::brand_font_for_dpi(dpi, zoom),
+                icons: IconSet::new(dpi, zoom),
                 dpi,
-                line_height: (23 * dpi as i32 + 48) / 96,
+                zoom,
+                line_height: scaled(21, dpi, zoom),
+                backbuffer: None,
+                transition: None,
                 status: "Ready".into(),
                 focused: false,
                 caret_on: true,
@@ -635,6 +699,9 @@ mod windows_app {
 
         fn activate_tab(&mut self, hwnd: HWND, index: usize) {
             if index < self.tabs.len() {
+                if index != self.active {
+                    self.start_transition(hwnd);
+                }
                 self.active = index;
                 self.show_active_tab(hwnd);
             }
@@ -660,6 +727,7 @@ mod windows_app {
             if !self.can_discard(hwnd) {
                 return;
             }
+            self.start_transition(hwnd);
             self.tabs.remove(index);
             if self.tabs.is_empty() {
                 self.tabs.push(Tab::new(Document::new()));
@@ -684,7 +752,7 @@ mod windows_app {
         }
 
         fn scale(&self, pixels: i32) -> i32 {
-            (pixels * self.dpi as i32 + 48) / 96
+            scaled(pixels, self.dpi, self.zoom)
         }
 
         fn set_dpi(&mut self, dpi: u32) {
@@ -692,9 +760,31 @@ mod windows_app {
             if dpi == self.dpi {
                 return;
             }
-            let font = Self::font_for_dpi(dpi);
-            let ui_font = Self::ui_font_for_dpi(dpi);
-            let brand_font = Self::brand_font_for_dpi(dpi);
+            self.set_metrics(dpi, self.zoom);
+        }
+
+        fn set_zoom(&mut self, hwnd: HWND, zoom: i32) {
+            let zoom = zoom.clamp(60, 200);
+            if zoom == self.zoom {
+                return;
+            }
+            self.set_metrics(self.dpi, zoom);
+            self.transition = None;
+            unsafe { KillTimer(hwnd, 3) };
+            let count = self.visible_tab_count(hwnd);
+            if self.active >= self.tab_first + count {
+                self.tab_first = self.active + 1 - count;
+            }
+            self.status = format!("Zoom: {}%", self.zoom);
+            self.keep_cursor_visible(hwnd);
+            self.update_scrollbar(hwnd);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+
+        fn set_metrics(&mut self, dpi: u32, zoom: i32) {
+            let font = Self::font_for_dpi(dpi, zoom);
+            let ui_font = Self::ui_font_for_dpi(dpi, zoom);
+            let brand_font = Self::brand_font_for_dpi(dpi, zoom);
             if font.is_null() || ui_font.is_null() || brand_font.is_null() {
                 if !font.is_null() {
                     unsafe {
@@ -721,9 +811,51 @@ mod windows_app {
             self.font = font;
             self.ui_font = ui_font;
             self.brand_font = brand_font;
-            self.icons = IconSet::new(dpi);
+            self.icons = IconSet::new(dpi, zoom);
             self.dpi = dpi;
-            self.line_height = (23 * dpi as i32 + 48) / 96;
+            self.zoom = zoom;
+            self.line_height = scaled(21, dpi, zoom);
+        }
+
+        fn start_transition(&mut self, hwnd: HWND) {
+            let Some(backbuffer) = &self.backbuffer else {
+                return;
+            };
+            let left = self.editor_left();
+            let top = self.editor_top();
+            let width = backbuffer.width - left;
+            let height = backbuffer.height - self.scale(STATUS) - top;
+            let dc = unsafe { GetDC(hwnd) };
+            let snapshot = Surface::new(dc, width, height);
+            unsafe { ReleaseDC(hwnd, dc) };
+            let Some(snapshot) = snapshot else { return };
+            unsafe {
+                BitBlt(
+                    snapshot.dc,
+                    0,
+                    0,
+                    snapshot.width,
+                    snapshot.height,
+                    backbuffer.dc,
+                    left,
+                    top,
+                    SRCCOPY,
+                );
+                SetTimer(hwnd, 3, 16, None);
+            }
+            self.transition = Some(Transition {
+                previous_frame: snapshot,
+                started: Instant::now(),
+                left,
+                top,
+            });
+        }
+
+        fn cancel_transition(&mut self, hwnd: HWND) {
+            if self.transition.take().is_some() {
+                unsafe { KillTimer(hwnd, 3) };
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
         }
 
         fn visible_lines(&self, hwnd: HWND) -> usize {
@@ -942,15 +1074,50 @@ mod windows_app {
             }
         }
 
-        fn paint(&self, hwnd: HWND) {
+        fn chevron(&self, hdc: HDC, x: i32, y: i32, expanded: bool) {
+            unsafe {
+                let half = self.scale(4).max(4);
+                let pen = CreatePen(PS_SOLID, self.scale(2).max(2), MUTED);
+                if pen.is_null() {
+                    return;
+                }
+                let previous = SelectObject(hdc, pen);
+                if expanded {
+                    MoveToEx(hdc, x - half, y - half / 2, null_mut());
+                    LineTo(hdc, x, y + half / 2);
+                    LineTo(hdc, x + half, y - half / 2);
+                } else {
+                    MoveToEx(hdc, x - half / 2, y - half, null_mut());
+                    LineTo(hdc, x + half / 2, y);
+                    LineTo(hdc, x - half / 2, y + half);
+                }
+                SelectObject(hdc, previous);
+                DeleteObject(pen);
+            }
+        }
+
+        fn paint(&mut self, hwnd: HWND) {
             unsafe {
                 let mut ps = PAINTSTRUCT::default();
-                let hdc = BeginPaint(hwnd, &mut ps);
+                let window_dc = BeginPaint(hwnd, &mut ps);
+                let mut rect = RECT::default();
+                GetClientRect(hwnd, &mut rect);
+                if self
+                    .backbuffer
+                    .as_ref()
+                    .is_none_or(|buffer| buffer.width != rect.right || buffer.height != rect.bottom)
+                {
+                    self.backbuffer = Surface::new(window_dc, rect.right, rect.bottom);
+                    self.transition = None;
+                    KillTimer(hwnd, 3);
+                }
+                let hdc = self
+                    .backbuffer
+                    .as_ref()
+                    .map_or(window_dc, |buffer| buffer.dc);
                 let old_font = SelectObject(hdc, self.font);
                 SelectObject(hdc, self.ui_font);
                 SetBkMode(hdc, TRANSPARENT as i32);
-                let mut rect = RECT::default();
-                GetClientRect(hwnd, &mut rect);
                 let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
                 let editor_left = self.editor_left();
                 let code_left = self.code_left();
@@ -1300,18 +1467,11 @@ mod windows_app {
                                 .to_string_lossy();
                             let left = self.scale(RAIL + 16 + item.depth.min(6) as i32 * 13);
                             if item.entry.is_dir {
-                                Self::label(
+                                self.chevron(
                                     hdc,
-                                    if item.expanded { "⌄" } else { "›" },
-                                    left,
-                                    top + self.scale(1),
-                                    MUTED,
-                                    RECT {
-                                        left,
-                                        top,
-                                        right: editor_left - self.scale(9),
-                                        bottom: top + self.scale(EXPLORER_ROW),
-                                    },
+                                    left + self.scale(5),
+                                    top + self.scale(EXPLORER_ROW / 2),
+                                    item.expanded,
                                 );
                             }
                             let icon_name = material_icon_for(
@@ -1607,6 +1767,46 @@ mod windows_app {
                 DeleteObject(tab_bg);
                 DeleteObject(active_bg);
                 SelectObject(hdc, old_font);
+                if let Some(transition) = &self.transition {
+                    let elapsed = transition.started.elapsed().as_millis();
+                    if elapsed < TRANSITION_MS
+                        && transition.left == editor_left
+                        && transition.top == self.editor_top()
+                        && transition.previous_frame.width == rect.right - editor_left
+                        && transition.previous_frame.height == editor_bottom - self.editor_top()
+                    {
+                        let left = editor_left;
+                        let top = self.editor_top();
+                        let width = (rect.right - left).max(0);
+                        let height = (editor_bottom - top).max(0);
+                        AlphaBlend(
+                            hdc,
+                            left,
+                            top,
+                            width,
+                            height,
+                            transition.previous_frame.dc,
+                            0,
+                            0,
+                            width,
+                            height,
+                            BLENDFUNCTION {
+                                BlendOp: AC_SRC_OVER as u8,
+                                BlendFlags: 0,
+                                SourceConstantAlpha: ((TRANSITION_MS - elapsed) * 255
+                                    / TRANSITION_MS)
+                                    as u8,
+                                AlphaFormat: 0,
+                            },
+                        );
+                    } else {
+                        self.transition = None;
+                        KillTimer(hwnd, 3);
+                    }
+                }
+                if hdc != window_dc {
+                    BitBlt(window_dc, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);
+                }
                 EndPaint(hwnd, &ps);
             }
         }
@@ -1743,6 +1943,7 @@ mod windows_app {
             }
             match Document::open(path.clone()) {
                 Ok(document) => {
+                    self.start_transition(hwnd);
                     if self.tabs.len() == 1
                         && self.doc().path.is_none()
                         && !self.doc().is_dirty()
@@ -1784,6 +1985,22 @@ mod windows_app {
             if ctrl {
                 let cursor = self.view().cursor;
                 match key {
+                    x if x == VK_OEM_PLUS as u32 || x == VK_ADD as u32 => {
+                        self.set_zoom(hwnd, self.zoom + 20);
+                        return true;
+                    }
+                    x if x == VK_OEM_MINUS as u32 || x == VK_SUBTRACT as u32 => {
+                        self.set_zoom(hwnd, self.zoom - 20);
+                        return true;
+                    }
+                    0x30 => {
+                        self.set_zoom(hwnd, 100);
+                        return true;
+                    }
+                    x if x == VK_NUMPAD0 as u32 => {
+                        self.set_zoom(hwnd, 100);
+                        return true;
+                    }
                     0x41 => {
                         self.view_mut().selection_anchor = Some(Pos::default());
                         let end = self.doc().end();
@@ -1803,6 +2020,7 @@ mod windows_app {
                         Err(error) => self.error(hwnd, &error),
                     },
                     0x4e => {
+                        self.start_transition(hwnd);
                         self.tabs.push(Tab::new(Document::new()));
                         self.active = self.tabs.len() - 1;
                         self.status = "New document".into();
@@ -2046,6 +2264,7 @@ mod windows_app {
                 } else {
                     ch.to_string()
                 };
+                self.cancel_transition(hwnd);
                 self.replace_selection(&text);
                 self.refresh(hwnd);
             }
@@ -2194,6 +2413,7 @@ mod windows_app {
             };
         };
         match msg {
+            WM_ERASEBKGND => 1,
             WM_PAINT => {
                 app.advance_syntax(hwnd);
                 app.paint(hwnd);
@@ -2201,6 +2421,8 @@ mod windows_app {
             }
             WM_DPICHANGED => {
                 app.set_dpi((wparam & 0xffff) as u32);
+                app.transition = None;
+                unsafe { KillTimer(hwnd, 3) };
                 let suggested = unsafe { &*(lparam as *const RECT) };
                 unsafe {
                     SetWindowPos(
@@ -2253,6 +2475,10 @@ mod windows_app {
                 unsafe {
                     InvalidateRect(hwnd, null(), 0);
                 }
+                0
+            }
+            WM_TIMER if wparam == 3 => {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
                 0
             }
             WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
