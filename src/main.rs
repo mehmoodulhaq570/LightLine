@@ -57,7 +57,178 @@ mod windows_app {
     const VIOLET: u32 = rgb(149, 109, 255);
     const TEAL: u32 = rgb(103, 220, 215);
     const GREEN: u32 = rgb(111, 220, 163);
+    macro_rules! icon_bytes {
+        ($name:literal) => {
+            include_bytes!(concat!("../assets/material-icon-theme/", $name, ".ico")) as &[u8]
+        };
+    }
+    const MATERIAL_ICONS: [(&str, &[u8]); 22] = [
+        ("file", icon_bytes!("file")),
+        ("folder", icon_bytes!("folder")),
+        ("folder-open", icon_bytes!("folder-open")),
+        ("folder-src", icon_bytes!("folder-src")),
+        ("folder-src-open", icon_bytes!("folder-src-open")),
+        ("folder-docs", icon_bytes!("folder-docs")),
+        ("folder-docs-open", icon_bytes!("folder-docs-open")),
+        ("rust", icon_bytes!("rust")),
+        ("toml", icon_bytes!("toml")),
+        ("markdown", icon_bytes!("markdown")),
+        ("json", icon_bytes!("json")),
+        ("python", icon_bytes!("python")),
+        ("c", icon_bytes!("c")),
+        ("cpp", icon_bytes!("cpp")),
+        ("html", icon_bytes!("html")),
+        ("css", icon_bytes!("css")),
+        ("javascript", icon_bytes!("javascript")),
+        ("typescript", icon_bytes!("typescript")),
+        ("git", icon_bytes!("git")),
+        ("lock", icon_bytes!("lock")),
+        ("yaml", icon_bytes!("yaml")),
+        ("readme", icon_bytes!("readme")),
+    ];
     static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+    struct IconSet {
+        handles: Vec<(&'static str, HICON)>,
+    }
+
+    impl IconSet {
+        fn new(dpi: u32) -> Self {
+            let size = (18 * dpi as i32 + 48) / 96;
+            let handles = MATERIAL_ICONS
+                .iter()
+                .map(|&(name, data)| (name, Self::load_ico(data, size)))
+                .collect();
+            Self { handles }
+        }
+
+        fn load_ico(data: &[u8], size: i32) -> HICON {
+            if data.len() < 6 || data[0..4] != [0, 0, 1, 0] {
+                return null_mut();
+            }
+            let count = u16::from_le_bytes([data[4], data[5]]) as usize;
+            let mut best: Option<(i32, usize, usize)> = None;
+            for index in 0..count {
+                let start = 6 + index * 16;
+                if start + 16 > data.len() {
+                    break;
+                }
+                let width = if data[start] == 0 {
+                    256
+                } else {
+                    data[start] as i32
+                };
+                let length =
+                    u32::from_le_bytes(data[start + 8..start + 12].try_into().unwrap()) as usize;
+                let offset =
+                    u32::from_le_bytes(data[start + 12..start + 16].try_into().unwrap()) as usize;
+                if offset
+                    .checked_add(length)
+                    .is_none_or(|end| end > data.len())
+                {
+                    continue;
+                }
+                let score = (width - size).abs();
+                if best.is_none_or(|(best_score, _, _)| score < best_score) {
+                    best = Some((score, offset, length));
+                }
+            }
+            let Some((_, offset, length)) = best else {
+                return null_mut();
+            };
+            unsafe {
+                CreateIconFromResourceEx(
+                    data.as_ptr().add(offset),
+                    length as u32,
+                    1,
+                    0x0003_0000,
+                    size,
+                    size,
+                    0,
+                )
+            }
+        }
+
+        fn draw(&self, hdc: HDC, name: &str, x: i32, y: i32, size: i32) -> bool {
+            let Some(&(_, icon)) = self.handles.iter().find(|(key, _)| *key == name) else {
+                return false;
+            };
+            if icon.is_null() {
+                return false;
+            }
+            unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 }
+        }
+    }
+
+    impl Drop for IconSet {
+        fn drop(&mut self) {
+            for (_, icon) in &self.handles {
+                if !icon.is_null() {
+                    unsafe { DestroyIcon(*icon) };
+                }
+            }
+        }
+    }
+
+    fn material_icon_for(path: &Path, is_dir: bool, expanded: bool) -> &'static str {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if is_dir {
+            return match (file_name.as_str(), expanded) {
+                ("src", true) => "folder-src-open",
+                ("src", false) => "folder-src",
+                ("docs", true) => "folder-docs-open",
+                ("docs", false) => "folder-docs",
+                (_, true) => "folder-open",
+                _ => "folder",
+            };
+        }
+        if file_name == "readme.md" {
+            return "readme";
+        }
+        if file_name == ".gitignore" || file_name == ".gitattributes" {
+            return "git";
+        }
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "rs" => "rust",
+            "toml" => "toml",
+            "md" | "markdown" => "markdown",
+            "json" | "jsonc" => "json",
+            "py" | "pyw" => "python",
+            "c" | "h" => "c",
+            "cc" | "cpp" | "cxx" | "hpp" => "cpp",
+            "html" | "htm" => "html",
+            "css" => "css",
+            "js" | "jsx" | "mjs" => "javascript",
+            "ts" | "tsx" => "typescript",
+            "lock" => "lock",
+            "yaml" | "yml" => "yaml",
+            _ => "file",
+        }
+    }
+
+    #[cfg(test)]
+    mod icon_tests {
+        use super::*;
+
+        #[test]
+        fn bundled_material_icons_load_as_windows_icons() {
+            for (name, data) in MATERIAL_ICONS {
+                let icon = IconSet::load_ico(data, 24);
+                assert!(!icon.is_null(), "failed to load {name}");
+                unsafe { DestroyIcon(icon) };
+            }
+        }
+    }
 
     unsafe extern "system" fn console_control(event: u32) -> i32 {
         if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
@@ -148,6 +319,7 @@ mod windows_app {
         font: HFONT,
         ui_font: HFONT,
         brand_font: HFONT,
+        icons: IconSet,
         dpi: u32,
         line_height: i32,
         status: String,
@@ -240,6 +412,7 @@ mod windows_app {
                 font: Self::font_for_dpi(dpi),
                 ui_font: Self::ui_font_for_dpi(dpi),
                 brand_font: Self::brand_font_for_dpi(dpi),
+                icons: IconSet::new(dpi),
                 dpi,
                 line_height: (23 * dpi as i32 + 48) / 96,
                 status: "Ready".into(),
@@ -548,6 +721,7 @@ mod windows_app {
             self.font = font;
             self.ui_font = ui_font;
             self.brand_font = brand_font;
+            self.icons = IconSet::new(dpi);
             self.dpi = dpi;
             self.line_height = (23 * dpi as i32 + 48) / 96;
         }
@@ -910,11 +1084,24 @@ mod windows_app {
                             VIOLET,
                         );
                     }
+                    let tab_icon = self.tabs[index]
+                        .document
+                        .path
+                        .as_deref()
+                        .map(|path| material_icon_for(path, false, false))
+                        .unwrap_or("file");
+                    self.icons.draw(
+                        hdc,
+                        tab_icon,
+                        left + self.scale(11),
+                        self.scale(9),
+                        self.scale(18),
+                    );
                     let label = self.tab_label(index);
                     let chars: Vec<u16> = label.encode_utf16().collect();
                     SetTextColor(hdc, if index == self.active { TEXT } else { MUTED });
                     let clip = RECT {
-                        left: left + self.scale(12),
+                        left: left + self.scale(37),
                         top: 0,
                         right: (left + tab_width - self.scale(30)).min(rect.right),
                         bottom: tab_height,
@@ -987,7 +1174,13 @@ mod windows_app {
                     },
                     BLUE,
                 );
-                Self::label(hdc, "□", self.scale(18), self.scale(53), BLUE, rail_clip);
+                self.icons.draw(
+                    hdc,
+                    "folder-open",
+                    self.scale(17),
+                    self.scale(52),
+                    self.scale(18),
+                );
                 Self::label(
                     hdc,
                     "Explorer",
@@ -1054,10 +1247,17 @@ mod windows_app {
                             .file_name()
                             .map(|name| name.to_string_lossy().into_owned())
                             .unwrap_or_else(|| root.display().to_string());
+                        self.icons.draw(
+                            hdc,
+                            "folder-open",
+                            self.scale(RAIL + 16),
+                            self.scale(48),
+                            self.scale(18),
+                        );
                         Self::label(
                             hdc,
-                            &format!("⌄  {}", root_name),
-                            self.scale(RAIL + 16),
+                            &root_name,
+                            self.scale(RAIL + 39),
                             self.scale(49),
                             TEXT,
                             sidebar_clip,
@@ -1099,13 +1299,6 @@ mod windows_app {
                                 .unwrap_or_default()
                                 .to_string_lossy();
                             let left = self.scale(RAIL + 16 + item.depth.min(6) as i32 * 13);
-                            let file_color =
-                                match item.entry.path.extension().and_then(|ext| ext.to_str()) {
-                                    Some("rs") => rgb(241, 142, 136),
-                                    Some("toml") => rgb(240, 181, 111),
-                                    Some("md") => BLUE,
-                                    _ => MUTED,
-                                };
                             if item.entry.is_dir {
                                 Self::label(
                                     hdc,
@@ -1120,22 +1313,34 @@ mod windows_app {
                                         bottom: top + self.scale(EXPLORER_ROW),
                                     },
                                 );
-                            } else {
+                            }
+                            let icon_name = material_icon_for(
+                                &item.entry.path,
+                                item.entry.is_dir,
+                                item.expanded,
+                            );
+                            if !self.icons.draw(
+                                hdc,
+                                icon_name,
+                                left + self.scale(12),
+                                top + self.scale(2),
+                                self.scale(18),
+                            ) {
                                 Self::fill(
                                     hdc,
                                     RECT {
-                                        left: left + self.scale(3),
+                                        left: left + self.scale(16),
                                         top: top + self.scale(8),
-                                        right: left + self.scale(10),
-                                        bottom: top + self.scale(15),
+                                        right: left + self.scale(22),
+                                        bottom: top + self.scale(14),
                                     },
-                                    file_color,
+                                    MUTED,
                                 );
                             }
                             Self::label(
                                 hdc,
                                 &name,
-                                left + self.scale(20),
+                                left + self.scale(36),
                                 top + self.scale(1),
                                 if selected {
                                     TEXT
@@ -1145,7 +1350,7 @@ mod windows_app {
                                     rgb(185, 205, 230)
                                 },
                                 RECT {
-                                    left: left + self.scale(20),
+                                    left: left + self.scale(36),
                                     top,
                                     right: editor_left - self.scale(10),
                                     bottom: top + self.scale(EXPLORER_ROW),

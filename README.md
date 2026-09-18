@@ -33,6 +33,19 @@ To stop a `cargo run` session, close the editor window with its X button. The te
 
 Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. Split panes, project-wide search, and LSP language intelligence are not yet included.
 
+## Default icons
+
+LightLine bundles a small snapshot of [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) as its default file and folder icons. The pinned version and selected icon names are in [VERSION.json](assets/material-icon-theme/VERSION.json), with the upstream [MIT license](assets/material-icon-theme/LICENSE.txt). The app embeds the icons in its executable; users do not need VS Code, its extension, or a marketplace.
+
+When upstream icons change, refresh the snapshot from a newer installed extension or repository checkout:
+
+```powershell
+python tools/update_material_icons.py --source "C:\path\to\vscode-material-icon-theme"
+cargo test --offline
+```
+
+The refresh script needs PyQt5 and Pillow on the developer's machine to convert selected SVGs into Windows icons. These packages are not runtime dependencies. Review the changed assets and ship them in a LightLine release. Additional file associations can be added to the icon map in `src/main.rs`. There is no automatic icon update in this version.
+
 ## Baseline measurement
 
 ```powershell

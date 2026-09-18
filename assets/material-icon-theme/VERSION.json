@@ -1,0 +1,29 @@
+{
+  "name": "Material Icon Theme",
+  "version": "5.38.1",
+  "source": "https://github.com/material-extensions/vscode-material-icon-theme",
+  "icons": [
+    "file",
+    "folder",
+    "folder-open",
+    "folder-src",
+    "folder-src-open",
+    "folder-docs",
+    "folder-docs-open",
+    "rust",
+    "toml",
+    "markdown",
+    "json",
+    "python",
+    "c",
+    "cpp",
+    "html",
+    "css",
+    "javascript",
+    "typescript",
+    "git",
+    "lock",
+    "yaml",
+    "readme"
+  ]
+}

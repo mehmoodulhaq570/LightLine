@@ -9,6 +9,7 @@ The supplied LightLine image is a design board. Its large upper frame shows the 
 - Near-black navy canvas and layered dark blue surfaces keep the code area dominant.
 - Thin blue borders, violet active states, and restrained teal accents identify interaction and status.
 - Code uses blue keywords, teal types, green strings, violet macros, warm numbers, and muted comments. Bright foreground text stays readable against the dark background.
+- File and folder glyphs use a pinned Material Icon Theme snapshot that LightLine embeds and updates with its own releases.
 - A narrow activity rail gives access to navigation. A collapsible file explorer sits beside the editor. Tabs and breadcrumbs tell users where they are. The bottom status strip carries transient messages and cursor details.
 - The reference uses compact typography, subtle row highlights, and generous spacing between major panels. Decorative gradients and rounded cards belong mainly to its Welcome and tool views; the writing surface stays quiet.
 
