@@ -11,18 +11,18 @@ impl App {
         unsafe {
             DrawIconEx(
                 hdc,
-                self.scale(15),
-                self.scale(9),
+                self.scale(10),
+                self.scale(5),
                 self.brand_icon,
-                self.scale(24),
-                self.scale(24),
+                self.scale(32),
+                self.scale(32),
                 0,
                 null_mut(),
                 DI_NORMAL,
             );
             SelectObject(hdc, self.brand_font);
         }
-        Self::label(hdc, "LightLine", self.scale(43), self.scale(9), TEXT, clip);
+        Self::label(hdc, "LightLine", self.scale(48), self.scale(9), TEXT, clip);
         Self::rounded_fill(
             hdc,
             RECT {
@@ -158,8 +158,8 @@ impl App {
                 self.scale(26),
                 self.scale(21),
                 self.brand_icon,
-                self.scale(24),
-                self.scale(24),
+                self.scale(32),
+                self.scale(32),
                 0,
                 null_mut(),
                 DI_NORMAL,

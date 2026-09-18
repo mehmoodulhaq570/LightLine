@@ -395,7 +395,7 @@ pub fn run() -> io::Result<()> {
             &dark_titlebar as *const i32 as *const std::ffi::c_void,
             size_of::<i32>() as u32,
         );
-        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.brand)));
+        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large)));
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,

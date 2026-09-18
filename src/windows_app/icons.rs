@@ -37,32 +37,23 @@ const LIGHTLINE_ICON: &[u8] = include_bytes!("../../assets/lightline.ico");
 
 pub(super) struct AppIcons {
     pub(super) small: HICON,
-    pub(super) brand: HICON,
     pub(super) large: HICON,
 }
 
 impl AppIcons {
     pub(super) fn new() -> Option<Self> {
         let small = IconSet::load_ico(LIGHTLINE_ICON, 16);
-        let brand = IconSet::load_ico(LIGHTLINE_ICON, 24);
         let large = IconSet::load_ico(LIGHTLINE_ICON, 32);
-        if small.is_null() || brand.is_null() || large.is_null() {
+        if small.is_null() || large.is_null() {
             if !small.is_null() {
                 unsafe { DestroyIcon(small) };
-            }
-            if !brand.is_null() {
-                unsafe { DestroyIcon(brand) };
             }
             if !large.is_null() {
                 unsafe { DestroyIcon(large) };
             }
             return None;
         }
-        Some(Self {
-            small,
-            brand,
-            large,
-        })
+        Some(Self { small, large })
     }
 }
 
@@ -70,7 +61,6 @@ impl Drop for AppIcons {
     fn drop(&mut self) {
         unsafe {
             DestroyIcon(self.small);
-            DestroyIcon(self.brand);
             DestroyIcon(self.large);
         }
     }
