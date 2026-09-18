@@ -1,9 +1,9 @@
-use my_editor::document::{Document, Pos};
+use lightline::document::{Document, Pos};
 use std::fs;
 use std::time::Instant;
 
 fn main() -> std::io::Result<()> {
-    let path = std::env::temp_dir().join(format!("my-editor-measure-{}.txt", std::process::id()));
+    let path = std::env::temp_dir().join(format!("lightline-measure-{}.txt", std::process::id()));
     let mut data = String::with_capacity(3_000_000);
     for i in 0..100_000 {
         data.push_str(&format!("line {i}: fn example() {{}}\n"));

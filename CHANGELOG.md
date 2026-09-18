@@ -6,6 +6,7 @@ Changes to the project are recorded here. Planned architecture is documented sep
 
 ### Added
 
+- Renamed the app, Rust package, executable, window title, dialogs, and documentation to **LightLine**. Refined the reference-inspired rail and explorer with compact typography, labeled actions, file colors, active-file reveal, and concise status messages.
 - Adapted the supplied dark-navy IDE reference to the native editor: activity rail, lazy file explorer, breadcrumb row, active-line and indentation guides, dark title bar, compact UI text, and blue/violet/teal syntax colors. Documented the reference's separate screens and future workflow in [the adaptation notes](design/REFERENCE_ADAPTATION.md).
 - Recorded the [v0.1 technical direction](docs/ARCHITECTURE.md), including system boundaries, technology candidates, lazy services, optional AI and plugins, performance measures, and the staged roadmap.
 - Added this changelog so architecture and implementation changes can be tracked over time.

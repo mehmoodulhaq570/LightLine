@@ -1,4 +1,4 @@
-# Quiet Workbench: My Editor visual direction
+# Quiet Workbench: earlier LightLine visual concept
 
 Open [the interactive prototype](workbench-prototype.html) in a browser. The screen buttons and controls inside the mock application change the view. The prototype is a design artifact; it does not change the Rust editor.
 

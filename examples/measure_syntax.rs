@@ -1,5 +1,5 @@
-use my_editor::document::{Document, Pos};
-use my_editor::syntax::RustSyntax;
+use lightline::document::{Document, Pos};
+use lightline::syntax::RustSyntax;
 use std::time::{Duration, Instant};
 
 fn wait_for_syntax(syntax: &mut RustSyntax, document: &Document, line: usize) {

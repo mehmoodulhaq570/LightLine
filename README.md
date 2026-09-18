@@ -1,4 +1,4 @@
-# My Editor
+# LightLine
 
 A small Windows text editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, and Rust syntax coloring. It paints only the visible lines of the active document.
 
@@ -29,7 +29,7 @@ The explorer opens around the first file you open, preferring a nearby Cargo or 
 
 Click a tab to switch to it, or click its × to close it. Each tab retains its cursor, selection, scroll position, undo history, and unsaved changes. Opening a file already open in a tab switches to that tab. Closing a dirty tab or the window prompts to save its changes. Arrow keys, Home, End, Page Up/Down, Enter, Backspace, Delete, Tab, mouse clicks, mouse drag selection, and the mouse wheel also work. Hold Shift while navigating to extend a selection. Find is currently case-sensitive and searches the active file only.
 
-To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process my-editor | Stop-Process`.
+To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process lightline | Stop-Process`.
 
 Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. Split panes, project-wide search, and LSP language intelligence are not yet included.
 

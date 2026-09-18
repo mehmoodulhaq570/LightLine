@@ -2,9 +2,9 @@
 
 #[cfg(windows)]
 mod windows_app {
-    use my_editor::clipboard;
-    use my_editor::document::{Document, Pos};
-    use my_editor::syntax::{Color, RustSyntax};
+    use lightline::clipboard;
+    use lightline::document::{Document, Pos};
+    use lightline::syntax::{Color, RustSyntax};
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
     use std::io;
@@ -28,8 +28,8 @@ mod windows_app {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    const RAIL: i32 = 58;
-    const SIDEBAR: i32 = 228;
+    const RAIL: i32 = 132;
+    const SIDEBAR: i32 = 200;
     const GUTTER: i32 = 62;
     const TOP: i32 = 7;
     const STATUS: i32 = 27;
@@ -37,8 +37,8 @@ mod windows_app {
     const TAB_HEIGHT: i32 = 38;
     const BREADCRUMB_HEIGHT: i32 = 27;
     const TAB_WIDTH: i32 = 180;
-    const EXPLORER_ROW: i32 = 27;
-    const EXPLORER_TOP: i32 = 86;
+    const EXPLORER_ROW: i32 = 24;
+    const EXPLORER_TOP: i32 = 78;
     const fn rgb(r: u8, g: u8, b: u8) -> u32 {
         r as u32 | ((g as u32) << 8) | ((b as u32) << 16)
     }
@@ -147,6 +147,7 @@ mod windows_app {
         tab_first: usize,
         font: HFONT,
         ui_font: HFONT,
+        brand_font: HFONT,
         dpi: u32,
         line_height: i32,
         status: String,
@@ -190,11 +191,33 @@ mod windows_app {
             let font_name = wide("Segoe UI");
             unsafe {
                 CreateFontW(
-                    -((15 * dpi as i32 + 48) / 96),
+                    -((13 * dpi as i32 + 48) / 96),
                     0,
                     0,
                     0,
                     400,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    CLEARTYPE_QUALITY as u32,
+                    0,
+                    font_name.as_ptr(),
+                )
+            }
+        }
+
+        fn brand_font_for_dpi(dpi: u32) -> HFONT {
+            let font_name = wide("Segoe UI Semibold");
+            unsafe {
+                CreateFontW(
+                    -((17 * dpi as i32 + 48) / 96),
+                    0,
+                    0,
+                    0,
+                    600,
                     0,
                     0,
                     0,
@@ -216,6 +239,7 @@ mod windows_app {
                 tab_first: 0,
                 font: Self::font_for_dpi(dpi),
                 ui_font: Self::ui_font_for_dpi(dpi),
+                brand_font: Self::brand_font_for_dpi(dpi),
                 dpi,
                 line_height: (23 * dpi as i32 + 48) / 96,
                 status: "Ready".into(),
@@ -273,6 +297,9 @@ mod windows_app {
                 .filter_map(Result::ok)
                 .take(400)
                 .filter_map(|entry| {
+                    if matches!(entry.file_name().to_str(), Some(".git" | "target")) {
+                        return None;
+                    }
                     let is_dir = entry.file_type().ok()?.is_dir();
                     Some(ExplorerEntry {
                         path: entry.path(),
@@ -281,7 +308,16 @@ mod windows_app {
                 })
                 .collect();
             entries.sort_by(|a, b| {
-                b.is_dir.cmp(&a.is_dir).then_with(|| {
+                let rank = |entry: &ExplorerEntry| {
+                    if entry.is_dir && entry.path.file_name().is_some_and(|name| name == "src") {
+                        0
+                    } else if entry.is_dir {
+                        1
+                    } else {
+                        2
+                    }
+                };
+                rank(a).cmp(&rank(b)).then_with(|| {
                     a.path
                         .file_name()
                         .unwrap_or_default()
@@ -314,6 +350,24 @@ mod windows_app {
                 self.workspace_root = Some(root.clone());
                 self.expanded_dirs.insert(root.clone());
                 self.load_directory(&root);
+            }
+        }
+
+        fn reveal_file_in_explorer(&mut self, path: &Path) {
+            let Some(root) = self.workspace_root.clone() else {
+                return;
+            };
+            let Some(parent) = path.parent() else {
+                return;
+            };
+            let Ok(relative) = parent.strip_prefix(&root) else {
+                return;
+            };
+            let mut dir = root;
+            for part in relative.components().take(8) {
+                dir.push(part);
+                self.expanded_dirs.insert(dir.clone());
+                self.load_directory(&dir);
             }
         }
 
@@ -467,7 +521,8 @@ mod windows_app {
             }
             let font = Self::font_for_dpi(dpi);
             let ui_font = Self::ui_font_for_dpi(dpi);
-            if font.is_null() || ui_font.is_null() {
+            let brand_font = Self::brand_font_for_dpi(dpi);
+            if font.is_null() || ui_font.is_null() || brand_font.is_null() {
                 if !font.is_null() {
                     unsafe {
                         DeleteObject(font);
@@ -478,14 +533,21 @@ mod windows_app {
                         DeleteObject(ui_font);
                     }
                 }
+                if !brand_font.is_null() {
+                    unsafe {
+                        DeleteObject(brand_font);
+                    }
+                }
                 return;
             }
             unsafe {
                 DeleteObject(self.font);
                 DeleteObject(self.ui_font);
+                DeleteObject(self.brand_font);
             }
             self.font = font;
             self.ui_font = ui_font;
+            self.brand_font = brand_font;
             self.dpi = dpi;
             self.line_height = (23 * dpi as i32 + 48) / 96;
         }
@@ -545,7 +607,7 @@ mod windows_app {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "Untitled".into());
             let title = format!(
-                "{}{} — My Editor",
+                "{}{} — LightLine",
                 file,
                 if self.doc().is_dirty() { " *" } else { "" }
             );
@@ -882,26 +944,86 @@ mod windows_app {
                     right: self.scale(RAIL),
                     bottom: editor_bottom,
                 };
+                SelectObject(hdc, self.brand_font);
+                Self::label(hdc, "✦", self.scale(14), self.scale(7), VIOLET, rail_clip);
+                Self::label(
+                    hdc,
+                    "LightLine",
+                    self.scale(36),
+                    self.scale(7),
+                    TEXT,
+                    rail_clip,
+                );
+                SelectObject(hdc, self.ui_font);
                 Self::fill(
                     hdc,
                     RECT {
                         left: 0,
-                        top: self.scale(49),
+                        top: self.scale(38),
+                        right: self.scale(RAIL),
+                        bottom: self.scale(39),
+                    },
+                    EDGE,
+                );
+                if self.explorer_visible {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: self.scale(7),
+                            top: self.scale(46),
+                            right: self.scale(RAIL - 7),
+                            bottom: self.scale(80),
+                        },
+                        ACTIVE_BG,
+                    );
+                }
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: 0,
+                        top: self.scale(48),
                         right: self.scale(3),
-                        bottom: self.scale(91),
+                        bottom: self.scale(78),
                     },
                     BLUE,
                 );
-                Self::label(hdc, "▣", self.scale(18), self.scale(15), VIOLET, rail_clip);
+                Self::label(hdc, "□", self.scale(18), self.scale(53), BLUE, rail_clip);
                 Self::label(
                     hdc,
-                    "F",
-                    self.scale(22),
-                    self.scale(54),
+                    "Explorer",
+                    self.scale(42),
+                    self.scale(53),
                     if self.explorer_visible { TEXT } else { MUTED },
                     rail_clip,
                 );
-                Self::label(hdc, "⌕", self.scale(19), self.scale(107), MUTED, rail_clip);
+                Self::label(hdc, "⌕", self.scale(18), self.scale(95), MUTED, rail_clip);
+                Self::label(
+                    hdc,
+                    "Search",
+                    self.scale(42),
+                    self.scale(95),
+                    MUTED,
+                    rail_clip,
+                );
+                if let Some(root) = &self.workspace_root {
+                    let name = root.file_name().unwrap_or_default().to_string_lossy();
+                    Self::label(
+                        hdc,
+                        "WORKSPACE",
+                        self.scale(16),
+                        editor_bottom - self.scale(60),
+                        MUTED,
+                        rail_clip,
+                    );
+                    Self::label(
+                        hdc,
+                        &name,
+                        self.scale(16),
+                        editor_bottom - self.scale(37),
+                        TEXT,
+                        rail_clip,
+                    );
+                }
                 if self.explorer_visible {
                     let sidebar_clip = RECT {
                         left: self.scale(RAIL),
@@ -911,10 +1033,10 @@ mod windows_app {
                     };
                     Self::label(
                         hdc,
-                        "EXPLORER",
-                        self.scale(RAIL + 17),
-                        self.scale(10),
-                        TEXT,
+                        "FILES",
+                        self.scale(RAIL + 16),
+                        self.scale(11),
+                        MUTED,
                         sidebar_clip,
                     );
                     Self::fill(
@@ -936,8 +1058,8 @@ mod windows_app {
                             hdc,
                             &format!("⌄  {}", root_name),
                             self.scale(RAIL + 16),
-                            self.scale(54),
-                            MUTED,
+                            self.scale(49),
+                            TEXT,
                             sidebar_clip,
                         );
                         for (row, item) in self
@@ -976,18 +1098,45 @@ mod windows_app {
                                 .file_name()
                                 .unwrap_or_default()
                                 .to_string_lossy();
-                            let symbol = if item.entry.is_dir {
-                                if item.expanded { "⌄" } else { "›" }
+                            let left = self.scale(RAIL + 16 + item.depth.min(6) as i32 * 13);
+                            let file_color =
+                                match item.entry.path.extension().and_then(|ext| ext.to_str()) {
+                                    Some("rs") => rgb(241, 142, 136),
+                                    Some("toml") => rgb(240, 181, 111),
+                                    Some("md") => BLUE,
+                                    _ => MUTED,
+                                };
+                            if item.entry.is_dir {
+                                Self::label(
+                                    hdc,
+                                    if item.expanded { "⌄" } else { "›" },
+                                    left,
+                                    top + self.scale(1),
+                                    MUTED,
+                                    RECT {
+                                        left,
+                                        top,
+                                        right: editor_left - self.scale(9),
+                                        bottom: top + self.scale(EXPLORER_ROW),
+                                    },
+                                );
                             } else {
-                                "·"
-                            };
-                            let label = format!("{}  {}", symbol, name);
-                            let left = self.scale(RAIL + 18 + item.depth.min(6) as i32 * 13);
+                                Self::fill(
+                                    hdc,
+                                    RECT {
+                                        left: left + self.scale(3),
+                                        top: top + self.scale(8),
+                                        right: left + self.scale(10),
+                                        bottom: top + self.scale(15),
+                                    },
+                                    file_color,
+                                );
+                            }
                             Self::label(
                                 hdc,
-                                &label,
-                                left,
-                                top + self.scale(2),
+                                &name,
+                                left + self.scale(20),
+                                top + self.scale(1),
                                 if selected {
                                     TEXT
                                 } else if item.entry.is_dir {
@@ -996,7 +1145,7 @@ mod windows_app {
                                     rgb(185, 205, 230)
                                 },
                                 RECT {
-                                    left,
+                                    left: left + self.scale(20),
                                     top,
                                     right: editor_left - self.scale(10),
                                     bottom: top + self.scale(EXPLORER_ROW),
@@ -1007,16 +1156,16 @@ mod windows_app {
                         Self::label(
                             hdc,
                             "Open a file to browse",
-                            self.scale(RAIL + 17),
-                            self.scale(55),
+                            self.scale(RAIL + 16),
+                            self.scale(49),
                             MUTED,
                             sidebar_clip,
                         );
                         Self::label(
                             hdc,
                             "its folder  (Ctrl+O)",
-                            self.scale(RAIL + 17),
-                            self.scale(82),
+                            self.scale(RAIL + 16),
+                            self.scale(73),
                             MUTED,
                             sidebar_clip,
                         );
@@ -1263,7 +1412,7 @@ mod windows_app {
                 MessageBoxW(
                     hwnd,
                     wide(&self.status).as_ptr(),
-                    wide("My Editor").as_ptr(),
+                    wide("LightLine").as_ptr(),
                     MB_OK | MB_ICONERROR,
                 );
             }
@@ -1329,13 +1478,17 @@ mod windows_app {
                 Ok(()) => {
                     self.tab_mut().update_syntax_language();
                     self.set_workspace_from_file(&path);
+                    self.reveal_file_in_explorer(&path);
                     if let Some(parent) = path.parent() {
                         self.directory_cache.remove(parent);
                         if self.expanded_dirs.contains(parent) {
                             self.load_directory(parent);
                         }
                     }
-                    self.status = format!("Saved {}", path.display());
+                    self.status = format!(
+                        "Saved {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
                     self.refresh(hwnd);
                     true
                 }
@@ -1354,7 +1507,7 @@ mod windows_app {
                 MessageBoxW(
                     hwnd,
                     wide(&format!("Save changes to {}?", self.tab_label(self.active))).as_ptr(),
-                    wide("My Editor").as_ptr(),
+                    wide("LightLine").as_ptr(),
                     MB_YESNOCANCEL | MB_ICONQUESTION,
                 )
             };
@@ -1377,7 +1530,10 @@ mod windows_app {
                     .is_some_and(|open| Self::same_path(open, &path))
             }) {
                 self.activate_tab(hwnd, index);
-                self.status = format!("Already open: {}", path.display());
+                self.status = format!(
+                    "Already open: {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
                 return;
             }
             match Document::open(path.clone()) {
@@ -1394,7 +1550,11 @@ mod windows_app {
                         self.active = self.tabs.len() - 1;
                     }
                     self.set_workspace_from_file(&path);
-                    self.status = format!("Opened {}", path.display());
+                    self.reveal_file_in_explorer(&path);
+                    self.status = format!(
+                        "Opened {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
                     self.show_active_tab(hwnd);
                 }
                 Err(error) => self.error(hwnd, &error),
@@ -1735,10 +1895,10 @@ mod windows_app {
             let rail = self.scale(RAIL);
             let editor_left = self.editor_left();
             if x < rail {
-                if y >= self.scale(46) && y < self.scale(94) {
+                if y >= self.scale(46) && y < self.scale(82) {
                     self.explorer_visible = !self.explorer_visible;
                     self.show_active_tab(hwnd);
-                } else if y >= self.scale(100) && y < self.scale(148) {
+                } else if y >= self.scale(88) && y < self.scale(124) {
                     self.find_mode = true;
                     self.find_query.clear();
                     self.status = "Find: ".into();
@@ -2041,7 +2201,7 @@ mod windows_app {
         unsafe {
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             let instance = GetModuleHandleW(null());
-            let class = wide("MyEditorWindow");
+            let class = wide("LightLineWindow");
             let wc = WNDCLASSW {
                 style: CS_HREDRAW | CS_VREDRAW,
                 lpfnWndProc: Some(wnd_proc),
@@ -2056,7 +2216,7 @@ mod windows_app {
             let hwnd = CreateWindowExW(
                 0,
                 class.as_ptr(),
-                wide("My Editor").as_ptr(),
+                wide("LightLine").as_ptr(),
                 WS_OVERLAPPEDWINDOW | WS_VSCROLL,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -2098,6 +2258,7 @@ mod windows_app {
             }
             DeleteObject(app.borrow().font);
             DeleteObject(app.borrow().ui_font);
+            DeleteObject(app.borrow().brand_font);
             Ok(())
         }
     }
@@ -2106,11 +2267,11 @@ mod windows_app {
 #[cfg(windows)]
 fn main() {
     if let Err(error) = windows_app::run() {
-        eprintln!("My Editor: {error}");
+        eprintln!("LightLine: {error}");
     }
 }
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("My Editor currently supports Windows only.");
+    eprintln!("LightLine currently supports Windows only.");
 }

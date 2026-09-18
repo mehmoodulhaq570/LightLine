@@ -362,7 +362,7 @@ impl Document {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let mut temporary = None;
         for n in 0..100 {
-            let name = format!(".my-editor-{}-{n}.tmp", std::process::id());
+            let name = format!(".lightline-{}-{n}.tmp", std::process::id());
             let candidate = parent.join(name);
             match OpenOptions::new()
                 .write(true)
@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn save_round_trip_preserves_crlf_and_bom() {
-        let path = std::env::temp_dir().join(format!("my-editor-test-{}.txt", std::process::id()));
+        let path = std::env::temp_dir().join(format!("lightline-test-{}.txt", std::process::id()));
         std::fs::write(&path, b"\xef\xbb\xbfhello\r\nworld").unwrap();
         let mut doc = Document::open(path.clone()).unwrap();
         doc.replace(Pos { line: 1, byte: 5 }, Pos { line: 1, byte: 5 }, "!");

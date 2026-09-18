@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Editor — Quiet Workbench concept</title>
+  <title>LightLine — Quiet Workbench concept</title>
   <style>
     :root {
       color-scheme: dark;
@@ -166,7 +166,7 @@
     <div class="eyebrow">Design exploration / 01</div>
     <div class="intro">
       <h1>The quiet workbench.</h1>
-      <p>A new direction for My Editor: the code is the permanent surface. Project files, search, run output, and review appear when the developer asks for them.</p>
+      <p>An earlier direction for LightLine: the code is the permanent surface. Project files, search, run output, and review appear when the developer asks for them.</p>
     </div>
     <nav class="scene-nav" aria-label="Design screens">
       <button data-scene="welcome">01 Start</button>
@@ -224,7 +224,7 @@
     function topbar(scene) {
       const project = scene === 'welcome' ? 'No workspace open' : 'custom-ide  /  src';
       const actions = scene === 'welcome' ? '<button class="icon-btn" data-go="explore" title="Open project" aria-label="Open project">▤</button>' : '<button class="icon-btn" data-go="explore" title="Project files" aria-label="Project files">▤</button><button class="run-btn" data-go="run" aria-label="Run current project">▶ <span>Run</span></button><button class="icon-btn" data-go="review" title="Review changes" aria-label="Review changes">◇</button>';
-      return `<header class="titlebar"><div class="brand"><span class="mark">m/</span><span class="brand-name">My Editor</span><span class="workspace-name">${project}</span></div><button class="title-search" data-go="quick" aria-label="Open quick search"><span>⌕ &nbsp; Search files, symbols, commands</span><kbd>Ctrl P</kbd></button><div class="title-actions">${actions}</div></header>`;
+      return `<header class="titlebar"><div class="brand"><span class="mark">✦</span><span class="brand-name">LightLine</span><span class="workspace-name">${project}</span></div><button class="title-search" data-go="quick" aria-label="Open quick search"><span>⌕ &nbsp; Search files, symbols, commands</span><kbd>Ctrl P</kbd></button><div class="title-actions">${actions}</div></header>`;
     }
     function tabs(scene) {
       const second = scene === 'review' ? 'Diff: main.rs' : 'document.rs';
