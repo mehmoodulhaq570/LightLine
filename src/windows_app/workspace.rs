@@ -112,6 +112,15 @@ impl App {
         unsafe { KillTimer(hwnd, 5) };
         self.side_view = SideView::Files;
         self.panel_focus = false;
+        self.lsp.clear();
+        self.lsp_failed_at.clear();
+        self.hover_target = None;
+        self.hover_card = None;
+        for tab in &mut self.tabs {
+            tab.lsp_opened = false;
+            tab.lsp_language = None;
+            tab.diagnostics.clear();
+        }
         self.load_directory(&root);
         workflow::remember_workspace(&root);
         self.recent = workflow::recent_workspaces();

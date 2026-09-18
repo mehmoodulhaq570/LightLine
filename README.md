@@ -1,6 +1,6 @@
 # LightLine
 
-A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust syntax coloring, rust-analyzer diagnostics and hover, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
+A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust syntax coloring, rust-analyzer diagnostics and hover, Pyright diagnostics and hover for Python, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
@@ -30,7 +30,8 @@ You can pass a UTF-8 file path as the first argument.
 | Quick Open files and commands | Ctrl+P; type `>` for commands |
 | Search across workspace files | Ctrl+Shift+F; type a query, press Enter |
 | Run Rust tests; review Git changes | Ctrl+Shift+B; Ctrl+Shift+G |
-| Show Rust hover information at the cursor | F1, or pause the mouse over code |
+| Show Rust or Python hover information at the cursor | F1, or pause the mouse over code |
+| Select a Python interpreter or virtual environment | Ctrl+P, type `>python`, choose the interpreter or virtual-environment command |
 
 The Start screen offers Open File, Open Folder, New File, and recent workspaces. Clicking the LightLine name returns to Start. Opening a file picks a nearby Cargo or Git root; Open Folder chooses one explicitly. Recent workspaces are stored in `%APPDATA%\LightLine\recent-workspaces.txt`. The explorer loads only opened folders, so project contents are not indexed at startup. The activity rail follows the LightLine reference design; the branch shown in its workspace footer comes from `.git/HEAD`.
 
@@ -44,7 +45,9 @@ To stop a `cargo run` session, close the editor window with its X button. The te
 
 Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text.
 
-For Rust diagnostics and hover, install the toolchain components with `rustup component add rust-analyzer rust-src`. LightLine starts rust-analyzer when you open a Rust file up to 2 MiB, using the nearest Cargo workspace when available. Errors and warnings appear in the gutter and under the code; move the cursor onto a marked line to read its message in the status bar. Press F1 or pause the mouse over Rust code for hover information. Edits are sent incrementally, and saving sends a save notification so cargo check diagnostics can refresh. Split panes showing the same file share one document and one LSP update. The server runs separately from the UI; if it exits, editing continues and the status bar shows the error. The first LSP slice does not include completion, navigation, or formatting.
+For Rust diagnostics and hover, install the toolchain components with `rustup component add rust-analyzer rust-src`. LightLine starts rust-analyzer when you open a Rust file up to 2 MiB, using the nearest Cargo workspace when available. For Python diagnostics and hover, install Pyright so `pyright-langserver` is on PATH, for example `npm.cmd install -g pyright` in PowerShell. LightLine starts Pyright lazily when you open a `.py` file up to 2 MiB, using the nearest Python project marker, Git root, or open workspace. Use Ctrl+P, type `>python`, then choose **Select Python interpreter** or **Select Python virtual environment**; picking a venv uses its `Scripts\python.exe` or `bin/python` so imports resolve against that environment. Errors and warnings appear in the gutter and under the code; move the cursor onto a marked line to read its message in the status bar. Press F1 or pause the mouse over Rust or Python code for hover information. Edits are sent incrementally, and saving sends a save notification so diagnostics can refresh. Split panes showing the same file share one document and one LSP update. Each server runs separately from the UI; if it is slow or exits, editing continues and the status bar shows the error. This LSP slice does not include completion, navigation, or formatting.
+
+To check Python support, open a `.py` file containing `value: int = "wrong"`, wait for the red diagnostic, then move the cursor to that line to read its message. Place the cursor on `value` and press F1 to see its type. Replace `"wrong"` with `7` and save; the diagnostic should clear. For an automated server check, run `cargo test --test lsp_live pyright_publishes_diagnostics_and_hover -- --ignored --nocapture` after installing Pyright. The Pyright interpreter choice lasts for the current LightLine session.
 
 ## Default icons
 

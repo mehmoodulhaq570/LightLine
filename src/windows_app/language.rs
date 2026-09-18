@@ -7,62 +7,104 @@ pub(super) const LSP_EVENT_MESSAGE: u32 = WM_APP + 7;
 
 impl App {
     pub(super) fn ensure_lsp(&mut self, hwnd: HWND) {
-        let Some(path) = self
-            .doc()
-            .path
-            .as_deref()
-            .filter(|_| Tab::is_rust(self.doc()))
-        else {
+        let Some(language) = Tab::lsp_language(self.doc()) else {
+            return;
+        };
+        let Some(path) = self.doc().path.as_deref() else {
             return;
         };
         if self.doc().byte_len() > LSP_MAX_FILE_BYTES {
-            self.status = "Rust language support skipped for files over 2 MiB".into();
+            self.status = format!(
+                "{} language support skipped for files over 2 MiB",
+                language.name()
+            );
             return;
         }
         let path = path.to_path_buf();
-        let root = path
-            .ancestors()
-            .skip(1)
-            .take(10)
-            .find(|folder| folder.join("Cargo.toml").is_file())
-            .or_else(|| path.parent())
-            .unwrap_or(Path::new("."))
-            .to_path_buf();
-        if self.lsp.as_ref().is_none_or(|client| client.root() != root) {
+        let root = self.lsp_root(language, &path);
+        if self
+            .lsp
+            .get(&language)
+            .is_none_or(|client| client.root() != root)
+        {
             if self
                 .lsp_failed_at
+                .get(&language)
                 .is_some_and(|when| when.elapsed() < Duration::from_secs(3))
             {
                 return;
             }
-            self.lsp = None;
-            self.lsp_events = None;
-            for tab in &mut self.tabs {
-                tab.lsp_opened = false;
-                tab.diagnostics.clear();
-            }
-            let (sender, receiver) = mpsc::channel();
+            self.reset_language_client(language);
             let hwnd_value = hwnd as isize;
             let wake = Arc::new(move || unsafe {
                 PostMessageW(hwnd_value as HWND, LSP_EVENT_MESSAGE, 0, 0);
             });
-            self.lsp = Some(LspClient::start(root, sender, wake));
-            self.lsp_events = Some(receiver);
-            self.lsp_failed_at = None;
+            let client = LspClient::start(
+                language,
+                root,
+                (language == LspLanguage::Python)
+                    .then(|| self.python_interpreter.clone())
+                    .flatten(),
+                self.lsp_event_tx.clone(),
+                wake,
+            );
+            self.lsp.insert(language, client);
+            self.lsp_failed_at.remove(&language);
         }
-        if !self.tab().lsp_opened {
+        if !self.tab().lsp_opened || self.tab().lsp_language != Some(language) {
             let uri = lsp::file_uri(&path);
             let text = self.doc().text();
             let version = 1;
             if self
                 .lsp
-                .as_ref()
+                .get(&language)
                 .is_some_and(|client| client.send(LspCommand::Open { uri, text, version }))
             {
                 let tab = self.tab_mut();
                 tab.lsp_opened = true;
+                tab.lsp_language = Some(language);
                 tab.lsp_version = version;
                 tab.lsp_serial = tab.document.change_serial();
+            }
+        }
+    }
+
+    fn lsp_root(&self, language: LspLanguage, path: &Path) -> PathBuf {
+        match language {
+            LspLanguage::Rust => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| folder.join("Cargo.toml").is_file())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            LspLanguage::Python => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| {
+                    folder.join("pyproject.toml").is_file()
+                        || folder.join("setup.py").is_file()
+                        || folder.join("setup.cfg").is_file()
+                        || folder.join("requirements.txt").is_file()
+                        || folder.join(".venv").is_dir()
+                        || folder.join(".git").exists()
+                })
+                .or(self.workspace_root.as_deref())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+        }
+    }
+
+    fn reset_language_client(&mut self, language: LspLanguage) {
+        self.lsp.remove(&language);
+        for tab in &mut self.tabs {
+            if tab.lsp_language == Some(language) {
+                tab.lsp_opened = false;
+                tab.lsp_language = None;
+                tab.diagnostics.clear();
             }
         }
     }
@@ -72,6 +114,9 @@ impl App {
         if !tab.lsp_opened || tab.lsp_serial == tab.document.change_serial() {
             return;
         }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
         let Some(path) = tab.document.path.as_deref() else {
             return;
         };
@@ -90,7 +135,7 @@ impl App {
                 character: change.end_utf16 as u32,
             },
         };
-        let sent = self.lsp.as_ref().is_some_and(|client| {
+        let sent = self.lsp.get(&language).is_some_and(|client| {
             client.send(LspCommand::Change {
                 uri,
                 version,
@@ -105,19 +150,21 @@ impl App {
             tab.lsp_serial = change.serial;
         } else {
             tab.lsp_opened = false;
+            tab.lsp_language = None;
         }
     }
 
     pub(super) fn close_lsp_tab(&mut self, index: usize) {
         let tab = &mut self.tabs[index];
         if tab.lsp_opened {
-            if let Some(path) = tab.document.path.as_deref() {
+            if let (Some(language), Some(path)) = (tab.lsp_language, tab.document.path.as_deref()) {
                 let uri = lsp::file_uri(path);
-                if let Some(client) = &self.lsp {
+                if let Some(client) = self.lsp.get(&language) {
                     client.send(LspCommand::Close { uri });
                 }
             }
             tab.lsp_opened = false;
+            tab.lsp_language = None;
         }
     }
 
@@ -125,20 +172,23 @@ impl App {
         let changed_path = old_path != self.doc().path.as_deref();
         if changed_path {
             if self.tab().lsp_opened
-                && let Some(path) = old_path
-                && let Some(client) = &self.lsp
+                && let (Some(language), Some(path)) = (self.tab().lsp_language, old_path)
+                && let Some(client) = self.lsp.get(&language)
             {
                 client.send(LspCommand::Close {
                     uri: lsp::file_uri(path),
                 });
             }
-            self.tab_mut().lsp_opened = false;
-            self.tab_mut().diagnostics.clear();
+            let tab = self.tab_mut();
+            tab.lsp_opened = false;
+            tab.lsp_language = None;
+            tab.diagnostics.clear();
         }
         self.ensure_lsp(hwnd);
         if self.tab().lsp_opened
-            && let Some(path) = self.doc().path.as_deref()
-            && let Some(client) = &self.lsp
+            && let (Some(language), Some(path)) =
+                (self.tab().lsp_language, self.doc().path.as_deref())
+            && let Some(client) = self.lsp.get(&language)
         {
             client.send(LspCommand::Save {
                 uri: lsp::file_uri(path),
@@ -147,46 +197,50 @@ impl App {
     }
 
     pub(super) fn poll_lsp(&mut self, hwnd: HWND) {
-        let events: Vec<LspEvent> = self
-            .lsp_events
-            .as_ref()
-            .map_or_else(Vec::new, |receiver| receiver.try_iter().collect());
+        let events: Vec<LspEvent> = self.lsp_events.try_iter().collect();
         if events.is_empty() {
             return;
         }
         for event in events {
             match event {
-                LspEvent::Ready => {
-                    if Tab::is_rust(self.doc()) {
-                        self.status = "Rust language support ready".into();
+                LspEvent::Ready { language } => {
+                    if Tab::lsp_language(self.doc()) == Some(language) {
+                        self.status = format!("{} language support ready", language.name());
                     }
                 }
                 LspEvent::Diagnostics {
+                    language,
                     uri,
                     version,
                     items,
                 } => {
                     if let Some(tab) = self.tabs.iter_mut().find(|tab| {
                         tab.lsp_opened
+                            && tab.lsp_language == Some(language)
                             && tab
                                 .document
                                 .path
                                 .as_deref()
-                                .is_some_and(|p| lsp::file_uri(p).eq_ignore_ascii_case(&uri))
+                                .is_some_and(|p| lsp::same_file_uri(&lsp::file_uri(p), &uri))
                     }) && version.is_none_or(|number| number == tab.lsp_version)
                     {
                         tab.diagnostics = items;
                     }
                 }
                 LspEvent::Hover {
+                    language,
                     id,
                     uri,
                     version,
                     text,
                 } => {
                     if let Some(target) = self.hover_target.take().filter(|target| {
-                        target.id == id && target.uri == uri && target.version == version
+                        target.language == language
+                            && target.id == id
+                            && target.uri == uri
+                            && target.version == version
                     }) && self.tab_for_pane(target.pane) < self.tabs.len()
+                        && self.tabs[self.tab_for_pane(target.pane)].lsp_language == Some(language)
                         && self.tabs[self.tab_for_pane(target.pane)].lsp_version == version
                     {
                         self.hover_card = text.map(|text| HoverCard {
@@ -196,20 +250,61 @@ impl App {
                         });
                     }
                 }
-                LspEvent::Stopped(error) => {
-                    self.lsp = None;
-                    self.lsp_events = None;
-                    self.lsp_failed_at = Some(Instant::now());
+                LspEvent::Stopped { language, message } => {
+                    self.reset_language_client(language);
+                    self.lsp_failed_at.insert(language, Instant::now());
                     self.hover_target = None;
                     self.hover_card = None;
-                    for tab in &mut self.tabs {
-                        tab.lsp_opened = false;
-                        tab.diagnostics.clear();
-                    }
-                    self.status = error;
+                    self.status = message;
                 }
             }
         }
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn select_python_interpreter(&mut self, hwnd: HWND) {
+        let mut buffer = [0u16; 32768];
+        let filter = wide("Python executable\0python.exe;pythonw.exe\0All files\0*.*\0");
+        let mut dialog: OPENFILENAMEW = unsafe { zeroed() };
+        dialog.lStructSize = size_of::<OPENFILENAMEW>() as u32;
+        dialog.hwndOwner = hwnd;
+        dialog.lpstrFilter = filter.as_ptr();
+        dialog.lpstrFile = buffer.as_mut_ptr();
+        dialog.nMaxFile = buffer.len() as u32;
+        dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        let ok = unsafe { GetOpenFileNameW(&mut dialog) };
+        if ok != 0
+            && let Some(end) = buffer.iter().position(|ch| *ch == 0)
+        {
+            self.set_python_interpreter(
+                hwnd,
+                PathBuf::from(String::from_utf16_lossy(&buffer[..end])),
+            );
+        }
+    }
+
+    pub(super) fn select_python_environment(&mut self, hwnd: HWND) {
+        if let Some(root) = self.folder_dialog(hwnd) {
+            let candidates = [
+                root.join("Scripts").join("python.exe"),
+                root.join("Scripts").join("pythonw.exe"),
+                root.join("bin").join("python"),
+            ];
+            if let Some(interpreter) = candidates.into_iter().find(|path| path.is_file()) {
+                self.set_python_interpreter(hwnd, interpreter);
+            } else {
+                self.status = "Selected folder is not a Python virtual environment".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+        }
+    }
+
+    fn set_python_interpreter(&mut self, hwnd: HWND, interpreter: PathBuf) {
+        self.python_interpreter = Some(interpreter.clone());
+        self.reset_language_client(LspLanguage::Python);
+        self.lsp_failed_at.remove(&LspLanguage::Python);
+        self.status = format!("Python interpreter: {}", interpreter.to_string_lossy());
+        self.ensure_lsp(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
@@ -289,6 +384,9 @@ impl App {
         if !tab.lsp_opened {
             return;
         }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
         let Some(path) = tab.document.path.as_deref() else {
             return;
         };
@@ -300,7 +398,7 @@ impl App {
         };
         self.hover_request_id += 1;
         let id = self.hover_request_id;
-        if self.lsp.as_ref().is_some_and(|client| {
+        if self.lsp.get(&language).is_some_and(|client| {
             client.send(LspCommand::Hover {
                 id,
                 uri: uri.clone(),
@@ -309,6 +407,7 @@ impl App {
             })
         }) {
             self.hover_target = Some(HoverTarget {
+                language,
                 id,
                 uri,
                 version,

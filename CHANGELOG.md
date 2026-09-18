@@ -4,6 +4,7 @@ This is LightLine's development history. Dates are the GitHub commit dates in As
 
 ## Unreleased
 
+- Added first-class Python language support through the shared LSP client: lazy Pyright startup for `.py` files, diagnostics and hover, per-session interpreter or virtual-environment selection for import resolution, and independent server failure handling that keeps editing responsive. Verified the Windows npm launcher and Pyright file URIs with a live diagnostics, hover, and edit test.
 - Added lazy rust-analyzer language support for Rust files: incremental document updates shared across split panes, diagnostics in the gutter and status bar, F1 and mouse hover, and a background server that cannot block editing. Added UTF-16 edit tracking and a live LSP test.
 - Rebuilt every app icon size from `LightLine-icon2.png`, cropping its nearly transparent margin and sharpening small resizes; the activity rail now paints the supplied artwork at 32 px.
 - Updated the bundled Windows application icon from `LightLine-icon2.png` for the title bar, taskbar, and executable.

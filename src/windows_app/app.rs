@@ -62,6 +62,7 @@ pub(super) struct Tab {
     pub(super) lsp_version: i32,
     pub(super) lsp_serial: u64,
     pub(super) lsp_opened: bool,
+    pub(super) lsp_language: Option<LspLanguage>,
 }
 
 #[derive(Clone)]
@@ -87,6 +88,7 @@ impl Tab {
             lsp_version: 1,
             lsp_serial: 0,
             lsp_opened: false,
+            lsp_language: None,
         }
     }
 
@@ -96,6 +98,24 @@ impl Tab {
             .as_deref()
             .and_then(Path::extension)
             .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
+    }
+
+    pub(super) fn is_python(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+    }
+
+    pub(super) fn lsp_language(document: &Document) -> Option<LspLanguage> {
+        if Self::is_rust(document) {
+            Some(LspLanguage::Rust)
+        } else if Self::is_python(document) {
+            Some(LspLanguage::Python)
+        } else {
+            None
+        }
     }
 
     fn update_syntax_language(&mut self) {
@@ -175,9 +195,11 @@ pub(super) struct App {
     pub(super) worker_tx: Sender<WorkerMessage>,
     pub(super) worker_rx: Receiver<WorkerMessage>,
     pub(super) pending_workers: usize,
-    pub(super) lsp: Option<LspClient>,
-    pub(super) lsp_events: Option<Receiver<LspEvent>>,
-    pub(super) lsp_failed_at: Option<Instant>,
+    pub(super) lsp: HashMap<LspLanguage, LspClient>,
+    pub(super) lsp_event_tx: Sender<LspEvent>,
+    pub(super) lsp_events: Receiver<LspEvent>,
+    pub(super) lsp_failed_at: HashMap<LspLanguage, Instant>,
+    pub(super) python_interpreter: Option<PathBuf>,
     pub(super) hover_mouse: Option<(i32, i32)>,
     pub(super) hover_target: Option<HoverTarget>,
     pub(super) hover_card: Option<HoverCard>,
@@ -185,6 +207,7 @@ pub(super) struct App {
 }
 
 pub(super) struct HoverTarget {
+    pub(super) language: LspLanguage,
     pub(super) id: u64,
     pub(super) uri: String,
     pub(super) version: i32,
@@ -270,6 +293,7 @@ impl App {
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let (worker_tx, worker_rx) = mpsc::channel();
+        let (lsp_tx, lsp_rx) = mpsc::channel();
         Self {
             tabs: vec![Tab::new(Document::new())],
             active: 0,
@@ -336,9 +360,11 @@ impl App {
             worker_tx,
             worker_rx,
             pending_workers: 0,
-            lsp: None,
-            lsp_events: None,
-            lsp_failed_at: None,
+            lsp: HashMap::new(),
+            lsp_event_tx: lsp_tx,
+            lsp_events: lsp_rx,
+            lsp_failed_at: HashMap::new(),
+            python_interpreter: None,
             hover_mouse: None,
             hover_target: None,
             hover_card: None,

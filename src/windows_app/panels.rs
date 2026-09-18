@@ -40,13 +40,15 @@ impl App {
             ("Review Git changes", 2),
             ("Open folder", 3),
             ("New file", 4),
+            ("Select Python interpreter", 5),
+            ("Select Python virtual environment", 6),
             (
                 if self.split_visible {
                     "Close editor split"
                 } else {
                     "Split editor"
                 },
-                5,
+                7,
             ),
         ]
         .into_iter()
@@ -73,7 +75,9 @@ impl App {
                 Some(2) => self.show_review(hwnd),
                 Some(3) => self.open_folder(hwnd),
                 Some(4) => self.new_file(hwnd),
-                Some(5) => self.toggle_split(hwnd),
+                Some(5) => self.select_python_interpreter(hwnd),
+                Some(6) => self.select_python_environment(hwnd),
+                Some(7) => self.toggle_split(hwnd),
                 _ => {}
             }
         } else {

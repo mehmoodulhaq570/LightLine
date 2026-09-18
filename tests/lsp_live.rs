@@ -1,6 +1,6 @@
 //! Run explicitly with `cargo test --offline --test lsp_live -- --ignored`.
 
-use lightline::lsp::{Client, Command, Event, Position, Range, file_uri};
+use lightline::lsp::{Client, Command, Event, Language, Position, Range, file_uri, same_file_uri};
 use std::fs;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -25,7 +25,7 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
     let root = fs::canonicalize(root).unwrap();
     let uri = file_uri(&fs::canonicalize(source).unwrap());
     let (sender, receiver) = mpsc::channel();
-    let client = Client::start(root.clone(), sender, Arc::new(|| {}));
+    let client = Client::start(Language::Rust, root.clone(), None, sender, Arc::new(|| {}));
     assert!(client.send(Command::Open {
         uri: uri.clone(),
         text: source_text.into(),
@@ -40,11 +40,14 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
     let mut cleared = false;
     while Instant::now() < deadline && !(ready && diagnosed && hovered && cleared) {
         match receiver.recv_timeout(Duration::from_millis(500)) {
-            Ok(Event::Ready) => {
+            Ok(Event::Ready {
+                language: Language::Rust,
+            }) => {
                 println!("rust-analyzer ready");
                 ready = true;
             }
             Ok(Event::Diagnostics {
+                language: Language::Rust,
                 uri: actual,
                 version,
                 items,
@@ -53,7 +56,7 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
                     "diagnostics for {actual} version {version:?}: {:?}",
                     items.iter().map(|item| &item.message).collect::<Vec<_>>()
                 );
-                if !actual.eq_ignore_ascii_case(&uri) {
+                if !same_file_uri(&actual, &uri) {
                     continue;
                 }
                 if changed
@@ -133,7 +136,7 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
                 text: None,
                 ..
             }) => println!("hover was empty"),
-            Ok(Event::Stopped(error)) => panic!("rust-analyzer stopped: {error}"),
+            Ok(Event::Stopped { message, .. }) => panic!("rust-analyzer stopped: {message}"),
             _ => {}
         }
     }
@@ -141,4 +144,120 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
     assert!(diagnosed, "expected a type diagnostic");
     assert!(hovered, "expected hover information for answer");
     assert!(cleared, "expected diagnostics for the incremental edit");
+}
+
+#[test]
+#[ignore = "requires pyright-langserver on PATH"]
+fn pyright_publishes_diagnostics_and_hover() {
+    let root = std::env::current_dir()
+        .unwrap()
+        .join("target")
+        .join(format!("lsp-python-live-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("pyproject.toml"),
+        "[tool.pyright]\ntypeCheckingMode = \"basic\"\n",
+    )
+    .unwrap();
+    let source = root.join("main.py");
+    let source_text = "value: int = \"wrong\"\nprint(value)\n";
+    fs::write(&source, source_text).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let uri = file_uri(&fs::canonicalize(source).unwrap());
+    let (sender, receiver) = mpsc::channel();
+    let client = Client::start(
+        Language::Python,
+        root.clone(),
+        None,
+        sender,
+        Arc::new(|| {}),
+    );
+    assert!(client.send(Command::Open {
+        uri: uri.clone(),
+        text: source_text.into(),
+        version: 1,
+    }));
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let mut ready = false;
+    let mut diagnosed = false;
+    let mut hovered = false;
+    let mut requested = false;
+    let mut changed = false;
+    let mut cleared = false;
+    while Instant::now() < deadline && !(ready && diagnosed && hovered && cleared) {
+        match receiver.recv_timeout(Duration::from_millis(500)) {
+            Ok(Event::Ready {
+                language: Language::Python,
+            }) => ready = true,
+            Ok(Event::Diagnostics {
+                language: Language::Python,
+                uri: actual,
+                items,
+                ..
+            }) if same_file_uri(&actual, &uri) => {
+                println!(
+                    "Pyright diagnostics: {:?}",
+                    items.iter().map(|item| &item.message).collect::<Vec<_>>()
+                );
+                if changed && items.is_empty() {
+                    cleared = true;
+                }
+                if items.iter().any(|item| item.message.contains("int")) {
+                    diagnosed = true;
+                    if !requested {
+                        assert!(client.send(Command::Hover {
+                            id: 2000,
+                            uri: uri.clone(),
+                            version: 1,
+                            position: Position {
+                                line: 0,
+                                character: 1,
+                            },
+                        }));
+                        requested = true;
+                    }
+                }
+            }
+            Ok(Event::Hover {
+                id: 2000,
+                text: Some(text),
+                ..
+            }) => {
+                println!("Pyright hover: {text}");
+                hovered = text.contains("int") || text.contains("value");
+                if hovered && !changed {
+                    assert!(client.send(Command::Change {
+                        uri: uri.clone(),
+                        version: 2,
+                        range: Range {
+                            start: Position {
+                                line: 0,
+                                character: 13,
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 20,
+                            },
+                        },
+                        text: "7".into(),
+                    }));
+                    fs::write(root.join("main.py"), source_text.replace("\"wrong\"", "7")).unwrap();
+                    assert!(client.send(Command::Save { uri: uri.clone() }));
+                    changed = true;
+                }
+            }
+            Ok(Event::Stopped {
+                language: Language::Python,
+                message,
+            }) => panic!("Pyright stopped: {message}"),
+            _ => {}
+        }
+    }
+    assert!(ready, "Pyright did not initialize");
+    assert!(diagnosed, "expected a Python type diagnostic");
+    assert!(hovered, "expected Python hover information");
+    assert!(
+        cleared,
+        "expected the Python diagnostic to clear after the edit"
+    );
 }

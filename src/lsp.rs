@@ -1,6 +1,6 @@
-//! A small, on-demand LSP client for the first Rust language-support slice.
+//! Small, on-demand LSP clients for language-support slices.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,6 +9,28 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Language {
+    Rust,
+    Python,
+}
+
+impl Language {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::Python => "Python",
+        }
+    }
+
+    fn language_id(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::Python => "python",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
@@ -57,24 +79,41 @@ pub enum Command {
 }
 
 pub enum Event {
-    Ready,
+    Ready {
+        language: Language,
+    },
     Diagnostics {
+        language: Language,
         uri: String,
         version: Option<i32>,
         items: Vec<Diagnostic>,
     },
     Hover {
+        language: Language,
         id: u64,
         uri: String,
         version: i32,
         text: Option<String>,
     },
-    Stopped(String),
+    Stopped {
+        language: Language,
+        message: String,
+    },
 }
 
 pub struct Client {
+    language: Language,
     root: PathBuf,
     sender: Sender<Command>,
+}
+
+#[derive(Clone, Debug)]
+struct ServerConfig {
+    language: Language,
+    display_name: &'static str,
+    command: String,
+    args: Vec<String>,
+    settings: Value,
 }
 
 struct PendingHover {
@@ -92,11 +131,26 @@ fn hover_request(id: u64, hover: &PendingHover) -> Value {
 }
 
 impl Client {
-    pub fn start(root: PathBuf, events: Sender<Event>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+    pub fn start(
+        language: Language,
+        root: PathBuf,
+        python_interpreter: Option<PathBuf>,
+        events: Sender<Event>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
         let (sender, commands) = mpsc::channel();
         let server_root = root.clone();
-        thread::spawn(move || run_server(server_root, commands, events, wake));
-        Self { root, sender }
+        let config = server_config(language, python_interpreter.as_deref());
+        thread::spawn(move || run_server(server_root, config, commands, events, wake));
+        Self {
+            language,
+            root,
+            sender,
+        }
+    }
+
+    pub fn language(&self) -> Language {
+        self.language
     }
 
     pub fn root(&self) -> &Path {
@@ -114,20 +168,98 @@ impl Drop for Client {
     }
 }
 
+fn server_config(language: Language, python_interpreter: Option<&Path>) -> ServerConfig {
+    match language {
+        Language::Rust => ServerConfig {
+            language,
+            display_name: "rust-analyzer",
+            command: "rust-analyzer".into(),
+            args: Vec::new(),
+            settings: Value::Null,
+        },
+        Language::Python => ServerConfig {
+            language,
+            display_name: "Pyright",
+            command: "pyright-langserver".into(),
+            args: vec!["--stdio".into()],
+            settings: python_settings(python_interpreter),
+        },
+    }
+}
+
+fn python_settings(interpreter: Option<&Path>) -> Value {
+    let mut python = Map::new();
+    if let Some(path) = interpreter {
+        python.insert(
+            "pythonPath".into(),
+            Value::String(path.to_string_lossy().into_owned()),
+        );
+        if let Some((venv_path, venv)) = venv_from_interpreter(path) {
+            python.insert(
+                "venvPath".into(),
+                Value::String(venv_path.to_string_lossy().into_owned()),
+            );
+            python.insert("venv".into(), Value::String(venv));
+        }
+    }
+    json!({
+        "python": Value::Object(python),
+        "python.analysis": {
+            "diagnosticMode": "openFilesOnly",
+            "autoSearchPaths": true,
+            "useLibraryCodeForTypes": true
+        }
+    })
+}
+
+fn venv_from_interpreter(path: &Path) -> Option<(PathBuf, String)> {
+    let file = path.file_name()?.to_string_lossy();
+    if !file.eq_ignore_ascii_case("python.exe") && !file.eq_ignore_ascii_case("python") {
+        return None;
+    }
+    let scripts_or_bin = path.parent()?;
+    let folder_name = scripts_or_bin.file_name()?.to_string_lossy();
+    if !folder_name.eq_ignore_ascii_case("Scripts") && !folder_name.eq_ignore_ascii_case("bin") {
+        return None;
+    }
+    let venv = scripts_or_bin.parent()?;
+    let parent = venv.parent()?.to_path_buf();
+    let name = venv.file_name()?.to_string_lossy().into_owned();
+    Some((parent, name))
+}
+
 fn emit(event: Event, events: &Sender<Event>, wake: &Arc<dyn Fn() + Send + Sync>) {
     if events.send(event).is_ok() {
         wake();
     }
 }
 
+fn stopped(language: Language, message: impl Into<String>) -> Event {
+    Event::Stopped {
+        language,
+        message: message.into(),
+    }
+}
+
 fn run_server(
     root: PathBuf,
+    config: ServerConfig,
     commands: Receiver<Command>,
     events: Sender<Event>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
-    let mut process = ProcessCommand::new("rust-analyzer");
+    #[cfg(windows)]
+    let mut process = if config.language == Language::Python {
+        let mut command = ProcessCommand::new("cmd.exe");
+        command.args(["/D", "/C", "pyright-langserver"]);
+        command
+    } else {
+        ProcessCommand::new(&config.command)
+    };
+    #[cfg(not(windows))]
+    let mut process = ProcessCommand::new(&config.command);
     process
+        .args(&config.args)
         .current_dir(&root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -140,8 +272,16 @@ fn run_server(
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
+            let hint = if config.language == Language::Python {
+                ". Install Pyright with `npm install -g pyright` so pyright-langserver is on PATH"
+            } else {
+                ""
+            };
             emit(
-                Event::Stopped(format!("Could not start rust-analyzer: {error}")),
+                stopped(
+                    config.language,
+                    format!("Could not start {}: {error}{hint}", config.display_name),
+                ),
                 &events,
                 &wake,
             );
@@ -169,6 +309,7 @@ fn run_server(
         return;
     };
     let (incoming_tx, incoming_rx) = mpsc::channel();
+    let reader_name = config.display_name;
     let reader = thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
         loop {
@@ -179,7 +320,7 @@ fn run_server(
                     }
                 }
                 Ok(None) => {
-                    let _ = incoming_tx.send(Err("rust-analyzer closed its output".into()));
+                    let _ = incoming_tx.send(Err(format!("{reader_name} closed its output")));
                     break;
                 }
                 Err(error) => {
@@ -192,26 +333,31 @@ fn run_server(
 
     let root_uri = file_uri(&root);
     let name = root.file_name().unwrap_or_default().to_string_lossy();
-    let initialize = json!({
-        "jsonrpc":"2.0", "id":1, "method":"initialize",
-        "params":{
-            "processId":std::process::id(), "rootUri":root_uri,
-            "workspaceFolders":[{"uri":root_uri,"name":name}],
-            "capabilities":{
-                "general":{"positionEncodings":["utf-16"]},
-                "workspace":{"configuration":true,"workspaceFolders":true},
-                "textDocument":{
-                    "synchronization":{"didSave":true},
-                    "hover":{"contentFormat":["plaintext","markdown"]},
-                    "publishDiagnostics":{"versionSupport":true}
-                }
-            },
-            "clientInfo":{"name":"LightLine","version":"0.1.0"}
-        }
+    let mut params = json!({
+        "processId": std::process::id(),
+        "rootUri": root_uri,
+        "workspaceFolders": [{"uri":root_uri,"name":name}],
+        "capabilities": {
+            "general": {"positionEncodings":["utf-16"]},
+            "workspace": {"configuration":true,"workspaceFolders":true},
+            "textDocument": {
+                "synchronization": {"didSave":true},
+                "hover": {"contentFormat":["plaintext","markdown"]},
+                "publishDiagnostics": {"versionSupport":true}
+            }
+        },
+        "clientInfo": {"name":"LightLine","version":"0.1.0"}
     });
+    if !config.settings.is_null() {
+        params["initializationOptions"] = json!({"settings": config.settings.clone()});
+    }
+    let initialize = json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":params});
     if write_packet(&mut stdin, &initialize).is_err() {
         emit(
-            Event::Stopped("Could not initialize rust-analyzer".into()),
+            stopped(
+                config.language,
+                format!("Could not initialize {}", config.display_name),
+            ),
             &events,
             &wake,
         );
@@ -235,23 +381,12 @@ fn run_server(
                     break 'running;
                 }
             };
-            if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some()
-                && message.get("id").and_then(Value::as_u64) == Some(1000)
-                && message.get("method").is_none()
-            {
-                eprintln!("LSP hover response: {}", message);
-            }
             if is_initialize_response(&message) {
-                if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some() {
-                    eprintln!(
-                        "LSP textDocumentSync: {}",
-                        message
-                            .pointer("/result/capabilities/textDocumentSync")
-                            .unwrap_or(&Value::Null)
-                    );
-                }
                 if let Some(error) = message.get("error") {
-                    failure = Some(format!("rust-analyzer initialization failed: {error}"));
+                    failure = Some(format!(
+                        "{} initialization failed: {error}",
+                        config.display_name
+                    ));
                     break 'running;
                 }
                 if write_packet(
@@ -260,35 +395,40 @@ fn run_server(
                 )
                 .is_err()
                 {
-                    failure = Some("Could not finish rust-analyzer initialization".into());
+                    failure = Some(format!(
+                        "Could not finish {} initialization",
+                        config.display_name
+                    ));
+                    break 'running;
+                }
+                if !config.settings.is_null()
+                    && write_packet(
+                        &mut stdin,
+                        &json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":config.settings.clone()}}),
+                    )
+                    .is_err()
+                {
+                    failure = Some(format!("Could not configure {}", config.display_name));
                     break 'running;
                 }
                 ready = true;
-                emit(Event::Ready, &events, &wake);
+                emit(
+                    Event::Ready {
+                        language: config.language,
+                    },
+                    &events,
+                    &wake,
+                );
                 while let Some(command) = waiting.pop_front() {
-                    if send_command(&mut stdin, command, &mut hovers).is_err() {
-                        failure = Some("Could not write to rust-analyzer".into());
+                    if send_command(&mut stdin, &config, command, &mut hovers).is_err() {
+                        failure = Some(format!("Could not write to {}", config.display_name));
                         break 'running;
                     }
                 }
             } else if let Some(method) = message.get("method").and_then(Value::as_str) {
-                if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some()
-                    && matches!(method, "window/logMessage" | "window/showMessage")
-                {
-                    eprintln!(
-                        "LSP server {method}: {}",
-                        message.get("params").unwrap_or(&Value::Null)
-                    );
-                }
                 if let Some(id) = message.get("id") {
                     let result = match method {
-                        "workspace/configuration" => {
-                            let count = message
-                                .pointer("/params/items")
-                                .and_then(Value::as_array)
-                                .map_or(0, Vec::len);
-                            Value::Array(vec![Value::Null; count])
-                        }
+                        "workspace/configuration" => configuration_response(&message, &config),
                         "workspace/workspaceFolders" => json!([{"uri":root_uri,"name":name}]),
                         "workspace/applyEdit" => json!({"applied":false}),
                         _ => Value::Null,
@@ -299,7 +439,7 @@ fn run_server(
                     )
                     .is_err()
                     {
-                        failure = Some("Could not answer rust-analyzer".into());
+                        failure = Some(format!("Could not answer {}", config.display_name));
                         break 'running;
                     }
                 } else if method == "textDocument/publishDiagnostics"
@@ -307,6 +447,7 @@ fn run_server(
                 {
                     emit(
                         Event::Diagnostics {
+                            language: config.language,
                             uri,
                             version,
                             items,
@@ -332,6 +473,7 @@ fn run_server(
                 let text = message.get("result").and_then(hover_text);
                 emit(
                     Event::Hover {
+                        language: config.language,
                         id,
                         uri: hover.uri,
                         version: hover.version,
@@ -348,7 +490,10 @@ fn run_server(
                 let (_, id, hover) = hover_retries.swap_remove(index);
                 let request = hover_request(id, &hover);
                 if write_packet(&mut stdin, &request).is_err() {
-                    failure = Some("Could not retry hover with rust-analyzer".into());
+                    failure = Some(format!(
+                        "Could not retry hover with {}",
+                        config.display_name
+                    ));
                     break 'running;
                 }
                 hovers.insert(id, hover);
@@ -359,8 +504,8 @@ fn run_server(
         match commands.recv_timeout(Duration::from_millis(30)) {
             Ok(Command::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Ok(command) if ready => {
-                if send_command(&mut stdin, command, &mut hovers).is_err() {
-                    failure = Some("Could not write to rust-analyzer".into());
+                if send_command(&mut stdin, &config, command, &mut hovers).is_err() {
+                    failure = Some(format!("Could not write to {}", config.display_name));
                     break;
                 }
             }
@@ -393,12 +538,6 @@ fn run_server(
     if let Some(thread) = stderr_reader {
         let _ = thread.join();
     }
-    if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some()
-        && let Ok(stderr) = stderr.lock()
-        && !stderr.trim().is_empty()
-    {
-        eprintln!("rust-analyzer stderr: {}", stderr.trim());
-    }
     if let Some(mut error) = failure {
         if let Ok(stderr) = stderr.lock()
             && !stderr.trim().is_empty()
@@ -406,18 +545,35 @@ fn run_server(
             error.push_str(": ");
             error.push_str(stderr.trim());
         }
-        emit(Event::Stopped(error), &events, &wake);
+        emit(stopped(config.language, error), &events, &wake);
     }
+}
+
+fn configuration_response(message: &Value, config: &ServerConfig) -> Value {
+    let Some(items) = message.pointer("/params/items").and_then(Value::as_array) else {
+        return Value::Array(Vec::new());
+    };
+    let responses = items
+        .iter()
+        .map(|item| {
+            item.get("section")
+                .and_then(Value::as_str)
+                .and_then(|section| config.settings.get(section).cloned())
+                .unwrap_or(Value::Null)
+        })
+        .collect();
+    Value::Array(responses)
 }
 
 fn send_command(
     stdin: &mut ChildStdin,
+    config: &ServerConfig,
     command: Command,
     hovers: &mut HashMap<u64, PendingHover>,
 ) -> io::Result<()> {
     let message = match command {
         Command::Open { uri, text, version } => {
-            json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"rust","version":version,"text":text}}})
+            json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":config.language.language_id(),"version":version,"text":text}}})
         }
         Command::Change {
             uri,
@@ -453,15 +609,13 @@ fn send_command(
     };
     if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some() {
         eprintln!(
-            "LSP sending {}",
+            "{} sending {}",
+            config.display_name,
             message
                 .get("method")
                 .and_then(Value::as_str)
                 .unwrap_or("response")
         );
-        if message.get("method").and_then(Value::as_str) == Some("textDocument/didChange") {
-            eprintln!("LSP change payload: {message}");
-        }
     }
     write_packet(stdin, &message)
 }
@@ -498,6 +652,39 @@ pub fn file_uri(path: &Path) -> String {
         }
     }
     uri
+}
+
+/// Compare file URIs even when a server chooses different percent escaping.
+pub fn same_file_uri(left: &str, right: &str) -> bool {
+    fn decoded(uri: &str) -> Vec<u8> {
+        let bytes = uri.as_bytes();
+        let mut result = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%'
+                && let (Some(high), Some(low)) = (bytes.get(index + 1), bytes.get(index + 2))
+                && let (Some(high), Some(low)) =
+                    ((*high as char).to_digit(16), (*low as char).to_digit(16))
+            {
+                result.push((high * 16 + low) as u8);
+                index += 3;
+            } else {
+                result.push(bytes[index]);
+                index += 1;
+            }
+        }
+        result
+    }
+    let left = decoded(left);
+    let right = decoded(right);
+    #[cfg(windows)]
+    {
+        left.eq_ignore_ascii_case(&right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
 }
 
 pub fn utf16_to_byte(line: &str, column: u32) -> usize {
@@ -571,8 +758,10 @@ fn hover_text(result: &Value) -> Option<String> {
             .join("\n")
     };
     let clean = raw
-        .replace("```rust", "")
-        .replace("```", "")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("```"))
+        .collect::<Vec<_>>()
+        .join("\n")
         .replace('`', "");
     let clean: String = clean.chars().take(800).collect();
     (!clean.trim().is_empty()).then_some(clean)
@@ -644,6 +833,14 @@ mod tests {
     }
 
     #[test]
+    fn file_uri_comparison_accepts_server_percent_escaping() {
+        assert!(same_file_uri(
+            "file:///d:/Code%20Work/main.py",
+            "file:///d%3A/Code%20Work/main.py"
+        ));
+    }
+
+    #[test]
     fn diagnostics_keep_range_and_version() {
         let message = json!({"params":{"uri":"file:///D:/x.rs","version":3,"diagnostics":[{"range":{"start":{"line":1,"character":2},"end":{"line":1,"character":5}},"severity":1,"message":"problem"}]}});
         let (_, version, diagnostics) = parse_diagnostics(&message).unwrap();
@@ -660,5 +857,38 @@ mod tests {
         assert!(is_initialize_response(
             &json!({"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}})
         ));
+    }
+
+    #[test]
+    fn python_interpreter_settings_include_venv_details() {
+        let settings = python_settings(Some(Path::new(
+            r"D:\Projects\demo\.venv\Scripts\python.exe",
+        )));
+        assert_eq!(
+            settings
+                .pointer("/python/pythonPath")
+                .and_then(Value::as_str),
+            Some(r"D:\Projects\demo\.venv\Scripts\python.exe")
+        );
+        assert_eq!(
+            settings.pointer("/python/venv").and_then(Value::as_str),
+            Some(".venv")
+        );
+        assert_eq!(
+            settings
+                .pointer("/python.analysis/diagnosticMode")
+                .and_then(Value::as_str),
+            Some("openFilesOnly")
+        );
+    }
+
+    #[test]
+    fn configuration_requests_get_section_values() {
+        let config = server_config(Language::Python, None);
+        let request =
+            json!({"params":{"items":[{"section":"python.analysis"},{"section":"missing"}]}});
+        let response = configuration_response(&request, &config);
+        assert!(response[0].is_object());
+        assert!(response[1].is_null());
     }
 }
