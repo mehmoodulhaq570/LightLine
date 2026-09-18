@@ -2,6 +2,7 @@ use super::*;
 
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
+        self.clear_hover(hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         if ctrl && key == 0x43 && self.output_focus {
@@ -271,6 +272,7 @@ impl App {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
+                        self.sync_lsp_edit();
                     }
                 }
                 0x5a => {
@@ -279,6 +281,7 @@ impl App {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
+                        self.sync_lsp_edit();
                     }
                 }
                 0x59 => {
@@ -287,6 +290,7 @@ impl App {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
+                        self.sync_lsp_edit();
                     }
                 }
                 x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
@@ -322,6 +326,10 @@ impl App {
         }
         let cursor = self.view().cursor;
         match key {
+            x if x == VK_F1 as u32 => {
+                self.hover_at_cursor(hwnd);
+                return true;
+            }
             x if x == VK_F3 as u32 => {
                 self.find_mode = false;
                 self.find(hwnd, !shift);
@@ -512,13 +520,19 @@ impl App {
     }
 
     pub(super) fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
+        self.position_at_pane(hwnd, x, y, self.focused_pane)
+    }
+
+    pub(super) fn position_at_pane(&self, hwnd: HWND, x: i32, y: i32, pane: usize) -> Pos {
+        let tab = &self.tabs[self.tab_for_pane(pane)];
+        let view = self.view_for_pane(pane);
         let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
-        let line = (self.view().first_line + row).min(self.doc().line_count() - 1);
-        let target = (x - self.code_left(hwnd)).max(0);
+        let line = (view.first_line + row).min(tab.document.line_count() - 1);
+        let target = (x - self.pane_left(hwnd, pane) - self.scale(GUTTER + PAD)).max(0);
         unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
-            let text = self.doc().line(line);
+            let text = tab.document.line(line);
             let boundaries: Vec<usize> = text
                 .char_indices()
                 .map(|(index, _)| index)
@@ -550,6 +564,7 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+        self.clear_hover(hwnd);
         let mut rect = RECT::default();
         unsafe {
             GetClientRect(hwnd, &mut rect);

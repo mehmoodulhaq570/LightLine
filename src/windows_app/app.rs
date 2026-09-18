@@ -58,6 +58,10 @@ pub(super) struct Tab {
     pub(super) document: Document,
     pub(super) views: [EditorView; 2],
     pub(super) syntax: Option<RustSyntax>,
+    pub(super) diagnostics: Vec<LspDiagnostic>,
+    pub(super) lsp_version: i32,
+    pub(super) lsp_serial: u64,
+    pub(super) lsp_opened: bool,
 }
 
 #[derive(Clone)]
@@ -79,10 +83,14 @@ impl Tab {
             document,
             views: [EditorView::default(), EditorView::default()],
             syntax,
+            diagnostics: Vec::new(),
+            lsp_version: 1,
+            lsp_serial: 0,
+            lsp_opened: false,
         }
     }
 
-    fn is_rust(document: &Document) -> bool {
+    pub(super) fn is_rust(document: &Document) -> bool {
         document
             .path
             .as_deref()
@@ -167,6 +175,28 @@ pub(super) struct App {
     pub(super) worker_tx: Sender<WorkerMessage>,
     pub(super) worker_rx: Receiver<WorkerMessage>,
     pub(super) pending_workers: usize,
+    pub(super) lsp: Option<LspClient>,
+    pub(super) lsp_events: Option<Receiver<LspEvent>>,
+    pub(super) lsp_failed_at: Option<Instant>,
+    pub(super) hover_mouse: Option<(i32, i32)>,
+    pub(super) hover_target: Option<HoverTarget>,
+    pub(super) hover_card: Option<HoverCard>,
+    pub(super) hover_request_id: u64,
+}
+
+pub(super) struct HoverTarget {
+    pub(super) id: u64,
+    pub(super) uri: String,
+    pub(super) version: i32,
+    pub(super) pane: usize,
+    pub(super) x: i32,
+    pub(super) y: i32,
+}
+
+pub(super) struct HoverCard {
+    pub(super) text: String,
+    pub(super) x: i32,
+    pub(super) y: i32,
 }
 
 impl App {
@@ -306,6 +336,13 @@ impl App {
             worker_tx,
             worker_rx,
             pending_workers: 0,
+            lsp: None,
+            lsp_events: None,
+            lsp_failed_at: None,
+            hover_mouse: None,
+            hover_target: None,
+            hover_card: None,
+            hover_request_id: 1000,
         }
     }
 
@@ -537,6 +574,7 @@ impl App {
     }
 
     pub(super) fn show_active_tab(&mut self, hwnd: HWND) {
+        self.clear_hover(hwnd);
         let count = self.visible_tab_count(hwnd);
         if self.active < self.tab_first {
             self.tab_first = self.active;
@@ -548,6 +586,7 @@ impl App {
         self.update_title(hwnd);
         self.update_scrollbar(hwnd);
         self.advance_syntax(hwnd);
+        self.ensure_lsp(hwnd);
         unsafe {
             InvalidateRect(hwnd, null(), 0);
         }
@@ -591,6 +630,7 @@ impl App {
         if !self.can_discard(hwnd) {
             return;
         }
+        self.close_lsp_tab(index);
         self.start_transition(hwnd);
         self.tabs.remove(index);
         if self.tabs.is_empty() {
@@ -843,6 +883,9 @@ impl App {
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
         self.revalidate_other_view(Some((start, end, cursor)));
+        self.sync_lsp_edit();
+        self.hover_target = None;
+        self.hover_card = None;
     }
 
     pub(super) fn revalidate_other_view(&mut self, edit: Option<(Pos, Pos, Pos)>) {
@@ -973,6 +1016,7 @@ impl App {
     }
 
     pub(super) fn save(&mut self, hwnd: HWND, save_as: bool) -> bool {
+        let old_path = self.doc().path.clone();
         let path = if save_as || self.doc().path.is_none() {
             match self.dialog(hwnd, true) {
                 Some(path) => path,
@@ -994,6 +1038,7 @@ impl App {
         }
         match self.doc_mut().save(&path) {
             Ok(()) => {
+                self.lsp_after_save(hwnd, old_path.as_deref());
                 self.tab_mut().update_syntax_language();
                 self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);

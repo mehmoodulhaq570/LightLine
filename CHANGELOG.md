@@ -4,6 +4,7 @@ This is LightLine's development history. Dates are the GitHub commit dates in As
 
 ## Unreleased
 
+- Added lazy rust-analyzer language support for Rust files: incremental document updates shared across split panes, diagnostics in the gutter and status bar, F1 and mouse hover, and a background server that cannot block editing. Added UTF-16 edit tracking and a live LSP test.
 - Rebuilt every app icon size from `LightLine-icon2.png`, cropping its nearly transparent margin and sharpening small resizes; the activity rail now paints the supplied artwork at 32 px.
 - Updated the bundled Windows application icon from `LightLine-icon2.png` for the title bar, taskbar, and executable.
 - Added vertical split editor panes with a draggable divider, focused-pane tab switching, separate cursor/selection/scroll state, and shared document text and undo history. Added split controls, keyboard shortcuts, and tests for edit-position and tab-reference updates.

@@ -9,6 +9,16 @@ pub struct Pos {
     pub byte: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextChange {
+    pub serial: u64,
+    pub start: Pos,
+    pub end: Pos,
+    pub start_utf16: usize,
+    pub end_utf16: usize,
+    pub text: String,
+}
+
 #[derive(Clone, Debug)]
 struct Edit {
     start: Pos,
@@ -29,6 +39,8 @@ pub struct Document {
     revision: u64,
     saved_revision: u64,
     next_revision: u64,
+    change_serial: u64,
+    last_change: Option<TextChange>,
 }
 
 impl Default for Document {
@@ -50,6 +62,8 @@ impl Document {
             revision: 0,
             saved_revision: 0,
             next_revision: 1,
+            change_serial: 0,
+            last_change: None,
         }
     }
 
@@ -73,6 +87,8 @@ impl Document {
             revision: 0,
             saved_revision: 0,
             next_revision: 1,
+            change_serial: 0,
+            last_change: None,
         })
     }
 
@@ -99,6 +115,41 @@ impl Document {
     }
     pub fn is_dirty(&self) -> bool {
         self.revision != self.saved_revision
+    }
+
+    pub fn change_serial(&self) -> u64 {
+        self.change_serial
+    }
+
+    pub fn last_change(&self) -> Option<&TextChange> {
+        self.last_change.as_ref()
+    }
+
+    pub fn byte_len(&self) -> usize {
+        self.lines.iter().map(String::len).sum::<usize>() + self.lines.len() - 1
+    }
+
+    pub fn text(&self) -> String {
+        self.lines.join("\n")
+    }
+
+    pub fn utf16_column(&self, pos: Pos) -> usize {
+        let pos = self.clamp(pos);
+        self.lines[pos.line][..pos.byte].encode_utf16().count()
+    }
+
+    fn record_change(&mut self, start: Pos, end: Pos, text: String) {
+        let start_utf16 = self.utf16_column(start);
+        let end_utf16 = self.utf16_column(end);
+        self.change_serial += 1;
+        self.last_change = Some(TextChange {
+            serial: self.change_serial,
+            start,
+            end,
+            start_utf16,
+            end_utf16,
+            text,
+        });
     }
 
     pub fn clamp(&self, mut pos: Pos) -> Pos {
@@ -291,6 +342,7 @@ impl Document {
         if old == replacement {
             return end;
         }
+        self.record_change(start, end, replacement.clone());
         let new_end = self.replace_raw(start, end, &replacement);
         let after = self.next_revision;
         self.next_revision += 1;
@@ -325,6 +377,7 @@ impl Document {
         if let Some(edit) = self.undo.pop() {
             let line = edit.start.line;
             let end = Self::end_of(edit.start, &edit.new);
+            self.record_change(edit.start, end, edit.old.clone());
             let cursor = self.replace_raw(edit.start, end, &edit.old);
             self.revision = edit.before;
             self.redo.push(edit);
@@ -338,6 +391,7 @@ impl Document {
         if let Some(edit) = self.redo.pop() {
             let line = edit.start.line;
             let end = Self::end_of(edit.start, &edit.old);
+            self.record_change(edit.start, end, edit.new.clone());
             let cursor = self.replace_raw(edit.start, end, &edit.new);
             self.revision = edit.after;
             self.undo.push(edit);
@@ -440,6 +494,26 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn edit_records_utf16_ranges_for_replace_undo_and_redo() {
+        let mut doc = Document::new();
+        doc.replace(Pos::default(), Pos::default(), "a🦀z");
+        let start = Pos { line: 0, byte: 5 };
+        let end = Pos { line: 0, byte: 6 };
+        doc.replace(start, end, "é");
+        let change = doc.last_change().unwrap();
+        assert_eq!((change.start_utf16, change.end_utf16), (3, 4));
+        assert_eq!(change.text, "é");
+        let serial = change.serial;
+        doc.undo();
+        let undone = doc.last_change().unwrap();
+        assert_eq!((undone.start_utf16, undone.end_utf16), (3, 4));
+        assert_eq!(undone.text, "z");
+        assert!(undone.serial > serial);
+        doc.redo();
+        assert_eq!(doc.last_change().unwrap().text, "é");
+    }
+
     #[test]
     fn multiline_edit_undo_and_redo() {
         let mut doc = Document::new();

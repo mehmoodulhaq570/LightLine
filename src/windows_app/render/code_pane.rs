@@ -177,6 +177,48 @@ impl App {
                         );
                     }
                 }
+                for diagnostic in tab
+                    .diagnostics
+                    .iter()
+                    .filter(|item| item.range.start.line as usize == index)
+                    .take(3)
+                {
+                    let color = if diagnostic.severity == 1 {
+                        rgb(246, 110, 120)
+                    } else {
+                        rgb(245, 184, 95)
+                    };
+                    let start_byte = lsp::utf16_to_byte(source, diagnostic.range.start.character);
+                    let end_byte = if diagnostic.range.end.line as usize == index {
+                        lsp::utf16_to_byte(source, diagnostic.range.end.character)
+                    } else {
+                        source.len()
+                    };
+                    let x1 = code_left + self.text_width(hdc, &source[..start_byte]);
+                    let x2 = code_left + self.text_width(hdc, &source[..end_byte.max(start_byte)]);
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: left + self.scale(48),
+                            top: y + self.line_height / 2 - self.scale(3),
+                            right: left + self.scale(54),
+                            bottom: y + self.line_height / 2 + self.scale(3),
+                        },
+                        color,
+                    );
+                    if x1 < right {
+                        Self::fill(
+                            hdc,
+                            RECT {
+                                left: x1,
+                                top: (y + self.line_height - self.scale(2)).min(bottom),
+                                right: x2.max(x1 + self.scale(6)).min(right),
+                                bottom: (y + self.line_height).min(bottom),
+                            },
+                            color,
+                        );
+                    }
+                }
             }
             DeleteObject(guide_brush);
             if self.focused && self.caret_on && pane == self.focused_pane {

@@ -126,6 +126,14 @@ unsafe extern "system" fn wnd_proc(
             app.advance_sidebar(hwnd);
             0
         }
+        WM_TIMER if wparam == 6 => {
+            app.begin_mouse_hover(hwnd);
+            0
+        }
+        LSP_EVENT_MESSAGE => {
+            app.poll_lsp(hwnd);
+            0
+        }
         WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
             unsafe {
                 let mut point = POINT::default();
@@ -190,6 +198,12 @@ unsafe extern "system" fn wnd_proc(
         WM_MOUSEMOVE => {
             if (app.dragging || app.divider_dragging) && wparam & 1 != 0 {
                 app.mouse_drag(
+                    hwnd,
+                    (lparam as u32 & 0xffff) as i16 as i32,
+                    ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+                );
+            } else {
+                app.mouse_hover_move(
                     hwnd,
                     (lparam as u32 & 0xffff) as i16 as i32,
                     ((lparam as u32 >> 16) & 0xffff) as i16 as i32,

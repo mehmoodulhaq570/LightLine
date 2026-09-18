@@ -562,8 +562,19 @@ impl App {
             let right_label = if self.side_view == SideView::Review && self.review_file.is_some() {
                 format!("Git review     {} lines", self.diff_rows.len())
             } else {
+                let issues = self
+                    .tab()
+                    .diagnostics
+                    .iter()
+                    .filter(|item| item.severity <= 2)
+                    .count();
                 format!(
-                    "Ln {}, Col {}     UTF-8     {}",
+                    "{}Ln {}, Col {}     UTF-8     {}",
+                    if issues == 0 {
+                        String::new()
+                    } else {
+                        format!("{issues} issues     ")
+                    },
                     self.view().cursor.line + 1,
                     self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
                         .chars()
@@ -579,9 +590,20 @@ impl App {
             };
             let right_width = self.text_width(hdc, &right_label);
             let right_x = (rect.right - right_width - self.scale(16)).max(self.scale(16));
+            let cursor = self.view().cursor;
+            let status_message = self
+                .tab()
+                .diagnostics
+                .iter()
+                .find(|item| {
+                    (item.range.start.line as usize..=item.range.end.line as usize)
+                        .contains(&cursor.line)
+                })
+                .and_then(|item| item.message.lines().next())
+                .unwrap_or(&self.status);
             Self::label(
                 hdc,
-                &self.status,
+                status_message,
                 self.scale(14),
                 editor_bottom + self.scale(4),
                 TEXT,
@@ -649,6 +671,7 @@ impl App {
             }
             SelectObject(hdc, self.ui_font);
             self.paint_quick_open(hdc, rect);
+            self.paint_hover_card(hdc, rect, editor_bottom);
             SelectObject(hdc, old_font);
             if hdc != window_dc {
                 BitBlt(window_dc, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);

@@ -1,6 +1,6 @@
 # LightLine
 
-A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust syntax coloring, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
+A small Windows code editor written in Rust. It supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust syntax coloring, rust-analyzer diagnostics and hover, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
@@ -30,6 +30,7 @@ You can pass a UTF-8 file path as the first argument.
 | Quick Open files and commands | Ctrl+P; type `>` for commands |
 | Search across workspace files | Ctrl+Shift+F; type a query, press Enter |
 | Run Rust tests; review Git changes | Ctrl+Shift+B; Ctrl+Shift+G |
+| Show Rust hover information at the cursor | F1, or pause the mouse over code |
 
 The Start screen offers Open File, Open Folder, New File, and recent workspaces. Clicking the LightLine name returns to Start. Opening a file picks a nearby Cargo or Git root; Open Folder chooses one explicitly. Recent workspaces are stored in `%APPDATA%\LightLine\recent-workspaces.txt`. The explorer loads only opened folders, so project contents are not indexed at startup. The activity rail follows the LightLine reference design; the branch shown in its workspace footer comes from `.git/HEAD`.
 
@@ -41,7 +42,9 @@ Click a tab to switch to it, or click its × to close it. Each tab retains its u
 
 To stop a `cargo run` session, close the editor window with its X button. The terminal command will then finish. You can also focus the terminal and press Ctrl+C; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process lightline | Stop-Process`.
 
-Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text. LSP language intelligence is not yet included.
+Rust `.rs` files get syntax coloring for comments, strings, keywords, types, numbers, and macros. Files up to 128 KiB use Tree-sitter's Rust parser on a background worker; after edits, the worker updates the previous syntax tree. Colors appear when the worker finishes. Larger files use a lightweight lexer that caches line state and processes distant sections in small batches when you scroll. Other file types use plain text.
+
+For Rust diagnostics and hover, install the toolchain components with `rustup component add rust-analyzer rust-src`. LightLine starts rust-analyzer when you open a Rust file up to 2 MiB, using the nearest Cargo workspace when available. Errors and warnings appear in the gutter and under the code; move the cursor onto a marked line to read its message in the status bar. Press F1 or pause the mouse over Rust code for hover information. Edits are sent incrementally, and saving sends a save notification so cargo check diagnostics can refresh. Split panes showing the same file share one document and one LSP update. The server runs separately from the UI; if it exits, editing continues and the status bar shows the error. The first LSP slice does not include completion, navigation, or formatting.
 
 ## Default icons
 
