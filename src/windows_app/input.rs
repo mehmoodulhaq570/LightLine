@@ -9,6 +9,32 @@ impl App {
             self.stop_run(hwnd);
             return true;
         }
+        if self.output_focus && self.run_input.is_some() && !ctrl {
+            match key {
+                x if x == VK_RETURN as u32 => {
+                    if let Some(input) = &self.run_input {
+                        let mut line = std::mem::take(&mut self.run_input_buffer);
+                        line.push('\n');
+                        let _ = input.send(line);
+                        self.run_output.push('\n');
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                x if x == VK_BACK as u32 => {
+                    if let Some(ch) = self.run_input_buffer.pop()
+                        && self.run_output.ends_with(ch)
+                    {
+                        for _ in 0..ch.len_utf8() {
+                            self.run_output.pop();
+                        }
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if self.welcome && key == VK_ESCAPE as u32 && self.workspace_root.is_some() {
             self.welcome = false;
             self.show_active_tab(hwnd);
@@ -181,6 +207,10 @@ impl App {
                 }
                 0x42 if shift => {
                     self.run_project(hwnd);
+                    return true;
+                }
+                0x52 if shift => {
+                    self.run_python_file(hwnd);
                     return true;
                 }
                 x if x == VK_OEM_PLUS as u32 || x == VK_ADD as u32 => {
@@ -449,6 +479,17 @@ impl App {
 
     pub(super) fn character(&mut self, hwnd: HWND, unit: u16) {
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
+            return;
+        }
+        if self.output_focus && self.run_input.is_some() && !self.quick_open && !self.search_input {
+            if unit >= 32
+                && unit != 127
+                && let Some(ch) = char::from_u32(unit as u32)
+            {
+                self.run_input_buffer.push(ch);
+                self.run_output.push(ch);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
             return;
         }
         if self.output_focus && !self.quick_open && !self.search_input {
@@ -749,6 +790,13 @@ impl App {
             return;
         }
         if y < self.scale(TAB_HEIGHT) {
+            if Tab::is_python(self.doc())
+                && x >= rect.right - self.scale(420)
+                && x < rect.right - self.scale(292)
+            {
+                self.run_python_file(hwnd);
+                return;
+            }
             if x >= rect.right - self.scale(112) {
                 self.toggle_split(hwnd);
                 return;

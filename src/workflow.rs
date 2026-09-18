@@ -1,12 +1,12 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 fn background_command(program: &str) -> Command {
@@ -214,36 +214,16 @@ pub fn run_tests_stream(
     let out_tx = lines.clone();
     let out_reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            let _ = out_tx.send(line);
+            let _ = out_tx.send(format!("{line}\n"));
         }
     });
     let err_tx = lines.clone();
     let err_reader = std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            let _ = err_tx.send(line);
+            let _ = err_tx.send(format!("{line}\n"));
         }
     });
-    let status = loop {
-        if cancel.load(Ordering::Relaxed) {
-            #[cfg(windows)]
-            let _ = background_command("taskkill")
-                .args(["/T", "/F", "/PID", &child.id().to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            let _ = child.kill();
-            break child
-                .wait()
-                .map_err(|error| format!("Could not stop cargo: {error}"))?;
-        }
-        match child
-            .try_wait()
-            .map_err(|error| format!("Could not wait for cargo: {error}"))?
-        {
-            Some(status) => break status,
-            None => std::thread::sleep(Duration::from_millis(50)),
-        }
-    };
+    let status = wait_for_child(&mut child, "cargo", cancel)?;
     let _ = out_reader.join();
     let _ = err_reader.join();
     pid.store(0, Ordering::Relaxed);
@@ -254,6 +234,122 @@ pub fn run_tests_stream(
     } else {
         Err(format!("Test command exited with {status}"))
     }
+}
+
+pub fn run_python_file_stream(
+    interpreter: &Path,
+    file: &Path,
+    root: &Path,
+    output: Sender<String>,
+    input: Receiver<String>,
+    cancel: &AtomicBool,
+    pid: &AtomicU32,
+) -> Result<(), String> {
+    if !interpreter.is_file() {
+        return Err(format!(
+            "Python interpreter does not exist: {}",
+            interpreter.display()
+        ));
+    }
+    if !file.is_file() {
+        return Err(format!("Python file does not exist: {}", file.display()));
+    }
+    let mut child = background_command(&interpreter.to_string_lossy())
+        .arg("-u")
+        .arg(file)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start Python: {error}"))?;
+    pid.store(child.id(), Ordering::Relaxed);
+    let mut stdin = child.stdin.take().unwrap();
+    let stdin_writer = std::thread::spawn(move || {
+        for text in input {
+            if stdin.write_all(text.as_bytes()).is_err() || stdin.flush().is_err() {
+                break;
+            }
+        }
+    });
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out_reader = stream_reader(stdout, output.clone());
+    let err_reader = stream_reader(stderr, output);
+    let status = wait_for_child(&mut child, "Python", cancel)?;
+    let _ = out_reader.join();
+    let _ = err_reader.join();
+    drop(stdin_writer);
+    pid.store(0, Ordering::Relaxed);
+    if cancel.load(Ordering::Relaxed) {
+        Err("Python run stopped by user".into())
+    } else if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Python exited with {status}"))
+    }
+}
+
+fn stream_reader(mut reader: impl Read + Send + 'static, output: Sender<String>) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut buffer = [0; 1024];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    let text = String::from_utf8_lossy(&buffer[..count]).into_owned();
+                    let _ = output.send(text);
+                }
+                Err(_) => break,
+            }
+        }
+    })
+}
+
+fn wait_for_child(
+    child: &mut std::process::Child,
+    name: &str,
+    cancel: &AtomicBool,
+) -> Result<std::process::ExitStatus, String> {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            #[cfg(windows)]
+            let _ = background_command("taskkill")
+                .args(["/T", "/F", "/PID", &child.id().to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = child.kill();
+            return child
+                .wait()
+                .map_err(|error| format!("Could not stop {name}: {error}"));
+        }
+        match child
+            .try_wait()
+            .map_err(|error| format!("Could not wait for {name}: {error}"))?
+        {
+            Some(status) => return Ok(status),
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
+pub fn python_project_root(file: &Path, workspace_root: Option<&Path>) -> PathBuf {
+    file.ancestors()
+        .skip(1)
+        .take(10)
+        .find(|folder| {
+            folder.join("pyproject.toml").is_file()
+                || folder.join("setup.py").is_file()
+                || folder.join("setup.cfg").is_file()
+                || folder.join("requirements.txt").is_file()
+                || folder.join(".venv").is_dir()
+                || folder.join(".git").exists()
+        })
+        .or(workspace_root)
+        .or_else(|| file.parent())
+        .unwrap_or(Path::new("."))
+        .to_path_buf()
 }
 
 pub fn git_changes(root: &Path) -> Result<Vec<Change>, String> {
@@ -408,6 +504,255 @@ fn parse_diff(text: &str) -> Vec<DiffRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::mpsc;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "lightline-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn find_python() -> Option<PathBuf> {
+        for name in ["python", "python3"] {
+            let output = Command::new("where").arg(name).output().ok()?;
+            if output.status.success() {
+                let first = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .map(PathBuf::from);
+                if let Some(path) = first
+                    && path.is_file()
+                {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+
+    fn drain(rx: Receiver<String>) -> String {
+        rx.into_iter().collect()
+    }
+
+    #[test]
+    fn python_project_root_prefers_the_nearest_project_marker() {
+        let root = temp_dir("python-root");
+        fs::create_dir_all(root.join("pkg/sub")).unwrap();
+        fs::write(root.join("pyproject.toml"), "").unwrap();
+        let file = root.join("pkg/sub/script.py");
+        fs::write(&file, "print('hi')\n").unwrap();
+        assert_eq!(python_project_root(&file, None), root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn python_project_root_detects_a_virtual_environment_marker() {
+        let root = temp_dir("python-root-venv");
+        fs::create_dir_all(root.join(".venv/Scripts")).unwrap();
+        fs::create_dir_all(root.join("app")).unwrap();
+        let file = root.join("app/script.py");
+        fs::write(&file, "print('hi')\n").unwrap();
+        assert_eq!(python_project_root(&file, None), root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_handles_paths_containing_spaces() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let root = temp_dir("python run with spaces");
+        let file = root.join("my script.py");
+        fs::write(&file, "print('spaces ok')\n").unwrap();
+        let (output_tx, output_rx) = mpsc::channel();
+        let (_input_tx, input_rx) = mpsc::channel();
+        let result = run_python_file_stream(
+            &python,
+            &file,
+            &root,
+            output_tx,
+            input_rx,
+            &AtomicBool::new(false),
+            &AtomicU32::new(0),
+        );
+        assert!(result.is_ok(), "unexpected error: {result:?}");
+        assert!(drain(output_rx).contains("spaces ok"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn python_project_root_falls_back_to_workspace_then_file_parent() {
+        let root = temp_dir("python-root-fallback");
+        let file = root.join("loose_script.py");
+        fs::write(&file, "print('hi')\n").unwrap();
+        let workspace = temp_dir("python-workspace");
+        assert_eq!(
+            python_project_root(&file, Some(&workspace)),
+            workspace
+        );
+        assert_eq!(python_project_root(&file, None), root);
+        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_rejects_a_missing_interpreter_or_file() {
+        let (output_tx, output_rx) = mpsc::channel();
+        let (_input_tx, input_rx) = mpsc::channel();
+        let missing_interpreter = Path::new("Z:/definitely/missing/python.exe");
+        let root = temp_dir("python-missing-interpreter");
+        let file = root.join("script.py");
+        fs::write(&file, "print('hi')\n").unwrap();
+        let result = run_python_file_stream(
+            missing_interpreter,
+            &file,
+            &root,
+            output_tx,
+            input_rx,
+            &AtomicBool::new(false),
+            &AtomicU32::new(0),
+        );
+        assert!(result.is_err());
+        drop(output_rx);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_streams_output_and_succeeds() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let root = temp_dir("python-run-success");
+        let file = root.join("script.py");
+        fs::write(
+            &file,
+            "print('line one')\nimport sys\nprint('line two', file=sys.stderr)\n",
+        )
+        .unwrap();
+        let (output_tx, output_rx) = mpsc::channel();
+        let (_input_tx, input_rx) = mpsc::channel();
+        let pid = AtomicU32::new(0);
+        let result = run_python_file_stream(
+            &python,
+            &file,
+            &root,
+            output_tx,
+            input_rx,
+            &AtomicBool::new(false),
+            &pid,
+        );
+        assert!(result.is_ok(), "unexpected error: {result:?}");
+        assert_eq!(pid.load(Ordering::Relaxed), 0);
+        let text = drain(output_rx);
+        assert!(text.contains("line one"));
+        assert!(text.contains("line two"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_reports_a_traceback_and_nonzero_exit() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let root = temp_dir("python-run-error");
+        let file = root.join("script.py");
+        fs::write(&file, "raise ValueError('boom')\n").unwrap();
+        let (output_tx, output_rx) = mpsc::channel();
+        let (_input_tx, input_rx) = mpsc::channel();
+        let result = run_python_file_stream(
+            &python,
+            &file,
+            &root,
+            output_tx,
+            input_rx,
+            &AtomicBool::new(false),
+            &AtomicU32::new(0),
+        );
+        assert!(result.is_err());
+        let text = drain(output_rx);
+        assert!(text.contains("ValueError"));
+        assert!(text.contains("boom"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_reads_stdin_input() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let root = temp_dir("python-run-input");
+        let file = root.join("script.py");
+        fs::write(
+            &file,
+            "name = input('name? ')\nprint('hello ' + name)\n",
+        )
+        .unwrap();
+        let (output_tx, output_rx) = mpsc::channel();
+        let (input_tx, input_rx) = mpsc::channel();
+        input_tx.send("LightLine\n".to_string()).unwrap();
+        let result = run_python_file_stream(
+            &python,
+            &file,
+            &root,
+            output_tx,
+            input_rx,
+            &AtomicBool::new(false),
+            &AtomicU32::new(0),
+        );
+        assert!(result.is_ok(), "unexpected error: {result:?}");
+        let text = drain(output_rx);
+        assert!(text.contains("hello LightLine"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_python_file_stream_can_be_cancelled_while_running() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let root = temp_dir("python-run-cancel");
+        let file = root.join("script.py");
+        fs::write(
+            &file,
+            "import time\nfor _ in range(600):\n    time.sleep(0.1)\n",
+        )
+        .unwrap();
+        let (output_tx, output_rx) = mpsc::channel();
+        let (_input_tx, input_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let pid = Arc::new(AtomicU32::new(0));
+        let run_cancel = cancel.clone();
+        let run_pid = pid.clone();
+        let run_root = root.clone();
+        let handle = std::thread::spawn(move || {
+            run_python_file_stream(
+                &python,
+                &file,
+                &run_root,
+                output_tx,
+                input_rx,
+                &run_cancel,
+                &run_pid,
+            )
+        });
+        while pid.load(Ordering::Relaxed) == 0 {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        cancel.store(true, Ordering::Relaxed);
+        let result = handle.join().unwrap();
+        assert!(result.is_err());
+        assert_eq!(pid.load(Ordering::Relaxed), 0);
+        drop(output_rx);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn parses_aligned_change_hunks() {

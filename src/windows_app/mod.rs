@@ -1,7 +1,7 @@
 mod app;
 mod panels;
 mod workspace;
-use app::{App, ExplorerEntry, ExplorerRow, SideView, WorkerMessage};
+use app::{App, ExplorerEntry, ExplorerRow, SideView, Tab, WorkerMessage};
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;

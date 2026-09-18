@@ -99,9 +99,12 @@ impl App {
             cancel.store(true, Ordering::Relaxed);
         }
         self.run_pid = None;
+        self.run_input = None;
+        self.run_input_buffer.clear();
         self.run_busy = false;
         self.run_visible = false;
         self.output_focus = false;
+        self.run_title = "Output".into();
         self.run_output.clear();
         self.welcome = false;
         self.explorer_visible = true;

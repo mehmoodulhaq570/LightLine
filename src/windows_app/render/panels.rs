@@ -719,7 +719,7 @@ impl App {
         );
         Self::label(
             hdc,
-            "OUTPUT  ·  cargo test",
+            &self.run_title,
             left + self.scale(16),
             top + self.scale(8),
             TEXT,

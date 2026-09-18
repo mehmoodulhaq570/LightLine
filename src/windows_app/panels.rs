@@ -37,6 +37,7 @@ impl App {
         [
             ("Search in files", 0),
             ("Run Rust tests", 1),
+            ("Run Python File", 8),
             ("Review Git changes", 2),
             ("Open folder", 3),
             ("New file", 4),
@@ -72,6 +73,7 @@ impl App {
             match action {
                 Some(0) => self.open_project_search(hwnd),
                 Some(1) => self.run_project(hwnd),
+                Some(8) => self.run_python_file(hwnd),
                 Some(2) => self.show_review(hwnd),
                 Some(3) => self.open_folder(hwnd),
                 Some(4) => self.new_file(hwnd),
@@ -163,22 +165,17 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        self.welcome = false;
-        self.run_visible = true;
-        self.output_focus = true;
         if self.run_busy {
-            unsafe { InvalidateRect(hwnd, null(), 0) };
+            self.focus_running_command(hwnd);
             return;
         }
+        self.prepare_run(hwnd, "OUTPUT  ·  cargo test", "$ cargo test --offline\n\n");
         self.run_busy = true;
         let cancel = Arc::new(AtomicBool::new(false));
+        let run_token = cancel.clone();
         let pid = Arc::new(AtomicU32::new(0));
         self.run_cancel = Some(cancel.clone());
         self.run_pid = Some(pid.clone());
-        self.run_output = "$ cargo test --offline\n\n".into();
-        self.output_scroll = 0;
-        self.update_title(hwnd);
-        self.keep_cursor_visible(hwnd);
         let tx = self.worker_tx.clone();
         self.worker_started(hwnd);
         std::thread::spawn(move || {
@@ -187,14 +184,100 @@ impl App {
             let runner = std::thread::spawn(move || {
                 workflow::run_tests_stream(&run_root, line_tx, &cancel, &pid)
             });
-            for line in line_rx {
-                let _ = tx.send(WorkerMessage::RunLine(root.clone(), line));
+            for chunk in line_rx {
+                let _ = tx.send(WorkerMessage::RunOutput(run_token.clone(), chunk));
             }
             let result = runner
                 .join()
                 .unwrap_or_else(|_| Err("Test worker stopped unexpectedly".into()));
-            let _ = tx.send(WorkerMessage::Run(root, result));
+            let _ = tx.send(WorkerMessage::Run(run_token, result));
         });
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn run_python_file(&mut self, hwnd: HWND) {
+        if !Tab::is_python(self.doc()) {
+            self.status = "Open a Python file to run it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
+        if self.run_busy {
+            self.focus_running_command(hwnd);
+            return;
+        }
+        if self.doc().is_dirty() && !self.save(hwnd, false) {
+            self.status = "Save the Python file before running it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
+        let Some(file) = self.doc().path.clone() else {
+            self.status = "Save the Python file before running it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+        let Some(interpreter) = self.python_interpreter.clone() else {
+            self.status = "Select a Python interpreter or virtual environment before running".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+        let root = workflow::python_project_root(&file, self.workspace_root.as_deref());
+        let command_line = format!(
+            "$ \"{}\" -u \"{}\"\n\n",
+            interpreter.display(),
+            file.display()
+        );
+        self.prepare_run(hwnd, "TERMINAL  ·  Python file", &command_line);
+        self.run_busy = true;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let run_token = cancel.clone();
+        let pid = Arc::new(AtomicU32::new(0));
+        let (input_tx, input_rx) = mpsc::channel();
+        self.run_cancel = Some(cancel.clone());
+        self.run_pid = Some(pid.clone());
+        self.run_input = Some(input_tx);
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        std::thread::spawn(move || {
+            let (output_tx, output_rx) = mpsc::channel();
+            let run_root = root.clone();
+            let runner = std::thread::spawn(move || {
+                workflow::run_python_file_stream(
+                    &interpreter,
+                    &file,
+                    &run_root,
+                    output_tx,
+                    input_rx,
+                    &cancel,
+                    &pid,
+                )
+            });
+            for chunk in output_rx {
+                let _ = tx.send(WorkerMessage::RunOutput(run_token.clone(), chunk));
+            }
+            let result = runner
+                .join()
+                .unwrap_or_else(|_| Err("Python worker stopped unexpectedly".into()));
+            let _ = tx.send(WorkerMessage::Run(run_token, result));
+        });
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    fn prepare_run(&mut self, hwnd: HWND, title: &str, first_line: &str) {
+        self.welcome = false;
+        self.run_visible = true;
+        self.output_focus = true;
+        self.run_title = title.into();
+        self.run_output = first_line.into();
+        self.run_input_buffer.clear();
+        self.output_scroll = 0;
+        self.update_title(hwnd);
+        self.keep_cursor_visible(hwnd);
+    }
+
+    fn focus_running_command(&mut self, hwnd: HWND) {
+        self.run_visible = true;
+        self.output_focus = true;
+        self.status = "A command is already running; stop it before starting another".into();
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
@@ -269,16 +352,18 @@ impl App {
         let mut received = false;
         while let Ok(message) = self.worker_rx.try_recv() {
             received = true;
-            if !matches!(&message, WorkerMessage::RunLine(..)) {
+            if !matches!(&message, WorkerMessage::RunOutput(..)) {
                 self.pending_workers = self.pending_workers.saturating_sub(1);
             }
             match message {
-                WorkerMessage::RunLine(root, line)
-                    if self.workspace_root.as_ref() == Some(&root) =>
+                WorkerMessage::RunOutput(run_token, chunk)
+                    if self
+                        .run_cancel
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, &run_token)) =>
                 {
                     if self.run_output.len() < 60_000 {
-                        self.run_output.push_str(&line);
-                        self.run_output.push('\n');
+                        self.run_output.push_str(&chunk);
                     }
                 }
                 WorkerMessage::Files(root, files)
@@ -299,14 +384,26 @@ impl App {
                     self.status = format!("{} results for {}", hits.len(), query);
                     self.search_results = hits;
                 }
-                WorkerMessage::Run(root, result) if self.workspace_root.as_ref() == Some(&root) => {
+                WorkerMessage::Run(run_token, result)
+                    if self
+                        .run_cancel
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, &run_token)) =>
+                {
                     self.run_busy = false;
                     self.run_cancel = None;
                     self.run_pid = None;
+                    self.run_input = None;
+                    self.run_input_buffer.clear();
                     match result {
                         Ok(()) => {
-                            self.run_output.push_str("\nTests finished successfully.\n");
-                            self.status = "Tests passed".into();
+                            let message = if self.run_title.contains("Python") {
+                                "Python exited with status 0"
+                            } else {
+                                "Tests finished successfully."
+                            };
+                            self.run_output.push_str(&format!("\n{message}\n"));
+                            self.status = message.into();
                         }
                         Err(error) => {
                             self.run_output.push_str(&format!("\n{error}\n"));

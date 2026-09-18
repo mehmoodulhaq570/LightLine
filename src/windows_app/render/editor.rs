@@ -227,6 +227,31 @@ impl App {
                     1,
                 );
             }
+            if self
+                .doc()
+                .path
+                .as_deref()
+                .and_then(Path::extension)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+                && editor_left
+                    + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
+                    + self.scale(12)
+                    < rect.right - self.scale(420)
+            {
+                Self::label(
+                    hdc,
+                    "▶  Run Python  Ctrl+Shift+R",
+                    rect.right - self.scale(420),
+                    self.scale(7),
+                    GREEN,
+                    RECT {
+                        left: rect.right - self.scale(420),
+                        top: 0,
+                        right: rect.right - self.scale(292),
+                        bottom: self.scale(TAB_HEIGHT),
+                    },
+                );
+            }
             if editor_left
                 + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                 + self.scale(12)
