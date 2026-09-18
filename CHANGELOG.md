@@ -4,6 +4,7 @@ This is LightLine's development history. Dates are the GitHub commit dates in As
 
 ## Unreleased
 
+- Split the Windows UI out of the nearly 5,000-line `main.rs` into app state, workspace, tool panels, input, window setup, icons, and focused rendering modules. The entry point is now small; editor behavior is unchanged.
 - Applied the new LightLine PNG as a multi-size Windows app icon in the title bar, taskbar, Start screen, activity rail, and executable resource. Moved Windows icon loading and file-icon mapping from `main.rs` into a dedicated module.
 - Matched the supplied left workbench close-up with a lightning brand mark, `IDE` badge, six-row activity rail, compact explorer header and tree, workspace branch footer, and active-file chip. Updated navigation hit areas; unavailable Extensions and AI entries now explain their status.
 - Added the native Quiet Workbench workflow: Start and recent workspaces, folder selection, a sliding project drawer, Quick Open for files and commands, project search with result previews, streamed and stoppable Rust test output, and read-only Git change review with side-by-side diffs.
