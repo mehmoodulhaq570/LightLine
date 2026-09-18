@@ -44,6 +44,8 @@ Rust `.rs` files get syntax coloring for comments, strings, keywords, types, num
 
 ## Default icons
 
+The LightLine app icon comes from [LightLine-icon.png](LightLine-icon.png). Regenerate its multi-size Windows icon after updating the PNG with `python tools/update_app_icon.py` (Pillow required for this developer step). The generated `assets/lightline.ico` is used in the title bar, taskbar, Start screen, and activity rail. On Windows MSVC builds, `build.rs` also embeds it in the executable using the Windows SDK resource compiler so Explorer shows the same icon.
+
 LightLine bundles a small snapshot of [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) as its default file and folder icons. The pinned version and selected icon names are in [VERSION.json](assets/material-icon-theme/VERSION.json), with the upstream [MIT license](assets/material-icon-theme/LICENSE.txt). The app embeds the icons in its executable; users do not need VS Code, its extension, or a marketplace.
 
 When upstream icons change, refresh the snapshot from a newer installed extension or repository checkout:
@@ -53,7 +55,7 @@ python tools/update_material_icons.py --source "C:\path\to\vscode-material-icon-
 cargo test --offline
 ```
 
-The refresh script needs PyQt5 and Pillow on the developer's machine to convert selected SVGs into Windows icons. These packages are not runtime dependencies. Review the changed assets and ship them in a LightLine release. Additional file associations can be added to the icon map in `src/main.rs`. There is no automatic icon update in this version.
+The refresh script needs PyQt5 and Pillow on the developer's machine to convert selected SVGs into Windows icons. These packages are not runtime dependencies. Review the changed assets and ship them in a LightLine release. Additional file associations can be added to the icon map in `src/windows_app/icons.rs`. There is no automatic icon update in this version.
 
 ## Baseline measurement
 

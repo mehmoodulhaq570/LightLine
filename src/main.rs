@@ -2,6 +2,9 @@
 
 #[cfg(windows)]
 mod windows_app {
+    mod icons;
+
+    use icons::{AppIcons, IconSet, material_icon_for};
     use lightline::clipboard;
     use lightline::document::{Document, Pos};
     use lightline::syntax::{Color, RustSyntax};
@@ -76,118 +79,7 @@ mod windows_app {
     const VIOLET: u32 = rgb(149, 109, 255);
     const TEAL: u32 = rgb(103, 220, 215);
     const GREEN: u32 = rgb(111, 220, 163);
-    macro_rules! icon_bytes {
-        ($name:literal) => {
-            include_bytes!(concat!("../assets/material-icon-theme/", $name, ".ico")) as &[u8]
-        };
-    }
-    const MATERIAL_ICONS: [(&str, &[u8]); 22] = [
-        ("file", icon_bytes!("file")),
-        ("folder", icon_bytes!("folder")),
-        ("folder-open", icon_bytes!("folder-open")),
-        ("folder-src", icon_bytes!("folder-src")),
-        ("folder-src-open", icon_bytes!("folder-src-open")),
-        ("folder-docs", icon_bytes!("folder-docs")),
-        ("folder-docs-open", icon_bytes!("folder-docs-open")),
-        ("rust", icon_bytes!("rust")),
-        ("toml", icon_bytes!("toml")),
-        ("markdown", icon_bytes!("markdown")),
-        ("json", icon_bytes!("json")),
-        ("python", icon_bytes!("python")),
-        ("c", icon_bytes!("c")),
-        ("cpp", icon_bytes!("cpp")),
-        ("html", icon_bytes!("html")),
-        ("css", icon_bytes!("css")),
-        ("javascript", icon_bytes!("javascript")),
-        ("typescript", icon_bytes!("typescript")),
-        ("git", icon_bytes!("git")),
-        ("lock", icon_bytes!("lock")),
-        ("yaml", icon_bytes!("yaml")),
-        ("readme", icon_bytes!("readme")),
-    ];
     static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
-
-    struct IconSet {
-        handles: Vec<(&'static str, HICON)>,
-    }
-
-    impl IconSet {
-        fn new(dpi: u32, zoom: i32) -> Self {
-            let size = scaled(18, dpi, zoom);
-            let handles = MATERIAL_ICONS
-                .iter()
-                .map(|&(name, data)| (name, Self::load_ico(data, size)))
-                .collect();
-            Self { handles }
-        }
-
-        fn load_ico(data: &[u8], size: i32) -> HICON {
-            if data.len() < 6 || data[0..4] != [0, 0, 1, 0] {
-                return null_mut();
-            }
-            let count = u16::from_le_bytes([data[4], data[5]]) as usize;
-            let mut best: Option<(i32, usize, usize)> = None;
-            for index in 0..count {
-                let start = 6 + index * 16;
-                if start + 16 > data.len() {
-                    break;
-                }
-                let width = if data[start] == 0 {
-                    256
-                } else {
-                    data[start] as i32
-                };
-                let length =
-                    u32::from_le_bytes(data[start + 8..start + 12].try_into().unwrap()) as usize;
-                let offset =
-                    u32::from_le_bytes(data[start + 12..start + 16].try_into().unwrap()) as usize;
-                if offset
-                    .checked_add(length)
-                    .is_none_or(|end| end > data.len())
-                {
-                    continue;
-                }
-                let score = (width - size).abs();
-                if best.is_none_or(|(best_score, _, _)| score < best_score) {
-                    best = Some((score, offset, length));
-                }
-            }
-            let Some((_, offset, length)) = best else {
-                return null_mut();
-            };
-            unsafe {
-                CreateIconFromResourceEx(
-                    data.as_ptr().add(offset),
-                    length as u32,
-                    1,
-                    0x0003_0000,
-                    size,
-                    size,
-                    0,
-                )
-            }
-        }
-
-        fn draw(&self, hdc: HDC, name: &str, x: i32, y: i32, size: i32) -> bool {
-            let Some(&(_, icon)) = self.handles.iter().find(|(key, _)| *key == name) else {
-                return false;
-            };
-            if icon.is_null() {
-                return false;
-            }
-            unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 }
-        }
-    }
-
-    impl Drop for IconSet {
-        fn drop(&mut self) {
-            for (_, icon) in &self.handles {
-                if !icon.is_null() {
-                    unsafe { DestroyIcon(*icon) };
-                }
-            }
-        }
-    }
 
     struct Surface {
         dc: HDC,
@@ -255,66 +147,6 @@ mod windows_app {
         Run(PathBuf, Result<(), String>),
         Changes(PathBuf, Result<Vec<Change>, String>),
         Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
-    }
-
-    fn material_icon_for(path: &Path, is_dir: bool, expanded: bool) -> &'static str {
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if is_dir {
-            return match (file_name.as_str(), expanded) {
-                ("src", true) => "folder-src-open",
-                ("src", false) => "folder-src",
-                ("docs", true) => "folder-docs-open",
-                ("docs", false) => "folder-docs",
-                (_, true) => "folder-open",
-                _ => "folder",
-            };
-        }
-        if file_name == "readme.md" {
-            return "readme";
-        }
-        if file_name == ".gitignore" || file_name == ".gitattributes" {
-            return "git";
-        }
-        match path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "rs" => "rust",
-            "toml" => "toml",
-            "md" | "markdown" => "markdown",
-            "json" | "jsonc" => "json",
-            "py" | "pyw" => "python",
-            "c" | "h" => "c",
-            "cc" | "cpp" | "cxx" | "hpp" => "cpp",
-            "html" | "htm" => "html",
-            "css" => "css",
-            "js" | "jsx" | "mjs" => "javascript",
-            "ts" | "tsx" => "typescript",
-            "lock" => "lock",
-            "yaml" | "yml" => "yaml",
-            _ => "file",
-        }
-    }
-
-    #[cfg(test)]
-    mod icon_tests {
-        use super::*;
-
-        #[test]
-        fn bundled_material_icons_load_as_windows_icons() {
-            for (name, data) in MATERIAL_ICONS {
-                let icon = IconSet::load_ico(data, 24);
-                assert!(!icon.is_null(), "failed to load {name}");
-                unsafe { DestroyIcon(icon) };
-            }
-        }
     }
 
     unsafe extern "system" fn console_control(event: u32) -> i32 {
@@ -406,6 +238,7 @@ mod windows_app {
         font: HFONT,
         ui_font: HFONT,
         brand_font: HFONT,
+        brand_icon: HICON,
         icons: IconSet,
         dpi: u32,
         zoom: i32,
@@ -528,7 +361,7 @@ mod windows_app {
             }
         }
 
-        fn new(hwnd: HWND) -> Self {
+        fn new(hwnd: HWND, brand_icon: HICON) -> Self {
             let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
             let zoom = 100;
             let (worker_tx, worker_rx) = mpsc::channel();
@@ -539,6 +372,7 @@ mod windows_app {
                 font: Self::font_for_dpi(dpi, zoom),
                 ui_font: Self::ui_font_for_dpi(dpi, zoom),
                 brand_font: Self::brand_font_for_dpi(dpi, zoom),
+                brand_icon,
                 icons: IconSet::new(dpi, zoom),
                 dpi,
                 zoom,
@@ -1841,47 +1675,17 @@ mod windows_app {
                 bottom: editor_bottom,
             };
             unsafe {
-                let brush = CreateSolidBrush(VIOLET);
-                let old_brush = SelectObject(hdc, brush);
-                let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-                Ellipse(
+                DrawIconEx(
                     hdc,
-                    self.scale(17),
-                    self.scale(12),
-                    self.scale(36),
-                    self.scale(31),
+                    self.scale(15),
+                    self.scale(9),
+                    self.brand_icon,
+                    self.scale(23),
+                    self.scale(23),
+                    0,
+                    null_mut(),
+                    DI_NORMAL,
                 );
-                SelectObject(hdc, GetStockObject(WHITE_BRUSH));
-                let bolt = [
-                    POINT {
-                        x: self.scale(27),
-                        y: self.scale(14),
-                    },
-                    POINT {
-                        x: self.scale(22),
-                        y: self.scale(23),
-                    },
-                    POINT {
-                        x: self.scale(26),
-                        y: self.scale(23),
-                    },
-                    POINT {
-                        x: self.scale(24),
-                        y: self.scale(29),
-                    },
-                    POINT {
-                        x: self.scale(32),
-                        y: self.scale(20),
-                    },
-                    POINT {
-                        x: self.scale(28),
-                        y: self.scale(20),
-                    },
-                ];
-                Polygon(hdc, bolt.as_ptr(), bolt.len() as i32);
-                SelectObject(hdc, old_pen);
-                SelectObject(hdc, old_brush);
-                DeleteObject(brush);
                 SelectObject(hdc, self.brand_font);
             }
             Self::label(hdc, "LightLine", self.scale(43), self.scale(9), TEXT, clip);
@@ -2014,15 +1818,21 @@ mod windows_app {
         fn paint_welcome(&self, hdc: HDC, rect: RECT) {
             Self::fill(hdc, rect, EDITOR_BG);
             let clip = rect;
-            unsafe { SelectObject(hdc, self.brand_font) };
-            Self::label(
-                hdc,
-                "✦  LightLine",
-                self.scale(28),
-                self.scale(24),
-                TEXT,
-                clip,
-            );
+            unsafe {
+                DrawIconEx(
+                    hdc,
+                    self.scale(26),
+                    self.scale(21),
+                    self.brand_icon,
+                    self.scale(28),
+                    self.scale(28),
+                    0,
+                    null_mut(),
+                    DI_NORMAL,
+                );
+                SelectObject(hdc, self.brand_font);
+            }
+            Self::label(hdc, "LightLine", self.scale(60), self.scale(24), TEXT, clip);
             unsafe { SelectObject(hdc, self.ui_font) };
             let x = (rect.right / 2 - self.scale(250)).max(self.scale(28));
             Self::label(
@@ -4765,15 +4575,24 @@ mod windows_app {
             let com_initialized = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) >= 0;
             let instance = GetModuleHandleW(null());
             let class = wide("LightLineWindow");
-            let wc = WNDCLASSW {
+            let app_icons = AppIcons::new().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "LightLine icon could not be loaded",
+                )
+            })?;
+            let wc = WNDCLASSEXW {
+                cbSize: size_of::<WNDCLASSEXW>() as u32,
                 style: CS_HREDRAW | CS_VREDRAW,
                 lpfnWndProc: Some(wnd_proc),
                 hInstance: instance,
+                hIcon: app_icons.large,
+                hIconSm: app_icons.small,
                 hCursor: LoadCursorW(null_mut(), IDC_IBEAM),
                 lpszClassName: class.as_ptr(),
                 ..zeroed()
             };
-            if RegisterClassW(&wc) == 0 {
+            if RegisterClassExW(&wc) == 0 {
                 return Err(io::Error::last_os_error());
             }
             let hwnd = CreateWindowExW(
@@ -4800,7 +4619,7 @@ mod windows_app {
                 &dark_titlebar as *const i32 as *const std::ffi::c_void,
                 size_of::<i32>() as u32,
             );
-            let mut app = Box::new(RefCell::new(App::new(hwnd)));
+            let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large)));
             SetWindowLongPtrW(
                 hwnd,
                 GWLP_USERDATA,

@@ -39,6 +39,10 @@ The text model must not depend on pixel coordinates or a particular GUI toolkit.
 
 Ownership and state changes need explicit rules. UI commands change core state; work that can finish later returns versioned results so stale parsing, search, or LSP responses cannot overwrite newer document state. Rust prevents many memory-safety errors, but it will not prevent duplicate buffers, unbounded caches, unnecessary copies, or a confused ownership model.
 
+### Current code organization
+
+The Windows prototype has grown beyond a comfortable single-file UI implementation. The text model (`src/document.rs`), syntax (`src/syntax.rs`), and workspace services (`src/workflow.rs`) are already separate. Windows file icons and the application icon now live in `src/windows_app/icons.rs`. The remaining `src/main.rs` still mixes window setup, application state, painting, input routing, and dialogs. Before adding more major IDE features, move those responsibilities into Windows UI modules without changing their behavior: `app` for state and commands, `render` for GDI drawing, `input` for Win32 event translation, and focused modules for the explorer and panels. Keep `main.rs` as the entry point and window bootstrap. Split by ownership and behavior rather than by an arbitrary line-count limit.
+
 ## Technology direction
 
 | Area | Initial direction | Decision status |

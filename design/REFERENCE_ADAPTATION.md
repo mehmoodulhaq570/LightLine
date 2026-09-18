@@ -12,7 +12,7 @@ The supplied LightLine image is a design board. Its large upper frame shows the 
 - File and folder glyphs use a pinned Material Icon Theme snapshot that LightLine embeds and updates with its own releases.
 - A narrow activity rail gives access to navigation. A collapsible file explorer sits beside the editor. Tabs and breadcrumbs tell users where they are. The bottom status strip carries transient messages and cursor details.
 - The reference uses compact typography, subtle row highlights, and generous spacing between major panels. Decorative gradients and rounded cards belong mainly to its Welcome and tool views; the writing surface stays quiet.
-- The left workbench follows the supplied close-up: a lightning mark and `IDE` badge, a compact six-row activity rail, a selected Explorer row, a small explorer header, nested file icons and chevrons, workspace and branch details, and an active-file chip at the drawer foot.
+- The left workbench follows the supplied close-up: the supplied LightLine icon and `IDE` badge, a compact six-row activity rail, a selected Explorer row, a small explorer header, nested file icons and chevrons, workspace and branch details, and an active-file chip at the drawer foot.
 
 ## Applied to the current Windows editor
 
