@@ -13,6 +13,7 @@ Changes to the project are recorded here. Planned architecture is documented sep
 - Added multiple tabs with per-tab cursor, selection, scroll, and undo state; tab switching and closing by mouse or keyboard; duplicate-open detection; and save prompts for each dirty tab on window close.
 - Added Rust syntax coloring for `.rs` files: background Tree-sitter parsing and incremental reparsing up to 128 KiB, with lazy line-state caching and bounded scanning for larger files. Edits and undo/redo invalidate the relevant syntax state.
 - Added a syntax benchmark that reports UI scheduling time separately from background completion time.
+- Added a clickable Quiet Workbench design concept and screen previews for the editor's future UI and workflow.
 
 ### Current prototype
 

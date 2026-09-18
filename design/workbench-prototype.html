@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Editor — Quiet Workbench concept</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #0b0f12;
+      --shell: #151b20;
+      --chrome: #1a2229;
+      --canvas: #11171c;
+      --panel: #171f25;
+      --raised: #202a32;
+      --line: #2a353e;
+      --text: #e6edf0;
+      --muted: #94a3ad;
+      --subtle: #667681;
+      --accent: #e6a772;
+      --accent-soft: #513b2e;
+      --blue: #9fc6e8;
+      --green: #a9cfb4;
+      --purple: #c6b5e9;
+      --red: #ea9f9b;
+      --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      --ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 360px; background: var(--page); color: var(--text); font-family: var(--ui); }
+    button { font: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .presentation { max-width: 1660px; margin: auto; padding: 30px 38px 46px; }
+    .eyebrow { display: flex; align-items: center; gap: 11px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 22px; height: 2px; background: var(--accent); }
+    .intro { display: flex; justify-content: space-between; align-items: end; gap: 28px; margin: 9px 0 24px; }
+    h1 { font-size: clamp(31px, 4vw, 52px); line-height: 1.08; letter-spacing: -.045em; font-weight: 650; margin: 0; }
+    .intro p { max-width: 430px; margin: 0 0 4px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+    .scene-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .scene-nav button { border: 1px solid var(--line); color: var(--muted); background: #151c21; padding: 9px 13px; border-radius: 8px; font-size: 12px; font-weight: 650; }
+    .scene-nav button:hover { color: var(--text); border-color: #65717a; }
+    .scene-nav button[aria-current="page"] { background: var(--accent-soft); color: #ffd2aa; border-color: #8b654b; }
+    .scene-nav small { color: var(--subtle); font-weight: 600; margin-left: 4px; }
+    .viewer { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 17px; align-items: stretch; }
+    .mock { border: 1px solid #34414a; border-radius: 12px; overflow: hidden; min-width: 0; height: 760px; background: var(--shell); box-shadow: 0 26px 70px #0007, 0 2px 8px #0005; }
+    .window { height: 100%; display: flex; flex-direction: column; }
+    .titlebar { height: 46px; min-height: 46px; display: grid; grid-template-columns: 1fr minmax(250px, 380px) 1fr; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); background: var(--chrome); padding: 0 14px; }
+    .brand { display: flex; gap: 11px; align-items: center; min-width: 0; }
+    .mark { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; background: var(--accent); color: #231b15; font-size: 12px; font-weight: 800; letter-spacing: -.08em; }
+    .brand-name { font-size: 12px; font-weight: 720; white-space: nowrap; }
+    .workspace-name { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-search { height: 30px; border: 1px solid #3a4650; border-radius: 6px; background: #202931; color: #aebbc3; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; font-size: 11px; }
+    .title-search:hover { color: var(--text); border-color: #70808a; }
+    .title-search kbd { font: 10px var(--mono); color: var(--subtle); }
+    .title-actions { justify-self: end; display: flex; gap: 5px; align-items: center; }
+    .icon-btn { height: 29px; min-width: 29px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 14px; }
+    .icon-btn:hover { background: var(--raised); color: var(--text); }
+    .run-btn { display: flex; align-items: center; gap: 6px; height: 29px; padding: 0 9px; border: 1px solid #5a5341; border-radius: 5px; color: #f0cf9f; background: #343027; font-size: 11px; font-weight: 680; }
+    .run-btn:hover { background: #47392d; }
+    .work-area { display: flex; flex: 1; min-height: 0; position: relative; }
+    .drawer { width: 230px; min-width: 230px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+    .drawer-header { min-height: 50px; padding: 17px 15px 11px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+    .drawer-header .plain { color: var(--subtle); font-size: 16px; font-weight: 400; }
+    .drawer-subhead { padding: 7px 15px 10px; color: var(--subtle); font-size: 11px; }
+    .tree { padding: 3px 8px; overflow: auto; }
+    .tree-row { height: 27px; width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 5px; background: transparent; color: #b7c2c9; text-align: left; padding: 0 8px; font: 11.5px var(--ui); }
+    .tree-row:hover { background: #273039; color: var(--text); }
+    .tree-row.active { background: #303941; color: #f2f5f6; }
+    .tree-row .twist { color: var(--subtle); width: 9px; }
+    .tree-row .file-dot { height: 6px; width: 6px; border-radius: 2px; background: var(--blue); }
+    .tree-row .file-dot.orange { background: var(--accent); }
+    .tree-row.indent { padding-left: 21px; }
+    .tree-row.deep { padding-left: 37px; }
+    .tree-row .trail { margin-left: auto; color: #82917c; font-size: 10px; }
+    .drawer-footer { margin-top: auto; border-top: 1px solid var(--line); padding: 12px 15px; color: var(--subtle); font-size: 10px; line-height: 1.6; }
+    .editor-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas); position: relative; }
+    .tabs { height: 38px; min-height: 38px; display: flex; align-items: stretch; gap: 2px; background: #1b2228; border-bottom: 1px solid var(--line); padding-left: 6px; }
+    .tab { min-width: 0; max-width: 190px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 11px; }
+    .tab.active { border-bottom-color: var(--accent); background: var(--canvas); color: #f3f4f4; }
+    .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .tab .x { color: var(--subtle); margin-left: 12px; font-size: 15px; }
+    .tab.ghost { color: var(--subtle); }
+    .breadcrumbs { height: 33px; min-height: 33px; display: flex; align-items: center; gap: 8px; padding: 0 19px; border-bottom: 1px solid #252f37; color: var(--subtle); font-size: 10px; }
+    .breadcrumbs strong { color: #b8c6ce; font-weight: 600; }
+    .breadcrumbs .slash { color: #52606a; }
+    .breadcrumbs .right { margin-left: auto; color: var(--subtle); }
+    .code-viewport { flex: 1; min-height: 0; overflow: auto; padding: 19px 22px 40px; scrollbar-color: #46525b transparent; }
+    .code-sheet { width: max-content; min-width: 100%; }
+    .focus .code-sheet { max-width: 1000px; width: 100%; margin: auto; }
+    .code-row { display: flex; min-height: 27px; align-items: center; font: 14px/27px var(--mono); white-space: pre; }
+    .code-row.current { background: #1e282e; border-radius: 3px; }
+    .line-no { width: 48px; flex: 0 0 48px; padding-right: 18px; text-align: right; color: #667782; user-select: none; }
+    .current .line-no { color: #b1c0c8; }
+    .line-code { color: #d7e0e4; }
+    .kw { color: #afc8f0; } .type { color: #eac399; } .str { color: #b3d8ab; }
+    .comment { color: #7f998f; } .macro { color: #d4b6e9; } .number { color: #e9b5a1; }
+    .fn { color: #93c5d9; } .cursor-block { border-left: 2px solid #f0bd83; margin-left: -1px; animation: blink 1.3s step-end infinite; }
+    @keyframes blink { 50% { border-color: transparent; } }
+    .status { height: 29px; min-height: 29px; display: flex; align-items: center; gap: 14px; padding: 0 13px; background: #202a31; border-top: 1px solid #354049; color: #aab8c1; font-size: 10px; }
+    .status .left, .status .right { display: flex; align-items: center; gap: 15px; min-width: 0; }
+    .status .right { margin-left: auto; }
+    .status strong { font-weight: 650; color: #d7e2e6; }
+    .status .branch { color: #c5d6cf; }
+    .status .message { color: var(--green); }
+    .hint-bar { display: flex; justify-content: space-between; padding: 15px 2px 0; gap: 18px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .hint-bar strong { color: var(--text); }
+    .notes { background: #151c21; border: 1px solid var(--line); border-radius: 12px; padding: 23px 22px; display: flex; flex-direction: column; }
+    .notes .count { color: var(--accent); font: 11px var(--mono); letter-spacing: .16em; }
+    .notes h2 { font-size: 23px; letter-spacing: -.025em; font-weight: 630; line-height: 1.15; margin: 16px 0 12px; }
+    .notes p { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 0 0 20px; }
+    .note-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+    .note-list li { display: flex; gap: 10px; padding: 11px 0; color: #bac6cd; font-size: 11px; line-height: 1.5; border-bottom: 1px solid #253038; }
+    .note-list li::before { content: "↗"; color: var(--accent); }
+    .notes .phase { margin-top: auto; display: inline-flex; width: fit-content; padding: 7px 9px; color: #b8c6ce; border: 1px solid #36424b; border-radius: 5px; font-size: 10px; }
+    .welcome { flex: 1; min-height: 0; background: radial-gradient(circle at 60% 35%, #1f2a30 0%, #141a1e 45%, #11171b 100%); display: flex; justify-content: center; overflow: auto; }
+    .welcome-inner { width: min(600px, 85%); padding: 83px 0 44px; }
+    .welcome .hero-mark { color: var(--accent); font: 800 31px var(--mono); letter-spacing: -.16em; }
+    .welcome h2 { margin: 18px 0 8px; font-size: 33px; font-weight: 600; letter-spacing: -.04em; }
+    .welcome p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .start-actions { display: flex; gap: 9px; margin: 26px 0 34px; flex-wrap: wrap; }
+    .start-actions button { padding: 10px 14px; border-radius: 6px; border: 1px solid #5c5144; background: #373027; color: #f1cfad; font-size: 11px; font-weight: 650; }
+    .start-actions button.secondary { border-color: var(--line); background: #202930; color: #d5e0e5; }
+    .recent-head { color: var(--subtle); font-size: 10px; font-weight: 750; letter-spacing: .13em; margin-bottom: 9px; }
+    .recent-item { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 13px 14px; border: 1px solid #334049; border-radius: 7px; background: #1d272d; color: #dce7eb; text-align: left; margin-bottom: 8px; font-size: 12px; }
+    .recent-item:hover { border-color: #8b6650; }
+    .recent-item small { display: block; color: var(--subtle); margin-top: 3px; font-size: 10px; }
+    .recent-item em { color: var(--subtle); font-style: normal; font-size: 10px; }
+    .search-drawer .query { margin: 0 12px 12px; padding: 10px; border: 1px solid #5b6a73; background: #11191e; border-radius: 6px; color: #e3edf0; font: 11px var(--mono); }
+    .result { width: 100%; border: 0; border-left: 2px solid transparent; color: #bdc9d0; background: transparent; text-align: left; padding: 10px 12px 10px 14px; font-size: 11px; }
+    .result:hover, .result.selected { background: #263139; border-left-color: var(--accent); }
+    .result b { display: block; font-weight: 620; color: var(--text); margin-bottom: 3px; }
+    .result small { color: var(--subtle); font: 10px var(--mono); }
+    .result mark { color: #f2c08f; background: transparent; }
+    .palette-backdrop { position: absolute; inset: 0; z-index: 4; background: #05090c99; display: flex; justify-content: center; align-items: flex-start; padding-top: 30px; }
+    .palette { width: min(560px, 86%); border: 1px solid #65737b; border-radius: 9px; background: #263039; box-shadow: 0 25px 80px #000b; overflow: hidden; }
+    .palette-input { display: flex; gap: 10px; align-items: center; padding: 13px 16px; border-bottom: 1px solid #46535c; font-size: 12px; }
+    .palette-input span:first-child { color: var(--accent); font-size: 19px; }
+    .palette-input kbd { margin-left: auto; font: 10px var(--mono); color: var(--subtle); }
+    .palette-row { width: 100%; border: 0; background: transparent; text-align: left; padding: 10px 17px; display: flex; gap: 11px; color: #b9c7ce; font-size: 11px; }
+    .palette-row.selected { background: #374149; color: #f2f5f5; }
+    .palette-row .path { margin-left: auto; color: var(--subtle); font: 10px var(--mono); }
+    .terminal { min-height: 218px; height: 218px; border-top: 1px solid #40505a; background: #121a1e; }
+    .terminal-head { height: 35px; border-bottom: 1px solid #2a353b; display: flex; align-items: center; gap: 18px; padding: 0 15px; font-size: 10px; color: var(--muted); }
+    .terminal-head .selected { height: 100%; display: flex; align-items: center; color: var(--text); border-bottom: 2px solid var(--accent); }
+    .terminal-head .close { margin-left: auto; border: 0; background: none; color: var(--muted); }
+    .terminal pre { margin: 0; padding: 16px 20px; font: 11px/21px var(--mono); color: #c5d3d8; overflow: auto; }
+    .terminal .success { color: var(--green); } .terminal .command { color: var(--accent); }
+    .review-sidebar .file-change { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: #dce5e8; font-size: 11px; background: #2a343b; }
+    .review-sidebar .badge { margin-left: auto; color: var(--green); font: 10px var(--mono); }
+    .review-actions { margin-top: auto; padding: 12px; border-top: 1px solid var(--line); }
+    .review-actions button { width: 100%; border: 1px solid #716044; border-radius: 5px; background: #42372a; color: #f5d4aa; padding: 8px; font-size: 11px; }
+    .diff { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+    .diff-side { min-width: 0; border-right: 1px solid var(--line); overflow: auto; }
+    .diff-side:last-child { border-right: 0; }
+    .diff-title { padding: 12px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    .diff-line { display: flex; padding: 2px 8px; font: 10.5px/22px var(--mono); white-space: pre; }
+    .diff-line .ln { width: 32px; flex: 0 0 32px; color: var(--subtle); text-align: right; margin-right: 13px; }
+    .diff-line.del { background: #3c292a; color: #f0b4b0; }
+    .diff-line.add { background: #263c34; color: #b9dfc7; }
+    @media (max-width: 1130px) { .viewer { grid-template-columns: 1fr; } .notes { min-height: 190px; } .notes .phase { margin-top: 5px; } .intro { display: block; } .intro p { margin-top: 12px; } }
+    @media (max-width: 700px) { .presentation { padding: 20px 13px; } .mock { height: 650px; } .titlebar { grid-template-columns: 1fr auto; } .title-search { display: none; } .drawer { width: 180px; min-width: 180px; } .workspace-name, .status .branch, .status .message { display: none; } .code-row { font-size: 11px; } .diff { grid-template-columns: 1fr; } .diff-side:first-child { display: none; } }
+  </style>
+</head>
+<body>
+  <main class="presentation">
+    <div class="eyebrow">Design exploration / 01</div>
+    <div class="intro">
+      <h1>The quiet workbench.</h1>
+      <p>A new direction for My Editor: the code is the permanent surface. Project files, search, run output, and review appear when the developer asks for them.</p>
+    </div>
+    <nav class="scene-nav" aria-label="Design screens">
+      <button data-scene="welcome">01 Start</button>
+      <button data-scene="focus">02 Focus</button>
+      <button data-scene="explore">03 Explore <small>next</small></button>
+      <button data-scene="search">04 Find <small>next</small></button>
+      <button data-scene="run">05 Run <small>later</small></button>
+      <button data-scene="review">06 Review <small>later</small></button>
+    </nav>
+    <div class="viewer">
+      <div>
+        <div class="mock" id="mock" aria-label="Interactive IDE design prototype"></div>
+        <div class="hint-bar"><span><strong>Try the controls.</strong> Click the screen steps or controls inside the mock editor.</span><span>Concept only · current Rust UI is unchanged</span></div>
+      </div>
+      <aside class="notes" id="notes" aria-live="polite"></aside>
+    </div>
+  </main>
+  <script>
+    const notes = {
+      welcome: { number: '01 / ENTRY', title: 'Start with intent', body: 'A small launch screen offers only the next useful actions. Recent workspaces are visible, while project scanning waits until one is opened.', points: ['Open a file or folder in one step', 'Recent workspaces without a dashboard', 'No startup panels or background services'], phase: 'Visual concept · start screen' },
+      focus: { number: '02 / DEFAULT', title: 'Give code the room', body: 'The everyday screen is a clean editor. A breadcrumb makes location clear. The status bar stays stable: file state on the left, cursor and encoding on the right.', points: ['Active tab has a clear accent', 'Readable type and quiet contrast', 'No sidebar until it is needed'], phase: 'Visual redesign · builds on v0.1' },
+      explore: { number: '03 / PROJECT', title: 'Reveal the project', body: 'The file tree slides into a contextual drawer. It remembers its width but disappears when the developer returns to focus mode.', points: ['Selected file is easy to find', 'Tree is keyboard friendly', 'Workspace appears without full indexing'], phase: 'Concept · project milestone' },
+      search: { number: '04 / NAVIGATION', title: 'Search in context', body: 'Content search gets a compact result drawer next to the code. Quick Open is a separate, lightweight overlay from the title search field.', points: ['Results grouped with file context', 'Preview a result before opening it', 'Escape restores prior focus'], phase: 'Concept · search milestone' },
+      quick: { number: '04A / QUICK OPEN', title: 'Jump without a panel', body: 'A small overlay lets developers jump to files or commands without changing the editor layout. Search in files leads to the full result drawer.', points: ['One field for navigation', 'Clear keyboard hints', 'Enter opens · Escape returns'], phase: 'Concept · navigation milestone' },
+      run: { number: '05 / FEEDBACK', title: 'Output on demand', body: 'A run command opens a short bottom drawer. The result is visible beside the code and can close without rearranging the workspace.', points: ['Task output arrives only when run', 'Success and errors are scannable', 'Terminal process stays dormant otherwise'], phase: 'Concept · developer tooling milestone' },
+      review: { number: '06 / CHANGE', title: 'Review where you work', body: 'A focused diff view puts the changed file at the center, with a small change list on the side. Git starts only when this view is opened.', points: ['Side by side context', 'Changed lines carry restrained color', 'Commit actions stay out of editing mode'], phase: 'Concept · Git milestone' }
+    };
+    const codeRows = [
+      [24, '<span class="comment">// Paint only what the viewport needs.</span>'],
+      [25, '<span class="kw">fn</span> <span class="fn">paint_editor</span>(&<span class="kw">mut</span> self, viewport: <span class="type">Viewport</span>) {'],
+      [26, '    <span class="kw">let</span> visible = self.document.visible_lines(viewport);'],
+      [27, '    <span class="kw">let</span> palette = self.theme.syntax();'],
+      [28, ''],
+      [29, '    <span class="kw">for</span> (line_number, line) <span class="kw">in</span> visible {'],
+      [30, '        <span class="kw">let</span> layout = self.layout_cache.get(line_number);'],
+      [31, '        <span class="kw">let</span> spans = self.syntax.spans(line_number);'],
+      [32, ''],
+      [33, '        self.canvas.draw_line('],
+      [34, '            line,'],
+      [35, '            layout,'],
+      [36, '            spans,'],
+      [37, '            palette,'],
+      [38, '        );'],
+      [39, '    }'],
+      [40, ''],
+      [41, '    self.canvas.draw_caret(self.cursor<span class="cursor-block"></span>);'],
+      [42, '}'],
+      [43, ''],
+      [44, '<span class="comment">// Parsing runs independently from painting.</span>'],
+      [45, '<span class="kw">async fn</span> <span class="fn">update_syntax</span>(&<span class="kw">mut</span> self, edit: <span class="type">Edit</span>) {'],
+      [46, '    self.parser.apply(edit).<span class="kw">await</span>;'],
+      [47, '    self.canvas.invalidate(edit.range);'],
+      [48, '}']
+    ];
+    function topbar(scene) {
+      const project = scene === 'welcome' ? 'No workspace open' : 'custom-ide  /  src';
+      const actions = scene === 'welcome' ? '<button class="icon-btn" data-go="explore" title="Open project" aria-label="Open project">▤</button>' : '<button class="icon-btn" data-go="explore" title="Project files" aria-label="Project files">▤</button><button class="run-btn" data-go="run" aria-label="Run current project">▶ <span>Run</span></button><button class="icon-btn" data-go="review" title="Review changes" aria-label="Review changes">◇</button>';
+      return `<header class="titlebar"><div class="brand"><span class="mark">m/</span><span class="brand-name">My Editor</span><span class="workspace-name">${project}</span></div><button class="title-search" data-go="quick" aria-label="Open quick search"><span>⌕ &nbsp; Search files, symbols, commands</span><kbd>Ctrl P</kbd></button><div class="title-actions">${actions}</div></header>`;
+    }
+    function tabs(scene) {
+      const second = scene === 'review' ? 'Diff: main.rs' : 'document.rs';
+      return `<div class="tabs"><button class="tab active" data-go="focus"><span class="dot"></span> main.rs <span class="x">×</span></button><button class="tab ghost" data-go="explore">${second}</button></div>`;
+    }
+    function breadcrumbs(scene) {
+      return `<div class="breadcrumbs"><span>custom-ide</span><span class="slash">/</span><span>src</span><span class="slash">/</span><strong>main.rs</strong><span class="right">${scene === 'run' ? 'Task: cargo test' : 'Rust · UTF-8'}</span></div>`;
+    }
+    function editor(scene) {
+      return `<div class="editor-stack ${scene === 'focus' || scene === 'quick' ? 'focus' : ''}">${tabs(scene)}${breadcrumbs(scene)}<div class="code-viewport"><div class="code-sheet">${codeRows.map(([n, text]) => `<div class="code-row ${n === 41 ? 'current' : ''}"><span class="line-no">${n}</span><span class="line-code">${text || '&nbsp;'}</span></div>`).join('')}</div></div>${scene === 'run' ? terminal() : ''}</div>`;
+    }
+    function tree() {
+      return `<aside class="drawer"><div class="drawer-header">PROJECT <span class="plain">···</span></div><div class="drawer-subhead">CUSTOM-IDE</div><div class="tree"><button class="tree-row"><span class="twist">⌄</span> src</button><button class="tree-row indent active" data-go="focus"><span class="file-dot orange"></span> main.rs</button><button class="tree-row indent" data-go="focus"><span class="file-dot"></span> document.rs</button><button class="tree-row indent" data-go="focus"><span class="file-dot"></span> syntax.rs</button><button class="tree-row"><span class="twist">›</span> examples</button><button class="tree-row"><span class="file-dot orange"></span> Cargo.toml</button><button class="tree-row"><span class="file-dot"></span> README.md</button></div><div class="drawer-footer">6 files shown<br>More files load as you browse.</div></aside>`;
+    }
+    function searchDrawer() {
+      return `<aside class="drawer search-drawer"><div class="drawer-header">SEARCH <span class="plain">···</span></div><div class="query">viewport</div><div class="drawer-subhead">3 RESULTS IN 2 FILES</div><button class="result selected" data-go="focus"><b>main.rs <small>src/</small></b><small>25 &nbsp;paint_editor(<mark>viewport</mark>)</small></button><button class="result" data-go="focus"><b>main.rs <small>src/</small></b><small>26 &nbsp;visible_lines(<mark>viewport</mark>)</small></button><button class="result" data-go="focus"><b>document.rs <small>src/</small></b><small>82 &nbsp;pub struct <mark>Viewport</mark></small></button><div class="drawer-footer">Enter opens · Esc returns to code</div></aside>`;
+    }
+    function palette() {
+      return `<div class="palette-backdrop" data-go="focus"><div class="palette" role="dialog" aria-label="Quick Open preview"><div class="palette-input"><span>⌕</span><span>main</span><kbd>Ctrl P</kbd></div><button class="palette-row selected" data-go="focus"><span>▤</span> main.rs <span class="path">src/main.rs</span></button><button class="palette-row" data-go="focus"><span>▤</span> document.rs <span class="path">src/document.rs</span></button><button class="palette-row" data-go="search"><span>◇</span> Find in files <span class="path">Ctrl Shift F</span></button></div></div>`;
+    }
+    function terminal() {
+      return `<section class="terminal" aria-label="Run output"><div class="terminal-head"><span class="selected">OUTPUT</span><span>TERMINAL</span><span>PROBLEMS</span><button class="close" data-go="focus" aria-label="Close output">×</button></div><pre><span class="command">$ cargo test</span>
+   Compiling custom-ide v0.1.0
+   Running 8 tests
+<span class="success">✓ 8 passed · 0 failed</span>
+
+Finished in 0.31s                         <span class="success">Ready</span></pre></section>`;
+    }
+    function review() {
+      return `<aside class="drawer review-sidebar"><div class="drawer-header">CHANGES <span class="plain">···</span></div><div class="drawer-subhead">WORKING TREE · 2 FILES</div><div class="file-change">main.rs <span class="badge">M</span></div><div class="tree-row indent">syntax.rs <span class="trail">M</span></div><div class="review-actions"><button>Review changes</button></div></aside><div class="editor-stack">${tabs('review')}<div class="diff"><div class="diff-side"><div class="diff-title">BEFORE · main.rs</div><div class="diff-line"><span class="ln">40</span>let visible = lines.all();</div><div class="diff-line del"><span class="ln">41</span>for line in visible {</div><div class="diff-line"><span class="ln">42</span>    canvas.draw(line);</div></div><div class="diff-side"><div class="diff-title">AFTER · main.rs</div><div class="diff-line add"><span class="ln">40</span>let visible = document.visible_lines(viewport);</div><div class="diff-line add"><span class="ln">41</span>for line in visible {</div><div class="diff-line"><span class="ln">42</span>    canvas.draw(line);</div></div></div></div>`;
+    }
+    function welcome() {
+      return `<div class="welcome"><div class="welcome-inner"><div class="hero-mark">m/</div><h2>Pick up where you left off.</h2><p>Open a file, return to a workspace, or start with a blank editor.</p><div class="start-actions"><button data-go="focus">Open a file ↗</button><button class="secondary" data-go="explore">Open a folder</button><button class="secondary" data-go="focus">New file</button></div><div class="recent-head">RECENT WORKSPACES</div><button class="recent-item" data-go="explore"><span>custom-ide<small>D:\Projects\CustomIDE</small></span><em>Today ↗</em></button><button class="recent-item" data-go="explore"><span>rust-playground<small>D:\Projects\rust-playground</small></span><em>Yesterday ↗</em></button></div></div>`;
+    }
+    function status(scene) {
+      if (scene === 'welcome') return '<footer class="status"><div class="left"><span>Ready to open a file or workspace</span></div><div class="right"><span>Ctrl+O &nbsp; Open file</span></div></footer>';
+      if (scene === 'review') return '<footer class="status"><div class="left"><span class="branch">◇ main</span><span>2 files changed</span></div><div class="right"><span>Side-by-side review</span><span>UTF-8</span></div></footer>';
+      return `<footer class="status"><div class="left"><span class="branch">◇ main</span><span>src/main.rs</span>${scene === 'run' ? '<span class="message">✓ Tests passed</span>' : ''}</div><div class="right"><span><strong>Ln 41, Col 37</strong></span><span>Spaces: 4</span><span>UTF-8</span><span>Rust</span></div></footer>`;
+    }
+    function render(scene) {
+      if (!notes[scene]) scene = 'focus';
+      const content = scene === 'welcome' ? welcome() : scene === 'review' ? review() : `${scene === 'explore' ? tree() : scene === 'search' ? searchDrawer() : ''}${editor(scene)}${scene === 'quick' ? palette() : ''}`;
+      document.getElementById('mock').innerHTML = `<div class="window">${topbar(scene)}<div class="work-area">${content}</div>${status(scene)}</div>`;
+      const data = notes[scene];
+      document.getElementById('notes').innerHTML = `<div class="count">${data.number}</div><h2>${data.title}</h2><p>${data.body}</p><ul class="note-list">${data.points.map(p => `<li>${p}</li>`).join('')}</ul><span class="phase">${data.phase}</span>`;
+      document.querySelectorAll('.scene-nav button').forEach(button => {
+        if (button.dataset.scene === scene) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+      });
+      history.replaceState(null, '', `#${scene}`);
+    }
+    document.addEventListener('click', event => {
+      const button = event.target.closest('[data-scene], [data-go]');
+      if (button) render(button.dataset.scene || button.dataset.go);
+    });
+    document.addEventListener('keydown', event => {
+      const control = event.ctrlKey || event.metaKey;
+      const scene = control && event.shiftKey && event.key.toLowerCase() === 'f' ? 'search'
+        : control && event.key.toLowerCase() === 'p' ? 'quick'
+        : control && event.key.toLowerCase() === 'b' ? 'explore'
+        : control && event.code === 'Backquote' ? 'run'
+        : event.key === 'Escape' ? 'focus' : null;
+      if (scene) { event.preventDefault(); render(scene); }
+    });
+    window.addEventListener('hashchange', () => render(location.hash.slice(1)));
+    render(location.hash.slice(1) || 'focus');
+  </script>
+</body>
+</html>

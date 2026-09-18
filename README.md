@@ -4,6 +4,8 @@ A small Windows text editor written in Rust. It supports UTF-8 files, editing, u
 
 The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md).
 
+An interactive future UI proposal is available in the [Quiet Workbench prototype](design/workbench-prototype.html), with [screen flow and implementation notes](design/WORKBENCH_CONCEPT.md). It is separate from the current native editor.
+
 ## Run
 
 ```powershell
