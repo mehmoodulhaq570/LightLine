@@ -529,6 +529,9 @@ impl App {
         if self.side_view == SideView::Review && self.review_file.is_some() {
             return;
         }
+        if self.tab().image.is_some() {
+            return;
+        }
         if self.find_mode && unit == 8 {
             self.find_query.pop();
             self.status = format!("Find: {}", self.find_query);

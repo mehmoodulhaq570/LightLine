@@ -70,6 +70,9 @@ pub(super) struct Tab {
     pub(super) lsp_serial: u64,
     pub(super) lsp_opened: bool,
     pub(super) lsp_language: Option<LspLanguage>,
+    // Some for a read-only raster image preview; `document` is then an empty,
+    // unsaved placeholder that must never actually be written to disk.
+    pub(super) image: Option<image_view::ImageAsset>,
 }
 
 #[derive(Clone)]
@@ -102,7 +105,16 @@ impl Tab {
             lsp_serial: 0,
             lsp_opened: false,
             lsp_language: None,
+            image: None,
         }
+    }
+
+    fn new_image(path: PathBuf, image: image_view::ImageAsset) -> Self {
+        let mut document = Document::new();
+        document.path = Some(path);
+        let mut tab = Self::new(document);
+        tab.image = Some(image);
+        tab
     }
 
     pub(super) fn is_rust(document: &Document) -> bool {
@@ -984,6 +996,14 @@ impl App {
     }
 
     pub(super) fn replace_range(&mut self, start: Pos, end: Pos, text: &str) {
+        // The single choke point every edit path (typing, backspace, delete,
+        // paste, cut) goes through. An image tab's document is an unsaved
+        // placeholder that must never be written to disk as if it were real
+        // content, so refuse to touch it here rather than trusting every
+        // caller to check first.
+        if self.tab().image.is_some() {
+            return;
+        }
         let cursor = self.doc_mut().replace(start, end, text);
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
@@ -1120,6 +1140,10 @@ impl App {
     }
 
     pub(super) fn save(&mut self, hwnd: HWND, save_as: bool) -> bool {
+        if self.tab().image.is_some() {
+            self.status = "This is an image preview; there is nothing to save".into();
+            return false;
+        }
         let old_path = self.doc().path.clone();
         let path = if save_as || self.doc().path.is_none() {
             match self.dialog(hwnd, true) {
@@ -1203,8 +1227,17 @@ impl App {
             );
             return;
         }
-        match Document::open(path.clone()) {
-            Ok(document) => {
+        let new_tab = if image_view::is_image_path(&path) {
+            image_view::load_image(&path)
+                .map(|image| Tab::new_image(path.clone(), image))
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Could not decode this image")
+                })
+        } else {
+            Document::open(path.clone()).map(Tab::new)
+        };
+        match new_tab {
+            Ok(tab) => {
                 self.terminal_focus = false;
                 let from_welcome = self.welcome;
                 self.welcome = false;
@@ -1222,10 +1255,10 @@ impl App {
                     && !self.doc().is_dirty()
                     && self.doc().line(0).is_empty()
                 {
-                    self.tabs[0] = Tab::new(document);
+                    self.tabs[0] = tab;
                     self.set_active_index(0);
                 } else {
-                    self.tabs.push(Tab::new(document));
+                    self.tabs.push(tab);
                     self.set_active_index(self.tabs.len() - 1);
                 }
                 self.set_workspace_from_file(&path);

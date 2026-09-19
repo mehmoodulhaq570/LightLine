@@ -13,6 +13,19 @@ impl App {
         if right <= left {
             return;
         }
+        if let Some(image) = &self.tabs[self.tab_for_pane(pane)].image {
+            self.paint_image_pane(
+                hdc,
+                image,
+                RECT {
+                    left,
+                    top: self.editor_top(),
+                    right,
+                    bottom,
+                },
+            );
+            return;
+        }
         unsafe {
             let saved = SaveDC(hdc);
             IntersectClipRect(hdc, left, self.editor_top(), right, bottom);
