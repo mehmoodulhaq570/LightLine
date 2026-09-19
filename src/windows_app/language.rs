@@ -324,7 +324,7 @@ impl App {
     pub(super) fn mouse_hover_move(&mut self, hwnd: HWND, x: i32, y: i32) {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
-        let bottom = rect.bottom - self.scale(STATUS + if self.run_visible { 210 } else { 0 });
+        let bottom = rect.bottom - self.scale(STATUS + if self.terminal_visible { 210 } else { 0 });
         if y < self.scale(TAB_HEIGHT)
             && Tab::is_python(self.doc())
             && x >= rect.right - self.scale(326)

@@ -5,34 +5,36 @@ impl App {
         self.clear_hover(hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
-        if ctrl && key == 0x43 && self.output_focus {
-            self.stop_run(hwnd);
-            return true;
-        }
-        if self.output_focus && self.run_input.is_some() && !ctrl {
-            match key {
-                x if x == VK_RETURN as u32 => {
-                    if let Some(input) = &self.run_input {
-                        let mut line = std::mem::take(&mut self.run_input_buffer);
-                        line.push('\n');
-                        let _ = input.send(line);
-                        self.run_output.push('\n');
-                    }
-                    unsafe { InvalidateRect(hwnd, null(), 0) };
-                    return true;
-                }
-                x if x == VK_BACK as u32 => {
-                    if let Some(ch) = self.run_input_buffer.pop()
-                        && self.run_output.ends_with(ch)
-                    {
-                        for _ in 0..ch.len_utf8() {
-                            self.run_output.pop();
-                        }
-                    }
-                    unsafe { InvalidateRect(hwnd, null(), 0) };
-                    return true;
-                }
-                _ => {}
+        if self.terminal_focus {
+            let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+            // Ctrl+` hides the panel even while the shell has focus.
+            if ctrl && !shift && key == VK_OEM_3 as u32 {
+                self.hide_terminal(hwnd);
+                return true;
+            }
+            // Escape hides the panel; the shell keeps running until it is closed.
+            if key == VK_ESCAPE as u32 && !ctrl && !shift {
+                self.hide_terminal(hwnd);
+                return true;
+            }
+            // Reserved application chords fall through to the handlers below.
+            let reserved_chord = ctrl
+                && match key {
+                    0x50 | 0x52 | 0x42 => shift, // Ctrl+Shift+P/R/B
+                    v if v == VK_TAB as u32 => true,
+                    v if v == VK_PRIOR as u32 || v == VK_NEXT as u32 => true,
+                    _ => false,
+                };
+            if !reserved_chord {
+                return if ctrl && shift && key == 0x56 {
+                    self.paste_into_terminal(hwnd);
+                    true
+                } else if ctrl && shift && key == 0x43 {
+                    // Cell selection/copy is deferred to a later phase; keep it out of the shell.
+                    true
+                } else {
+                    self.send_terminal_key(hwnd, key, ctrl, shift, alt)
+                };
             }
         }
         if self.welcome && key == VK_ESCAPE as u32 && self.workspace_root.is_some() {
@@ -173,6 +175,10 @@ impl App {
         if ctrl {
             let cursor = self.view().cursor;
             match key {
+                x if x == VK_OEM_3 as u32 && !shift => {
+                    self.toggle_terminal(hwnd);
+                    return true;
+                }
                 x if x == VK_OEM_5 as u32 => {
                     self.toggle_split(hwnd);
                     return true;
@@ -366,10 +372,8 @@ impl App {
                 return true;
             }
             x if x == VK_ESCAPE as u32 => {
-                if self.run_visible {
-                    self.run_visible = false;
-                    self.output_focus = false;
-                    self.keep_cursor_visible(hwnd);
+                if self.terminal_visible {
+                    self.hide_terminal(hwnd);
                     return true;
                 }
                 if self.side_view != SideView::Files {
@@ -481,18 +485,26 @@ impl App {
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
             return;
         }
-        if self.output_focus && self.run_input.is_some() && !self.quick_open && !self.search_input {
-            if unit >= 32
-                && unit != 127
-                && let Some(ch) = char::from_u32(unit as u32)
-            {
-                self.run_input_buffer.push(ch);
-                self.run_output.push(ch);
-                unsafe { InvalidateRect(hwnd, null(), 0) };
+        if self.terminal_focus {
+            // Enter/Tab/Backspace/Escape and arrows arrive through key(); only
+            // forward printable text (including surrogate-paired characters).
+            if unit < 32 || unit == 127 {
+                return;
             }
-            return;
-        }
-        if self.output_focus && !self.quick_open && !self.search_input {
+            let ch = if (0xd800..=0xdbff).contains(&unit) {
+                self.pending_high_surrogate = Some(unit);
+                None
+            } else if (0xdc00..=0xdfff).contains(&unit) {
+                self.pending_high_surrogate.take().and_then(|high| {
+                    char::from_u32(0x10000 + ((high as u32 - 0xd800) << 10) + (unit as u32 - 0xdc00))
+                })
+            } else {
+                self.pending_high_surrogate = None;
+                char::from_u32(unit as u32)
+            };
+            if let Some(ch) = ch {
+                self.send_terminal_char(hwnd, ch);
+            }
             return;
         }
         if self.quick_open || self.search_input {
@@ -768,17 +780,12 @@ impl App {
             }
             return;
         }
-        if self.run_visible && y >= rect.bottom - self.scale(STATUS + 210) {
-            self.output_focus = true;
-            if y < rect.bottom - self.scale(STATUS + 176) {
-                if x >= rect.right - self.scale(40) {
-                    self.run_visible = false;
-                    self.output_focus = false;
-                    self.keep_cursor_visible(hwnd);
-                } else if x >= rect.right - self.scale(100) && self.run_busy {
-                    self.stop_run(hwnd);
-                }
+        if self.terminal_visible && y >= self.terminal_top(hwnd) {
+            if y < self.terminal_top(hwnd) + self.scale(34) && x >= rect.right - self.scale(40) {
+                self.close_terminal(hwnd);
+                return;
             }
+            self.focus_terminal(hwnd);
             return;
         }
         if self.side_view == SideView::Review
@@ -840,7 +847,7 @@ impl App {
         }
         let pos = self.position_at(hwnd, x, y);
         self.panel_focus = false;
-        self.output_focus = false;
+        self.terminal_focus = false;
         self.move_cursor(pos, extend);
         self.dragging = true;
         unsafe {

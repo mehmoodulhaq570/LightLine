@@ -62,7 +62,7 @@ impl App {
         };
         for (index, label) in labels.iter().enumerate() {
             let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
-            let is_selected = selected == Some(index) || (index == 3 && self.run_visible);
+            let is_selected = selected == Some(index) || (index == 3 && self.terminal_visible);
             if is_selected {
                 Self::rounded_fill(
                     hdc,
@@ -687,101 +687,6 @@ impl App {
             );
         }
         unsafe { SelectObject(hdc, self.ui_font) };
-    }
-
-    pub(in crate::windows_app) fn paint_output(
-        &self,
-        hdc: HDC,
-        left: i32,
-        right: i32,
-        bottom: i32,
-    ) {
-        let top = bottom - self.scale(210);
-        Self::fill(
-            hdc,
-            RECT {
-                left,
-                top,
-                right,
-                bottom,
-            },
-            SIDEBAR_BG,
-        );
-        Self::fill(
-            hdc,
-            RECT {
-                left,
-                top,
-                right,
-                bottom: top + self.scale(1),
-            },
-            EDGE,
-        );
-        Self::label(
-            hdc,
-            &self.run_title,
-            left + self.scale(16),
-            top + self.scale(8),
-            TEXT,
-            RECT {
-                left,
-                top,
-                right,
-                bottom,
-            },
-        );
-        Self::label(
-            hdc,
-            "×",
-            right - self.scale(28),
-            top + self.scale(6),
-            MUTED,
-            RECT {
-                left: right - self.scale(28),
-                top,
-                right,
-                bottom: top + self.scale(33),
-            },
-        );
-        if self.run_busy {
-            Self::label(
-                hdc,
-                "Stop",
-                right - self.scale(87),
-                top + self.scale(6),
-                rgb(234, 159, 155),
-                RECT {
-                    left: right - self.scale(90),
-                    top,
-                    right: right - self.scale(36),
-                    bottom: top + self.scale(33),
-                },
-            );
-        }
-        let lines: Vec<&str> = self.run_output.lines().collect();
-        let visible = 8usize;
-        let start = lines.len().saturating_sub(visible + self.output_scroll);
-        for (index, line) in lines.iter().skip(start).take(visible).enumerate() {
-            Self::label(
-                hdc,
-                line,
-                left + self.scale(18),
-                top + self.scale(39 + index as i32 * 20),
-                if line.contains("FAILED") || line.contains("error") {
-                    rgb(234, 159, 155)
-                } else if line.contains("passed") || line.contains("ok") {
-                    GREEN
-                } else {
-                    TEXT
-                },
-                RECT {
-                    left: left + self.scale(18),
-                    top: top + self.scale(38),
-                    right: right - self.scale(12),
-                    bottom,
-                },
-            );
-        }
     }
 
     pub(in crate::windows_app) fn paint_quick_open(&self, hdc: HDC, rect: RECT) {

@@ -1,10 +1,12 @@
 mod app;
 mod panels;
+mod terminal;
 mod workspace;
 use app::{App, ExplorerEntry, ExplorerRow, SideView, Tab, WorkerMessage};
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;
+use terminal::TERMINAL_EVENT_MESSAGE;
 mod render;
 mod window;
 pub use window::run;
@@ -18,17 +20,21 @@ use lightline::lsp::{
     self, Client as LspClient, Diagnostic as LspDiagnostic, Event as LspEvent,
     Language as LspLanguage,
 };
-use lightline::syntax::{Color, RustSyntax};
+use lightline::syntax::{Color, Syntax};
+use lightline::terminal::{
+    Cell, Color as TermColor, Key as TermKey, LaunchRequest, MAX_DRAIN_EVENTS,
+    Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, Snapshot,
+    TerminalService, TerminalSize,
+};
 use lightline::workflow::{self, Change, DiffRow, SearchHit};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem::{size_of, zeroed};
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};

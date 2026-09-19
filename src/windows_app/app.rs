@@ -10,8 +10,6 @@ pub(super) enum SideView {
 pub(super) enum WorkerMessage {
     Files(PathBuf, Vec<PathBuf>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
-    RunOutput(Arc<AtomicBool>, String),
-    Run(Arc<AtomicBool>, Result<(), String>),
     Changes(PathBuf, Result<Vec<Change>, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
 }
@@ -57,7 +55,7 @@ fn tab_index_after_close(current: usize, closed: usize, remaining: usize) -> usi
 pub(super) struct Tab {
     pub(super) document: Document,
     pub(super) views: [EditorView; 2],
-    pub(super) syntax: Option<RustSyntax>,
+    pub(super) syntax: Option<Syntax>,
     pub(super) diagnostics: Vec<LspDiagnostic>,
     pub(super) lsp_version: i32,
     pub(super) lsp_serial: u64,
@@ -79,7 +77,13 @@ pub(super) struct ExplorerRow {
 
 impl Tab {
     fn new(document: Document) -> Self {
-        let syntax = Self::is_rust(&document).then(RustSyntax::new);
+        let syntax = if Self::is_rust(&document) {
+            Some(Syntax::new_rust())
+        } else if Self::is_python(&document) {
+            Some(Syntax::new_python())
+        } else {
+            None
+        };
         Self {
             document,
             views: [EditorView::default(), EditorView::default()],
@@ -120,8 +124,12 @@ impl Tab {
 
     fn update_syntax_language(&mut self) {
         if Self::is_rust(&self.document) {
-            if self.syntax.is_none() {
-                self.syntax = Some(RustSyntax::new());
+            if !matches!(self.syntax, Some(Syntax::Rust(_))) {
+                self.syntax = Some(Syntax::new_rust());
+            }
+        } else if Self::is_python(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::Python(_))) {
+                self.syntax = Some(Syntax::new_python());
             }
         } else {
             self.syntax = None;
@@ -176,15 +184,13 @@ pub(super) struct App {
     pub(super) project_query: String,
     pub(super) search_results: Vec<SearchHit>,
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
-    pub(super) run_visible: bool,
-    pub(super) run_output: String,
-    pub(super) run_title: String,
-    pub(super) run_busy: bool,
-    pub(super) run_cancel: Option<Arc<AtomicBool>>,
-    pub(super) run_pid: Option<Arc<AtomicU32>>,
-    pub(super) run_input: Option<Sender<String>>,
-    pub(super) run_input_buffer: String,
-    pub(super) output_focus: bool,
+    pub(super) terminal: TerminalService,
+    pub(super) terminal_session: Option<SessionId>,
+    pub(super) terminal_snapshot: Option<Arc<Snapshot>>,
+    pub(super) terminal_visible: bool,
+    pub(super) terminal_focus: bool,
+    pub(super) terminal_applied_size: Option<TerminalSize>,
+    pub(super) cell_width: i32,
     pub(super) changes: Vec<Change>,
     pub(super) review_loading: bool,
     pub(super) review_file: Option<PathBuf>,
@@ -193,7 +199,6 @@ pub(super) struct App {
     pub(super) panel_first: usize,
     pub(super) panel_selected: usize,
     pub(super) panel_focus: bool,
-    pub(super) output_scroll: usize,
     pub(super) recent: Vec<PathBuf>,
     pub(super) worker_tx: Sender<WorkerMessage>,
     pub(super) worker_rx: Receiver<WorkerMessage>,
@@ -344,15 +349,18 @@ impl App {
             project_query: String::new(),
             search_results: Vec::new(),
             search_cancel: None,
-            run_visible: false,
-            run_output: String::new(),
-            run_title: "Output".into(),
-            run_busy: false,
-            run_cancel: None,
-            run_pid: None,
-            run_input: None,
-            run_input_buffer: String::new(),
-            output_focus: false,
+            terminal: TerminalService::new({
+                let hwnd_value = hwnd as isize;
+                move || unsafe {
+                    PostMessageW(hwnd_value as HWND, TERMINAL_EVENT_MESSAGE, 0, 0);
+                }
+            }),
+            terminal_session: None,
+            terminal_snapshot: None,
+            terminal_visible: false,
+            terminal_focus: false,
+            terminal_applied_size: None,
+            cell_width: 0,
             changes: Vec::new(),
             review_loading: false,
             review_file: None,
@@ -361,7 +369,6 @@ impl App {
             panel_first: 0,
             panel_selected: 0,
             panel_focus: false,
-            output_scroll: 0,
             recent: workflow::recent_workspaces(),
             worker_tx,
             worker_rx,
@@ -532,7 +539,7 @@ impl App {
         self.quick_open = false;
         self.search_input = false;
         self.panel_focus = false;
-        self.output_focus = false;
+        self.terminal_focus = false;
         self.find_mode = false;
         self.update_title(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -544,7 +551,7 @@ impl App {
         self.welcome = false;
         self.search_input = false;
         self.panel_focus = false;
-        self.output_focus = false;
+        self.terminal_focus = false;
         self.review_file = None;
         self.side_view = SideView::Files;
         if !from_welcome
@@ -626,7 +633,7 @@ impl App {
 
     pub(super) fn activate_tab(&mut self, hwnd: HWND, index: usize) {
         if index < self.tabs.len() {
-            self.output_focus = false;
+            self.terminal_focus = false;
             if self.side_view == SideView::Search {
                 self.cancel_search();
             }
@@ -809,7 +816,7 @@ impl App {
             - rect.top
             - self.editor_top()
             - self.scale(STATUS)
-            - if self.run_visible { self.scale(210) } else { 0 })
+            - if self.terminal_visible { self.scale(210) } else { 0 })
         .max(1)
             / self.line_height)
             .max(1) as usize
@@ -1133,7 +1140,7 @@ impl App {
         }
         match Document::open(path.clone()) {
             Ok(document) => {
-                self.output_focus = false;
+                self.terminal_focus = false;
                 let from_welcome = self.welcome;
                 self.welcome = false;
                 self.quick_open = false;

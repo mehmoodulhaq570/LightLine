@@ -49,7 +49,8 @@ pub enum Key {
 }
 
 pub fn encode_key(key: Key, modifiers: Modifiers, modes: InputModes) -> Vec<u8> {
-    let modifier = 1 + u8::from(modifiers.shift)
+    let modifier = 1
+        + u8::from(modifiers.shift)
         + 2 * u8::from(modifiers.alt)
         + 4 * u8::from(modifiers.control);
     let final_byte = match key {
@@ -161,22 +162,50 @@ mod tests {
 
     #[test]
     fn terminal_input_controls_and_utf8() {
-        let ctrl = Modifiers { control: true, ..Modifiers::default() };
+        let ctrl = Modifiers {
+            control: true,
+            ..Modifiers::default()
+        };
         assert_eq!(encode_key(Key::Char('c'), ctrl, InputModes::default()), [3]);
         assert_eq!(encode_key(Key::Char('d'), ctrl, InputModes::default()), [4]);
-        assert_eq!(encode_key(Key::Char('z'), ctrl, InputModes::default()), [26]);
+        assert_eq!(
+            encode_key(Key::Char('z'), ctrl, InputModes::default()),
+            [26]
+        );
         assert_eq!(encode_key(Key::Char(' '), ctrl, InputModes::default()), [0]);
-        assert_eq!(encode_key(Key::Enter, Modifiers::default(), InputModes::default()), b"\r");
-        assert_eq!(encode_key(Key::Char('界'), Modifiers::default(), InputModes::default()), "界".as_bytes());
-        assert_eq!(encode_key(Key::Left, ctrl, InputModes::default()), b"\x1b[1;5D");
+        assert_eq!(
+            encode_key(Key::Enter, Modifiers::default(), InputModes::default()),
+            b"\r"
+        );
+        assert_eq!(
+            encode_key(Key::Char('界'), Modifiers::default(), InputModes::default()),
+            "界".as_bytes()
+        );
+        assert_eq!(
+            encode_key(Key::Left, ctrl, InputModes::default()),
+            b"\x1b[1;5D"
+        );
     }
 
     #[test]
     fn terminal_input_modes_and_paste() {
-        let modes = InputModes { application_cursor: true, bracketed_paste: true, ..InputModes::default() };
+        let modes = InputModes {
+            application_cursor: true,
+            bracketed_paste: true,
+            ..InputModes::default()
+        };
         assert_eq!(encode_key(Key::Up, Modifiers::default(), modes), b"\x1bOA");
-        assert_eq!(encode_key(Key::Function(12), Modifiers::default(), modes), b"\x1b[24~");
-        assert_eq!(encode_paste("hé\r\n界\n", modes), "\x1b[200~hé\r界\r\x1b[201~".as_bytes());
-        assert_eq!(encode_paste("a\x1b[201~\0b", modes), b"\x1b[200~a[201~b\x1b[201~");
+        assert_eq!(
+            encode_key(Key::Function(12), Modifiers::default(), modes),
+            b"\x1b[24~"
+        );
+        assert_eq!(
+            encode_paste("hé\r\n界\n", modes),
+            "\x1b[200~hé\r界\r\x1b[201~".as_bytes()
+        );
+        assert_eq!(
+            encode_paste("a\x1b[201~\0b", modes),
+            b"\x1b[200~a[201~b\x1b[201~"
+        );
     }
 }

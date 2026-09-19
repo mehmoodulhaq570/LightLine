@@ -3,3 +3,4 @@ mod editor;
 mod hover;
 mod panels;
 mod primitives;
+mod terminal;

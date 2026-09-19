@@ -95,17 +95,8 @@ impl App {
         self.changes.clear();
         self.review_loading = false;
         self.review_file = None;
-        if let Some(cancel) = self.run_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.run_pid = None;
-        self.run_input = None;
-        self.run_input_buffer.clear();
-        self.run_busy = false;
-        self.run_visible = false;
-        self.output_focus = false;
-        self.run_title = "Output".into();
-        self.run_output.clear();
+        self.close_terminal(hwnd);
+        self.terminal_snapshot = None;
         self.welcome = false;
         self.explorer_visible = true;
         self.sidebar_width = SIDEBAR;

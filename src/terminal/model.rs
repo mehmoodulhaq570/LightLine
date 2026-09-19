@@ -55,12 +55,26 @@ impl Snapshot {
     // Coordinates are viewport cells; the end is exclusive. Hold an Arc<Snapshot>
     // while selecting to keep the selection stable even as the terminal updates.
     pub fn selected_text(&self, start: (u16, u16), end: (u16, u16)) -> String {
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         let mut text = String::new();
         for index in usize::from(start.0)..=usize::from(end.0) {
-            let Some(row) = self.rows.get(index) else { break };
-            let first = if index == usize::from(start.0) { usize::from(start.1) } else { 0 };
-            let last = if index == usize::from(end.0) { usize::from(end.1) } else { row.cells.len() };
+            let Some(row) = self.rows.get(index) else {
+                break;
+            };
+            let first = if index == usize::from(start.0) {
+                usize::from(start.1)
+            } else {
+                0
+            };
+            let last = if index == usize::from(end.0) {
+                usize::from(end.1)
+            } else {
+                row.cells.len()
+            };
             let mut line = String::new();
             for cell in row.cells.iter().take(last).skip(first) {
                 if !cell.wide_continuation {
@@ -113,17 +127,35 @@ impl vt100::Callbacks for Callbacks {
 
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         self.title = String::from_utf8_lossy(title)
-            .chars().filter(|c| !c.is_control()).take(256).collect();
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(256)
+            .collect();
     }
 
-    fn unhandled_escape(&mut self, _: &mut vt100::Screen, i1: Option<u8>, i2: Option<u8>, byte: u8) {
+    fn unhandled_escape(
+        &mut self,
+        _: &mut vt100::Screen,
+        i1: Option<u8>,
+        i2: Option<u8>,
+        byte: u8,
+    ) {
         if i1.is_none() && i2.is_none() && byte == b'Z' {
             self.reply(b"\x1b[?1;2c".to_vec());
         }
     }
 
-    fn unhandled_csi(&mut self, screen: &mut vt100::Screen, i1: Option<u8>, i2: Option<u8>, params: &[&[u16]], command: char) {
-        if i2.is_some() { return; }
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        i1: Option<u8>,
+        i2: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if i2.is_some() {
+            return;
+        }
         let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
         match (i1, command, first) {
             (None, 'c', 0) => self.reply(b"\x1b[?1;2c".to_vec()),
@@ -155,7 +187,12 @@ impl TerminalModel {
     pub fn new(size: TerminalSize) -> Self {
         let size = size.normalized();
         Self {
-            parser: vt100::Parser::new_with_callbacks(size.rows, size.columns, SCROLLBACK_LINES, Callbacks::default()),
+            parser: vt100::Parser::new_with_callbacks(
+                size.rows,
+                size.columns,
+                SCROLLBACK_LINES,
+                Callbacks::default(),
+            ),
             osc_length: None,
             escape_pending: false,
         }
@@ -177,7 +214,9 @@ impl TerminalModel {
                     length < 8_192
                 }
             } else {
-                if self.escape_pending && byte == b']' { self.osc_length = Some(0); }
+                if self.escape_pending && byte == b']' {
+                    self.osc_length = Some(0);
+                }
                 if byte == 27 {
                     self.escape_pending = true;
                 } else if (32..=126).contains(&byte) || matches!(byte, 24 | 26) {
@@ -186,11 +225,15 @@ impl TerminalModel {
                 true
             };
             if !keep {
-                if start < index { self.parser.process(&bytes[start..index]); }
+                if start < index {
+                    self.parser.process(&bytes[start..index]);
+                }
                 start = index + 1;
             }
         }
-        if start < bytes.len() { self.parser.process(&bytes[start..]); }
+        if start < bytes.len() {
+            self.parser.process(&bytes[start..]);
+        }
     }
 
     pub fn resize(&mut self, size: TerminalSize) {
@@ -216,7 +259,14 @@ impl TerminalModel {
         Ok(callbacks.replies.drain(..).collect())
     }
 
-    pub fn snapshot(&mut self, session_id: SessionId, kind: SessionKind, generation: u64, status: SessionStatus, scrollback_offset: usize) -> Snapshot {
+    pub fn snapshot(
+        &mut self,
+        session_id: SessionId,
+        kind: SessionKind,
+        generation: u64,
+        status: SessionStatus,
+        scrollback_offset: usize,
+    ) -> Snapshot {
         let modes = self.modes();
         let callbacks = self.parser.callbacks();
         let title = callbacks.title.clone();
@@ -229,26 +279,48 @@ impl TerminalModel {
         screen.set_scrollback(scrollback_offset);
         let scrollback_offset = screen.scrollback();
         let snapshot = Snapshot {
-            session_id, kind, generation, status,
+            session_id,
+            kind,
+            generation,
+            status,
             size: TerminalSize { rows, columns },
-            rows: (0..rows).map(|row| Row {
-                wrapped: screen.row_wrapped(row),
-                cells: (0..columns).map(|column| {
-                    // Historical rows retain their old width after a resize in vt100.
-                    // Pad missing cells so every published viewport remains rectangular.
-                    screen.cell(row, column).map_or_else(|| Cell {
-                        text: String::new(), foreground: Color::Default, background: Color::Default,
-                        bold: false, dim: false, italic: false, underline: false,
-                        inverse: false, wide: false, wide_continuation: false,
-                    }, |cell| Cell {
-                        text: cell.contents().to_owned(),
-                        foreground: cell.fgcolor(), background: cell.bgcolor(),
-                        bold: cell.bold(), dim: cell.dim(), italic: cell.italic(),
-                        underline: cell.underline(), inverse: cell.inverse(),
-                        wide: cell.is_wide(), wide_continuation: cell.is_wide_continuation(),
-                    })
-                }).collect(),
-            }).collect(),
+            rows: (0..rows)
+                .map(|row| Row {
+                    wrapped: screen.row_wrapped(row),
+                    cells: (0..columns)
+                        .map(|column| {
+                            // Historical rows retain their old width after a resize in vt100.
+                            // Pad missing cells so every published viewport remains rectangular.
+                            screen.cell(row, column).map_or_else(
+                                || Cell {
+                                    text: String::new(),
+                                    foreground: Color::Default,
+                                    background: Color::Default,
+                                    bold: false,
+                                    dim: false,
+                                    italic: false,
+                                    underline: false,
+                                    inverse: false,
+                                    wide: false,
+                                    wide_continuation: false,
+                                },
+                                |cell| Cell {
+                                    text: cell.contents().to_owned(),
+                                    foreground: cell.fgcolor(),
+                                    background: cell.bgcolor(),
+                                    bold: cell.bold(),
+                                    dim: cell.dim(),
+                                    italic: cell.italic(),
+                                    underline: cell.underline(),
+                                    inverse: cell.inverse(),
+                                    wide: cell.is_wide(),
+                                    wide_continuation: cell.is_wide_continuation(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+                .collect(),
             cursor: Cursor {
                 row: cursor_row,
                 column: cursor_column.min(columns - 1),
@@ -256,7 +328,10 @@ impl TerminalModel {
             },
             modes,
             alternate_screen: screen.alternate_screen(),
-            scrollback_offset, scrollback_available, title, bell_count,
+            scrollback_offset,
+            scrollback_available,
+            title,
+            bell_count,
         };
         // Query replies and subsequent output always operate on the live screen.
         screen.set_scrollback(0);
@@ -269,7 +344,13 @@ mod tests {
     use super::*;
 
     fn snapshot(model: &mut TerminalModel, offset: usize) -> Snapshot {
-        model.snapshot(SessionId(1), SessionKind::Shell, 1, SessionStatus::Running, offset)
+        model.snapshot(
+            SessionId(1),
+            SessionKind::Shell,
+            1,
+            SessionStatus::Running,
+            offset,
+        )
     }
 
     #[test]
@@ -294,7 +375,9 @@ mod tests {
     #[test]
     fn terminal_scrollback_bound_and_alternate_screen() {
         let mut model = TerminalModel::new(TerminalSize::new(3, 12).unwrap());
-        for _ in 0..6_100 { model.process(b"row\r\n"); }
+        for _ in 0..6_100 {
+            model.process(b"row\r\n");
+        }
         let snap = snapshot(&mut model, usize::MAX);
         assert_eq!(snap.scrollback_available, SCROLLBACK_LINES);
         assert_eq!(snap.scrollback_offset, SCROLLBACK_LINES);
@@ -305,14 +388,19 @@ mod tests {
         assert!(snap.modes.application_cursor && snap.modes.bracketed_paste);
         assert_eq!(snap.scrollback_available, 0);
         model.process(b"\x1b[?1049l");
-        assert_eq!(snapshot(&mut model, 0).scrollback_available, SCROLLBACK_LINES);
+        assert_eq!(
+            snapshot(&mut model, 0).scrollback_available,
+            SCROLLBACK_LINES
+        );
     }
 
     #[test]
     fn terminal_osc_payload_is_bounded_and_history_stays_rectangular() {
         let mut model = TerminalModel::new(TerminalSize::new(2, 5).unwrap());
         model.process(b"\x1b\x7f]2;");
-        for _ in 0..100 { model.process(&[b'x'; 1024]); }
+        for _ in 0..100 {
+            model.process(&[b'x'; 1024]);
+        }
         assert_eq!(model.osc_length, Some(8_193));
         model.process(b"\x07row\r\nrow\r\nrow\r\n");
         assert_eq!(model.osc_length, None);
@@ -329,7 +417,17 @@ mod tests {
         model.process(b"\x1b[2;3H\x1b[6");
         model.process(b"n\x1b[5n\x1b[c\x1b[>c\x1b[?6n\x1b[18t\x1b]52;c;?\x07");
         let replies = model.take_replies().unwrap();
-        assert_eq!(replies, [b"\x1b[2;3R".to_vec(), b"\x1b[0n".to_vec(), b"\x1b[?1;2c".to_vec(), b"\x1b[>0;1;0c".to_vec(), b"\x1b[?2;3R".to_vec(), b"\x1b[8;4;20t".to_vec()]);
+        assert_eq!(
+            replies,
+            [
+                b"\x1b[2;3R".to_vec(),
+                b"\x1b[0n".to_vec(),
+                b"\x1b[?1;2c".to_vec(),
+                b"\x1b[>0;1;0c".to_vec(),
+                b"\x1b[?2;3R".to_vec(),
+                b"\x1b[8;4;20t".to_vec()
+            ]
+        );
         model.process(b"\x1b[2J\x1b[H");
         assert_eq!(snapshot(&mut model, 0).text().trim(), "");
     }

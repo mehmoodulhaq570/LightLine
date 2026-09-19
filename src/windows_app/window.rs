@@ -81,6 +81,7 @@ unsafe extern "system" fn wnd_proc(
             if app.active >= app.tab_first + count {
                 app.tab_first = app.active + 1 - count;
             }
+            app.resize_terminal_to_fit(hwnd);
             0
         }
         WM_SETFOCUS => {
@@ -134,6 +135,10 @@ unsafe extern "system" fn wnd_proc(
             app.poll_lsp(hwnd);
             0
         }
+        TERMINAL_EVENT_MESSAGE => {
+            app.poll_terminal(hwnd);
+            0
+        }
         WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
             unsafe {
                 let mut point = POINT::default();
@@ -158,7 +163,7 @@ unsafe extern "system" fn wnd_proc(
                             GetClientRect(hwnd, &mut rect);
                             point.y
                                 >= rect.bottom
-                                    - app.scale(STATUS + if app.run_visible { 210 } else { 0 })
+                                    - app.scale(STATUS + if app.terminal_visible { 210 } else { 0 })
                         }
                     {
                         IDC_ARROW
@@ -228,17 +233,11 @@ unsafe extern "system" fn wnd_proc(
             }
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
-            if app.run_visible
+            if app.terminal_visible
                 && point.x >= app.editor_left()
-                && point.y >= rect.bottom - app.scale(STATUS + 210)
+                && point.y >= app.terminal_top(hwnd)
             {
-                let max = app.run_output.lines().count().saturating_sub(8);
-                app.output_scroll = if delta > 0 {
-                    (app.output_scroll + 3).min(max)
-                } else {
-                    app.output_scroll.saturating_sub(3)
-                };
-                unsafe { InvalidateRect(hwnd, null(), 0) };
+                app.scroll_terminal(hwnd, delta as i32);
                 return 0;
             }
             if app.sidebar_width > 0 && point.x >= app.scale(RAIL) && point.x < app.editor_left() {
@@ -345,7 +344,7 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_CLOSE => {
             if app.can_close_window(hwnd) {
-                app.stop_run_before_close();
+                app.stop_terminal_for_close();
                 unsafe {
                     DestroyWindow(hwnd);
                 }

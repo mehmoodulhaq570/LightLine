@@ -34,7 +34,7 @@ impl App {
                 return;
             }
             let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-            let code_bottom = editor_bottom - if self.run_visible { self.scale(210) } else { 0 };
+            let code_bottom = editor_bottom - if self.terminal_visible { self.scale(210) } else { 0 };
             let editor_left = self.editor_left();
             let bg = CreateSolidBrush(EDITOR_BG);
             let gutter_bg = CreateSolidBrush(EDITOR_BG);
@@ -581,8 +581,8 @@ impl App {
                 self.pane_right(hwnd, self.focused_pane),
                 code_bottom,
             );
-            if self.run_visible {
-                self.paint_output(hdc, editor_left, rect.right, editor_bottom);
+            if self.terminal_visible {
+                self.paint_terminal(hdc, editor_left, rect.right, editor_bottom);
             }
             FillRect(
                 hdc,

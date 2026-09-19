@@ -1,6 +1,8 @@
-//! Rust colors from Tree-sitter for ordinary files, with bounded lexical fallback for large files.
+//! Tree-sitter colors for Rust and Python, with bounded lexical fallback for large Rust files.
+//! Oversized Python files (see `PARSE_LIMIT`) render as plain text instead.
 
 use crate::document::Document;
+use std::marker::PhantomData;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use tree_sitter::{InputEdit, Parser, Point, Query, QueryCursor, StreamingIterator, Tree};
@@ -32,6 +34,156 @@ pub struct Span {
     pub color: Color,
 }
 
+/// Per-tab syntax highlighter, dispatching to the language matching the open file.
+pub enum Syntax {
+    Rust(RustSyntax),
+    Python(PythonSyntax),
+}
+
+impl Syntax {
+    pub fn new_rust() -> Self {
+        Syntax::Rust(RustSyntax::new())
+    }
+
+    pub fn new_python() -> Self {
+        Syntax::Python(PythonSyntax::new())
+    }
+
+    pub fn invalidate_from(&mut self, line: usize) {
+        match self {
+            Syntax::Rust(syntax) => syntax.invalidate_from(line),
+            Syntax::Python(syntax) => syntax.invalidate_from(),
+        }
+    }
+
+    pub fn advance_to(&mut self, document: &Document, target: usize, budget: usize) -> bool {
+        match self {
+            Syntax::Rust(syntax) => syntax.advance_to(document, target, budget),
+            Syntax::Python(syntax) => syntax.advance_to(document),
+        }
+    }
+
+    pub fn spans(&self, document: &Document, line: usize) -> Vec<Span> {
+        match self {
+            Syntax::Rust(syntax) => syntax.spans(document, line),
+            Syntax::Python(syntax) => syntax.spans(line),
+        }
+    }
+}
+
+/// Parses one incremental snapshot on a background worker thread.
+trait LangParser: Sized {
+    fn new(source: String) -> Option<Self>;
+    fn refresh(&mut self, next: String) -> bool;
+    fn all_spans(&self) -> Vec<Vec<Span>>;
+}
+
+fn compute_edit(before_src: &str, after_src: &str) -> InputEdit {
+    let before = before_src.as_bytes();
+    let after = after_src.as_bytes();
+    let mut start = before.iter().zip(after).take_while(|(a, b)| a == b).count();
+    while !before_src.is_char_boundary(start) || !after_src.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut suffix = before[start..]
+        .iter()
+        .rev()
+        .zip(after[start..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !before_src.is_char_boundary(before.len() - suffix)
+        || !after_src.is_char_boundary(after.len() - suffix)
+    {
+        suffix -= 1;
+    }
+    let old_end = before.len() - suffix;
+    let new_end = after.len() - suffix;
+    InputEdit {
+        start_byte: start,
+        old_end_byte: old_end,
+        new_end_byte: new_end,
+        start_position: point_at(before_src, start),
+        old_end_position: point_at(before_src, old_end),
+        new_end_position: point_at(after_src, new_end),
+    }
+}
+
+fn spans_from_query(
+    query: &Query,
+    tree: &Tree,
+    source: &str,
+    capture_color: impl Fn(&str) -> Option<Color>,
+) -> Vec<Vec<Span>> {
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut output = vec![Vec::new(); lines.len()];
+    let mut cursor = QueryCursor::new();
+    let mut captures = cursor.captures(query, tree.root_node(), source.as_bytes());
+    while let Some((matched, capture_index)) = captures.next() {
+        let capture = matched.captures()[*capture_index];
+        let name = query.capture_names()[capture.index as usize];
+        let Some(color) = capture_color(name) else {
+            continue;
+        };
+        let start = capture.node.start_position();
+        let end = capture.node.end_position();
+        for line in start.row..=end.row.min(lines.len().saturating_sub(1)) {
+            let source = lines[line];
+            let from = if start.row == line { start.column } else { 0 };
+            let to = if end.row == line {
+                end.column
+            } else {
+                source.len()
+            };
+            if from < to
+                && to <= source.len()
+                && source.is_char_boundary(from)
+                && source.is_char_boundary(to)
+            {
+                output[line].push(Span {
+                    start: from,
+                    end: to,
+                    color,
+                });
+            }
+        }
+    }
+    output
+}
+
+fn rust_capture_color(name: &str) -> Option<Color> {
+    if name.starts_with("comment") {
+        Some(Color::Comment)
+    } else if name.starts_with("string") || name.starts_with("character") {
+        Some(Color::String)
+    } else if name.starts_with("keyword") || name == "boolean" {
+        Some(Color::Keyword)
+    } else if name.starts_with("type") || name == "constructor" {
+        Some(Color::Type)
+    } else if name.starts_with("number") || name.starts_with("constant") {
+        Some(Color::Number)
+    } else if name == "function.macro" {
+        Some(Color::Macro)
+    } else {
+        None
+    }
+}
+
+fn python_capture_color(name: &str) -> Option<Color> {
+    if name.starts_with("comment") {
+        Some(Color::Comment)
+    } else if name.starts_with("string") || name == "escape" {
+        Some(Color::String)
+    } else if name.starts_with("keyword") {
+        Some(Color::Keyword)
+    } else if name.starts_with("type") || name == "constructor" {
+        Some(Color::Type)
+    } else if name.starts_with("number") || name.starts_with("constant") {
+        Some(Color::Number)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum State {
     #[default]
@@ -44,16 +196,17 @@ enum State {
 pub struct RustSyntax {
     // states[i] is the lexer state at the beginning of line i.
     states: Vec<State>,
-    worker: Option<Worker>,
+    worker: Option<Worker<ParsedRust>>,
     tree_spans: Option<Vec<Vec<Span>>>,
     parser_attempted: bool,
     dirty: bool,
     revision: u64,
 }
 
-struct Worker {
+struct Worker<P> {
     jobs: Sender<Job>,
     results: Receiver<ResultSet>,
+    _parser: PhantomData<P>,
 }
 
 struct Job {
@@ -73,7 +226,7 @@ struct ParsedRust {
     source: String,
 }
 
-impl ParsedRust {
+impl LangParser for ParsedRust {
     fn new(source: String) -> Option<Self> {
         let language = tree_sitter_rust::LANGUAGE.into();
         let mut parser = Parser::new();
@@ -92,33 +245,7 @@ impl ParsedRust {
         if next == self.source {
             return true;
         }
-        let before = self.source.as_bytes();
-        let after = next.as_bytes();
-        let mut start = before.iter().zip(after).take_while(|(a, b)| a == b).count();
-        while !self.source.is_char_boundary(start) || !next.is_char_boundary(start) {
-            start -= 1;
-        }
-        let mut suffix = before[start..]
-            .iter()
-            .rev()
-            .zip(after[start..].iter().rev())
-            .take_while(|(a, b)| a == b)
-            .count();
-        while !self.source.is_char_boundary(before.len() - suffix)
-            || !next.is_char_boundary(after.len() - suffix)
-        {
-            suffix -= 1;
-        }
-        let old_end = before.len() - suffix;
-        let new_end = after.len() - suffix;
-        let edit = InputEdit {
-            start_byte: start,
-            old_end_byte: old_end,
-            new_end_byte: new_end,
-            start_position: point_at(&self.source, start),
-            old_end_position: point_at(&self.source, old_end),
-            new_end_position: point_at(&next, new_end),
-        };
+        let edit = compute_edit(&self.source, &next);
         self.tree.edit(&edit);
         let Some(tree) = self.parser.parse(&next, Some(&self.tree)) else {
             return false;
@@ -129,65 +256,57 @@ impl ParsedRust {
     }
 
     fn all_spans(&self) -> Vec<Vec<Span>> {
-        let lines: Vec<&str> = self.source.split('\n').collect();
-        let mut output = vec![Vec::new(); lines.len()];
-        let mut cursor = QueryCursor::new();
-        let mut captures =
-            cursor.captures(&self.query, self.tree.root_node(), self.source.as_bytes());
-        while let Some((matched, capture_index)) = captures.next() {
-            let capture = matched.captures()[*capture_index];
-            let name = self.query.capture_names()[capture.index as usize];
-            let color = if name.starts_with("comment") {
-                Some(Color::Comment)
-            } else if name.starts_with("string") || name.starts_with("character") {
-                Some(Color::String)
-            } else if name.starts_with("keyword") || name == "boolean" {
-                Some(Color::Keyword)
-            } else if name.starts_with("type") || name == "constructor" {
-                Some(Color::Type)
-            } else if name.starts_with("number") || name.starts_with("constant") {
-                Some(Color::Number)
-            } else if name == "function.macro" {
-                Some(Color::Macro)
-            } else {
-                None
-            };
-            let Some(color) = color else {
-                continue;
-            };
-            let start = capture.node.start_position();
-            let end = capture.node.end_position();
-            for line in start.row..=end.row.min(lines.len().saturating_sub(1)) {
-                let source = lines[line];
-                let from = if start.row == line { start.column } else { 0 };
-                let to = if end.row == line {
-                    end.column
-                } else {
-                    source.len()
-                };
-                if from < to
-                    && to <= source.len()
-                    && source.is_char_boundary(from)
-                    && source.is_char_boundary(to)
-                {
-                    output[line].push(Span {
-                        start: from,
-                        end: to,
-                        color,
-                    });
-                }
-            }
-        }
-        output
+        spans_from_query(&self.query, &self.tree, &self.source, rust_capture_color)
     }
 }
 
-impl Worker {
+struct ParsedPython {
+    parser: Parser,
+    tree: Tree,
+    query: Query,
+    source: String,
+}
+
+impl LangParser for ParsedPython {
+    fn new(source: String) -> Option<Self> {
+        let language = tree_sitter_python::LANGUAGE.into();
+        let mut parser = Parser::new();
+        parser.set_language(&language).ok()?;
+        let query = Query::new(&language, tree_sitter_python::HIGHLIGHTS_QUERY).ok()?;
+        let tree = parser.parse(&source, None)?;
+        Some(Self {
+            parser,
+            tree,
+            query,
+            source,
+        })
+    }
+
+    fn refresh(&mut self, next: String) -> bool {
+        if next == self.source {
+            return true;
+        }
+        let edit = compute_edit(&self.source, &next);
+        self.tree.edit(&edit);
+        let Some(tree) = self.parser.parse(&next, Some(&self.tree)) else {
+            return false;
+        };
+        self.tree = tree;
+        self.source = next;
+        true
+    }
+
+    fn all_spans(&self) -> Vec<Vec<Span>> {
+        spans_from_query(&self.query, &self.tree, &self.source, python_capture_color)
+    }
+}
+
+impl<P: LangParser + Send + 'static> Worker<P> {
     fn start() -> Self {
         let (jobs_tx, jobs_rx) = mpsc::channel::<Job>();
         let (results_tx, results_rx) = mpsc::channel::<ResultSet>();
         thread::spawn(move || {
-            let mut parsed: Option<ParsedRust> = None;
+            let mut parsed: Option<P> = None;
             while let Ok(mut job) = jobs_rx.recv() {
                 while let Ok(newer) = jobs_rx.try_recv() {
                     job = newer;
@@ -195,11 +314,11 @@ impl Worker {
                 let okay = if let Some(parser) = &mut parsed {
                     parser.refresh(job.source)
                 } else {
-                    parsed = ParsedRust::new(job.source);
+                    parsed = P::new(job.source);
                     parsed.is_some()
                 };
                 let spans = if okay {
-                    parsed.as_ref().map(ParsedRust::all_spans)
+                    parsed.as_ref().map(P::all_spans)
                 } else {
                     None
                 };
@@ -217,6 +336,7 @@ impl Worker {
         Self {
             jobs: jobs_tx,
             results: results_rx,
+            _parser: PhantomData,
         }
     }
 }
@@ -332,6 +452,93 @@ impl RustSyntax {
         let mut spans = Vec::new();
         scan(document.line(line), state, Some(&mut spans));
         spans
+    }
+}
+
+pub struct PythonSyntax {
+    worker: Option<Worker<ParsedPython>>,
+    tree_spans: Option<Vec<Vec<Span>>>,
+    parser_attempted: bool,
+    dirty: bool,
+    revision: u64,
+}
+
+impl Default for PythonSyntax {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PythonSyntax {
+    pub fn new() -> Self {
+        Self {
+            worker: None,
+            tree_spans: None,
+            parser_attempted: false,
+            dirty: false,
+            revision: 0,
+        }
+    }
+
+    pub fn invalidate_from(&mut self) {
+        self.dirty = true;
+        self.revision = self.revision.wrapping_add(1);
+        self.tree_spans = None;
+    }
+
+    /// Polls the background parser. Files over `PARSE_LIMIT` never start one, so
+    /// they render as plain text; there is no lexical fallback for Python.
+    pub fn advance_to(&mut self, document: &Document) -> bool {
+        if !self.parser_attempted {
+            self.parser_attempted = true;
+            if within_parse_limit(document) {
+                self.worker = Some(Worker::start());
+                self.dirty = true;
+            }
+        }
+        if self.worker.is_some() {
+            if self.dirty {
+                if !within_parse_limit(document) {
+                    self.worker = None;
+                } else {
+                    let job = Job {
+                        revision: self.revision,
+                        source: document.text_range(Default::default(), document.end()),
+                    };
+                    if self.worker.as_ref().unwrap().jobs.send(job).is_err() {
+                        self.worker = None;
+                    }
+                }
+                self.dirty = false;
+            }
+            if let Some(worker) = &self.worker {
+                loop {
+                    match worker.results.try_recv() {
+                        Ok(result) if result.revision == self.revision => {
+                            self.tree_spans = result.spans;
+                            if self.tree_spans.is_none() {
+                                self.worker = None;
+                            }
+                            break;
+                        }
+                        Ok(_) => continue,
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Disconnected) => {
+                            self.worker = None;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        self.worker.is_none() || self.tree_spans.is_some()
+    }
+
+    pub fn spans(&self, line: usize) -> Vec<Span> {
+        self.tree_spans
+            .as_ref()
+            .and_then(|spans| spans.get(line).cloned())
+            .unwrap_or_default()
     }
 }
 
@@ -613,5 +820,78 @@ mod tests {
                 .iter()
                 .any(|span| span.color == Color::Comment)
         );
+    }
+
+    fn settle_python(syntax: &mut PythonSyntax, doc: &Document) {
+        for _ in 0..500 {
+            if syntax.advance_to(doc) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("python syntax worker did not finish");
+    }
+
+    #[test]
+    fn python_tree_sitter_colors_keywords_and_strings() {
+        let mut doc = Document::new();
+        doc.replace(
+            Pos::default(),
+            Pos::default(),
+            "def greet(name):\n    return f\"hi {name}\"  # comment\n",
+        );
+        let mut syntax = PythonSyntax::new();
+        settle_python(&mut syntax, &doc);
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::Keyword)
+        );
+        assert!(
+            syntax
+                .spans(1)
+                .iter()
+                .any(|span| span.color == Color::String)
+        );
+        assert!(
+            syntax
+                .spans(1)
+                .iter()
+                .any(|span| span.color == Color::Comment)
+        );
+    }
+
+    #[test]
+    fn python_reparses_after_an_edit() {
+        let mut doc = Document::new();
+        doc.replace(Pos::default(), Pos::default(), "x = 1\n");
+        let mut syntax = PythonSyntax::new();
+        settle_python(&mut syntax, &doc);
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::Number)
+        );
+        doc.replace(Pos { line: 0, byte: 4 }, Pos { line: 0, byte: 5 }, "\"s\"");
+        syntax.invalidate_from();
+        settle_python(&mut syntax, &doc);
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::String)
+        );
+    }
+
+    #[test]
+    fn python_oversized_file_falls_back_to_plain_text() {
+        let mut doc = Document::new();
+        let text = format!("x = 1\n{}", "# padding line\n".repeat(20_000));
+        doc.replace(Pos::default(), Pos::default(), &text);
+        let mut syntax = PythonSyntax::new();
+        assert!(syntax.advance_to(&doc));
+        assert!(syntax.spans(0).is_empty());
     }
 }
