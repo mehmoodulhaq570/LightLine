@@ -95,8 +95,7 @@ impl App {
         self.changes.clear();
         self.review_loading = false;
         self.review_file = None;
-        self.close_terminal(hwnd);
-        self.terminal_snapshot = None;
+        self.reset_terminal_sessions(hwnd);
         self.welcome = false;
         self.explorer_visible = true;
         self.sidebar_width = SIDEBAR;
@@ -126,28 +125,7 @@ impl App {
     }
 
     pub(super) fn folder_dialog(&self, hwnd: HWND) -> Option<PathBuf> {
-        let mut display = [0u16; 260];
-        let title = wide("Choose a LightLine workspace folder");
-        let info = BROWSEINFOW {
-            hwndOwner: hwnd,
-            pszDisplayName: display.as_mut_ptr(),
-            lpszTitle: title.as_ptr(),
-            ulFlags: BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
-            ..unsafe { zeroed() }
-        };
-        let id = unsafe { SHBrowseForFolderW(&info) };
-        if id.is_null() {
-            return None;
-        }
-        let mut path = [0u16; 260];
-        let ok = unsafe { SHGetPathFromIDListW(id, path.as_mut_ptr()) };
-        unsafe { CoTaskMemFree(id.cast()) };
-        if ok == 0 {
-            return None;
-        }
-        Some(PathBuf::from(String::from_utf16_lossy(
-            &path[..path.iter().position(|ch| *ch == 0)?],
-        )))
+        file_dialog::pick_folder(hwnd, "Choose a LightLine workspace folder")
     }
 
     pub(super) fn open_folder(&mut self, hwnd: HWND) {

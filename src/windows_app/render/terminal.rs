@@ -13,7 +13,7 @@ impl App {
         right: i32,
         bottom: i32,
     ) {
-        let top = bottom - self.scale(210);
+        let top = bottom - self.scale(self.terminal_height);
         Self::fill(
             hdc,
             RECT {
@@ -36,38 +36,62 @@ impl App {
         );
         self.refresh_terminal_cell_width(hdc);
         let header_bottom = top + self.scale(34);
-        let (title, status) = match &self.terminal_snapshot {
-            Some(snapshot) => {
-                let title = if snapshot.title.is_empty() {
-                    "TERMINAL".to_string()
-                } else {
-                    snapshot.title.clone()
-                };
-                let status = match &snapshot.status {
-                    SessionStatus::Exited { code } => format!("process exited ({code})"),
-                    SessionStatus::Failed(message) => format!("error: {message}"),
-                    SessionStatus::Stopped => "stopped".to_string(),
-                    SessionStatus::Starting => "starting\u{2026}".to_string(),
-                    SessionStatus::Stopping => "stopping\u{2026}".to_string(),
-                    SessionStatus::Running => String::new(),
-                };
-                (title, status)
+
+        // Output (run/build results, its own session) and Terminal (the
+        // persistent interactive shell) sit in fixed-width tab slots so hit
+        // testing in input.rs doesn't need to re-measure label text.
+        let tab_slot = self.scale(90);
+        for (index, (tab, label)) in [
+            (TerminalTab::Output, "OUTPUT"),
+            (TerminalTab::Terminal, "TERMINAL"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let slot_left = left + self.scale(16) + index as i32 * tab_slot;
+            let active = self.terminal_tab == tab;
+            Self::label(
+                hdc,
+                label,
+                slot_left,
+                top + self.scale(9),
+                if active { TEXT } else { MUTED },
+                RECT {
+                    left: slot_left,
+                    top,
+                    right: slot_left + tab_slot,
+                    bottom: header_bottom,
+                },
+            );
+            if active {
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: slot_left,
+                        top: header_bottom - self.scale(2),
+                        right: slot_left + tab_slot - self.scale(16),
+                        bottom: header_bottom,
+                    },
+                    BLUE,
+                );
             }
-            None => ("TERMINAL".to_string(), String::new()),
+        }
+
+        let active_snapshot = match self.terminal_tab {
+            TerminalTab::Output => self.run_snapshot.clone(),
+            TerminalTab::Terminal => self.shell_snapshot.clone(),
         };
-        Self::label(
-            hdc,
-            &title,
-            left + self.scale(16),
-            top + self.scale(9),
-            TEXT,
-            RECT {
-                left,
-                top,
-                right: right - self.scale(44),
-                bottom: header_bottom,
+        let status = match &active_snapshot {
+            Some(snapshot) => match &snapshot.status {
+                SessionStatus::Exited { code } => format!("process exited ({code})"),
+                SessionStatus::Failed(message) => format!("error: {message}"),
+                SessionStatus::Stopped => "stopped".to_string(),
+                SessionStatus::Starting => "starting\u{2026}".to_string(),
+                SessionStatus::Stopping => "stopping\u{2026}".to_string(),
+                SessionStatus::Running => String::new(),
             },
-        );
+            None => String::new(),
+        };
         if !status.is_empty() {
             let width = self.text_width(hdc, &status);
             Self::label(
@@ -97,7 +121,7 @@ impl App {
                 bottom: header_bottom,
             },
         );
-        let Some(snapshot) = self.terminal_snapshot.clone() else {
+        let Some(snapshot) = active_snapshot else {
             return;
         };
         let cell_width = self.cell_width.max(1);

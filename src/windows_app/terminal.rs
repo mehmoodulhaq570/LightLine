@@ -3,29 +3,30 @@ use super::*;
 // Posted from the terminal service wake callback; mirrors LSP_EVENT_MESSAGE.
 pub(super) const TERMINAL_EVENT_MESSAGE: u32 = WM_APP + 8;
 
-// Bottom panel geometry (logical pixels, scaled through App::scale).
-pub(super) const TERMINAL_HEIGHT: i32 = 210;
+// Bottom panel geometry (logical pixels, scaled through App::scale). The
+// panel's height is user-resizable (App::terminal_height); this is only its
+// fixed header row.
 const TERMINAL_HEADER: i32 = 34;
 const TERMINAL_PAD: i32 = 8;
 
 // A 16-entry ANSI palette tuned for the dark EDITOR_BG / SIDEBAR_BG surface.
 const ANSI_PALETTE: [u32; 16] = [
-    rgb(30, 34, 44),  // black
-    rgb(205, 79, 79), // red
-    rgb(119, 221, 119),// green
-    rgb(229, 200, 90), // yellow
-    rgb(96, 143, 244), // blue
-    rgb(190, 120, 224),// magenta
-    rgb(92, 200, 214), // cyan
-    rgb(210, 218, 235),// white
-    rgb(110, 120, 140),// bright black
-    rgb(240, 100, 100),// bright red
-    rgb(150, 240, 150),// bright green
-    rgb(245, 220, 120),// bright yellow
-    rgb(130, 170, 250),// bright blue
-    rgb(215, 150, 245),// bright magenta
-    rgb(130, 225, 235),// bright cyan
-    rgb(240, 245, 252),// bright white
+    rgb(30, 34, 44),    // black
+    rgb(205, 79, 79),   // red
+    rgb(119, 221, 119), // green
+    rgb(229, 200, 90),  // yellow
+    rgb(96, 143, 244),  // blue
+    rgb(190, 120, 224), // magenta
+    rgb(92, 200, 214),  // cyan
+    rgb(210, 218, 235), // white
+    rgb(110, 120, 140), // bright black
+    rgb(240, 100, 100), // bright red
+    rgb(150, 240, 150), // bright green
+    rgb(245, 220, 120), // bright yellow
+    rgb(130, 170, 250), // bright blue
+    rgb(215, 150, 245), // bright magenta
+    rgb(130, 225, 235), // bright cyan
+    rgb(240, 245, 252), // bright white
 ];
 
 fn brighten(color: u32) -> u32 {
@@ -154,21 +155,65 @@ fn vk_to_terminal_key(vk: u32, control: bool) -> Option<TermKey> {
 }
 
 impl App {
-    // Ensure a shell session exists, show the panel, and take keyboard focus.
-    pub(super) fn open_terminal(&mut self, hwnd: HWND) -> Option<SessionId> {
+    fn session_for(&self, tab: TerminalTab) -> Option<SessionId> {
+        match tab {
+            TerminalTab::Terminal => self.shell_session,
+            TerminalTab::Output => self.run_session,
+        }
+    }
+
+    fn snapshot_for(&self, tab: TerminalTab) -> Option<&Arc<Snapshot>> {
+        match tab {
+            TerminalTab::Terminal => self.shell_snapshot.as_ref(),
+            TerminalTab::Output => self.run_snapshot.as_ref(),
+        }
+    }
+
+    fn set_session(&mut self, tab: TerminalTab, id: Option<SessionId>) {
+        match tab {
+            TerminalTab::Terminal => self.shell_session = id,
+            TerminalTab::Output => self.run_session = id,
+        }
+    }
+
+    fn set_snapshot(&mut self, tab: TerminalTab, snapshot: Option<Arc<Snapshot>>) {
+        match tab {
+            TerminalTab::Terminal => self.shell_snapshot = snapshot,
+            TerminalTab::Output => self.run_snapshot = snapshot,
+        }
+    }
+
+    fn set_applied_size(&mut self, tab: TerminalTab, size: Option<TerminalSize>) {
+        match tab {
+            TerminalTab::Terminal => self.shell_applied_size = size,
+            TerminalTab::Output => self.run_applied_size = size,
+        }
+    }
+
+    fn kind_for(tab: TerminalTab) -> SessionKind {
+        match tab {
+            TerminalTab::Terminal => SessionKind::Shell,
+            TerminalTab::Output => SessionKind::ManagedRun,
+        }
+    }
+
+    // Ensure the session backing `tab` exists, show the panel on that tab, and
+    // take keyboard focus. Shared by the interactive shell (Terminal) and run
+    // output (Output) — they are always distinct sessions, never the same one.
+    fn ensure_session(&mut self, hwnd: HWND, tab: TerminalTab) -> Option<SessionId> {
         self.welcome = false;
         self.terminal_visible = true;
-        if let Some(id) = self.terminal_session
+        self.terminal_tab = tab;
+        if let Some(id) = self.session_for(tab)
             && self
-                .terminal_snapshot
-                .as_ref()
+                .snapshot_for(tab)
                 .is_some_and(|snapshot| snapshot.status.is_final())
         {
             let _ = self.terminal.remove(id);
-            self.terminal_session = None;
-            self.terminal_applied_size = None;
+            self.set_session(tab, None);
+            self.set_applied_size(tab, None);
         }
-        let id = match self.terminal_session {
+        let id = match self.session_for(tab) {
             Some(id) => Some(id),
             None => {
                 let cwd = self
@@ -176,13 +221,16 @@ impl App {
                     .clone()
                     .or_else(|| std::env::current_dir().ok())
                     .unwrap_or_else(|| PathBuf::from("."));
+                // Strip canonicalize()'s \\?\ prefix so PowerShell's own
+                // prompt shows an ordinary path instead of the extended form.
+                let cwd = PathBuf::from(display_path(&cwd));
                 let request = LaunchRequest::shell(cwd).without_profile();
                 let size = self.terminal_size_for(hwnd);
-                match self.terminal.start(SessionKind::Shell, request, size) {
+                match self.terminal.start(Self::kind_for(tab), request, size) {
                     Ok(id) => {
-                        self.terminal_session = Some(id);
-                        self.terminal_applied_size = Some(size);
-                        self.terminal_snapshot = None;
+                        self.set_session(tab, Some(id));
+                        self.set_applied_size(tab, Some(size));
+                        self.set_snapshot(tab, None);
                         Some(id)
                     }
                     Err(error) => {
@@ -192,7 +240,10 @@ impl App {
                 }
             }
         };
-        if id.is_some() {
+        // Output is a read-only log, like VS Code's Output panel: it still
+        // runs on a real session underneath so streamed text keeps arriving,
+        // but it never takes keyboard focus. Only Terminal is typable.
+        if id.is_some() && tab == TerminalTab::Terminal {
             self.terminal_focus = true;
         }
         self.update_title(hwnd);
@@ -200,9 +251,21 @@ impl App {
         id
     }
 
-    // Stop the running shell and hide the panel; the session is reaped in poll_terminal.
+    // Show (or create) the persistent interactive user shell on the Terminal tab.
+    pub(super) fn open_terminal(&mut self, hwnd: HWND) -> Option<SessionId> {
+        self.ensure_session(hwnd, TerminalTab::Terminal)
+    }
+
+    // Show (or reuse) the dedicated run session on the Output tab. Reusing a
+    // still-running session means a new command queues behind whatever is
+    // already executing there rather than silently killing it.
+    fn ensure_run_session(&mut self, hwnd: HWND) -> Option<SessionId> {
+        self.ensure_session(hwnd, TerminalTab::Output)
+    }
+
+    // Stop the active tab's session and hide the panel; reaped in poll_terminal.
     pub(super) fn close_terminal(&mut self, hwnd: HWND) {
-        if let Some(id) = self.terminal_session {
+        if let Some(id) = self.session_for(self.terminal_tab) {
             let _ = self.terminal.stop(id);
         }
         self.terminal_visible = false;
@@ -229,39 +292,64 @@ impl App {
         }
     }
 
+    pub(super) fn switch_terminal_tab(&mut self, hwnd: HWND, tab: TerminalTab) {
+        if self.terminal_tab == tab {
+            return;
+        }
+        match tab {
+            // Clicking Terminal should just work, the way opening the panel
+            // does in any other editor: start the shell if none is running yet.
+            TerminalTab::Terminal => {
+                self.open_terminal(hwnd);
+            }
+            // Output has nothing to auto-start; it only ever shows whatever a
+            // run has already produced, and never takes keyboard focus.
+            TerminalTab::Output => {
+                self.terminal_tab = tab;
+                self.terminal_focus = false;
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+        }
+    }
+
     pub(super) fn focus_terminal(&mut self, hwnd: HWND) {
         self.terminal_visible = true;
-        self.terminal_focus = true;
+        // Output is read-only; clicking its body must not start capturing keys.
+        self.terminal_focus = self.terminal_tab == TerminalTab::Terminal;
         unsafe {
             SetFocus(hwnd);
             InvalidateRect(hwnd, null(), 0);
         }
     }
 
-    // Drain terminal events; keep the latest snapshot for the live session and reap
-    // a session once its final frame arrives.
+    // Drain terminal events for both sessions; keep the latest snapshot for
+    // each live session and reap one once its final frame arrives.
     pub(super) fn poll_terminal(&mut self, hwnd: HWND) {
         let events = self.terminal.poll(MAX_DRAIN_EVENTS);
-        let mut latest: Option<Arc<Snapshot>> = None;
-        for event in events {
-            if Some(event.session_id) == self.terminal_session {
-                latest = Some(event.snapshot);
-            }
-        }
         let mut repaint = false;
-        if let Some(snapshot) = latest {
-            let final_status = snapshot.status.is_final();
-            let id = snapshot.session_id;
-            self.terminal_snapshot = Some(snapshot);
+        for event in events {
+            let tab = if Some(event.session_id) == self.shell_session {
+                TerminalTab::Terminal
+            } else if Some(event.session_id) == self.run_session {
+                TerminalTab::Output
+            } else {
+                continue;
+            };
+            let final_status = event.snapshot.status.is_final();
+            self.set_snapshot(tab, Some(event.snapshot));
             repaint = true;
             if final_status {
-                let _ = self.terminal.remove(id);
-                self.terminal_session = None;
-                self.terminal_applied_size = None;
-                self.terminal_focus = false;
+                if let Some(id) = self.session_for(tab) {
+                    let _ = self.terminal.remove(id);
+                }
+                self.set_session(tab, None);
+                self.set_applied_size(tab, None);
+                if self.terminal_tab == tab {
+                    self.terminal_focus = false;
+                }
             }
         }
-        if repaint || self.terminal_session.is_some() {
+        if repaint || self.shell_session.is_some() || self.run_session.is_some() {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
@@ -269,7 +357,7 @@ impl App {
     pub(super) fn terminal_top(&self, hwnd: HWND) -> i32 {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
-        (rect.bottom - self.scale(STATUS) - self.scale(TERMINAL_HEIGHT)).max(0)
+        (rect.bottom - self.scale(STATUS) - self.scale(self.terminal_height)).max(0)
     }
 
     pub(super) fn terminal_size_for(&self, hwnd: HWND) -> TerminalSize {
@@ -287,19 +375,29 @@ impl App {
     }
 
     pub(super) fn resize_terminal_to_fit(&mut self, hwnd: HWND) {
-        let Some(id) = self.terminal_session else {
-            return;
-        };
         let size = self.terminal_size_for(hwnd);
-        if self.terminal_applied_size == Some(size) {
-            return;
-        }
-        if self.terminal.resize(id, size).is_ok() {
-            self.terminal_applied_size = Some(size);
+        for tab in [TerminalTab::Terminal, TerminalTab::Output] {
+            let Some(id) = self.session_for(tab) else {
+                continue;
+            };
+            if self.applied_size(tab) == Some(size) {
+                continue;
+            }
+            if self.terminal.resize(id, size).is_ok() {
+                self.set_applied_size(tab, Some(size));
+            }
         }
     }
 
-    // Returns true when the key was delivered to (or deliberately consumed by) the shell.
+    fn applied_size(&self, tab: TerminalTab) -> Option<TerminalSize> {
+        match tab {
+            TerminalTab::Terminal => self.shell_applied_size,
+            TerminalTab::Output => self.run_applied_size,
+        }
+    }
+
+    // Returns true when the key was delivered to (or deliberately consumed by)
+    // the session behind the currently active tab.
     pub(super) fn send_terminal_key(
         &mut self,
         hwnd: HWND,
@@ -308,7 +406,7 @@ impl App {
         shift: bool,
         alt: bool,
     ) -> bool {
-        let Some(id) = self.terminal_session else {
+        let Some(id) = self.session_for(self.terminal_tab) else {
             return false;
         };
         let Some(key) = vk_to_terminal_key(vk, control) else {
@@ -329,7 +427,7 @@ impl App {
     }
 
     pub(super) fn send_terminal_char(&mut self, hwnd: HWND, ch: char) {
-        let Some(id) = self.terminal_session else {
+        let Some(id) = self.session_for(self.terminal_tab) else {
             return;
         };
         self.reset_terminal_scrollback();
@@ -341,24 +439,22 @@ impl App {
     }
 
     fn reset_terminal_scrollback(&mut self) {
-        if let Some(id) = self.terminal_session {
-            if self
-                .terminal_snapshot
-                .as_ref()
+        let tab = self.terminal_tab;
+        if let Some(id) = self.session_for(tab)
+            && self
+                .snapshot_for(tab)
                 .is_some_and(|snapshot| snapshot.scrollback_offset != 0)
-            {
-                let _ = self.terminal.scrollback(id, 0);
-            }
+        {
+            let _ = self.terminal.scrollback(id, 0);
         }
     }
 
     pub(super) fn scroll_terminal(&mut self, hwnd: HWND, delta: i32) {
-        let Some(id) = self.terminal_session else {
+        let Some(id) = self.session_for(self.terminal_tab) else {
             return;
         };
         let (current, available) = self
-            .terminal_snapshot
-            .as_ref()
+            .snapshot_for(self.terminal_tab)
             .map_or((0, 0), |snapshot| {
                 (snapshot.scrollback_offset, snapshot.scrollback_available)
             });
@@ -374,7 +470,7 @@ impl App {
     }
 
     pub(super) fn paste_into_terminal(&mut self, hwnd: HWND) {
-        let Some(id) = self.terminal_session else {
+        let Some(id) = self.session_for(self.terminal_tab) else {
             return;
         };
         match clipboard::paste(hwnd) {
@@ -390,8 +486,9 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
+    // Runs `command` in the dedicated Output session, never the user's shell.
     pub(super) fn run_in_terminal(&mut self, hwnd: HWND, command: &str) {
-        if let Some(id) = self.open_terminal(hwnd) {
+        if let Some(id) = self.ensure_run_session(hwnd) {
             let mut line = command.to_string();
             line.push('\r');
             let _ = self.terminal.input(id, line.as_bytes());
@@ -399,9 +496,21 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
+    // Stops both sessions (reaped asynchronously by poll_terminal, same as
+    // close_terminal) and hides the panel, e.g. when switching workspaces: the
+    // old shell's cwd/venv no longer matches, so nothing should carry over.
+    pub(super) fn reset_terminal_sessions(&mut self, hwnd: HWND) {
+        self.stop_terminal_for_close();
+        self.terminal_visible = false;
+        self.terminal_focus = false;
+        self.keep_cursor_visible(hwnd);
+    }
+
     pub(super) fn stop_terminal_for_close(&mut self) {
-        if let Some(id) = self.terminal_session {
-            let _ = self.terminal.stop(id);
+        for tab in [TerminalTab::Terminal, TerminalTab::Output] {
+            if let Some(id) = self.session_for(tab) {
+                let _ = self.terminal.stop(id);
+            }
         }
     }
 

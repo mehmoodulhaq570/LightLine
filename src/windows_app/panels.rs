@@ -58,11 +58,13 @@ impl App {
         .collect()
     }
 
+    // Matches the 7-row render cap in paint_quick_open, so keyboard navigation
+    // never selects a row that isn't actually visible.
     pub(super) fn quick_count(&self) -> usize {
         if self.quick_query.starts_with('>') {
-            self.quick_commands().len()
+            self.quick_commands().len().min(7)
         } else {
-            self.quick_matches().len()
+            self.quick_matches().len().min(7)
         }
     }
 
@@ -200,17 +202,21 @@ impl App {
                 }
                 None => {
                     self.status =
-                        "Select a Python interpreter or virtual environment before running"
-                            .into();
+                        "Select a Python interpreter or virtual environment before running".into();
                     unsafe { InvalidateRect(hwnd, null(), 0) };
                     return;
                 }
             },
         };
+        // PowerShell only executes a quoted-string command when it's prefixed
+        // with the call operator; without it "'...exe' -u '...'" parses as a
+        // bare string statement followed by an unexpected "-u" token.
+        // display_path() drops the \\?\ extended-length prefix canonicalize()
+        // leaves on the path, which is noise in a command the user can see.
         let command = format!(
-            "{} -u {}",
+            "& {} -u {}",
             terminal::powershell_quoted(&interpreter),
-            terminal::powershell_quoted(&file)
+            terminal::powershell_quoted(Path::new(&display_path(&file)))
         );
         self.run_in_terminal(hwnd, &command);
     }

@@ -26,7 +26,8 @@ impl App {
                     _ => false,
                 };
             if !reserved_chord {
-                return if ctrl && shift && key == 0x56 {
+                return if ctrl && key == 0x56 {
+                    // Ordinary Ctrl+V and Ctrl+Shift+V both paste into the shell.
                     self.paste_into_terminal(hwnd);
                     true
                 } else if ctrl && shift && key == 0x43 {
@@ -496,7 +497,9 @@ impl App {
                 None
             } else if (0xdc00..=0xdfff).contains(&unit) {
                 self.pending_high_surrogate.take().and_then(|high| {
-                    char::from_u32(0x10000 + ((high as u32 - 0xd800) << 10) + (unit as u32 - 0xdc00))
+                    char::from_u32(
+                        0x10000 + ((high as u32 - 0xd800) << 10) + (unit as u32 - 0xdc00),
+                    )
                 })
             } else {
                 self.pending_high_surrogate = None;
@@ -711,12 +714,32 @@ impl App {
             }
             return;
         }
+        // Sidebar-width resize handle: a few px straddling its right edge.
+        if self.sidebar_width > 0
+            && self.sidebar_started.is_none()
+            && (x - editor_left).abs() <= self.scale(4)
+        {
+            self.sidebar_dragging = true;
+            unsafe { SetCapture(hwnd) };
+            return;
+        }
         if self.sidebar_width > 0 && x < editor_left {
             if !self.explorer_visible {
                 return;
             }
             if y < self.scale(39) && x >= editor_left - self.scale(36) {
                 self.set_sidebar_visible(hwnd, false);
+                return;
+            }
+            if self.side_view == SideView::Files
+                && y >= self.scale(15)
+                && y < self.scale(26)
+                && x >= self.scale(RAIL + 12)
+                && x < self.scale(RAIL + 23)
+            {
+                self.expanded_dirs.clear();
+                self.explorer_first_row = 0;
+                self.refresh(hwnd);
                 return;
             }
             if self.side_view == SideView::Search {
@@ -780,10 +803,29 @@ impl App {
             }
             return;
         }
+        // Terminal-height resize handle: a few px straddling its top edge.
+        if self.terminal_visible && (y - self.terminal_top(hwnd)).abs() <= self.scale(4) {
+            self.terminal_resizing = true;
+            unsafe { SetCapture(hwnd) };
+            return;
+        }
         if self.terminal_visible && y >= self.terminal_top(hwnd) {
-            if y < self.terminal_top(hwnd) + self.scale(34) && x >= rect.right - self.scale(40) {
+            let header_bottom = self.terminal_top(hwnd) + self.scale(34);
+            if y < header_bottom && x >= rect.right - self.scale(40) {
                 self.close_terminal(hwnd);
                 return;
+            }
+            if y < header_bottom {
+                let tab_slot = self.scale(90);
+                let tabs_left = editor_left + self.scale(16);
+                if x >= tabs_left && x < tabs_left + tab_slot {
+                    self.switch_terminal_tab(hwnd, TerminalTab::Output);
+                    return;
+                }
+                if x >= tabs_left + tab_slot && x < tabs_left + tab_slot * 2 {
+                    self.switch_terminal_tab(hwnd, TerminalTab::Terminal);
+                    return;
+                }
             }
             self.focus_terminal(hwnd);
             return;
@@ -860,6 +902,14 @@ impl App {
     pub(super) fn mouse_drag(&mut self, hwnd: HWND, x: i32, y: i32) {
         if self.divider_dragging {
             self.resize_split(hwnd, x);
+            return;
+        }
+        if self.sidebar_dragging {
+            self.resize_sidebar(hwnd, x);
+            return;
+        }
+        if self.terminal_resizing {
+            self.resize_terminal_panel(hwnd, y);
             return;
         }
         if !self.dragging {

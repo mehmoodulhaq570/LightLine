@@ -1,8 +1,9 @@
 mod app;
+mod file_dialog;
 mod panels;
 mod terminal;
 mod workspace;
-use app::{App, ExplorerEntry, ExplorerRow, SideView, Tab, WorkerMessage};
+use app::{App, ExplorerEntry, ExplorerRow, SideView, Tab, TerminalTab, WorkerMessage};
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;
@@ -23,8 +24,8 @@ use lightline::lsp::{
 use lightline::syntax::{Color, Syntax};
 use lightline::terminal::{
     Cell, Color as TermColor, Key as TermKey, LaunchRequest, MAX_DRAIN_EVENTS,
-    Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, Snapshot,
-    TerminalService, TerminalSize,
+    Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, Snapshot, TerminalService,
+    TerminalSize,
 };
 use lightline::workflow::{self, Change, DiffRow, SearchHit};
 use std::cell::RefCell;
@@ -41,9 +42,7 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows_sys::Win32::Graphics::Gdi::*;
-use windows_sys::Win32::System::Com::{
-    COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-};
+use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 use windows_sys::Win32::System::Console::{
     ATTACH_PARENT_PROCESS, AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, GetConsoleWindow,
     SetConsoleCtrlHandler,
@@ -55,9 +54,6 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-use windows_sys::Win32::UI::Shell::{
-    BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, SHBrowseForFolderW, SHGetPathFromIDListW,
-};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const RAIL: i32 = 152;
@@ -76,6 +72,14 @@ const RAIL_ROW: i32 = 32;
 const TRANSITION_MS: u128 = 150;
 fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
     ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
+}
+// Windows' canonicalize() returns the `\\?\` extended-length form; strip it for display.
+fn display_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    text.strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| text.strip_prefix(r"\\?\").map(str::to_string))
+        .unwrap_or(text)
 }
 const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | ((g as u32) << 8) | ((b as u32) << 16)

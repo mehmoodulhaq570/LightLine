@@ -7,6 +7,15 @@ pub(super) enum SideView {
     Review,
 }
 
+// Output holds run/build results (cargo test, Run Python) in a dedicated
+// ManagedRun session; Terminal is the persistent interactive user shell.
+// Never conflate the two: run output must not be typed into the user's shell.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalTab {
+    Output,
+    Terminal,
+}
+
 pub(super) enum WorkerMessage {
     Files(PathBuf, Vec<PathBuf>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
@@ -165,9 +174,13 @@ pub(super) struct App {
     pub(super) pending_high_surrogate: Option<u16>,
     pub(super) explorer_visible: bool,
     pub(super) sidebar_width: i32,
+    pub(super) sidebar_user_width: i32,
     pub(super) sidebar_from: i32,
     pub(super) sidebar_target: i32,
     pub(super) sidebar_started: Option<Instant>,
+    pub(super) sidebar_dragging: bool,
+    pub(super) terminal_height: i32,
+    pub(super) terminal_resizing: bool,
     pub(super) explorer_first_row: usize,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) workspace_branch: Option<String>,
@@ -185,11 +198,15 @@ pub(super) struct App {
     pub(super) search_results: Vec<SearchHit>,
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) terminal: TerminalService,
-    pub(super) terminal_session: Option<SessionId>,
-    pub(super) terminal_snapshot: Option<Arc<Snapshot>>,
+    pub(super) terminal_tab: TerminalTab,
+    pub(super) shell_session: Option<SessionId>,
+    pub(super) shell_snapshot: Option<Arc<Snapshot>>,
+    pub(super) shell_applied_size: Option<TerminalSize>,
+    pub(super) run_session: Option<SessionId>,
+    pub(super) run_snapshot: Option<Arc<Snapshot>>,
+    pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
     pub(super) terminal_focus: bool,
-    pub(super) terminal_applied_size: Option<TerminalSize>,
     pub(super) cell_width: i32,
     pub(super) changes: Vec<Change>,
     pub(super) review_loading: bool,
@@ -330,9 +347,13 @@ impl App {
             pending_high_surrogate: None,
             explorer_visible: true,
             sidebar_width: SIDEBAR,
+            sidebar_user_width: SIDEBAR,
             sidebar_from: SIDEBAR,
             sidebar_target: SIDEBAR,
             sidebar_started: None,
+            sidebar_dragging: false,
+            terminal_height: 210,
+            terminal_resizing: false,
             explorer_first_row: 0,
             workspace_root: None,
             workspace_branch: None,
@@ -355,11 +376,15 @@ impl App {
                     PostMessageW(hwnd_value as HWND, TERMINAL_EVENT_MESSAGE, 0, 0);
                 }
             }),
-            terminal_session: None,
-            terminal_snapshot: None,
+            terminal_tab: TerminalTab::Terminal,
+            shell_session: None,
+            shell_snapshot: None,
+            shell_applied_size: None,
+            run_session: None,
+            run_snapshot: None,
+            run_applied_size: None,
             terminal_visible: false,
             terminal_focus: false,
-            terminal_applied_size: None,
             cell_width: 0,
             changes: Vec::new(),
             review_loading: false,
@@ -469,6 +494,31 @@ impl App {
         self.update_scrollbar(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
+
+    pub(super) fn resize_sidebar(&mut self, hwnd: HWND, x: i32) {
+        let width = self.unscale((x - self.scale(RAIL)).max(0)).clamp(140, 480);
+        self.sidebar_width = width;
+        self.sidebar_user_width = width;
+        self.sidebar_from = width;
+        self.sidebar_target = width;
+        self.sidebar_started = None;
+        unsafe {
+            KillTimer(hwnd, 5);
+            InvalidateRect(hwnd, null(), 0);
+        }
+    }
+
+    pub(super) fn resize_terminal_panel(&mut self, hwnd: HWND, y: i32) {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        let max_height = self.unscale((rect.bottom - self.editor_top()).max(0));
+        let height = self
+            .unscale((rect.bottom - self.scale(STATUS) - y).max(0))
+            .clamp(80, max_height.saturating_sub(80).max(80));
+        self.terminal_height = height;
+        self.resize_terminal_to_fit(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
     pub(super) fn pane_left(&self, hwnd: HWND, pane: usize) -> i32 {
         if self.split_visible && pane == 1 {
             self.pane_divider(hwnd)
@@ -494,7 +544,7 @@ impl App {
     }
 
     pub(super) fn set_sidebar_visible(&mut self, hwnd: HWND, visible: bool) {
-        let target = if visible { SIDEBAR } else { 0 };
+        let target = if visible { self.sidebar_user_width } else { 0 };
         self.explorer_visible = visible;
         if self.sidebar_width == target {
             self.sidebar_target = target;
@@ -701,6 +751,14 @@ impl App {
         scaled(pixels, self.dpi, self.zoom)
     }
 
+    // Approximate inverse of `scale`, for turning a live drag position back
+    // into the logical pixels layout fields are stored in. Only used for
+    // interactive resize feedback, where sub-pixel drift is not visible.
+    pub(super) fn unscale(&self, pixels: i32) -> i32 {
+        let denom = (self.dpi as i64 * self.zoom as i64).max(1);
+        ((pixels as i64 * 9600) / denom) as i32
+    }
+
     pub(super) fn set_dpi(&mut self, dpi: u32) {
         let dpi = dpi.max(96);
         if dpi == self.dpi {
@@ -816,7 +874,11 @@ impl App {
             - rect.top
             - self.editor_top()
             - self.scale(STATUS)
-            - if self.terminal_visible { self.scale(210) } else { 0 })
+            - if self.terminal_visible {
+                self.scale(self.terminal_height)
+            } else {
+                0
+            })
         .max(1)
             / self.line_height)
             .max(1) as usize

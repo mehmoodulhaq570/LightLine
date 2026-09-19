@@ -190,15 +190,24 @@ impl App {
         );
         for (index, label) in ["Open file", "Open folder", "New file"].iter().enumerate() {
             let left = x + self.scale(index as i32 * 145);
+            let bounds = RECT {
+                left,
+                top: self.scale(251),
+                right: left + self.scale(135),
+                bottom: self.scale(289),
+            };
+            // All three are equally valid starting actions, so they share one
+            // bordered treatment instead of singling "Open file" out as primary.
+            Self::fill(hdc, bounds, EDGE);
             Self::fill(
                 hdc,
                 RECT {
-                    left,
-                    top: self.scale(251),
-                    right: left + self.scale(135),
-                    bottom: self.scale(289),
+                    left: bounds.left + self.scale(1),
+                    top: bounds.top + self.scale(1),
+                    right: bounds.right - self.scale(1),
+                    bottom: bounds.bottom - self.scale(1),
                 },
-                if index == 0 { SELECT_BG } else { ACTIVE_BG },
+                ACTIVE_BG,
             );
             Self::label(
                 hdc,
@@ -230,16 +239,17 @@ impl App {
                 TEXT,
                 clip,
             );
-            Self::label(
+            let path_right = (x + self.scale(425)).min(rect.right);
+            self.label_ellipsis(
                 hdc,
-                &path.display().to_string(),
+                &display_path(path),
                 x + self.scale(115),
                 top + self.scale(7),
                 MUTED,
                 RECT {
                     left: x + self.scale(115),
                     top,
-                    right: (x + self.scale(425)).min(rect.right),
+                    right: path_right,
                     bottom: top + self.scale(42),
                 },
             );
@@ -432,16 +442,17 @@ impl App {
                     );
                 }
                 Self::label(hdc, &change.status, left + self.scale(12), top, GREEN, clip);
-                Self::label(
+                let name_right = editor_left - self.scale(7);
+                self.label_ellipsis(
                     hdc,
-                    &change.path.display().to_string(),
+                    &display_path(&change.path),
                     left + self.scale(37),
                     top,
                     TEXT,
                     RECT {
                         left: left + self.scale(37),
                         top,
-                        right: editor_left - self.scale(7),
+                        right: name_right,
                         bottom: top + self.scale(EXPLORER_ROW),
                     },
                 );
@@ -475,7 +486,7 @@ impl App {
         let name = self
             .review_file
             .as_ref()
-            .map(|path| path.display().to_string())
+            .map(|path| display_path(path))
             .unwrap_or_default();
         Self::label(
             hdc,
@@ -751,14 +762,18 @@ impl App {
                 bottom,
             },
         );
+        // Capped at 7 (not the 8 rows the box has room for) so a full list never
+        // shares its last row with the "Type > for commands" hint below it.
         let items: Vec<String> = if self.quick_query.starts_with('>') {
             self.quick_commands()
                 .iter()
+                .take(7)
                 .map(|(name, _)| format!(">  {name}"))
                 .collect()
         } else {
             self.quick_matches()
                 .iter()
+                .take(7)
                 .map(|path| {
                     path.strip_prefix(self.workspace_root.as_deref().unwrap_or(Path::new("")))
                         .unwrap_or(path)

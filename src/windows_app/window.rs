@@ -146,11 +146,20 @@ unsafe extern "system" fn wnd_proc(
                 ScreenToClient(hwnd, &mut point);
                 let cursor = LoadCursorW(
                     null_mut(),
-                    if app.divider_dragging
+                    if app.terminal_resizing
+                        || (app.terminal_visible
+                            && (point.y - app.terminal_top(hwnd)).abs() <= app.scale(4))
+                    {
+                        IDC_SIZENS
+                    } else if app.divider_dragging
+                        || app.sidebar_dragging
                         || app.split_visible
                             && !app.welcome
                             && point.y >= app.scale(TAB_HEIGHT)
                             && (point.x - app.pane_divider(hwnd)).abs() <= app.scale(6)
+                        || (app.sidebar_width > 0
+                            && app.sidebar_started.is_none()
+                            && (point.x - app.editor_left()).abs() <= app.scale(4))
                     {
                         IDC_SIZEWE
                     } else if app.welcome
@@ -163,7 +172,14 @@ unsafe extern "system" fn wnd_proc(
                             GetClientRect(hwnd, &mut rect);
                             point.y
                                 >= rect.bottom
-                                    - app.scale(STATUS + if app.terminal_visible { 210 } else { 0 })
+                                    - app.scale(
+                                        STATUS
+                                            + if app.terminal_visible {
+                                                app.terminal_height
+                                            } else {
+                                                0
+                                            },
+                                    )
                         }
                     {
                         IDC_ARROW
@@ -201,7 +217,12 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_MOUSEMOVE => {
-            if (app.dragging || app.divider_dragging) && wparam & 1 != 0 {
+            if (app.dragging
+                || app.divider_dragging
+                || app.sidebar_dragging
+                || app.terminal_resizing)
+                && wparam & 1 != 0
+            {
                 app.mouse_drag(
                     hwnd,
                     (lparam as u32 & 0xffff) as i16 as i32,
@@ -219,6 +240,8 @@ unsafe extern "system" fn wnd_proc(
         WM_LBUTTONUP => {
             app.dragging = false;
             app.divider_dragging = false;
+            app.sidebar_dragging = false;
+            app.terminal_resizing = false;
             unsafe {
                 ReleaseCapture();
             }

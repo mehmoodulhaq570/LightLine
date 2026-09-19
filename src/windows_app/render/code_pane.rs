@@ -221,7 +221,7 @@ impl App {
                 }
             }
             DeleteObject(guide_brush);
-            if self.focused && self.caret_on && pane == self.focused_pane {
+            if self.focused && self.caret_on && !self.terminal_focus && pane == self.focused_pane {
                 let line = doc.line(view.cursor.line);
                 let x = code_left + self.text_width(hdc, &line[..view.cursor.byte]);
                 let y = self.editor_top()

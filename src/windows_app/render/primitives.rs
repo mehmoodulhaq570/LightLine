@@ -90,6 +90,42 @@ impl App {
         }
     }
 
+    // Like `label`, but trims from the end and appends an ellipsis instead of
+    // letting GDI hard-clip mid-character when the text doesn't fit between
+    // `x` and `clip.right`.
+    pub(in crate::windows_app) fn label_ellipsis(
+        &self,
+        hdc: HDC,
+        text: &str,
+        x: i32,
+        y: i32,
+        color: u32,
+        clip: RECT,
+    ) {
+        let max_width = clip.right - x;
+        if self.text_width(hdc, text) <= max_width {
+            Self::label(hdc, text, x, y, color, clip);
+            return;
+        }
+        let ellipsis = "\u{2026}";
+        let budget = (max_width - self.text_width(hdc, ellipsis)).max(0);
+        let mut end = text.len();
+        while end > 0 && self.text_width(hdc, &text[..end]) > budget {
+            end -= 1;
+            while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+        }
+        Self::label(
+            hdc,
+            &format!("{}{ellipsis}", &text[..end]),
+            x,
+            y,
+            color,
+            clip,
+        );
+    }
+
     pub(in crate::windows_app) fn chevron(&self, hdc: HDC, x: i32, y: i32, expanded: bool) {
         unsafe {
             let half = self.scale(4).max(4);

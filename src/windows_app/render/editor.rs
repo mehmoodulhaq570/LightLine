@@ -34,7 +34,12 @@ impl App {
                 return;
             }
             let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-            let code_bottom = editor_bottom - if self.terminal_visible { self.scale(210) } else { 0 };
+            let code_bottom = editor_bottom
+                - if self.terminal_visible {
+                    self.scale(self.terminal_height)
+                } else {
+                    0
+                };
             let editor_left = self.editor_left();
             let bg = CreateSolidBrush(EDITOR_BG);
             let gutter_bg = CreateSolidBrush(EDITOR_BG);
@@ -332,6 +337,17 @@ impl App {
                     },
                     SIDEBAR_BG,
                 );
+                // Collapse-all-folders glyph: a single dash inside the button square.
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: self.scale(RAIL + 15),
+                        top: self.scale(20),
+                        right: self.scale(RAIL + 20),
+                        bottom: self.scale(21),
+                    },
+                    MUTED,
+                );
                 Self::label(
                     hdc,
                     "×",
@@ -354,7 +370,7 @@ impl App {
                     let root_name = root
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| root.display().to_string());
+                        .unwrap_or_else(|| display_path(root));
                     self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), true);
                     self.icons.draw(
                         hdc,
