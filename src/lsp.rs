@@ -99,6 +99,10 @@ pub enum Event {
         language: Language,
         message: String,
     },
+    Status {
+        language: Language,
+        message: String,
+    },
 }
 
 pub struct Client {
@@ -244,12 +248,11 @@ fn stopped(language: Language, message: impl Into<String>) -> Event {
 fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
     let stderr = stderr.trim();
     if stderr.contains("is not recognized as an internal or external command") {
-        let install = match config.language {
-            Language::Python => "npm.cmd install -g pyright",
-            Language::Rust => "rustup component add rust-analyzer rust-src",
-        };
+        if config.language == Language::Python {
+            return NODE_MISSING.to_string();
+        }
         return format!(
-            "{} is not installed or not on PATH. Install it with `{install}`, then reopen this file. Editing and running still work without it.",
+            "{} is not installed or not on PATH. Install it with `rustup component add rust-analyzer rust-src`, then reopen this file. Editing and running still work without it.",
             config.display_name
         );
     }
@@ -258,6 +261,106 @@ fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
     } else {
         format!("{error}: {stderr}")
     }
+}
+
+const NODE_MISSING: &str = "Pyright setup needs Node.js. Install it once from nodejs.org (or `winget install OpenJS.NodeJS.LTS`) and reopen this file — LightLine then downloads and configures Pyright automatically. Editing and running Python work without it.";
+
+/// Resolve a program by looking for any of `file_names` in each PATH folder.
+fn find_in_path(file_names: &[&str]) -> Option<PathBuf> {
+    find_in_path_with(&std::env::var_os("PATH")?, file_names)
+}
+
+fn find_in_path_with(path_var: &std::ffi::OsStr, file_names: &[&str]) -> Option<PathBuf> {
+    std::env::split_paths(path_var)
+        .flat_map(|dir| file_names.iter().map(move |name| dir.join(name)))
+        .find(|candidate| candidate.is_file())
+}
+
+/// LightLine's own Pyright location, like IDEs that provision language servers
+/// for you: `%APPDATA%\LightLine\pyright`.
+fn pyright_home() -> Option<PathBuf> {
+    Some(
+        PathBuf::from(std::env::var_os("APPDATA")?)
+            .join("LightLine")
+            .join("pyright"),
+    )
+}
+
+fn managed_pyright_script() -> Option<PathBuf> {
+    let script = pyright_home()?
+        .join("node_modules")
+        .join("pyright")
+        .join("langserver.index.js");
+    script.is_file().then_some(script)
+}
+
+enum PyrightLaunch {
+    /// A user-installed `pyright-langserver` on PATH (run through the cmd wrapper).
+    OnPath,
+    /// The managed copy under `%APPDATA%\LightLine\pyright`, run with Node.
+    Node { script: PathBuf },
+    /// Nothing installed yet, but npm and Node exist: install the managed copy.
+    Install,
+    /// Node.js itself is missing, so no automatic setup is possible.
+    Missing(String),
+}
+
+fn resolve_pyright() -> PyrightLaunch {
+    if find_in_path(&[
+        "pyright-langserver.cmd",
+        "pyright-langserver.exe",
+        "pyright-langserver.bat",
+        "pyright-langserver",
+    ])
+    .is_some()
+    {
+        return PyrightLaunch::OnPath;
+    }
+    let node = find_in_path(&["node.exe", "node"]).is_some();
+    if let Some(script) = managed_pyright_script() {
+        return if node {
+            PyrightLaunch::Node { script }
+        } else {
+            PyrightLaunch::Missing(NODE_MISSING.into())
+        };
+    }
+    if node && find_in_path(&["npm.cmd", "npm"]).is_some() {
+        return PyrightLaunch::Install;
+    }
+    PyrightLaunch::Missing(NODE_MISSING.into())
+}
+
+/// One-time silent install of Pyright into LightLine's own data folder.
+fn install_pyright() -> Result<PathBuf, String> {
+    let home = pyright_home().ok_or_else(|| "could not resolve %APPDATA%".to_string())?;
+    std::fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+    let npm = find_in_path(&["npm.cmd", "npm"]).ok_or("npm not found on PATH")?;
+    let mut command = ProcessCommand::new(npm);
+    command
+        .args([
+            "install",
+            "--prefix",
+            home.to_str().unwrap_or_default(),
+            "pyright",
+            "--no-audit",
+            "--no-fund",
+            "--loglevel=error",
+        ])
+        .current_dir(&home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("`npm install pyright` failed: {stderr}"));
+    }
+    managed_pyright_script().ok_or_else(|| "npm install finished without Pyright".to_string())
 }
 
 fn run_server(
@@ -269,9 +372,50 @@ fn run_server(
 ) {
     #[cfg(windows)]
     let mut process = if config.language == Language::Python {
-        let mut command = ProcessCommand::new("cmd.exe");
-        command.args(["/D", "/C", "pyright-langserver"]);
-        command
+        match resolve_pyright() {
+            PyrightLaunch::OnPath => {
+                let mut command = ProcessCommand::new("cmd.exe");
+                command.args(["/D", "/C", "pyright-langserver"]);
+                command
+            }
+            PyrightLaunch::Node { script } => {
+                let mut command = ProcessCommand::new("node");
+                command.arg(script);
+                command
+            }
+            PyrightLaunch::Install => {
+                emit(
+                    Event::Status {
+                        language: config.language,
+                        message: "Setting up Pyright automatically (one-time download)…".into(),
+                    },
+                    &events,
+                    &wake,
+                );
+                match install_pyright() {
+                    Ok(script) => {
+                        let mut command = ProcessCommand::new("node");
+                        command.arg(script);
+                        command
+                    }
+                    Err(error) => {
+                        emit(
+                            stopped(
+                                config.language,
+                                format!("Could not set up Pyright automatically: {error}. You can still install it manually with `npm.cmd install -g pyright`."),
+                            ),
+                            &events,
+                            &wake,
+                        );
+                        return;
+                    }
+                }
+            }
+            PyrightLaunch::Missing(message) => {
+                emit(stopped(config.language, message), &events, &wake);
+                return;
+            }
+        }
     } else {
         ProcessCommand::new(&config.command)
     };
@@ -292,7 +436,7 @@ fn run_server(
         Ok(child) => child,
         Err(error) => {
             let hint = if config.language == Language::Python {
-                ". Install Pyright with `npm.cmd install -g pyright` so pyright-langserver is on PATH"
+                ". Install Node.js once (nodejs.org) and LightLine sets Pyright up automatically"
             } else {
                 ""
             };
@@ -835,12 +979,35 @@ mod tests {
             "Pyright closed its output",
             "'pyright-langserver' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n",
         );
-        assert!(message.contains("npm.cmd install -g pyright"));
+        assert!(message.contains("Node.js"));
+        assert!(message.contains("automatically"));
         assert!(!message.contains("not recognized"));
         let plain = stop_message(&config, "Pyright closed its output", "  ");
         assert_eq!(plain, "Pyright closed its output");
         let detailed = stop_message(&config, "Pyright closed its output", "boom");
         assert_eq!(detailed, "Pyright closed its output: boom");
+        let rust = server_config(Language::Rust, None);
+        let rust_message = stop_message(
+            &rust,
+            "rust-analyzer closed its output",
+            "'rust-analyzer' is not recognized as an internal or external command",
+        );
+        assert!(rust_message.contains("rustup component add"));
+    }
+
+    #[test]
+    fn find_in_path_with_locates_the_first_existing_candidate() {
+        let dir = std::env::temp_dir().join(format!("lightline-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("pyright-langserver.cmd");
+        std::fs::write(&script, "").unwrap();
+        let path_var = std::env::join_paths([&dir, &std::env::temp_dir()]).unwrap();
+        assert_eq!(
+            find_in_path_with(&path_var, &["pyright-langserver.cmd", "pyright-langserver"]),
+            Some(script)
+        );
+        assert_eq!(find_in_path_with(&path_var, &["definitely-missing.cmd"]), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

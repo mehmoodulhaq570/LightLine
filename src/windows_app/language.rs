@@ -260,6 +260,9 @@ impl App {
                     self.hover_card = None;
                     self.status = message;
                 }
+                LspEvent::Status { message, .. } => {
+                    self.status = message;
+                }
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
