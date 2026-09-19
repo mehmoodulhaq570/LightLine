@@ -50,14 +50,26 @@ pub struct LaunchSpec {
 }
 
 // This helper does filesystem discovery. TerminalService calls it on its owner thread.
+// An unprovisioned Windows Store execution alias (e.g. a pwsh.exe stub under
+// WindowsApps for a user who never actually installed PowerShell 7 from the
+// Store) is a 0-byte reparse point. It satisfies is_file() but does not
+// reliably launch through CreateProcess with a redirected/ConPTY handle set —
+// the process can exit almost immediately instead of running interactively.
+// A real PowerShell executable is always well over 0 bytes, so this is a
+// cheap, reliable way to tell a working install from a dangling stub.
+fn is_real_executable(path: &Path) -> bool {
+    path.is_file() && std::fs::metadata(path).is_ok_and(|meta| meta.len() > 0)
+}
+
 pub fn resolve_powershell() -> Result<PathBuf, String> {
     let paths = std::env::var_os("PATH").unwrap_or_default();
     for directory in std::env::split_paths(&paths) {
         // Empty or relative PATH entries must not turn a workspace file into the shell.
-        // WindowsApps execution aliases are deliberately eligible.
+        // WindowsApps execution aliases are deliberately eligible, provided they
+        // are actually provisioned (see is_real_executable).
         if directory.is_absolute() {
             let path = directory.join("pwsh.exe");
-            if path.is_file() {
+            if is_real_executable(&path) {
                 return Ok(path);
             }
         }
@@ -69,7 +81,7 @@ pub fn resolve_powershell() -> Result<PathBuf, String> {
                 let mut candidates: Vec<_> = entries
                     .flatten()
                     .map(|entry| entry.path().join("pwsh.exe"))
-                    .filter(|path| path.is_file())
+                    .filter(|path| is_real_executable(path))
                     .collect();
                 candidates.sort();
                 if let Some(path) = candidates.pop() {
@@ -85,7 +97,7 @@ pub fn resolve_powershell() -> Result<PathBuf, String> {
             .join("WindowsPowerShell")
             .join("v1.0")
             .join("powershell.exe");
-        if path.is_absolute() && path.is_file() {
+        if path.is_absolute() && is_real_executable(&path) {
             return Ok(path);
         }
     }

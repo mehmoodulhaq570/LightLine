@@ -23,11 +23,12 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetCurrentThreadId, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenThread,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread, STARTUPINFOEXW,
-    THREAD_TERMINATE, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DETACHED_PROCESS,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentThreadId,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    OpenThread, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread,
+    STARTUPINFOEXW, THREAD_TERMINATE, TerminateProcess, UpdateProcThreadAttribute,
+    WaitForSingleObject,
 };
 
 struct Handle(HANDLE);
@@ -281,7 +282,10 @@ fn spawn(spec: &LaunchSpec, console: &PseudoConsole, job: &Handle) -> Result<Pro
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup.lpAttributeList = attributes.pointer();
     let mut information = PROCESS_INFORMATION::default();
-    let flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+    let flags = EXTENDED_STARTUPINFO_PRESENT
+        | CREATE_SUSPENDED
+        | CREATE_UNICODE_ENVIRONMENT
+        | DETACHED_PROCESS;
     if unsafe {
         CreateProcessW(
             executable.as_ptr(),
