@@ -135,12 +135,34 @@ impl App {
             right,
             bottom,
         };
+        let selection = self.terminal_selection_range();
+        let cell_selected = |row_index: usize, column: usize| {
+            let Some((start, finish)) = selection else {
+                return false;
+            };
+            // Tuple comparison is lexicographic (row, then column), which is
+            // exactly reading-order: "at or after start, at or before end."
+            let point = (row_index as u16, column as u16);
+            point >= (start.1, start.0) && point <= (finish.1, finish.0)
+        };
         for (row_index, row) in snapshot.rows.iter().enumerate() {
             let y = header_bottom + row_index as i32 * cell_height;
             if y >= bottom {
                 break;
             }
-            let colors: Vec<(u32, u32)> = row.cells.iter().map(cell_colors).collect();
+            let colors: Vec<(u32, u32)> = row
+                .cells
+                .iter()
+                .enumerate()
+                .map(|(column, cell)| {
+                    let (foreground, background) = cell_colors(cell);
+                    if cell_selected(row_index, column) {
+                        (foreground, SELECT_BG)
+                    } else {
+                        (foreground, background)
+                    }
+                })
+                .collect();
             let mut column = 0usize;
             while column < row.cells.len() {
                 let (foreground, background) = colors[column];

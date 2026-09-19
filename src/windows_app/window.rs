@@ -220,7 +220,8 @@ unsafe extern "system" fn wnd_proc(
             if (app.dragging
                 || app.divider_dragging
                 || app.sidebar_dragging
-                || app.terminal_resizing)
+                || app.terminal_resizing
+                || app.terminal_selecting)
                 && wparam & 1 != 0
             {
                 app.mouse_drag(
@@ -242,6 +243,9 @@ unsafe extern "system" fn wnd_proc(
             app.divider_dragging = false;
             app.sidebar_dragging = false;
             app.terminal_resizing = false;
+            // Selection itself (anchor/end) stays put so it's still visible
+            // and copyable with Ctrl+Shift+C after releasing the mouse.
+            app.terminal_selecting = false;
             unsafe {
                 ReleaseCapture();
             }

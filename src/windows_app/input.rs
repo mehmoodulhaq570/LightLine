@@ -31,12 +31,24 @@ impl App {
                     self.paste_into_terminal(hwnd);
                     true
                 } else if ctrl && shift && key == 0x43 {
-                    // Cell selection/copy is deferred to a later phase; keep it out of the shell.
+                    self.copy_terminal_selection(hwnd);
                     true
                 } else {
                     self.send_terminal_key(hwnd, key, ctrl, shift, alt)
                 };
             }
+        }
+        // Output never takes keyboard focus, but copying its text (e.g. a
+        // build error) is still a read, not an edit, so it's allowed here.
+        if self.terminal_visible
+            && !self.terminal_focus
+            && ctrl
+            && shift
+            && key == 0x43
+            && self.terminal_select_anchor.is_some()
+        {
+            self.copy_terminal_selection(hwnd);
+            return true;
         }
         if self.welcome && key == VK_ESCAPE as u32 && self.workspace_root.is_some() {
             self.welcome = false;
@@ -831,6 +843,7 @@ impl App {
                 }
             }
             self.focus_terminal(hwnd);
+            self.start_terminal_selection(hwnd, x, y);
             return;
         }
         if self.side_view == SideView::Review
@@ -913,6 +926,10 @@ impl App {
         }
         if self.terminal_resizing {
             self.resize_terminal_panel(hwnd, y);
+            return;
+        }
+        if self.terminal_selecting {
+            self.update_terminal_selection(hwnd, x, y);
             return;
         }
         if !self.dragging {

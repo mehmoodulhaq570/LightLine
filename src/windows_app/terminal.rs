@@ -409,6 +409,104 @@ impl App {
         (rect.bottom - self.scale(STATUS) - self.scale(self.terminal_height)).max(0)
     }
 
+    // Pixel position to (column, row), matching the geometry paint_terminal
+    // draws cells at, so hit-testing and rendering never drift apart.
+    pub(super) fn terminal_cell_at(&self, hwnd: HWND, x: i32, y: i32) -> (u16, u16) {
+        let cell_width = self.cell_width.max(1);
+        let cell_height = self.line_height.max(1);
+        let content_left = self.editor_left() + self.scale(TERMINAL_PAD);
+        let header_bottom = self.terminal_top(hwnd) + self.scale(TERMINAL_HEADER);
+        let column = ((x - content_left).max(0) / cell_width) as u16;
+        let row = ((y - header_bottom).max(0) / cell_height) as u16;
+        (column, row)
+    }
+
+    pub(super) fn start_terminal_selection(&mut self, hwnd: HWND, x: i32, y: i32) {
+        let cell = self.terminal_cell_at(hwnd, x, y);
+        self.terminal_selecting = true;
+        self.terminal_select_anchor = Some(cell);
+        self.terminal_select_end = Some(cell);
+        unsafe {
+            SetCapture(hwnd);
+            InvalidateRect(hwnd, null(), 0);
+        }
+    }
+
+    pub(super) fn update_terminal_selection(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if !self.terminal_selecting {
+            return;
+        }
+        let cell = self.terminal_cell_at(hwnd, x, y);
+        if self.terminal_select_end != Some(cell) {
+            self.terminal_select_end = Some(cell);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
+    // Normalized (start, end) with start always before end in reading order,
+    // or None when there is no real selection (nothing dragged yet).
+    pub(super) fn terminal_selection_range(&self) -> Option<((u16, u16), (u16, u16))> {
+        let anchor = self.terminal_select_anchor?;
+        let end = self.terminal_select_end?;
+        if anchor == end {
+            return None;
+        }
+        Some(if (anchor.1, anchor.0) <= (end.1, end.0) {
+            (anchor, end)
+        } else {
+            (end, anchor)
+        })
+    }
+
+    // Extracts the text between the selection's two corners, trimming
+    // trailing padding spaces off each line the way a real terminal's copy does.
+    fn terminal_selected_text(&self) -> Option<String> {
+        let (start, finish) = self.terminal_selection_range()?;
+        let snapshot = self.snapshot_for(self.terminal_tab)?;
+        let mut lines = Vec::new();
+        for row_index in start.1..=finish.1 {
+            let Some(row) = snapshot.rows.get(row_index as usize) else {
+                break;
+            };
+            let from = if row_index == start.1 {
+                start.0 as usize
+            } else {
+                0
+            };
+            let to = if row_index == finish.1 {
+                (finish.0 as usize).min(row.cells.len())
+            } else {
+                row.cells.len()
+            };
+            let mut line = String::new();
+            if from < to {
+                for cell in &row.cells[from..to] {
+                    if cell.wide_continuation {
+                        continue;
+                    }
+                    if cell.text.is_empty() {
+                        line.push(' ');
+                    } else {
+                        line.push_str(&cell.text);
+                    }
+                }
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        let text = lines.join("\n");
+        if text.is_empty() { None } else { Some(text) }
+    }
+
+    pub(super) fn copy_terminal_selection(&mut self, hwnd: HWND) {
+        let Some(text) = self.terminal_selected_text() else {
+            return;
+        };
+        match clipboard::copy(hwnd, &text) {
+            Ok(()) => self.status = "Copied selection".into(),
+            Err(error) => self.error(hwnd, &error),
+        }
+    }
+
     pub(super) fn terminal_size_for(&self, hwnd: HWND) -> TerminalSize {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };

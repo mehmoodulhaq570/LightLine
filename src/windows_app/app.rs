@@ -193,6 +193,12 @@ pub(super) struct App {
     pub(super) sidebar_dragging: bool,
     pub(super) terminal_height: i32,
     pub(super) terminal_resizing: bool,
+    // Cell coordinates (column, row), not pixels. Selecting text is allowed
+    // on both tabs (copying a build error from Output is legitimate) even
+    // though only Terminal accepts typed input.
+    pub(super) terminal_selecting: bool,
+    pub(super) terminal_select_anchor: Option<(u16, u16)>,
+    pub(super) terminal_select_end: Option<(u16, u16)>,
     pub(super) explorer_first_row: usize,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) workspace_branch: Option<String>,
@@ -262,9 +268,61 @@ pub(super) struct HoverCard {
     pub(super) y: i32,
 }
 
+// Checks whether a font family is actually installed, rather than just
+// asking Windows to substitute the closest match silently.
+unsafe extern "system" fn note_family_found(
+    _logfont: *const LOGFONTW,
+    _metrics: *const TEXTMETRICW,
+    _font_type: u32,
+    found: LPARAM,
+) -> i32 {
+    unsafe {
+        *(found as *mut bool) = true;
+    }
+    0
+}
+
+fn family_available(name: &str) -> bool {
+    unsafe {
+        let hdc = GetDC(null_mut());
+        if hdc.is_null() {
+            return false;
+        }
+        let mut logfont: LOGFONTW = zeroed();
+        logfont.lfCharSet = DEFAULT_CHARSET;
+        let wide_name = wide(name);
+        let len = wide_name.len().min(logfont.lfFaceName.len());
+        logfont.lfFaceName[..len].copy_from_slice(&wide_name[..len]);
+        let mut found = false;
+        EnumFontFamiliesExW(
+            hdc,
+            &logfont,
+            Some(note_family_found),
+            &mut found as *mut bool as LPARAM,
+            0,
+        );
+        ReleaseDC(null_mut(), hdc);
+        found
+    }
+}
+
 impl App {
+    // Cascadia Mono ships with Windows Terminal and recent Windows builds but
+    // isn't guaranteed present (e.g. Windows 10 without Terminal installed),
+    // so this is resolved once and cached rather than assumed.
+    pub(super) fn code_font_family() -> &'static str {
+        static FAMILY: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        FAMILY.get_or_init(|| {
+            if family_available("Cascadia Mono") {
+                "Cascadia Mono"
+            } else {
+                "Consolas"
+            }
+        })
+    }
+
     pub(super) fn font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
-        let font_name = wide("Consolas");
+        let font_name = wide(Self::code_font_family());
         unsafe {
             CreateFontW(
                 -scaled(15, dpi, zoom),
@@ -282,6 +340,28 @@ impl App {
                 0,
                 font_name.as_ptr(),
             )
+        }
+    }
+
+    // Real ascent+descent+leading for the resolved font, instead of a fixed
+    // guess — keeps the editor and terminal's cell grid consistent with
+    // whichever font actually got selected (Cascadia Mono or the Consolas
+    // fallback have different metrics).
+    fn measured_line_height(font: HFONT, dpi: u32, zoom: i32) -> i32 {
+        unsafe {
+            let hdc = GetDC(null_mut());
+            if hdc.is_null() {
+                return scaled(21, dpi, zoom);
+            }
+            let old = SelectObject(hdc, font);
+            let mut metrics: TEXTMETRICW = zeroed();
+            let ok = GetTextMetricsW(hdc, &mut metrics);
+            SelectObject(hdc, old);
+            ReleaseDC(null_mut(), hdc);
+            if ok == 0 {
+                return scaled(21, dpi, zoom);
+            }
+            (metrics.tmHeight + metrics.tmExternalLeading).max(scaled(12, dpi, zoom))
         }
     }
 
@@ -332,6 +412,8 @@ impl App {
     pub(super) fn new(hwnd: HWND, brand_icon: HICON) -> Self {
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
+        let font = Self::font_for_dpi(dpi, zoom);
+        let line_height = Self::measured_line_height(font, dpi, zoom);
         let (worker_tx, worker_rx) = mpsc::channel();
         let (lsp_tx, lsp_rx) = mpsc::channel();
         Self {
@@ -343,14 +425,14 @@ impl App {
             split_ratio: 50,
             divider_dragging: false,
             tab_first: 0,
-            font: Self::font_for_dpi(dpi, zoom),
+            font,
             ui_font: Self::ui_font_for_dpi(dpi, zoom),
             brand_font: Self::brand_font_for_dpi(dpi, zoom),
             brand_icon,
             icons: IconSet::new(dpi, zoom),
             dpi,
             zoom,
-            line_height: scaled(21, dpi, zoom),
+            line_height,
             backbuffer: None,
             transition: None,
             status: "Ready".into(),
@@ -369,6 +451,9 @@ impl App {
             sidebar_dragging: false,
             terminal_height: 210,
             terminal_resizing: false,
+            terminal_selecting: false,
+            terminal_select_anchor: None,
+            terminal_select_end: None,
             explorer_first_row: 0,
             workspace_root: None,
             workspace_branch: None,
@@ -828,13 +913,13 @@ impl App {
             DeleteObject(self.ui_font);
             DeleteObject(self.brand_font);
         }
+        self.line_height = Self::measured_line_height(font, dpi, zoom);
         self.font = font;
         self.ui_font = ui_font;
         self.brand_font = brand_font;
         self.icons = IconSet::new(dpi, zoom);
         self.dpi = dpi;
         self.zoom = zoom;
-        self.line_height = scaled(21, dpi, zoom);
     }
 
     pub(super) fn start_transition(&mut self, hwnd: HWND) {
