@@ -236,21 +236,32 @@ impl App {
                 && editor_left
                     + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                     + self.scale(12)
-                    < rect.right - self.scale(420)
+                    < rect.right - self.scale(326)
             {
-                Self::label(
-                    hdc,
-                    "▶  Run Python  Ctrl+Shift+R",
-                    rect.right - self.scale(420),
-                    self.scale(7),
-                    GREEN,
-                    RECT {
-                        left: rect.right - self.scale(420),
-                        top: 0,
-                        right: rect.right - self.scale(292),
-                        bottom: self.scale(TAB_HEIGHT),
+                let left = rect.right - self.scale(326);
+                let brush = CreateSolidBrush(GREEN);
+                let pen = CreatePen(PS_SOLID, 1, GREEN);
+                let old_brush = SelectObject(hdc, brush);
+                let old_pen = SelectObject(hdc, pen);
+                let points = [
+                    POINT {
+                        x: left + self.scale(9),
+                        y: self.scale(11),
                     },
-                );
+                    POINT {
+                        x: left + self.scale(9),
+                        y: self.scale(27),
+                    },
+                    POINT {
+                        x: left + self.scale(23),
+                        y: self.scale(19),
+                    },
+                ];
+                Polygon(hdc, points.as_ptr(), 3);
+                SelectObject(hdc, old_brush);
+                SelectObject(hdc, old_pen);
+                DeleteObject(brush);
+                DeleteObject(pen);
             }
             if editor_left
                 + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32

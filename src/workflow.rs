@@ -352,6 +352,35 @@ pub fn python_project_root(file: &Path, workspace_root: Option<&Path>) -> PathBu
         .to_path_buf()
 }
 
+pub fn detect_python_interpreter(root: Option<&Path>) -> Option<PathBuf> {
+    if let Some(root) = root {
+        for folder in root.ancestors().take(10) {
+            for candidate in [
+                folder.join(".venv").join("Scripts").join("python.exe"),
+                folder.join(".venv").join("bin").join("python"),
+            ] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    let paths = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&paths) {
+        let display = directory.to_string_lossy();
+        if display.contains("WindowsApps") {
+            continue;
+        }
+        for name in ["python.exe", "python3.exe"] {
+            let candidate = directory.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 pub fn git_changes(root: &Path) -> Result<Vec<Change>, String> {
     let output = background_command("git")
         .args([
@@ -561,6 +590,20 @@ mod tests {
         let file = root.join("app/script.py");
         fs::write(&file, "print('hi')\n").unwrap();
         assert_eq!(python_project_root(&file, None), root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detect_python_interpreter_prefers_a_project_virtual_environment() {
+        let root = temp_dir("python-detect-venv");
+        fs::create_dir_all(root.join(".venv").join("Scripts")).unwrap();
+        let venv_python = root.join(".venv").join("Scripts").join("python.exe");
+        fs::write(&venv_python, "").unwrap();
+        fs::create_dir_all(root.join("app")).unwrap();
+        assert_eq!(
+            detect_python_interpreter(Some(&root.join("app"))),
+            Some(venv_python)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

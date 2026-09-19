@@ -215,12 +215,25 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        let Some(interpreter) = self.python_interpreter.clone() else {
-            self.status = "Select a Python interpreter or virtual environment before running".into();
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-            return;
-        };
         let root = workflow::python_project_root(&file, self.workspace_root.as_deref());
+        let interpreter = match self.python_interpreter.clone() {
+            Some(interpreter) => interpreter,
+            None => match workflow::detect_python_interpreter(Some(&root)) {
+                Some(detected) => {
+                    self.python_interpreter = Some(detected.clone());
+                    self.status =
+                        format!("Using Python interpreter {}", detected.to_string_lossy());
+                    detected
+                }
+                None => {
+                    self.status =
+                        "Select a Python interpreter or virtual environment before running"
+                            .into();
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return;
+                }
+            },
+        };
         let command_line = format!(
             "$ \"{}\" -u \"{}\"\n\n",
             interpreter.display(),

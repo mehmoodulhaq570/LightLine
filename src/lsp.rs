@@ -241,6 +241,25 @@ fn stopped(language: Language, message: impl Into<String>) -> Event {
     }
 }
 
+fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
+    let stderr = stderr.trim();
+    if stderr.contains("is not recognized as an internal or external command") {
+        let install = match config.language {
+            Language::Python => "npm.cmd install -g pyright",
+            Language::Rust => "rustup component add rust-analyzer rust-src",
+        };
+        return format!(
+            "{} is not installed or not on PATH. Install it with `{install}`, then reopen this file. Editing and running still work without it.",
+            config.display_name
+        );
+    }
+    if stderr.is_empty() {
+        error.to_string()
+    } else {
+        format!("{error}: {stderr}")
+    }
+}
+
 fn run_server(
     root: PathBuf,
     config: ServerConfig,
@@ -273,7 +292,7 @@ fn run_server(
         Ok(child) => child,
         Err(error) => {
             let hint = if config.language == Language::Python {
-                ". Install Pyright with `npm install -g pyright` so pyright-langserver is on PATH"
+                ". Install Pyright with `npm.cmd install -g pyright` so pyright-langserver is on PATH"
             } else {
                 ""
             };
@@ -538,14 +557,16 @@ fn run_server(
     if let Some(thread) = stderr_reader {
         let _ = thread.join();
     }
-    if let Some(mut error) = failure {
-        if let Ok(stderr) = stderr.lock()
-            && !stderr.trim().is_empty()
-        {
-            error.push_str(": ");
-            error.push_str(stderr.trim());
-        }
-        emit(stopped(config.language, error), &events, &wake);
+    if let Some(error) = failure {
+        let stderr_text = stderr.lock().map(|saved| saved.clone()).unwrap_or_default();
+        emit(
+            stopped(
+                config.language,
+                stop_message(&config, &error, &stderr_text),
+            ),
+            &events,
+            &wake,
+        );
     }
 }
 
@@ -805,6 +826,22 @@ fn read_packet(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_server_stderr_becomes_an_install_hint() {
+        let config = server_config(Language::Python, None);
+        let message = stop_message(
+            &config,
+            "Pyright closed its output",
+            "'pyright-langserver' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n",
+        );
+        assert!(message.contains("npm.cmd install -g pyright"));
+        assert!(!message.contains("not recognized"));
+        let plain = stop_message(&config, "Pyright closed its output", "  ");
+        assert_eq!(plain, "Pyright closed its output");
+        let detailed = stop_message(&config, "Pyright closed its output", "boom");
+        assert_eq!(detailed, "Pyright closed its output: boom");
+    }
 
     #[test]
     fn packets_and_unicode_positions_round_trip() {

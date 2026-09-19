@@ -35,6 +35,9 @@ impl App {
                 return;
             }
             self.reset_language_client(language);
+            if language == LspLanguage::Python && self.python_interpreter.is_none() {
+                self.python_interpreter = workflow::detect_python_interpreter(Some(&root));
+            }
             let hwnd_value = hwnd as isize;
             let wake = Arc::new(move || unsafe {
                 PostMessageW(hwnd_value as HWND, LSP_EVENT_MESSAGE, 0, 0);
@@ -319,6 +322,18 @@ impl App {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
         let bottom = rect.bottom - self.scale(STATUS + if self.run_visible { 210 } else { 0 });
+        if y < self.scale(TAB_HEIGHT)
+            && Tab::is_python(self.doc())
+            && x >= rect.right - self.scale(326)
+            && x < rect.right - self.scale(296)
+        {
+            let hint = "Run Python File (Ctrl+Shift+R)";
+            if self.status != hint {
+                self.status = hint.into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            return;
+        }
         if self.welcome
             || self.quick_open
             || self.side_view == SideView::Review

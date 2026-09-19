@@ -676,7 +676,13 @@ impl App {
                     }
                     1 => self.open_project_search(hwnd),
                     2 => self.show_review(hwnd),
-                    3 => self.run_project(hwnd),
+                    3 => {
+                        if Tab::is_python(self.doc()) {
+                            self.run_python_file(hwnd);
+                        } else {
+                            self.run_project(hwnd);
+                        }
+                    }
                     4 => {
                         self.status = "Extensions are planned for a later release".into();
                         self.refresh(hwnd);
@@ -791,8 +797,8 @@ impl App {
         }
         if y < self.scale(TAB_HEIGHT) {
             if Tab::is_python(self.doc())
-                && x >= rect.right - self.scale(420)
-                && x < rect.right - self.scale(292)
+                && x >= rect.right - self.scale(326)
+                && x < rect.right - self.scale(296)
             {
                 self.run_python_file(hwnd);
                 return;
