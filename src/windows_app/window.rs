@@ -384,6 +384,7 @@ unsafe extern "system" fn wnd_proc(
 pub fn run() -> io::Result<()> {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        dialog::enable_native_dark_mode();
         let com_initialized = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) >= 0;
         let instance = GetModuleHandleW(null());
         let class = wide("LightLineWindow");

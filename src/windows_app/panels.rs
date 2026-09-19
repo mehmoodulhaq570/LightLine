@@ -52,6 +52,8 @@ impl App {
                 7,
             ),
             ("New Terminal", 9),
+            ("Restart Terminal", 10),
+            ("Restart Terminal (No Profile)", 11),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -86,6 +88,8 @@ impl App {
                 Some(9) => {
                     self.open_terminal(hwnd);
                 }
+                Some(10) => self.restart_terminal(hwnd, false),
+                Some(11) => self.restart_terminal(hwnd, true),
                 _ => {}
             }
         } else {

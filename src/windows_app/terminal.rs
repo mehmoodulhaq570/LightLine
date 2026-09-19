@@ -197,10 +197,23 @@ impl App {
         }
     }
 
+    // Output is a fast, deterministic run session (build/script output), so it
+    // skips profile scripts by default. Terminal is the user's actual shell,
+    // so per spec it loads their normal profile unless explicitly restarted
+    // without one for troubleshooting.
+    fn default_no_profile(tab: TerminalTab) -> bool {
+        matches!(tab, TerminalTab::Output)
+    }
+
     // Ensure the session backing `tab` exists, show the panel on that tab, and
     // take keyboard focus. Shared by the interactive shell (Terminal) and run
     // output (Output) — they are always distinct sessions, never the same one.
-    fn ensure_session(&mut self, hwnd: HWND, tab: TerminalTab) -> Option<SessionId> {
+    fn ensure_session(
+        &mut self,
+        hwnd: HWND,
+        tab: TerminalTab,
+        no_profile: bool,
+    ) -> Option<SessionId> {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = tab;
@@ -224,7 +237,10 @@ impl App {
                 // Strip canonicalize()'s \\?\ prefix so PowerShell's own
                 // prompt shows an ordinary path instead of the extended form.
                 let cwd = PathBuf::from(display_path(&cwd));
-                let request = LaunchRequest::shell(cwd).without_profile();
+                let mut request = LaunchRequest::shell(cwd);
+                if no_profile {
+                    request = request.without_profile();
+                }
                 let size = self.terminal_size_for(hwnd);
                 match self.terminal.start(Self::kind_for(tab), request, size) {
                     Ok(id) => {
@@ -253,14 +269,42 @@ impl App {
 
     // Show (or create) the persistent interactive user shell on the Terminal tab.
     pub(super) fn open_terminal(&mut self, hwnd: HWND) -> Option<SessionId> {
-        self.ensure_session(hwnd, TerminalTab::Terminal)
+        self.ensure_session(
+            hwnd,
+            TerminalTab::Terminal,
+            Self::default_no_profile(TerminalTab::Terminal),
+        )
     }
 
     // Show (or reuse) the dedicated run session on the Output tab. Reusing a
     // still-running session means a new command queues behind whatever is
     // already executing there rather than silently killing it.
     fn ensure_run_session(&mut self, hwnd: HWND) -> Option<SessionId> {
-        self.ensure_session(hwnd, TerminalTab::Output)
+        self.ensure_session(
+            hwnd,
+            TerminalTab::Output,
+            Self::default_no_profile(TerminalTab::Output),
+        )
+    }
+
+    // Recycle the Terminal session: stop it and, once poll_terminal finishes
+    // reaping it, start a fresh one — optionally skipping the profile, e.g.
+    // to recover from a broken profile script. If nothing is running yet,
+    // this just starts one directly.
+    pub(super) fn restart_terminal(&mut self, hwnd: HWND, no_profile: bool) {
+        match self.shell_session {
+            Some(id) => {
+                let _ = self.terminal.stop(id);
+                self.pending_terminal_restart = Some(no_profile);
+                self.terminal_tab = TerminalTab::Terminal;
+                self.terminal_visible = true;
+                self.status = "Restarting terminal\u{2026}".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            None => {
+                self.ensure_session(hwnd, TerminalTab::Terminal, no_profile);
+            }
+        }
     }
 
     // Stop the active tab's session and hide the panel; reaped in poll_terminal.
@@ -346,6 +390,11 @@ impl App {
                 self.set_applied_size(tab, None);
                 if self.terminal_tab == tab {
                     self.terminal_focus = false;
+                }
+                if tab == TerminalTab::Terminal
+                    && let Some(no_profile) = self.pending_terminal_restart.take()
+                {
+                    self.ensure_session(hwnd, TerminalTab::Terminal, no_profile);
                 }
             }
         }

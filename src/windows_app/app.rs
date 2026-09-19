@@ -207,6 +207,9 @@ pub(super) struct App {
     pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
     pub(super) terminal_focus: bool,
+    // Set while waiting for a stopped Terminal session to finish reaping
+    // before starting its replacement; see terminal::restart_terminal.
+    pub(super) pending_terminal_restart: Option<bool>,
     pub(super) cell_width: i32,
     pub(super) changes: Vec<Change>,
     pub(super) review_loading: bool,
@@ -385,6 +388,7 @@ impl App {
             run_applied_size: None,
             terminal_visible: false,
             terminal_focus: false,
+            pending_terminal_restart: None,
             cell_width: 0,
             changes: Vec::new(),
             review_loading: false,
@@ -1070,14 +1074,13 @@ impl App {
 
     pub(super) fn error(&mut self, hwnd: HWND, error: &impl std::fmt::Display) {
         self.status = error.to_string();
-        unsafe {
-            MessageBoxW(
-                hwnd,
-                wide(&self.status).as_ptr(),
-                wide("LightLine").as_ptr(),
-                MB_OK | MB_ICONERROR,
-            );
-        }
+        dialog::show_dialog(
+            hwnd,
+            "LightLine",
+            &self.status,
+            dialog::DialogIcon::Error,
+            &[dialog::BTN_OK],
+        );
         self.refresh(hwnd);
     }
 
@@ -1167,18 +1170,18 @@ impl App {
         if !self.doc().is_dirty() {
             return true;
         }
-        let answer = unsafe {
-            MessageBoxW(
-                hwnd,
-                wide(&format!("Save changes to {}?", self.tab_label(self.active))).as_ptr(),
-                wide("LightLine").as_ptr(),
-                MB_YESNOCANCEL | MB_ICONQUESTION,
-            )
-        };
-        if answer == IDYES {
+        let message = format!("Save changes to {}?", self.tab_label(self.active));
+        let answer = dialog::show_dialog(
+            hwnd,
+            "LightLine",
+            &message,
+            dialog::DialogIcon::Question,
+            &dialog::yes_no_cancel(),
+        );
+        if answer == dialog::DLG_YES {
             self.save(hwnd, false)
         } else {
-            answer == IDNO
+            answer == dialog::DLG_NO
         }
     }
 

@@ -1,4 +1,5 @@
 mod app;
+mod dialog;
 mod file_dialog;
 mod panels;
 mod terminal;
