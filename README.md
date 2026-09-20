@@ -7,22 +7,25 @@
 **A small, native Windows code editor written in Rust.**
 
 [![Rust](https://github.com/mehmoodulhaq570/LightLine/actions/workflows/rust.yml/badge.svg)](https://github.com/mehmoodulhaq570/LightLine/actions/workflows/rust.yml)
+[![Release](https://img.shields.io/github/v/release/mehmoodulhaq570/LightLine?color=blue)](https://github.com/mehmoodulhaq570/LightLine/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-DEA584?logo=rust&logoColor=white)](Cargo.toml)
 [![Status](https://img.shields.io/badge/status-active%20development-yellow)](CHANGELOG.md)
 
 </div>
 
-LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics, hover, go-to-definition, completion and formatting, Pyright diagnostics, hover, go-to-definition, completion and formatting for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, read-only Git review, read-only image and hex-dump previews for non-text files, and session restore that reopens your last workspace, tabs, and cursor positions. It paints only visible document lines.
+LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics, hover, go-to-definition, completion and formatting, Pyright diagnostics, hover, go-to-definition, completion and formatting for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, read-only Git review, read-only image and hex-dump previews for non-text files, JSON-backed user settings, and session restore that reopens your last workspace, tabs, and cursor positions. It paints only visible document lines.
 
-There is no tagged release yet — LightLine is built and dogfooded directly from `main`. The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md). The native editor's current visual direction is documented in the [reference adaptation](design/REFERENCE_ADAPTATION.md); an earlier interactive concept remains in the [Quiet Workbench prototype](design/workbench-prototype.html).
+The latest release is **[v0.1.0](https://github.com/mehmoodulhaq570/LightLine/releases/tag/v0.1.0)**, available as a standalone zero-dependency executable (`lightline.exe`) and a zip archive. The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md). The native editor's current visual direction is documented in the [reference adaptation](design/REFERENCE_ADAPTATION.md); an earlier interactive concept remains in the [Quiet Workbench prototype](design/workbench-prototype.html).
 
 ## Contents
 
+- [Download & Run](#download--run)
 - [Features](#features)
 - [Requirements](#requirements)
-- [Run](#run)
+- [Run from Source](#run-from-source)
 - [Keyboard shortcuts](#keyboard-shortcuts)
+- [User Settings](#user-settings)
 - [Workspaces and the explorer](#workspaces-and-the-explorer)
 - [Terminal](#terminal)
 - [Quick Open, search, tests, and Git review](#quick-open-search-tests-and-git-review)
@@ -33,8 +36,15 @@ There is no tagged release yet — LightLine is built and dogfooded directly fro
 - [Default icons](#default-icons)
 - [Baseline measurement](#baseline-measurement)
 
+## Download & Run
+
+Download the latest release directly from **[GitHub Releases](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**:
+- **`lightline.exe`**: Standalone executable (~5.2 MB). No installer or extra runtime required — download and double-click to launch.
+- **`lightline-v0.1.0-windows-x86_64.zip`**: Portable archive containing the executable, documentation, and changelog.
+
 ## Features
 
+- **Zero Dependencies**: Single portable native Windows binary written directly with Win32 and GDI
 - UTF-8 file editing with undo/redo, multiple tabs, and vertical split panes
 - Rust and Python syntax coloring via Tree-sitter, with a lexical fallback for large Rust files
 - rust-analyzer diagnostics, hover, go-to-definition, completion and formatting for Rust; Pyright diagnostics, hover, go-to-definition, completion and formatting for Python (self-installing, no manual setup)
@@ -42,16 +52,18 @@ There is no tagged release yet — LightLine is built and dogfooded directly fro
 - Run the active Python file, or run `cargo test`, straight from the editor
 - Workspace explorer, project-wide search, Quick Open (files and commands), and read-only Git review with side-by-side diffs
 - Read-only previews for files that are not editable text: raster images, and a bounded hex dump for other binary files instead of a "not UTF-8" error
+- User Settings (`%APPDATA%\LightLine\settings.json`, `Ctrl+,`) for custom font, tab size, word wrap, bracket matching, indentation guides, and theme colors
 - Interface zoom (60%–200%), a resizable sidebar and terminal panel, and a dark, native Windows 11-style folder picker
 - Reopens where you left off: the last workspace, open tabs, and each tab's cursor and scroll position are restored on launch (saved to `%APPDATA%\LightLine\session.json`)
 
 ## Requirements
 
-- Windows, with the Rust toolchain (`cargo`) installed
+- Windows 10/11 64-bit
+- For building from source: Rust toolchain (`cargo`)
 - For Rust diagnostics and hover: `rustup component add rust-analyzer rust-src`
 - For Python diagnostics and hover: Node.js installed once (for example `winget install OpenJS.NodeJS.LTS`) — LightLine installs Pyright itself the first time you open a `.py` file
 
-## Run
+## Run from Source
 
 ```powershell
 cargo run --release
@@ -87,6 +99,22 @@ You can pass a UTF-8 file path as the first argument.
 | Open a new terminal session alongside the current one | Ctrl+Shift+\`, the **+** button in the terminal header, or Ctrl+P, type `>`, choose **New Terminal** |
 | Switch between open terminal sessions | Click a session's tab in the terminal header |
 | Close the active terminal session, or restart it (with or without your profile) | The **×** button in the header, or Ctrl+P, type `>`, choose **Kill Active Terminal**, **Restart Terminal**, or **Restart Terminal (No Profile)** |
+| Open Settings (JSON) | Ctrl+, or Ctrl+P, type `>`, choose **Open Settings (JSON)** |
+
+## User Settings
+
+LightLine includes a JSON-backed settings system stored at `%APPDATA%\LightLine\settings.json`. Press **Ctrl+,** or run **Open Settings (JSON)** from the Command Palette (`Ctrl+P` then `>`) to open your configuration file directly in an editor tab.
+
+Supported configurations include:
+- `font_family`: Monospace font name (defaults to `"Consolas"`)
+- `font_size`: Point size (e.g. `14`)
+- `tab_size`: Number of spaces per tab (defaults to `4`)
+- `insert_spaces`: Convert tabs to spaces on typing
+- `word_wrap`: Wrap lines within the viewport
+- `bracket_matching`: Highlight matching bracket pairs (`()`, `[]`, `{}`)
+- `render_indent_guides`: Render visual indentation guide lines
+- `parse_limit_kb`: Tree-sitter background parse file size cap in KiB
+- `theme`: Custom RGB hex colors for background, gutter, text, accents, and selection
 
 ## Workspaces and the explorer
 

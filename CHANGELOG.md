@@ -1,6 +1,16 @@
 # Changelog
 
-This is LightLine's development history. Dates are the GitHub commit dates in Asia/Karachi (UTC+05:00). The project has no tagged release yet, so these dates do not represent releases. Planned architecture is documented separately in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+This is LightLine's development history. Dates are the GitHub commit dates in Asia/Karachi (UTC+05:00). The project's latest release is **[v0.1.0](https://github.com/mehmoodulhaq570/LightLine/releases/tag/v0.1.0)**. Planned architecture is documented separately in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## [v0.1.0] - 2026-09-20 — Initial Release
+
+This is the first tagged and packaged release of LightLine, available as a standalone executable (`lightline.exe`) and portable zip archive on GitHub Releases.
+
+### Added & Improved
+- **User Settings System**: Introduced a persistent JSON-backed settings system stored at `%APPDATA%\LightLine\settings.json`. Accessible via **Ctrl+,** or the Command Palette (`>Open Settings (JSON)`). Supports configuring `font_family`, `font_size`, `tab_size`, `insert_spaces`, `word_wrap`, `bracket_matching`, `render_indent_guides`, `parse_limit_kb`, and custom theme RGB hex colors with instant application and live validation fallback.
+- **VS Code-Style Side Views**: Added dedicated **Debug** and **Extensions** side views in the activity rail. Sidebar views now support clean single-click toggle/collapse behavior matching VS Code, leaving the full vertical height dedicated to the code editor.
+- **Bracket Matching**: Added visual bracket matching highlights for matching pairs (`()`, `[]`, `{}`) across lines when the caret is positioned on or next to a bracket delimiter.
+- **UTF-8 & Slice Safety**: Implemented resilient UTF-8 character-boundary clamping and length guarding (`safe_slice_prefix`, `safe_slice_range`) across code pane selections, syntax highlights, diagnostics, bracket matching, and caret positions, eliminating out-of-bounds slicing crashes.
 
 ## 2026-09-20
 
