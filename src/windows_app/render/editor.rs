@@ -1,5 +1,29 @@
 use super::super::*;
 
+// The status bar names the language the way an editor does ("Rust", not "RS"),
+// falling back to the bare extension for types we have no display name for.
+fn language_label(path: Option<&Path>) -> String {
+    let extension = path
+        .and_then(Path::extension)
+        .map(|ext| ext.to_string_lossy().to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("rs") => "Rust".into(),
+        Some("py" | "pyw") => "Python".into(),
+        Some("toml") => "TOML".into(),
+        Some("json" | "jsonc") => "JSON".into(),
+        Some("md" | "markdown") => "Markdown".into(),
+        Some("yaml" | "yml") => "YAML".into(),
+        Some("js" | "mjs" | "jsx") => "JavaScript".into(),
+        Some("ts" | "tsx") => "TypeScript".into(),
+        Some("html" | "htm") => "HTML".into(),
+        Some("css") => "CSS".into(),
+        Some("c" | "h") => "C".into(),
+        Some("cc" | "cpp" | "cxx" | "hpp") => "C++".into(),
+        Some(other) => other.to_uppercase(),
+        None => "Plain Text".into(),
+    }
+}
+
 impl App {
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
         unsafe {
@@ -97,6 +121,31 @@ impl App {
                         bottom: editor_bottom,
                     },
                     SIDEBAR_BG,
+                );
+            }
+            // Hairline separators so the rail, side panel and editor read as
+            // distinct surfaces instead of one continuous field of dark blue.
+            let hairline = self.scale(1).max(1);
+            Self::fill(
+                hdc,
+                RECT {
+                    left: self.scale(RAIL) - hairline,
+                    top: 0,
+                    right: self.scale(RAIL),
+                    bottom: editor_bottom,
+                },
+                EDGE,
+            );
+            if self.sidebar_width > 0 {
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: editor_left - hairline,
+                        top: 0,
+                        right: editor_left,
+                        bottom: editor_bottom,
+                    },
+                    EDGE,
                 );
             }
             Self::fill(
@@ -610,7 +659,24 @@ impl App {
                 },
                 status_bg,
             );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: editor_bottom,
+                    right: rect.right,
+                    bottom: editor_bottom + self.scale(1).max(1),
+                },
+                EDGE,
+            );
             SelectObject(hdc, self.ui_font);
+            // A live language server for this file is the one "ready" signal
+            // the app actually has, so the indicator reflects that rather than
+            // being a decoration that is always green.
+            let lsp_ready = self
+                .tab()
+                .lsp_language
+                .is_some_and(|language| self.lsp.contains_key(&language));
             let right_label = if self.side_view == SideView::Review && self.review_file.is_some() {
                 format!("Git review     {} lines", self.diff_rows.len())
             } else {
@@ -621,7 +687,7 @@ impl App {
                     .filter(|item| item.severity <= 2)
                     .count();
                 format!(
-                    "{}Ln {}, Col {}     UTF-8     {}",
+                    "{}Ln {}, Col {}     Spaces: 4     UTF-8     {}{}{}",
                     if issues == 0 {
                         String::new()
                     } else {
@@ -632,12 +698,12 @@ impl App {
                         .chars()
                         .count()
                         + 1,
-                    self.doc()
-                        .path
-                        .as_deref()
-                        .and_then(Path::extension)
-                        .map(|ext| ext.to_string_lossy().to_uppercase())
-                        .unwrap_or_else(|| "TEXT".into())
+                    language_label(self.doc().path.as_deref()),
+                    match &self.workspace_branch {
+                        Some(branch) => format!("     {branch}"),
+                        None => String::new(),
+                    },
+                    if lsp_ready { "     Ready" } else { "" },
                 )
             };
             let right_width = self.text_width(hdc, &right_label);
@@ -679,6 +745,28 @@ impl App {
                     bottom: rect.bottom,
                 },
             );
+            if lsp_ready && right_label.ends_with("Ready") {
+                // Sits in the run of spaces the label already leaves before
+                // "Ready", so it never collides with the text.
+                let dot_right = rect.right - self.scale(16)
+                    - self.text_width(hdc, "Ready")
+                    - self.scale(5);
+                let middle = (editor_bottom + rect.bottom) / 2;
+                let size = self.scale(8).max(6);
+                let brush = CreateSolidBrush(GREEN);
+                let previous_brush = SelectObject(hdc, brush);
+                let previous_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                Ellipse(
+                    hdc,
+                    dot_right - size,
+                    middle - size / 2,
+                    dot_right,
+                    middle + size / 2,
+                );
+                SelectObject(hdc, previous_pen);
+                SelectObject(hdc, previous_brush);
+                DeleteObject(brush);
+            }
             DeleteObject(bg);
             DeleteObject(gutter_bg);
             DeleteObject(status_bg);
