@@ -56,6 +56,7 @@ impl App {
             ("Restart Terminal (No Profile)", 11),
             ("Go to Definition", 12),
             ("Format Document", 13),
+            ("Trigger Completion", 14),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -94,6 +95,7 @@ impl App {
                 Some(11) => self.restart_terminal(hwnd, true),
                 Some(12) => self.goto_definition(hwnd),
                 Some(13) => self.format_document(hwnd),
+                Some(14) => self.trigger_completion(hwnd),
                 _ => {}
             }
         } else {

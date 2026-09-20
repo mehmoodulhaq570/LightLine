@@ -188,6 +188,10 @@ impl App {
         if ctrl {
             let cursor = self.view().cursor;
             match key {
+                x if x == VK_SPACE as u32 => {
+                    self.trigger_completion(hwnd);
+                    return true;
+                }
                 x if x == VK_OEM_3 as u32 && !shift => {
                     self.toggle_terminal(hwnd);
                     return true;
@@ -380,6 +384,29 @@ impl App {
             self.format_document(hwnd);
             return true;
         }
+        // A completion popup, when open, captures navigation and commit keys
+        // before they reach the editor; any other key dismisses it first.
+        if self.completion_active() {
+            match key {
+                x if x == VK_DOWN as u32 => {
+                    self.completion_move(hwnd, 1);
+                    return true;
+                }
+                x if x == VK_UP as u32 => {
+                    self.completion_move(hwnd, -1);
+                    return true;
+                }
+                x if x == VK_RETURN as u32 || x == VK_TAB as u32 => {
+                    self.accept_completion(hwnd);
+                    return true;
+                }
+                x if x == VK_ESCAPE as u32 => {
+                    self.dismiss_completion(hwnd);
+                    return true;
+                }
+                _ => self.dismiss_completion(hwnd),
+            }
+        }
         match key {
             x if x == VK_F1 as u32 => {
                 self.hover_at_cursor(hwnd);
@@ -554,6 +581,8 @@ impl App {
         if self.tab().read_only() {
             return;
         }
+        // Typing over the identifier closes the popup; Ctrl+Space re-opens it.
+        self.dismiss_completion(hwnd);
         if self.find_mode && unit == 8 {
             self.find_query.pop();
             self.status = format!("Find: {}", self.find_query);

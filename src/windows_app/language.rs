@@ -1,4 +1,4 @@
-use super::app::{HoverCard, HoverTarget, NavTarget, Tab};
+use super::app::{CompletionPopup, CompletionRequest, HoverCard, HoverTarget, NavTarget, Tab};
 use super::*;
 use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as LspRange};
 
@@ -260,6 +260,8 @@ impl App {
                     self.hover_card = None;
                     self.definition_target = None;
                     self.format_target = None;
+                    self.completion_request = None;
+                    self.completion = None;
                     self.status = message;
                 }
                 LspEvent::Definition {
@@ -382,6 +384,63 @@ impl App {
                 }
                 LspEvent::Status { message, .. } => {
                     self.status = message;
+                }
+                LspEvent::Completion {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    items,
+                } => {
+                    let Some(request) = self.completion_request.take().filter(|request| {
+                        request.language == language
+                            && request.id == id
+                            && request.uri == uri
+                            && request.version == version
+                    }) else {
+                        continue;
+                    };
+                    let index = self.tab_for_pane(request.pane);
+                    if self.tabs[index].lsp_language != Some(language)
+                        || self.tabs[index].lsp_version != version
+                    {
+                        continue;
+                    }
+                    // Narrow the list to the identifier prefix typed before the
+                    // caret, but fall back to the full set when the prefix would
+                    // filter everything away (servers that ignore trigger text).
+                    let prefix = {
+                        let doc = self.doc();
+                        let line = doc.line(request.replace_start.line);
+                        let end = request.replace_end.byte.min(line.len());
+                        line.get(request.replace_start.byte..end)
+                            .unwrap_or("")
+                            .to_owned()
+                    };
+                    let mut items = items;
+                    if !prefix.is_empty() {
+                        let needle = prefix.to_lowercase();
+                        let kept: Vec<_> = items
+                            .iter()
+                            .filter(|item| item.label.to_lowercase().starts_with(&needle))
+                            .cloned()
+                            .collect();
+                        if !kept.is_empty() {
+                            items = kept;
+                        }
+                    }
+                    if items.is_empty() {
+                        self.status = "No completions".into();
+                        continue;
+                    }
+                    self.completion = Some(CompletionPopup {
+                        items,
+                        selected: 0,
+                        replace_start: request.replace_start,
+                        replace_end: request.replace_end,
+                        x: request.x,
+                        y: request.y,
+                    });
                 }
             }
         }
@@ -646,6 +705,147 @@ impl App {
                 pane,
             });
             self.status = "Formatting...".into();
+        }
+    }
+
+    // Ctrl+Space: ask the language server for completions at the caret and
+    // remember the identifier prefix that an accepted item should overwrite.
+    pub(super) fn trigger_completion(&mut self, hwnd: HWND) {
+        self.completion = None;
+        let pane = self.focused_pane;
+        let pos = self.view().cursor;
+        let index = self.tab_for_pane(pane);
+        if !self.tabs[index].lsp_opened {
+            self.ensure_lsp(hwnd);
+        }
+        let tab = &self.tabs[index];
+        if !tab.lsp_opened {
+            self.status = "Language server not ready yet".into();
+            return;
+        }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
+        let Some(path) = tab.document.path.as_deref() else {
+            return;
+        };
+        let replace_start = {
+            let doc = self.doc();
+            let line = doc.line(pos.line);
+            let mut start = pos.byte.min(line.len());
+            while start > 0 {
+                let Some(prev) = line[..start].chars().next_back() else {
+                    break;
+                };
+                if prev.is_alphanumeric() || prev == '_' {
+                    start -= prev.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            Pos {
+                line: pos.line,
+                byte: start,
+            }
+        };
+        let uri = lsp::file_uri(path);
+        let version = tab.lsp_version;
+        let character = tab.document.utf16_column(pos) as u32;
+        let position = LspPosition {
+            line: pos.line as u32,
+            character,
+        };
+        self.request_id += 1;
+        let id = self.request_id;
+        if self.lsp.get(&language).is_some_and(|client| {
+            client.send(LspCommand::Completion {
+                id,
+                uri: uri.clone(),
+                version,
+                position,
+            })
+        }) {
+            let rect = self.caret_rect(hwnd);
+            self.completion_request = Some(CompletionRequest {
+                language,
+                id,
+                uri,
+                version,
+                pane,
+                replace_start,
+                replace_end: pos,
+                x: rect.left,
+                y: rect.bottom,
+            });
+        }
+    }
+
+    pub(super) fn completion_active(&self) -> bool {
+        self.completion.is_some()
+    }
+
+    pub(super) fn completion_move(&mut self, hwnd: HWND, delta: i32) {
+        let Some(popup) = self.completion.as_mut() else {
+            return;
+        };
+        let count = popup.items.len();
+        if count == 0 {
+            return;
+        }
+        popup.selected = if delta < 0 {
+            popup.selected.saturating_sub((-delta) as usize)
+        } else {
+            (popup.selected + delta as usize).min(count - 1)
+        };
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn accept_completion(&mut self, hwnd: HWND) {
+        let Some(item) = self
+            .completion
+            .as_ref()
+            .and_then(|popup| popup.items.get(popup.selected).cloned())
+        else {
+            return;
+        };
+        let (fallback_start, fallback_end) = self
+            .completion
+            .as_ref()
+            .map(|popup| (popup.replace_start, popup.replace_end))
+            .unwrap_or((Pos::default(), Pos::default()));
+        // Honour the server-provided edit range when present (it may span more
+        // than the typed prefix, e.g. for member access after a dot).
+        let (start, end) = match (item.edit_start, item.edit_end) {
+            (Some(s), Some(e)) => {
+                let doc = self.doc();
+                let start_line =
+                    (s.line as usize).min(doc.line_count().saturating_sub(1));
+                let end_line = (e.line as usize).min(doc.line_count().saturating_sub(1));
+                (
+                    Pos {
+                        line: start_line,
+                        byte: lsp::utf16_to_byte(doc.line(start_line), s.character),
+                    },
+                    Pos {
+                        line: end_line,
+                        byte: lsp::utf16_to_byte(doc.line(end_line), e.character),
+                    },
+                )
+            }
+            _ => (fallback_start, fallback_end),
+        };
+        self.completion = None;
+        self.completion_request = None;
+        let text = item.insert.replace("\r\n", "\n").replace('\r', "\n");
+        self.replace_range(start, end, &text);
+        self.keep_cursor_visible(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn dismiss_completion(&mut self, hwnd: HWND) {
+        let had = self.completion.take().is_some() || self.completion_request.take().is_some();
+        if had {
+            unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 }

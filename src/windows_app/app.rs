@@ -285,6 +285,8 @@ pub(super) struct App {
     pub(super) definition_target: Option<NavTarget>,
     pub(super) format_target: Option<NavTarget>,
     pub(super) request_id: u64,
+    pub(super) completion_request: Option<CompletionRequest>,
+    pub(super) completion: Option<CompletionPopup>,
 }
 
 // Records which pane/request an in-flight definition or format call belongs to
@@ -309,6 +311,32 @@ pub(super) struct HoverTarget {
 
 pub(super) struct HoverCard {
     pub(super) text: String,
+    pub(super) x: i32,
+    pub(super) y: i32,
+}
+
+// Tracks an in-flight textDocument/completion request. The replace range and
+// caret anchor are captured at trigger time so the popup can be positioned and
+// applied even though the reply arrives asynchronously through poll_lsp.
+pub(super) struct CompletionRequest {
+    pub(super) language: LspLanguage,
+    pub(super) id: u64,
+    pub(super) uri: String,
+    pub(super) version: i32,
+    pub(super) pane: usize,
+    pub(super) replace_start: Pos,
+    pub(super) replace_end: Pos,
+    pub(super) x: i32,
+    pub(super) y: i32,
+}
+
+// A resolved completion list shown as a popup near the caret. Selecting an
+// item replaces [replace_start, replace_end) with the item's insert text.
+pub(super) struct CompletionPopup {
+    pub(super) items: Vec<LspCompletionItem>,
+    pub(super) selected: usize,
+    pub(super) replace_start: Pos,
+    pub(super) replace_end: Pos,
     pub(super) x: i32,
     pub(super) y: i32,
 }
@@ -556,6 +584,8 @@ impl App {
             definition_target: None,
             format_target: None,
             request_id: 5000,
+            completion_request: None,
+            completion: None,
         }
     }
 

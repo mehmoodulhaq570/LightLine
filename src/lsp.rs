@@ -63,6 +63,21 @@ pub struct TextEdit {
     pub text: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct CompletionItem {
+    pub label: String,
+    pub kind: u8,
+    pub detail: Option<String>,
+    // Text to insert: the server's textEdit.newText, else insertText, else
+    // label, with any snippet placeholders stripped to plain text.
+    pub insert: String,
+    // The server's own replacement range, when it sent a textEdit. The GUI
+    // applies this range if present, otherwise it replaces the identifier
+    // prefix it tracked when the request was made.
+    pub edit_start: Option<Position>,
+    pub edit_end: Option<Position>,
+}
+
 pub enum Command {
     Open {
         uri: String,
@@ -98,6 +113,12 @@ pub enum Command {
         uri: String,
         version: i32,
     },
+    Completion {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
+    },
     Shutdown,
 }
 
@@ -131,6 +152,13 @@ pub enum Event {
         uri: String,
         version: i32,
         edits: Vec<TextEdit>,
+    },
+    Completion {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        items: Vec<CompletionItem>,
     },
     Stopped {
         language: Language,
@@ -172,6 +200,7 @@ struct Pending {
     hovers: HashMap<u64, PendingHover>,
     definitions: HashMap<u64, PendingHover>,
     formats: HashMap<u64, (String, i32)>,
+    completions: HashMap<u64, PendingHover>,
 }
 
 fn hover_request(id: u64, hover: &PendingHover) -> Value {
@@ -192,6 +221,14 @@ fn format_request(id: u64, uri: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"method":"textDocument/formatting","params":{
         "textDocument":{"uri":uri},
         "options":{"tabSize":4,"insertSpaces":true}
+    }})
+}
+
+fn completion_request(id: u64, request: &PendingHover) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
+        "textDocument":{"uri":request.uri},
+        "position":{"line":request.position.line,"character":request.position.character},
+        "context":{"triggerKind":1}
     }})
 }
 
@@ -569,6 +606,14 @@ fn run_server(
                 "hover": {"contentFormat":["plaintext","markdown"]},
                 "definition": {"linkSupport":false},
                 "formatting": {},
+                "completion": {
+                    "contextSupport":true,
+                    "completionItem": {
+                        "snippetSupport":false,
+                        "documentationFormat":["plaintext"],
+                        "resolveSupport":{"properties":[]}
+                    }
+                },
                 "publishDiagnostics": {"versionSupport":true}
             }
         },
@@ -733,6 +778,19 @@ fn run_server(
                         &events,
                         &wake,
                     );
+                } else if let Some(request) = pending.completions.remove(&id) {
+                    let items = parse_completion(&message);
+                    emit(
+                        Event::Completion {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            items,
+                        },
+                        &events,
+                        &wake,
+                    );
                 }
             }
         }
@@ -878,6 +936,22 @@ fn send_command(
         Command::Format { id, uri, version } => {
             let request = format_request(id, &uri);
             pending.formats.insert(id, (uri, version));
+            request
+        }
+        Command::Completion {
+            id,
+            uri,
+            version,
+            position,
+        } => {
+            let request_state = PendingHover {
+                uri,
+                version,
+                position,
+                retries: 0,
+            };
+            let request = completion_request(id, &request_state);
+            pending.completions.insert(id, request_state);
             request
         }
         Command::Shutdown => return Ok(()),
@@ -1099,6 +1173,103 @@ fn parse_text_edits(message: &Value) -> Vec<TextEdit> {
         })
         .take(20_000)
         .collect()
+}
+
+// textDocument/completion answers with either a bare array of items or a
+// { isIncomplete, items } object; each item carries a label plus optional
+// kind/detail and an insertText or textEdit.
+fn parse_completion(message: &Value) -> Vec<CompletionItem> {
+    let result = match message.get("result") {
+        Some(Value::Null) | None => return Vec::new(),
+        Some(value) => value,
+    };
+    let Some(items) = result.get("items").and_then(Value::as_array).or_else(|| result.as_array())
+    else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let label = item.get("label")?.as_str()?;
+            let text_edit = item.get("textEdit").filter(|edit| edit.is_object());
+            let insert = text_edit
+                .and_then(|edit| edit.get("newText").and_then(Value::as_str))
+                .or_else(|| item.get("insertText").and_then(Value::as_str))
+                .unwrap_or(label);
+            let insert = strip_snippet(insert);
+            // A textEdit may be a plain {range,newText} or an
+            // InsertReplaceEdit with separate insert/replace ranges.
+            let edit_range = text_edit.and_then(|edit| {
+                edit.get("range")
+                    .or_else(|| edit.get("replace"))
+                    .or_else(|| edit.get("insert"))
+            });
+            let (edit_start, edit_end) = edit_range.map_or((None, None), |range| {
+                (
+                    range.get("start").and_then(parse_position),
+                    range.get("end").and_then(parse_position),
+                )
+            });
+            Some(CompletionItem {
+                label: label.to_owned(),
+                kind: item.get("kind").and_then(Value::as_u64).unwrap_or(0).min(25) as u8,
+                detail: item.get("detail").and_then(Value::as_str).map(str::to_owned),
+                insert,
+                edit_start,
+                edit_end,
+            })
+        })
+        .take(300)
+        .collect()
+}
+
+// Drops snippet placeholders so a plain-text insert never leaves `${...}` or
+// `$1` tab stops in the document: keeps the text after a `${n:placeholder}`
+// colon, drops a bare `${n}`/`$n` tab stop.
+fn strip_snippet(text: &str) -> String {
+    if !text.contains('$') {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '$' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        if chars.get(index + 1) == Some(&'{') {
+            let mut depth = 1;
+            let mut cursor = index + 2;
+            let start = cursor;
+            while cursor < chars.len() && depth > 0 {
+                match chars[cursor] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 {
+                    cursor += 1;
+                }
+            }
+            let inner: String = chars[start..cursor.min(chars.len())].iter().collect();
+            let body = inner.split_once(':').map_or("", |(_, value)| value);
+            out.push_str(&strip_snippet(body));
+            index = (cursor + 1).min(chars.len());
+        } else {
+            let mut cursor = index + 1;
+            while cursor < chars.len() && chars[cursor].is_ascii_digit() {
+                cursor += 1;
+            }
+            // A lone `$` with no digits is a literal dollar sign.
+            if cursor == index + 1 {
+                out.push('$');
+            }
+            index = cursor;
+        }
+    }
+    out
 }
 
 /// Reverse of [`file_uri`]: turn a file:// URI back into a native path.
@@ -1334,6 +1505,37 @@ mod tests {
         assert_eq!(edits[0].text, "  ");
         assert_eq!(edits[1].range.end.line, 1);
         assert!(parse_text_edits(&json!({"result":null})).is_empty());
+    }
+
+    #[test]
+    fn completion_parses_lists_and_snippets() {
+        // Bare array form, a snippet insertText, and an object form with a
+        // textEdit range are all accepted.
+        let array = parse_completion(&json!({"result":[
+            {"label":"println","kind":3,"insertText":"println!($1)"},
+            {"label":"Vec","kind":7,"detail":"struct Vec","insertText":"Vec"}
+        ]}));
+        assert_eq!(array.len(), 2);
+        assert_eq!(array[0].kind, 3);
+        assert_eq!(array[0].insert, "println!()");
+        assert_eq!(array[1].detail.as_deref(), Some("struct Vec"));
+        assert!(array[1].edit_start.is_none());
+
+        let object = parse_completion(&json!({"result":{"items":[
+            {"label":"push","textEdit":{
+                "newText":"push($0)",
+                "range":{"start":{"line":2,"character":4},"end":{"line":2,"character":7}}
+            }}
+        ]}}));
+        assert_eq!(object.len(), 1);
+        assert_eq!(object[0].insert, "push()");
+        assert_eq!(object[0].edit_start.unwrap().line, 2);
+        assert_eq!(object[0].edit_end.unwrap().character, 7);
+
+        assert!(parse_completion(&json!({"result":null})).is_empty());
+        assert_eq!(strip_snippet("${1:foo}bar"), "foobar");
+        assert_eq!(strip_snippet("a$1b"), "ab");
+        assert_eq!(strip_snippet("cost $x"), "cost $x");
     }
 
     #[cfg(windows)]

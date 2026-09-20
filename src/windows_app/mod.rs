@@ -21,8 +21,8 @@ use icons::{AppIcons, IconSet, material_icon_for};
 use lightline::clipboard;
 use lightline::document::{Document, Pos};
 use lightline::lsp::{
-    self, Client as LspClient, Diagnostic as LspDiagnostic, Event as LspEvent,
-    Language as LspLanguage,
+    self, Client as LspClient, CompletionItem as LspCompletionItem, Diagnostic as LspDiagnostic,
+    Event as LspEvent, Language as LspLanguage,
 };
 use lightline::syntax::{Color, Syntax};
 use lightline::terminal::{
