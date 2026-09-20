@@ -73,6 +73,10 @@ pub(super) struct Tab {
     // Some for a read-only raster image preview; `document` is then an empty,
     // unsaved placeholder that must never actually be written to disk.
     pub(super) image: Option<image_view::ImageAsset>,
+    // True for a read-only hex-dump preview of a non-UTF-8, non-image file;
+    // `document` holds the generated dump text as its only "content", which
+    // must never be written back over the real file.
+    pub(super) binary_preview: bool,
 }
 
 #[derive(Clone)]
@@ -106,6 +110,7 @@ impl Tab {
             lsp_opened: false,
             lsp_language: None,
             image: None,
+            binary_preview: false,
         }
     }
 
@@ -250,6 +255,19 @@ pub(super) struct App {
     pub(super) hover_target: Option<HoverTarget>,
     pub(super) hover_card: Option<HoverCard>,
     pub(super) hover_request_id: u64,
+    pub(super) definition_target: Option<NavTarget>,
+    pub(super) format_target: Option<NavTarget>,
+    pub(super) request_id: u64,
+}
+
+// Records which pane/request an in-flight definition or format call belongs to
+// so poll_lsp can validate the response against the current document state.
+pub(super) struct NavTarget {
+    pub(super) language: LspLanguage,
+    pub(super) id: u64,
+    pub(super) uri: String,
+    pub(super) version: i32,
+    pub(super) pane: usize,
 }
 
 pub(super) struct HoverTarget {
@@ -508,6 +526,9 @@ impl App {
             hover_target: None,
             hover_card: None,
             hover_request_id: 1000,
+            definition_target: None,
+            format_target: None,
+            request_id: 5000,
         }
     }
 

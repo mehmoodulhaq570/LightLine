@@ -51,6 +51,18 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct Location {
+    pub uri: String,
+    pub range: Range,
+}
+
+#[derive(Clone, Debug)]
+pub struct TextEdit {
+    pub range: Range,
+    pub text: String,
+}
+
 pub enum Command {
     Open {
         uri: String,
@@ -75,6 +87,17 @@ pub enum Command {
         version: i32,
         position: Position,
     },
+    Definition {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
+    },
+    Format {
+        id: u64,
+        uri: String,
+        version: i32,
+    },
     Shutdown,
 }
 
@@ -94,6 +117,20 @@ pub enum Event {
         uri: String,
         version: i32,
         text: Option<String>,
+    },
+    Definition {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        targets: Vec<Location>,
+    },
+    Format {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        edits: Vec<TextEdit>,
     },
     Stopped {
         language: Language,
@@ -127,10 +164,34 @@ struct PendingHover {
     retries: u8,
 }
 
+// Tracks in-flight requests by id so the reader loop can route each response
+// back to the right kind of event. Hover keeps a retry budget because
+// rust-analyzer answers with a "server busy" code while it is still indexing.
+#[derive(Default)]
+struct Pending {
+    hovers: HashMap<u64, PendingHover>,
+    definitions: HashMap<u64, PendingHover>,
+    formats: HashMap<u64, (String, i32)>,
+}
+
 fn hover_request(id: u64, hover: &PendingHover) -> Value {
     json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
         "textDocument":{"uri":hover.uri},
         "position":{"line":hover.position.line,"character":hover.position.character}
+    }})
+}
+
+fn definition_request(id: u64, request: &PendingHover) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/definition","params":{
+        "textDocument":{"uri":request.uri},
+        "position":{"line":request.position.line,"character":request.position.character}
+    }})
+}
+
+fn format_request(id: u64, uri: &str) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/formatting","params":{
+        "textDocument":{"uri":uri},
+        "options":{"tabSize":4,"insertSpaces":true}
     }})
 }
 
@@ -506,6 +567,8 @@ fn run_server(
             "textDocument": {
                 "synchronization": {"didSave":true},
                 "hover": {"contentFormat":["plaintext","markdown"]},
+                "definition": {"linkSupport":false},
+                "formatting": {},
                 "publishDiagnostics": {"versionSupport":true}
             }
         },
@@ -532,7 +595,7 @@ fn run_server(
 
     let mut ready = false;
     let mut waiting = VecDeque::new();
-    let mut hovers: HashMap<u64, PendingHover> = HashMap::new();
+    let mut pending = Pending::default();
     let mut hover_retries: Vec<(Instant, u64, PendingHover)> = Vec::new();
     let mut failure = None;
     'running: loop {
@@ -583,7 +646,7 @@ fn run_server(
                     &wake,
                 );
                 while let Some(command) = waiting.pop_front() {
-                    if send_command(&mut stdin, &config, command, &mut hovers).is_err() {
+                    if send_command(&mut stdin, &config, command, &mut pending).is_err() {
                         failure = Some(format!("Could not write to {}", config.display_name));
                         break 'running;
                     }
@@ -619,32 +682,58 @@ fn run_server(
                         &wake,
                     );
                 }
-            } else if let Some(id) = message.get("id").and_then(Value::as_u64)
-                && let Some(mut hover) = hovers.remove(&id)
-            {
-                if message.pointer("/error/code").and_then(Value::as_i64) == Some(-32801)
-                    && hover.retries < 2
-                {
-                    hover.retries += 1;
-                    hover_retries.push((
-                        Instant::now() + Duration::from_millis(250 * u64::from(hover.retries)),
-                        id,
-                        hover,
-                    ));
-                    continue;
+            } else if let Some(id) = message.get("id").and_then(Value::as_u64) {
+                if let Some(mut hover) = pending.hovers.remove(&id) {
+                    if message.pointer("/error/code").and_then(Value::as_i64) == Some(-32801)
+                        && hover.retries < 2
+                    {
+                        hover.retries += 1;
+                        hover_retries.push((
+                            Instant::now() + Duration::from_millis(250 * u64::from(hover.retries)),
+                            id,
+                            hover,
+                        ));
+                        continue;
+                    }
+                    let text = message.get("result").and_then(hover_text);
+                    emit(
+                        Event::Hover {
+                            language: config.language,
+                            id,
+                            uri: hover.uri,
+                            version: hover.version,
+                            text,
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.definitions.remove(&id) {
+                    let targets = parse_locations(&message);
+                    emit(
+                        Event::Definition {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            targets,
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some((uri, version)) = pending.formats.remove(&id) {
+                    let edits = parse_text_edits(&message);
+                    emit(
+                        Event::Format {
+                            language: config.language,
+                            id,
+                            uri,
+                            version,
+                            edits,
+                        },
+                        &events,
+                        &wake,
+                    );
                 }
-                let text = message.get("result").and_then(hover_text);
-                emit(
-                    Event::Hover {
-                        language: config.language,
-                        id,
-                        uri: hover.uri,
-                        version: hover.version,
-                        text,
-                    },
-                    &events,
-                    &wake,
-                );
             }
         }
         let mut index = 0;
@@ -659,7 +748,7 @@ fn run_server(
                     ));
                     break 'running;
                 }
-                hovers.insert(id, hover);
+                pending.hovers.insert(id, hover);
             } else {
                 index += 1;
             }
@@ -667,7 +756,7 @@ fn run_server(
         match commands.recv_timeout(Duration::from_millis(30)) {
             Ok(Command::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Ok(command) if ready => {
-                if send_command(&mut stdin, &config, command, &mut hovers).is_err() {
+                if send_command(&mut stdin, &config, command, &mut pending).is_err() {
                     failure = Some(format!("Could not write to {}", config.display_name));
                     break;
                 }
@@ -734,7 +823,7 @@ fn send_command(
     stdin: &mut ChildStdin,
     config: &ServerConfig,
     command: Command,
-    hovers: &mut HashMap<u64, PendingHover>,
+    pending: &mut Pending,
 ) -> io::Result<()> {
     let message = match command {
         Command::Open { uri, text, version } => {
@@ -767,7 +856,28 @@ fn send_command(
                 retries: 0,
             };
             let request = hover_request(id, &hover);
-            hovers.insert(id, hover);
+            pending.hovers.insert(id, hover);
+            request
+        }
+        Command::Definition {
+            id,
+            uri,
+            version,
+            position,
+        } => {
+            let request_state = PendingHover {
+                uri,
+                version,
+                position,
+                retries: 0,
+            };
+            let request = definition_request(id, &request_state);
+            pending.definitions.insert(id, request_state);
+            request
+        }
+        Command::Format { id, uri, version } => {
+            let request = format_request(id, &uri);
+            pending.formats.insert(id, (uri, version));
             request
         }
         Command::Shutdown => return Ok(()),
@@ -932,6 +1042,101 @@ fn hover_text(result: &Value) -> Option<String> {
     (!clean.trim().is_empty()).then_some(clean)
 }
 
+fn parse_range(value: &Value) -> Option<Range> {
+    Some(Range {
+        start: parse_position(value.get("start")?)?,
+        end: parse_position(value.get("end")?)?,
+    })
+}
+
+fn parse_location(value: &Value) -> Option<Location> {
+    // A LocationLink carries targetUri/targetSelectionRange instead of uri/range.
+    if let Some(uri) = value.get("targetUri").and_then(Value::as_str) {
+        let range = value
+            .get("targetSelectionRange")
+            .and_then(parse_range)
+            .or_else(|| value.get("targetRange").and_then(parse_range))?;
+        return Some(Location {
+            uri: uri.to_owned(),
+            range,
+        });
+    }
+    let uri = value.get("uri")?.as_str()?;
+    let range = parse_range(value.get("range")?)?;
+    Some(Location {
+        uri: uri.to_owned(),
+        range,
+    })
+}
+
+// textDocument/definition answers with a single Location, an array of
+// Locations, an array of LocationLinks, or null when there is no definition.
+fn parse_locations(message: &Value) -> Vec<Location> {
+    let result = match message.get("result") {
+        Some(Value::Null) | None => return Vec::new(),
+        Some(value) => value,
+    };
+    if let Some(items) = result.as_array() {
+        return items.iter().filter_map(parse_location).take(64).collect();
+    }
+    if result.is_object() {
+        return parse_location(result).into_iter().collect();
+    }
+    Vec::new()
+}
+
+// textDocument/formatting answers with an array of TextEdits or null.
+fn parse_text_edits(message: &Value) -> Vec<TextEdit> {
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let range = parse_range(item.get("range")?)?;
+            let text = item.get("newText")?.as_str()?.to_owned();
+            Some(TextEdit { range, text })
+        })
+        .take(20_000)
+        .collect()
+}
+
+/// Reverse of [`file_uri`]: turn a file:// URI back into a native path.
+pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let mut text = percent_decode(rest.as_bytes());
+    // Drop the leading slash on /C:/... Windows paths.
+    #[cfg(windows)]
+    if text.first() == Some(&b'/')
+        && text.get(2) == Some(&b':')
+        && text[1].is_ascii_alphabetic()
+    {
+        text.remove(0);
+    }
+    let path = String::from_utf8(text).ok()?;
+    let path = path.replace('/', std::path::MAIN_SEPARATOR_STR);
+    Some(PathBuf::from(path))
+}
+
+fn percent_decode(bytes: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (bytes.get(index + 1), bytes.get(index + 2))
+            && let (Some(high), Some(low)) =
+                ((*high as char).to_digit(16), (*low as char).to_digit(16))
+        {
+            result.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            result.push(bytes[index]);
+            index += 1;
+        }
+    }
+    result
+}
+
 fn write_packet(writer: &mut impl Write, message: &Value) -> io::Result<()> {
     let body = serde_json::to_vec(message)?;
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
@@ -1094,5 +1299,49 @@ mod tests {
         let response = configuration_response(&request, &config);
         assert!(response[0].is_object());
         assert!(response[1].is_null());
+    }
+
+    #[test]
+    fn definition_results_accept_locations_and_links() {
+        let single = json!({"result":{"uri":"file:///a.rs","range":{
+            "start":{"line":3,"character":5},"end":{"line":3,"character":8}}}});
+        let parsed = parse_locations(&single);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].uri, "file:///a.rs");
+        assert_eq!(parsed[0].range.start.line, 3);
+
+        let links = json!({"result":[{
+            "targetUri":"file:///b.rs",
+            "targetRange":{"start":{"line":1,"character":0},"end":{"line":1,"character":4}},
+            "targetSelectionRange":{"start":{"line":1,"character":2},"end":{"line":1,"character":4}}
+        }]});
+        let parsed = parse_locations(&links);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].uri, "file:///b.rs");
+        assert_eq!(parsed[0].range.start.character, 2);
+
+        assert!(parse_locations(&json!({"result":null})).is_empty());
+    }
+
+    #[test]
+    fn formatting_parses_text_edits() {
+        let message = json!({"result":[
+            {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":2}},"newText":"  "},
+            {"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"newText":""}
+        ]});
+        let edits = parse_text_edits(&message);
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[0].text, "  ");
+        assert_eq!(edits[1].range.end.line, 1);
+        assert!(parse_text_edits(&json!({"result":null})).is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn file_uri_round_trips_back_to_a_path() {
+        let path = Path::new(r"D:\Projects\demo\src\main.rs");
+        let uri = file_uri(path);
+        let back = uri_to_path(&uri).unwrap();
+        assert_eq!(back, PathBuf::from(r"d:\Projects\demo\src\main.rs"));
     }
 }

@@ -92,6 +92,13 @@ impl Document {
         })
     }
 
+    // Sets the initial content of a fresh, non-file-backed document (e.g. a
+    // generated read-only preview) directly, bypassing undo tracking. Only
+    // meaningful before any real edit has happened.
+    pub fn seed(&mut self, text: &str) {
+        self.lines = text.split('\n').map(str::to_owned).collect();
+    }
+
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }

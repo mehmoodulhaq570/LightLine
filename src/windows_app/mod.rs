@@ -1,4 +1,5 @@
 mod app;
+mod binary_view;
 mod dialog;
 mod file_dialog;
 mod image_view;

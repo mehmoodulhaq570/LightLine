@@ -1,4 +1,4 @@
-use super::app::{HoverCard, HoverTarget, Tab};
+use super::app::{HoverCard, HoverTarget, NavTarget, Tab};
 use super::*;
 use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as LspRange};
 
@@ -258,7 +258,127 @@ impl App {
                     self.lsp_failed_at.insert(language, Instant::now());
                     self.hover_target = None;
                     self.hover_card = None;
+                    self.definition_target = None;
+                    self.format_target = None;
                     self.status = message;
+                }
+                LspEvent::Definition {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    targets,
+                } => {
+                    let Some(target) = self.definition_target.take().filter(|target| {
+                        target.language == language
+                            && target.id == id
+                            && target.uri == uri
+                            && target.version == version
+                    }) else {
+                        continue;
+                    };
+                    let index = self.tab_for_pane(target.pane);
+                    if self.tabs[index].lsp_version != version {
+                        continue;
+                    }
+                    let Some(location) = targets.first() else {
+                        self.status = "No definition found".into();
+                        continue;
+                    };
+                    let Some(path) = lsp::uri_to_path(&location.uri) else {
+                        continue;
+                    };
+                    self.open(hwnd, Some(path));
+                    let line = location.range.start.line as usize;
+                    let byte = {
+                        let doc = self.doc();
+                        let line = line.min(doc.line_count().saturating_sub(1));
+                        (line, lsp::utf16_to_byte(doc.line(line), location.range.start.character))
+                    };
+                    self.move_cursor(Pos { line: byte.0, byte: byte.1 }, false);
+                    self.keep_cursor_visible(hwnd);
+                    self.status = format!("Jumped to definition (line {})", byte.0 + 1);
+                }
+                LspEvent::Format {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    edits,
+                } => {
+                    let Some(target) = self.format_target.take().filter(|target| {
+                        target.language == language
+                            && target.id == id
+                            && target.uri == uri
+                            && target.version == version
+                    }) else {
+                        continue;
+                    };
+                    let index = self.tab_for_pane(target.pane);
+                    if self.tabs[index].lsp_version != version || edits.is_empty() {
+                        self.status = if edits.is_empty() {
+                            "Already formatted".into()
+                        } else {
+                            String::new()
+                        };
+                        continue;
+                    }
+                    if index != self.active {
+                        self.activate_tab(hwnd, index);
+                    }
+                    let cursor = self.view().cursor;
+                    // Resolve LSP ranges into document positions against the
+                    // unmodified text, then apply from the end backwards so the
+                    // earlier edits keep valid line/byte offsets. Each
+                    // replace_range re-syncs the server incrementally.
+                    let mut resolved: Vec<(Pos, Pos, String)> = edits
+                        .iter()
+                        .map(|edit| {
+                            let doc = self.doc();
+                            let start_line = (edit.range.start.line as usize)
+                                .min(doc.line_count().saturating_sub(1));
+                            let end_line = (edit.range.end.line as usize)
+                                .min(doc.line_count().saturating_sub(1));
+                            (
+                                Pos {
+                                    line: start_line,
+                                    byte: lsp::utf16_to_byte(
+                                        doc.line(start_line),
+                                        edit.range.start.character,
+                                    ),
+                                },
+                                Pos {
+                                    line: end_line,
+                                    byte: lsp::utf16_to_byte(
+                                        doc.line(end_line),
+                                        edit.range.end.character,
+                                    ),
+                                },
+                                edit.text.clone(),
+                            )
+                        })
+                        .collect();
+                    resolved.sort_by(|a, b| {
+                        (b.0.line, b.0.byte).cmp(&(a.0.line, a.0.byte))
+                    });
+                    for (start, end, text) in resolved {
+                        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                        self.replace_range(start, end, &text);
+                    }
+                    let restored = {
+                        let doc = self.doc();
+                        Pos {
+                            line: cursor.line.min(doc.line_count().saturating_sub(1)),
+                            byte: 0,
+                        }
+                    };
+                    let restored = self.doc().clamp(Pos {
+                        line: restored.line,
+                        byte: cursor.byte,
+                    });
+                    self.move_cursor(restored, false);
+                    self.keep_cursor_visible(hwnd);
+                    self.status = "Formatted document".into();
                 }
                 LspEvent::Status { message, .. } => {
                     self.status = message;
@@ -442,6 +562,90 @@ impl App {
                 y,
             });
             self.hover_card = None;
+        }
+    }
+
+    pub(super) fn goto_definition(&mut self, hwnd: HWND) {
+        let pane = self.focused_pane;
+        let pos = self.view().cursor;
+        let index = self.tab_for_pane(pane);
+        if !self.tabs[index].lsp_opened {
+            self.ensure_lsp(hwnd);
+        }
+        let tab = &self.tabs[index];
+        if !tab.lsp_opened {
+            self.status = "Language server not ready yet".into();
+            return;
+        }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
+        let Some(path) = tab.document.path.as_deref() else {
+            return;
+        };
+        let uri = lsp::file_uri(path);
+        let version = tab.lsp_version;
+        let position = LspPosition {
+            line: pos.line as u32,
+            character: tab.document.utf16_column(pos) as u32,
+        };
+        self.request_id += 1;
+        let id = self.request_id;
+        if self.lsp.get(&language).is_some_and(|client| {
+            client.send(LspCommand::Definition {
+                id,
+                uri: uri.clone(),
+                version,
+                position,
+            })
+        }) {
+            self.definition_target = Some(NavTarget {
+                language,
+                id,
+                uri,
+                version,
+                pane,
+            });
+            self.status = "Finding definition...".into();
+        }
+    }
+
+    pub(super) fn format_document(&mut self, hwnd: HWND) {
+        let pane = self.focused_pane;
+        let index = self.tab_for_pane(pane);
+        if !self.tabs[index].lsp_opened {
+            self.ensure_lsp(hwnd);
+        }
+        let tab = &self.tabs[index];
+        if !tab.lsp_opened {
+            self.status = "Language server not ready yet".into();
+            return;
+        }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
+        let Some(path) = tab.document.path.as_deref() else {
+            return;
+        };
+        let uri = lsp::file_uri(path);
+        let version = tab.lsp_version;
+        self.request_id += 1;
+        let id = self.request_id;
+        if self.lsp.get(&language).is_some_and(|client| {
+            client.send(LspCommand::Format {
+                id,
+                uri: uri.clone(),
+                version,
+            })
+        }) {
+            self.format_target = Some(NavTarget {
+                language,
+                id,
+                uri,
+                version,
+                pane,
+            });
+            self.status = "Formatting...".into();
         }
     }
 }

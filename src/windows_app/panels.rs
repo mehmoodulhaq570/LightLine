@@ -54,6 +54,8 @@ impl App {
             ("New Terminal", 9),
             ("Restart Terminal", 10),
             ("Restart Terminal (No Profile)", 11),
+            ("Go to Definition", 12),
+            ("Format Document", 13),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -90,6 +92,8 @@ impl App {
                 }
                 Some(10) => self.restart_terminal(hwnd, false),
                 Some(11) => self.restart_terminal(hwnd, true),
+                Some(12) => self.goto_definition(hwnd),
+                Some(13) => self.format_document(hwnd),
                 _ => {}
             }
         } else {

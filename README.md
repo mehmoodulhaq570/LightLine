@@ -13,7 +13,7 @@
 
 </div>
 
-LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics and hover, Pyright diagnostics and hover for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
+LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics, hover, go-to-definition and formatting, Pyright diagnostics, hover, go-to-definition and formatting for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, and read-only Git review. It paints only visible document lines.
 
 There is no tagged release yet — LightLine is built and dogfooded directly from `main`. The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md). The native editor's current visual direction is documented in the [reference adaptation](design/REFERENCE_ADAPTATION.md); an earlier interactive concept remains in the [Quiet Workbench prototype](design/workbench-prototype.html).
 
@@ -37,7 +37,7 @@ There is no tagged release yet — LightLine is built and dogfooded directly fro
 
 - UTF-8 file editing with undo/redo, multiple tabs, and vertical split panes
 - Rust and Python syntax coloring via Tree-sitter, with a lexical fallback for large Rust files
-- rust-analyzer diagnostics and hover for Rust; Pyright diagnostics and hover for Python (self-installing, no manual setup)
+- rust-analyzer diagnostics, hover, go-to-definition and formatting for Rust; Pyright diagnostics, hover, go-to-definition and formatting for Python (self-installing, no manual setup)
 - An integrated terminal with a persistent interactive shell separate from build/run output
 - Run the active Python file, or run `cargo test`, straight from the editor
 - Workspace explorer, project-wide search, Quick Open (files and commands), and read-only Git review with side-by-side diffs
@@ -77,6 +77,8 @@ You can pass a UTF-8 file path as the first argument.
 | Run Rust tests; review Git changes | Ctrl+Shift+B; Ctrl+Shift+G |
 | Run the active Python file | Ctrl+Shift+R, or click the green play button in the tab bar, or Ctrl+P, type `>python`, choose **Run Python File** |
 | Show Rust or Python hover information at the cursor | F1, or pause the mouse over code |
+| Go to the definition of the symbol at the cursor | F12, or Ctrl+P, type `>`, choose **Go to Definition** |
+| Format the current Rust or Python file | Shift+Alt+F, or Ctrl+P, type `>`, choose **Format Document** |
 | Select a Python interpreter or virtual environment | Ctrl+P, type `>python`, choose the interpreter or virtual-environment command |
 | Show or hide the terminal panel | Ctrl+\` |
 | Open a new terminal, or restart the current one (with or without your profile) | Ctrl+P, type `>`, choose **New Terminal**, **Restart Terminal**, or **Restart Terminal (No Profile)** |
@@ -111,7 +113,7 @@ For Rust diagnostics and hover, install the toolchain components with `rustup co
 
 For Python diagnostics and hover, Pyright is set up automatically: if `pyright-langserver` is not already on PATH, LightLine silently installs Pyright into its own data folder (`%APPDATA%\LightLine\pyright`) the first time you open a `.py` file and runs it from there — no npm command to type, no admin rights, and a global install always takes precedence if you have one. The only prerequisite is Node.js installed once (for example `winget install OpenJS.NodeJS.LTS`); the status bar reports setup progress while the one-time download runs. If Node.js is missing, the status bar explains that instead of showing raw process errors, and editing and running Python still work. LightLine starts Pyright lazily when you open a `.py` file up to 2 MiB, using the nearest Python project marker, Git root, or open workspace. Use Ctrl+P, type `>python`, then choose **Select Python interpreter** or **Select Python virtual environment**; picking a venv uses its `Scripts\python.exe` or `bin/python` so imports resolve against that environment. When nothing is selected, LightLine detects one automatically (project `.venv` first, then the first `python.exe` on PATH) so imports resolve without any setup.
 
-Errors and warnings appear in the gutter and under the code; move the cursor onto a marked line to read its message in the status bar. Press F1 or pause the mouse over Rust or Python code for hover information. Edits are sent incrementally, and saving sends a save notification so diagnostics can refresh. Split panes showing the same file share one document and one LSP update. Each server runs separately from the UI; if it is slow or exits, editing continues and the status bar shows the error. This LSP slice does not include completion, navigation, or formatting.
+Errors and warnings appear in the gutter and under the code; move the cursor onto a marked line to read its message in the status bar. Press F1 or pause the mouse over Rust or Python code for hover information, F12 to jump to the definition of the symbol under the cursor, and Shift+Alt+F to format the file. Edits are sent incrementally, and saving sends a save notification so diagnostics can refresh. Split panes showing the same file share one document and one LSP update. Each server runs separately from the UI; if it is slow or exits, editing continues and the status bar shows the error. This LSP slice does not include completion.
 
 To check Python support, open a `.py` file containing `value: int = "wrong"`, wait for the red diagnostic, then move the cursor to that line to read its message. Place the cursor on `value` and press F1 to see its type. Replace `"wrong"` with `7` and save; the diagnostic should clear. For an automated server check, run `cargo test --test lsp_live pyright_publishes_diagnostics_and_hover -- --ignored --nocapture` after installing Pyright. The Pyright interpreter choice lasts for the current LightLine session.
 

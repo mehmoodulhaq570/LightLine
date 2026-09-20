@@ -374,9 +374,19 @@ impl App {
             return true;
         }
         let cursor = self.view().cursor;
+        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        // Shift+Alt+F formats the current document through the language server.
+        if shift && alt && !ctrl && key == 0x46 {
+            self.format_document(hwnd);
+            return true;
+        }
         match key {
             x if x == VK_F1 as u32 => {
                 self.hover_at_cursor(hwnd);
+                return true;
+            }
+            x if x == VK_F12 as u32 => {
+                self.goto_definition(hwnd);
                 return true;
             }
             x if x == VK_F3 as u32 => {
