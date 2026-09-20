@@ -2,6 +2,7 @@ mod ai_assistant;
 mod code_pane;
 mod completion;
 mod editor;
+mod git;
 mod hover;
 mod panels;
 mod primitives;

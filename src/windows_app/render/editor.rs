@@ -255,12 +255,16 @@ impl App {
                         VIOLET,
                     );
                 }
-                let tab_icon = self.tabs[index]
-                    .document
-                    .path
-                    .as_deref()
-                    .map(|path| material_icon_for(path, false, false))
-                    .unwrap_or("file");
+                let tab_icon = if self.has_extension("material-icons") {
+                    self.tabs[index]
+                        .document
+                        .path
+                        .as_deref()
+                        .map(|path| material_icon_for(path, false, false))
+                        .unwrap_or("file")
+                } else {
+                    "file"
+                };
                 self.icons.draw(
                     hdc,
                     tab_icon,
@@ -470,8 +474,17 @@ impl App {
                                 item.expanded,
                             );
                         }
-                        let icon_name =
-                            material_icon_for(&item.entry.path, item.entry.is_dir, item.expanded);
+                        let icon_name = if self.has_extension("material-icons") {
+                            material_icon_for(&item.entry.path, item.entry.is_dir, item.expanded)
+                        } else if item.entry.is_dir {
+                            if item.expanded {
+                                "folder-open"
+                            } else {
+                                "folder"
+                            }
+                        } else {
+                            "file"
+                        };
                         if !self.icons.draw(
                             hdc,
                             icon_name,
@@ -643,12 +656,15 @@ impl App {
                 bottom: rect.bottom - self.scale(4),
             };
             Self::rounded_fill(hdc, chip_rect, self.scale(4), rgb(24, 38, 70));
-            let icon = self
-                .doc()
-                .path
-                .as_deref()
-                .map(|path| material_icon_for(path, false, false))
-                .unwrap_or("file");
+            let icon = if self.has_extension("material-icons") {
+                self.doc()
+                    .path
+                    .as_deref()
+                    .map(|path| material_icon_for(path, false, false))
+                    .unwrap_or("file")
+            } else {
+                "file"
+            };
             self.icons.draw(
                 hdc,
                 icon,
@@ -666,7 +682,7 @@ impl App {
             );
 
             // Right side: branch and Ready status indicator
-            let branch = self.workspace_branch.as_deref().unwrap_or("main");
+            let branch = self.git_head_label();
             let right_branch = format!("\u{2442}  {branch}");
             let right_ready = "\u{25cf}  Ready";
             let ready_width = self.text_width(hdc, right_ready);

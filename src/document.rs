@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,8 @@ pub struct Document {
     next_revision: u64,
     change_serial: u64,
     last_change: Option<TextChange>,
+    // Zero-based line numbers with a breakpoint set from the gutter.
+    breakpoints: BTreeSet<usize>,
 }
 
 impl Default for Document {
@@ -64,6 +67,7 @@ impl Document {
             next_revision: 1,
             change_serial: 0,
             last_change: None,
+            breakpoints: BTreeSet::new(),
         }
     }
 
@@ -89,6 +93,7 @@ impl Document {
             next_revision: 1,
             change_serial: 0,
             last_change: None,
+            breakpoints: BTreeSet::new(),
         })
     }
 
@@ -122,6 +127,27 @@ impl Document {
     }
     pub fn is_dirty(&self) -> bool {
         self.revision != self.saved_revision
+    }
+
+    pub fn breakpoints(&self) -> &BTreeSet<usize> {
+        &self.breakpoints
+    }
+
+    pub fn has_breakpoint(&self, line: usize) -> bool {
+        self.breakpoints.contains(&line)
+    }
+
+    // Returns true if the breakpoint is now set, false if it was cleared.
+    pub fn toggle_breakpoint(&mut self, line: usize) -> bool {
+        if line >= self.lines.len() {
+            return false;
+        }
+        if !self.breakpoints.insert(line) {
+            self.breakpoints.remove(&line);
+            false
+        } else {
+            true
+        }
     }
 
     pub fn change_serial(&self) -> u64 {

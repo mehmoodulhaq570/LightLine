@@ -201,10 +201,99 @@ pub struct SearchHit {
     pub context: Vec<(usize, String)>,
 }
 
+/// One changed file, as reported by `git status --porcelain=v2`.
 #[derive(Clone, Debug)]
 pub struct Change {
     pub path: PathBuf,
+    /// Raw Git XY status code, e.g. `".M"` or `"A."`.
     pub status: String,
+    /// Previous path, present for renames and copies.
+    pub old_path: Option<PathBuf>,
+    /// The index differs from HEAD, so the change is staged.
+    pub staged: bool,
+    /// The working tree differs from the index (or the file is untracked).
+    pub unstaged: bool,
+    pub untracked: bool,
+    /// A merge or rebase conflict is pending on this path.
+    pub unmerged: bool,
+}
+
+impl Change {
+    /// One-word label for the source-control list.
+    pub fn label(&self) -> &'static str {
+        if self.unmerged {
+            return "Conflicted";
+        }
+        let mut code = self.status.chars();
+        let index = code.next().unwrap_or('.');
+        let worktree = code.next().unwrap_or('.');
+        // Prefer the staged letter; fall back to the working-tree one.
+        let marker = if index == '.' { worktree } else { index };
+        match marker {
+            'A' => "Added",
+            'M' => "Modified",
+            'D' => "Deleted",
+            'R' => "Renamed",
+            'C' => "Copied",
+            'T' => "Type change",
+            'U' => "Conflicted",
+            '?' => "Untracked",
+            _ => "Changed",
+        }
+    }
+}
+
+/// Which side of the index a diff should be computed against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffScope {
+    /// Working tree against HEAD: everything not yet committed.
+    Head,
+    /// Index against HEAD: the staged changes only.
+    Staged,
+    /// Working tree against the index: the unstaged changes only.
+    Unstaged,
+}
+
+/// Everything one `git status` call tells the source-control panel.
+#[derive(Clone, Debug, Default)]
+pub struct RepoState {
+    /// Repository root, which can be above the opened workspace folder.
+    pub root: PathBuf,
+    /// Current branch, or `None` when HEAD is detached or unborn.
+    pub branch: Option<String>,
+    /// Short commit hash, used as the label when HEAD is detached.
+    pub detached: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
+    pub changes: Vec<Change>,
+    /// True when at least one path is in a conflict state.
+    pub conflicted: bool,
+    /// Recent commits, newest first.
+    pub history: Vec<CommitEntry>,
+}
+
+impl RepoState {
+    /// What the branch chip shows: branch name, or `@abcd1234` when detached.
+    pub fn head_label(&self) -> String {
+        if let Some(branch) = &self.branch {
+            return branch.clone();
+        }
+        if let Some(oid) = &self.detached {
+            return format!("@{oid}");
+        }
+        String::new()
+    }
+
+    pub fn staged(&self) -> impl Iterator<Item = &Change> {
+        self.changes.iter().filter(|change| change.staged)
+    }
+
+    /// Files with work-tree changes. A partially staged file appears in both
+    /// lists, which is what the two review sections mean.
+    pub fn unstaged(&self) -> impl Iterator<Item = &Change> {
+        self.changes.iter().filter(|change| change.unstaged)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -511,38 +600,286 @@ pub fn detect_python_interpreter(root: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
-pub fn git_changes(root: &Path) -> Result<Vec<Change>, String> {
-    let output = background_command("git")
-        .args([
-            "-c",
-            "core.quotePath=false",
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-        ])
-        .current_dir(root)
+/// Run Git in `root` and return its standard output.
+pub fn git_output(root: &Path, args: &[&str]) -> Result<String, String> {
+    let output = git_command(root, args)
         .output()
         .map_err(|error| format!("Could not start Git: {error}"))?;
     if !output.status.success() {
-        return Err("This workspace is not inside a Git repository.".into());
+        return Err(git_failure(&output));
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn git_command(root: &Path, args: &[&str]) -> Command {
+    let mut command = background_command("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(["--no-pager", "-c", "core.quotePath=false"])
+        .args(args);
+    command
+}
+
+/// Run a Git command whose path arguments follow the options.
+fn git_paths(root: &Path, args: &[&str], paths: &[PathBuf]) -> Result<(), String> {
+    let mut command = git_command(root, args);
+    for path in paths {
+        command.arg(path);
+    }
+    let output = command
+        .output()
+        .map_err(|error| format!("Could not start Git: {error}"))?;
+    if !output.status.success() {
+        return Err(git_failure(&output));
+    }
+    Ok(())
+}
+
+fn git_failure(output: &std::process::Output) -> String {
+    let text = String::from_utf8_lossy(&output.stderr);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return format!("Git failed ({}).", output.status);
+    }
+    if trimmed.contains("not a git repository") {
+        return "This workspace is not inside a Git repository.".into();
+    }
+    // A rejected commit or a conflicted merge spreads the reason over several
+    // lines; keep enough of them to act on without flooding the status bar.
+    trimmed.lines().take(4).collect::<Vec<_>>().join(" / ")
+}
+
+/// Top level of the repository containing `path`. Opening a subfolder of a
+/// repository still needs this, because Git reports paths from the root.
+pub fn repo_root(path: &Path) -> Option<PathBuf> {
+    let text = git_output(path, &["rev-parse", "--show-toplevel"]).ok()?;
+    let line = text.lines().next()?;
+    (!line.is_empty()).then(|| PathBuf::from(line))
+}
+
+/// Branch, sync state, changed files and recent commits. Paths in `changes`
+/// are relative to `state.root`, which can sit above `root` when a subfolder
+/// was opened as the workspace.
+pub fn repo_state(root: &Path) -> Result<RepoState, String> {
+    let text = git_output(
+        root,
+        &[
+            "status",
+            "--branch",
+            "--porcelain=v2",
+            "-z",
+            "--untracked-files=all",
+        ],
+    )?;
+    let mut state = parse_porcelain_v2(&text);
+    state.root = repo_root(root).unwrap_or_else(|| root.to_path_buf());
+    state.history = log(root, 30).unwrap_or_default();
+    Ok(state)
+}
+
+/// Parse `git status --branch --porcelain=v2 -z`. Records are NUL separated,
+/// and a rename carries its original path in the record that follows it.
+pub fn parse_porcelain_v2(text: &str) -> RepoState {
+    fn field(record: &str, index: usize) -> Option<&str> {
+        record.splitn(index + 1, ' ').nth(index).map(str::trim)
+    }
+    fn change(path: &str, status: &str) -> Change {
+        let mut chars = status.chars();
+        let index_code = chars.next().unwrap_or('.');
+        let work_code = chars.next().unwrap_or('.');
+        Change {
+            path: PathBuf::from(path),
+            status: status.to_owned(),
+            old_path: None,
+            staged: index_code != '.' && index_code != '?',
+            unstaged: (work_code != '.' && work_code != '?') || status.starts_with('?'),
+            untracked: status.starts_with('?'),
+            unmerged: false,
+        }
+    }
+
+    let records: Vec<&str> = text.split('\0').filter(|record| !record.is_empty()).collect();
+    let mut state = RepoState::default();
+    let mut oid = String::new();
+    let mut index = 0;
+    while index < records.len() {
+        let record = records[index];
+        index += 1;
+        if let Some(header) = record.strip_prefix("# ") {
+            let (key, value) = header.split_once(' ').unwrap_or((header, ""));
+            match key {
+                "branch.oid" => oid = value.to_owned(),
+                "branch.head" => {
+                    if value != "(detached)" && value != "(initial)" && !value.is_empty() {
+                        state.branch = Some(value.to_owned());
+                    }
+                }
+                "branch.upstream" => state.upstream = Some(value.to_owned()),
+                "branch.ab" => {
+                    for token in value.split(' ') {
+                        if let Some(count) = token.strip_prefix('+') {
+                            state.ahead = count.parse().unwrap_or(0);
+                        } else if let Some(count) = token.strip_prefix('-') {
+                            state.behind = count.parse().unwrap_or(0);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        let kind = record.chars().next().unwrap_or_default();
+        if kind == '?' {
+            if let Some(path) = record.get(2..) {
+                state.changes.push(change(path, "??"));
+            }
+            continue;
+        }
+        // Each entry lists its fixed fields first, so the path is whatever is
+        // left after them and may itself contain spaces.
+        let path_index = match kind {
+            '1' => 8,
+            '2' => 9,
+            'u' => 12,
+            _ => continue,
+        };
+        let Some(status) = record.get(2..4) else {
+            continue;
+        };
+        let Some(path) = field(record, path_index) else {
+            continue;
+        };
+        let mut item = change(path, status);
+        item.unmerged = kind == 'u';
+        if kind == '2' {
+            item.old_path = records.get(index).map(|path| PathBuf::from(*path));
+            index += 1;
+        }
+        state.changes.push(item);
+    }
+    if state.branch.is_none() && oid.len() >= 8 && !oid.starts_with('(') {
+        state.detached = Some(oid[..8].to_owned());
+    }
+    state.conflicted = state.changes.iter().any(|change| change.unmerged);
+    state
+}
+
+/// Add files to the index, or everything when `paths` is empty.
+pub fn stage(root: &Path, paths: &[PathBuf]) -> Result<(), String> {
+    if paths.is_empty() {
+        return git_output(root, &["add", "-A"]).map(|_| ());
+    }
+    git_paths(root, &["add", "--"], paths)
+}
+
+/// Drop files from the index without touching the working tree.
+pub fn unstage(root: &Path, paths: &[PathBuf]) -> Result<(), String> {
+    if paths.is_empty() {
+        return git_output(root, &["reset"]).map(|_| ());
+    }
+    git_paths(root, &["restore", "--staged", "--"], paths)
+}
+
+/// Throw away working-tree changes. Untracked files are deleted rather than
+/// restored, so callers must confirm first: neither kind is recoverable.
+pub fn discard(root: &Path, paths: &[PathBuf], untracked: &[PathBuf]) -> Result<(), String> {
+    if !paths.is_empty() {
+        git_paths(root, &["restore", "--"], paths)?;
+    }
+    if !untracked.is_empty() {
+        git_paths(root, &["clean", "-f", "--"], untracked)?;
+    }
+    Ok(())
+}
+
+pub fn commit(root: &Path, message: &str) -> Result<(), String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Type a commit message first.".into());
+    }
+    git_output(root, &["commit", &format!("--message={message}")]).map(|_| ())
+}
+
+/// Local branch names with the checked-out one flagged.
+pub fn branches(root: &Path) -> Result<Vec<(String, bool)>, String> {
+    let text = git_output(root, &["branch", "--format=%(refname:short)\u{1f}%(HEAD)"])?;
+    Ok(text
         .lines()
         .filter_map(|line| {
-            let name = line.get(3..)?;
-            Some(Change {
-                path: PathBuf::from(name.rsplit(" -> ").next().unwrap_or(name)),
-                status: line.get(..2)?.to_owned(),
-            })
+            let (name, head) = line.split_once('\u{1f}')?;
+            (!name.is_empty()).then(|| (name.to_owned(), head == "*"))
         })
         .collect())
 }
 
-pub fn git_diff(root: &Path, path: &Path) -> Result<Vec<DiffRow>, String> {
-    let tracked = background_command("git")
-        .args(["ls-files", "--error-unmatch", "--"])
+pub fn checkout(root: &Path, branch: &str, create: bool) -> Result<(), String> {
+    if create {
+        git_output(root, &["switch", "-c", branch]).map(|_| ())
+    } else {
+        git_output(root, &["switch", "--", branch]).map(|_| ())
+    }
+}
+
+/// Sync commands run in the terminal panel instead of a hidden child process,
+/// so Git's own output and its credential prompt stay visible to the user.
+pub fn remote_command(action: RemoteAction) -> &'static str {
+    match action {
+        RemoteAction::Push => "git push",
+        RemoteAction::Pull => "git pull --ff-only",
+        RemoteAction::Fetch => "git fetch --all",
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoteAction {
+    Push,
+    Pull,
+    Fetch,
+}
+
+/// Short history, newest first.
+pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitEntry>, String> {
+    let text = git_output(
+        root,
+        &[
+            "log",
+            &format!("--max-count={limit}"),
+            "--date=format:%b %d",
+            "--pretty=format:%h\u{1f}%an\u{1f}%ad\u{1f}%s",
+        ],
+    )?;
+    Ok(parse_log(&text))
+}
+
+/// Parse `%h<US>%an<US>%ad<US>%s` records, one per line.
+pub fn parse_log(text: &str) -> Vec<CommitEntry> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\u{1f}');
+            let (oid, author, date, subject) =
+                (fields.next()?, fields.next()?, fields.next()?, fields.next()?);
+            (!oid.is_empty()).then(|| CommitEntry {
+                oid: oid.to_owned(),
+                author: author.to_owned(),
+                date: date.to_owned(),
+                subject: subject.to_owned(),
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug)]
+pub struct CommitEntry {
+    pub oid: String,
+    pub author: String,
+    pub date: String,
+    pub subject: String,
+}
+
+pub fn git_diff(root: &Path, path: &Path, scope: DiffScope) -> Result<Vec<DiffRow>, String> {
+    let tracked = git_command(root, &["ls-files", "--error-unmatch", "--"])
         .arg(path)
-        .current_dir(root)
         .output()
         .map_err(|error| format!("Could not start Git: {error}"))?
         .status
@@ -563,10 +900,17 @@ pub fn git_diff(root: &Path, path: &Path) -> Result<Vec<DiffRow>, String> {
             })
             .collect());
     }
-    let output = background_command("git")
-        .args(["diff", "--no-ext-diff", "--unified=2", "HEAD", "--"])
+    let mut output = match scope {
+        DiffScope::Head => git_command(root, &["diff", "--no-ext-diff", "--unified=2", "HEAD", "--"]),
+        DiffScope::Staged => {
+            git_command(root, &["diff", "--no-ext-diff", "--cached", "--unified=2", "--"])
+        }
+        DiffScope::Unstaged => {
+            git_command(root, &["diff", "--no-ext-diff", "--unified=2", "--"])
+        }
+    };
+    let output = output
         .arg(path)
-        .current_dir(root)
         .output()
         .map_err(|error| format!("Could not start Git: {error}"))?;
     if !output.status.success() {
@@ -1021,25 +1365,118 @@ mod tests {
         );
         fs::write(root.join("a.txt"), "after\n").unwrap();
         fs::write(root.join("new.txt"), "new file\n").unwrap();
-        let changes = git_changes(&root).unwrap();
+        let state = repo_state(&root).unwrap();
+        let changes = &state.changes;
+        assert_eq!(state.branch.as_deref(), Some("master"));
         assert!(
             changes
                 .iter()
-                .any(|change| change.path == Path::new("a.txt"))
+                .any(|change| change.path == Path::new("a.txt") && change.unstaged)
         );
         assert!(
             changes
                 .iter()
-                .any(|change| change.path == Path::new("new.txt"))
+                .any(|change| change.path == Path::new("new.txt") && change.untracked)
         );
-        let tracked = git_diff(&root, Path::new("a.txt")).unwrap();
+        let tracked = git_diff(&root, Path::new("a.txt"), DiffScope::Head).unwrap();
         assert!(
             tracked
                 .iter()
                 .any(|row| row.before == "before" && row.after == "after")
         );
-        let new = git_diff(&root, Path::new("new.txt")).unwrap();
+        let new = git_diff(&root, Path::new("new.txt"), DiffScope::Head).unwrap();
         assert_eq!(new[0].after, "new file");
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parses_porcelain_v2_branch_and_change_records() {
+        let text = "# branch.oid 2a0b1c3d4e5f6a7b8c9d\0\
+                    # branch.head main\0\
+                    # branch.upstream origin/main\0\
+                    # branch.ab +2 -3\0\
+                    1 .M N... 100644 100644 100644 aaaa bbbb src/two words.rs\0\
+                    2 R. N... 100644 100644 100644 cccc dddd R100 lib/new.rs\0lib/old.rs\0\
+                    1 A. N... 000000 100644 100644 0000 eeee added.rs\0\
+                    1 M. N... 100644 100644 100644 ffff 0000 staged.rs\0\
+                    u UU N... 100644 100644 100644 1111 2222 3333 1 2 3 conflicted.rs\0\
+                    ? free.txt\0";
+        let state = parse_porcelain_v2(text);
+        assert_eq!(state.branch.as_deref(), Some("main"));
+        assert_eq!(state.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((state.ahead, state.behind), (2, 3));
+        assert!(state.conflicted);
+        assert_eq!(state.changes.len(), 6);
+
+        // Paths may contain spaces because -z ends records at NUL, not space.
+        let spaced = &state.changes[0];
+        assert_eq!(spaced.path, Path::new("src/two words.rs"));
+        assert!(!spaced.staged && spaced.unstaged);
+        assert_eq!(spaced.label(), "Modified");
+
+        let renamed = &state.changes[1];
+        assert_eq!(renamed.path, Path::new("lib/new.rs"));
+        assert_eq!(renamed.old_path.as_deref(), Some(Path::new("lib/old.rs")));
+        assert!(renamed.staged && !renamed.unstaged);
+        assert_eq!(renamed.label(), "Renamed");
+
+        assert!(state.changes[2].staged);
+        assert_eq!(state.changes[2].label(), "Added");
+        assert_eq!(state.changes[3].label(), "Modified");
+        assert!(state.changes[3].staged && !state.changes[3].unstaged);
+        assert_eq!(state.changes[4].label(), "Conflicted");
+        assert!(state.changes[4].unmerged && state.changes[4].staged && state.changes[4].unstaged);
+        assert_eq!(state.changes[5].label(), "Untracked");
+        // The conflicted path counts as staged because its index differs from
+        // HEAD, and as unstaged because the working tree is not resolved.
+        assert_eq!(state.staged().count(), 4);
+        assert_eq!(state.unstaged().count(), 3);
+    }
+
+    #[test]
+    fn detached_head_has_no_branch_name() {
+        let text = "# branch.oid 0f1e2d3c4b5a6978\0# branch.head (detached)\0";
+        let state = parse_porcelain_v2(text);
+        assert_eq!(state.branch, None);
+        assert_eq!(state.detached.as_deref(), Some("0f1e2d3c"));
+        assert_eq!(state.head_label(), "@0f1e2d3c");
+    }
+
+    #[test]
+    fn unborn_and_partially_staged_records_split_into_both_sections() {
+        // `(initial)` is what Git reports before the first commit, when there
+        // is no upstream and nothing to compare ahead/behind against.
+        let text = "# branch.oid (initial)\0# branch.head main\0\
+                    1 MM N... 100644 100644 100644 aaaa bbbb both.rs\0\
+                    1 .D N... 100644 100644 000000 cccc dddd gone.rs\0";
+        let state = parse_porcelain_v2(text);
+        assert_eq!(state.branch.as_deref(), Some("main"));
+        assert_eq!(state.head_label(), "main");
+        assert_eq!(state.upstream, None);
+        assert_eq!((state.ahead, state.behind), (0, 0));
+        assert!(!state.conflicted);
+
+        // A file staged and then edited again belongs to both lists, which is
+        // what makes the two sections mean what they say.
+        let both = &state.changes[0];
+        assert!(both.staged && both.unstaged);
+        assert_eq!(both.label(), "Modified");
+        assert_eq!(state.staged().count(), 1);
+        assert_eq!(state.unstaged().count(), 2);
+
+        let deleted = &state.changes[1];
+        assert!(!deleted.staged && deleted.unstaged);
+        assert_eq!(deleted.label(), "Deleted");
+    }
+
+    #[test]
+    fn parses_commit_log_records() {
+        let rows = parse_log("aaaa\u{1f}Ada\u{1f}Sep 12\u{1f}Add terminal\n\
+                              bbbb\u{1f}Ada\u{1f}Sep 13\u{1f}Fix: a bug, then another");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].oid, "aaaa");
+        assert_eq!(rows[0].author, "Ada");
+        assert_eq!(rows[1].subject, "Fix: a bug, then another");
+        assert!(parse_log("").is_empty());
     }
 }

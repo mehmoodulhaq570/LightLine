@@ -27,7 +27,8 @@
 - 🌲 **Tree-sitter Syntax Coloring**: High-speed, background-worker semantic highlighting for Rust and Python with smart incremental re-parsing.
 - 🧠 **Integrated Language Support (LSP)**: Automatic background support for **rust-analyzer** and **Pyright** (self-installing): diagnostics, hover (`F1`), go-to-definition (`F12`), autocompletion (`Ctrl+Space`), and formatting (`Shift+Alt+F`).
 - 💻 **Multi-Session Terminal**: Persistent ConPTY terminal with multiple tabs and full VT100/ANSI support, cleanly separated from the read-only build/run **Output** stream.
-- 🗂️ **Workspaces & Project Drawer**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), read-only Git diff review (`Ctrl+Shift+G`), and folder tree navigation.
+- 🗂️ **Workspaces & Project Drawer**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation.
+- 🌿 **Source Control**: Stage, commit and discard from the sidebar (`Ctrl+Shift+G`). Separate Staged and Changes lists, word status labels, ahead/behind branch chip, side-by-side diff review that jumps into the file, recent commit history, and Push/Pull/Fetch handed to Git Credential Manager.
 - ⚙️ **User Configuration**: JSON-backed settings at `%APPDATA%\LightLine\settings.json` (`Ctrl+,`) for fonts, indentation, themes, and behavior.
 - 💾 **Session Restore**: Automatically reopens your last workspace, tabs, cursor positions, and scroll offsets on launch.
 
@@ -64,7 +65,8 @@ cargo run --release
 | `Ctrl+B` | Toggle sidebar (Explorer, Search, Git, Debug, Extensions) |
 | `Ctrl+F` | Find in current file (`F3` / `Shift+F3` next / previous) |
 | `Ctrl+Shift+F` | Search across workspace files |
-| `Ctrl+Shift+G` | Open Git review & side-by-side diff |
+| `Ctrl+Shift+G` | **Source Control**: stage, commit, diff review |
+| `↑` / `↓` / `Enter` / `Space` | In the source control list: move, open diff, stage or unstage |
 | `Ctrl+Shift+R` | Run active Python file |
 | `Ctrl+Shift+B` | Run Rust tests (`cargo test`) |
 | `Ctrl+\`` | Toggle terminal panel |

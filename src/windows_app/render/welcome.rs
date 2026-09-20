@@ -803,7 +803,7 @@ impl App {
 
     // --- small vector glyphs, drawn to match the hand-drawn rail icons ---
 
-    fn stroke(&self, hdc: HDC, color: u32, draw: impl FnOnce(HDC)) {
+    pub(super) fn stroke(&self, hdc: HDC, color: u32, draw: impl FnOnce(HDC)) {
         unsafe {
             let pen = CreatePen(PS_SOLID, self.scale(2).max(2), color);
             if pen.is_null() {

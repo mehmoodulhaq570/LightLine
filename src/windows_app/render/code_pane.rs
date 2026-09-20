@@ -71,6 +71,22 @@ impl App {
                         LINE_BG,
                     );
                 }
+                if doc.has_breakpoint(index) {
+                    let dot_brush = CreateSolidBrush(rgb(220, 60, 60));
+                    let old_brush = SelectObject(hdc, dot_brush);
+                    let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                    let dot_top = y + (self.line_height - self.scale(9)) / 2;
+                    Ellipse(
+                        hdc,
+                        left + self.scale(6),
+                        dot_top,
+                        left + self.scale(6) + self.scale(9),
+                        dot_top + self.scale(9),
+                    );
+                    SelectObject(hdc, old_pen);
+                    SelectObject(hdc, old_brush);
+                    DeleteObject(dot_brush);
+                }
                 let number = format!("{}", index + 1);
                 let num: Vec<u16> = number.encode_utf16().collect();
                 SetTextColor(

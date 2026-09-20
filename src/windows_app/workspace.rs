@@ -70,11 +70,21 @@ impl App {
         }
     }
 
+    /// Which commit is checked out. Reading `.git/HEAD` as text is wrong for
+    /// linked worktrees, submodules and detached HEAD, so ask Git instead.
     pub(super) fn head_branch(root: &Path) -> Option<String> {
-        let head = std::fs::read_to_string(root.join(".git").join("HEAD")).ok()?;
-        head.trim()
-            .strip_prefix("ref: refs/heads/")
-            .map(str::to_owned)
+        let root = workflow::repo_root(root)?;
+        if let Ok(branch) =
+            workflow::git_output(&root, &["symbolic-ref", "--short", "-q", "HEAD"])
+        {
+            let branch = branch.trim();
+            if !branch.is_empty() {
+                return Some(branch.to_owned());
+            }
+        }
+        let sha = workflow::git_output(&root, &["rev-parse", "--short", "HEAD"]).ok()?;
+        let sha = sha.trim();
+        (!sha.is_empty()).then(|| sha.to_owned())
     }
 
     pub(super) fn set_workspace(&mut self, hwnd: HWND, root: PathBuf) {
@@ -97,6 +107,19 @@ impl App {
         self.search_results.clear();
         self.changes.clear();
         self.review_loading = false;
+        // Everything below belongs to the previous repository, including the
+        // resolved top level, which can sit above the folder just opened.
+        self.git_root = None;
+        self.history.clear();
+        self.git_ahead = 0;
+        self.git_behind = 0;
+        self.git_conflicted = false;
+        self.git_busy = false;
+        self.commit_after_stage = false;
+        self.commit_message.clear();
+        self.commit_focus = false;
+        self.git_diff_cache.clear();
+        self.gutter_done = None;
         self.review_file = None;
         self.reset_terminal_sessions(hwnd);
         self.welcome = false;
@@ -119,6 +142,7 @@ impl App {
         }
         self.load_directory(&root);
         workflow::remember_workspace(&root);
+        self.refresh_git(hwnd);
         self.recent = workflow::recent_workspaces();
         self.status = format!(
             "Workspace: {}",

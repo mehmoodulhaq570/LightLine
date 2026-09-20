@@ -669,9 +669,137 @@ impl App {
         }
     }
 
+    pub(super) fn is_prettier_supported(path: Option<&std::path::Path>) -> bool {
+        let Some(path) = path else { return false };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        matches!(
+            ext.as_str(),
+            "js" | "mjs" | "cjs" | "jsx"
+                | "ts" | "mts" | "cts" | "tsx"
+                | "json"
+                | "css" | "scss" | "less"
+                | "html" | "htm"
+                | "md" | "markdown"
+                | "yaml" | "yml"
+                | "graphql" | "gql"
+                | "vue"
+        )
+    }
+
+    pub(super) fn format_with_prettier(&mut self, hwnd: HWND) {
+        if self.tab().read_only() {
+            return;
+        }
+        let code = self.doc().text();
+        if code.trim().is_empty() {
+            self.status = "Nothing to format".into();
+            self.refresh(hwnd);
+            return;
+        }
+        let filepath = self
+            .doc()
+            .path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "document.js".to_string());
+
+        #[cfg(windows)]
+        use std::os::windows::process::CommandExt;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child_res = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(&["/C", "prettier", "--stdin-filepath", &filepath]);
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000);
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+        };
+
+        if child_res.is_err() {
+            let mut cmd = Command::new("cmd");
+            cmd.args(&["/C", "npx", "--yes", "prettier", "--stdin-filepath", &filepath]);
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000);
+            child_res = cmd
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn();
+        }
+
+        let mut child = match child_res {
+            Ok(c) => c,
+            Err(e) => {
+                self.status = format!("Could not launch Prettier: {e}");
+                self.refresh(hwnd);
+                return;
+            }
+        };
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(code.as_bytes());
+        }
+
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                self.status = format!("Prettier failed: {e}");
+                self.refresh(hwnd);
+                return;
+            }
+        };
+
+        if output.status.success() {
+            let formatted = String::from_utf8_lossy(&output.stdout).to_string();
+            let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
+            let current_clean = code.replace("\r\n", "\n").replace('\r', "\n");
+            if formatted_clean == current_clean {
+                self.status = "Already formatted with Prettier".into();
+            } else {
+                let doc = self.doc();
+                let last_line = doc.line_count().saturating_sub(1);
+                let end = Pos {
+                    line: last_line,
+                    byte: doc.line(last_line).len(),
+                };
+                self.replace_range(Pos::default(), end, &formatted_clean);
+                self.status = "Document formatted with Prettier".into();
+            }
+        } else {
+            let err = String::from_utf8_lossy(&output.stderr);
+            let first_err = err
+                .lines()
+                .find(|l| l.contains("Error") || l.contains("SyntaxError"))
+                .unwrap_or("Prettier formatting error");
+            self.status = first_err.trim().to_string();
+        }
+        self.refresh(hwnd);
+    }
+
     pub(super) fn format_document(&mut self, hwnd: HWND) {
         let pane = self.focused_pane;
         let index = self.tab_for_pane(pane);
+        let path = self.tabs[index].document.path.clone();
+
+        if self.has_extension("prettier") && Self::is_prettier_supported(path.as_deref()) {
+            self.format_with_prettier(hwnd);
+            return;
+        }
+
+        if Self::is_prettier_supported(path.as_deref()) {
+            self.status = "Install Prettier extension to format this file (Ctrl+Shift+X)".into();
+            self.refresh(hwnd);
+            return;
+        }
+
         if !self.tabs[index].lsp_opened {
             self.ensure_lsp(hwnd);
         }

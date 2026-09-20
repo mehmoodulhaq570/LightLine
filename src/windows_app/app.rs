@@ -33,8 +33,28 @@ pub(super) struct TerminalPane {
 pub(super) enum WorkerMessage {
     Files(PathBuf, Vec<PathBuf>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
-    Changes(PathBuf, Result<Vec<Change>, String>),
+    // Generation guards the status request: only the newest answer may paint,
+    // because refreshes fire on activation, save and every completed action.
+    Repo(u64, Result<RepoState, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
+    GutterDiff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
+    GitWrite(GitAction, Result<(), String>),
+    ExtensionInstalled(String, bool),
+    DebugBuild(Result<PathBuf, String>),
+}
+
+// A pending source-control write. Each one runs on the shared worker channel
+// and re-reads the repository when it finishes, so the panel never drifts
+// ahead of what Git actually did.
+#[derive(Clone, Debug)]
+pub(super) enum GitAction {
+    Stage(Vec<PathBuf>),
+    Unstage(Vec<PathBuf>),
+    Discard {
+        paths: Vec<PathBuf>,
+        untracked: Vec<PathBuf>,
+    },
+    Commit,
 }
 
 #[derive(Clone, Default)]
@@ -73,6 +93,26 @@ fn tab_index_after_close(current: usize, closed: usize, remaining: usize) -> usi
     } else {
         current
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ExtensionsTab {
+    Marketplace,
+    Installed,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Extension {
+    pub(super) id: &'static str,
+    pub(super) name: &'static str,
+    pub(super) publisher: &'static str,
+    pub(super) version: &'static str,
+    pub(super) description: &'static str,
+    pub(super) downloads: &'static str,
+    #[allow(dead_code)]
+    pub(super) rating: &'static str,
+    pub(super) installed: bool,
+    pub(super) installing: bool,
 }
 
 pub(super) struct Tab {
@@ -285,6 +325,26 @@ pub(super) struct App {
     pub(super) changes: Vec<Change>,
     pub(super) review_loading: bool,
     pub(super) review_file: Option<PathBuf>,
+    // True while the open diff shows the staged side of a file.
+    pub(super) review_staged: bool,
+    // Repository top level, which sits above workspace_root when a subfolder
+    // was opened; every Git path is relative to it.
+    pub(super) git_root: Option<PathBuf>,
+    pub(super) git_busy: bool,
+    // Absolute path whose gutter diff is currently in flight.
+    pub(super) gutter_request: Option<PathBuf>,
+    // Absolute path whose gutter diff is already cached.
+    pub(super) gutter_done: Option<PathBuf>,
+    pub(super) git_generation: u64,
+    pub(super) git_ahead: usize,
+    pub(super) git_behind: usize,
+    pub(super) git_conflicted: bool,
+    pub(super) commit_message: String,
+    pub(super) commit_focus: bool,
+    // Set when Commit staged everything first, so the commit follows the stage
+    // instead of racing it.
+    pub(super) commit_after_stage: bool,
+    pub(super) history: Vec<CommitEntry>,
     pub(super) diff_rows: Vec<DiffRow>,
     pub(super) diff_first: usize,
     pub(super) panel_first: usize,
@@ -314,6 +374,28 @@ pub(super) struct App {
     pub(super) watcher: Option<lightline::watcher::FileWatcher>,
     pub(super) settings: lightline::settings::Settings,
     pub(super) git_diff_cache: HashMap<PathBuf, (HashSet<usize>, HashSet<usize>)>,
+    pub(super) extensions: Vec<Extension>,
+    pub(super) extensions_tab: ExtensionsTab,
+    pub(super) extensions_query: String,
+    pub(super) extensions_search_active: bool,
+    pub(super) debug: Option<DebugClient>,
+    pub(super) debug_event_tx: Sender<DebugEvent>,
+    pub(super) debug_events: Receiver<DebugEvent>,
+    pub(super) debug_state: DebugState,
+    pub(super) debug_pending_root: Option<PathBuf>,
+    pub(super) debug_pending_breakpoints: Vec<(PathBuf, Vec<u32>)>,
+}
+
+// Everything the Debug side panel paints, kept separate from the live
+// `DebugClient` so it survives the moment a session ends (the last stop
+// stays visible, like VS Code, until the next run clears it).
+#[derive(Default)]
+pub(super) struct DebugState {
+    pub(super) status: String,
+    pub(super) running: bool,
+    pub(super) thread_id: i64,
+    pub(super) frames: Vec<DebugFrame>,
+    pub(super) scopes: Vec<DebugScope>,
 }
 
 // Records which pane/request an in-flight definition or format call belongs to
@@ -550,6 +632,7 @@ impl App {
         let line_height = Self::measured_line_height(font, dpi, zoom);
         let (worker_tx, worker_rx) = mpsc::channel();
         let (lsp_tx, lsp_rx) = mpsc::channel();
+        let (debug_tx, debug_rx) = mpsc::channel();
         Self {
             tabs: vec![Tab::new(Document::new())],
             active: 0,
@@ -630,6 +713,19 @@ impl App {
             changes: Vec::new(),
             review_loading: false,
             review_file: None,
+            review_staged: false,
+            git_root: None,
+            git_busy: false,
+            gutter_request: None,
+            gutter_done: None,
+            git_generation: 0,
+            git_ahead: 0,
+            git_behind: 0,
+            git_conflicted: false,
+            commit_message: String::new(),
+            commit_focus: false,
+            commit_after_stage: false,
+            history: Vec::new(),
             diff_rows: Vec::new(),
             diff_first: 0,
             panel_first: 0,
@@ -657,6 +753,130 @@ impl App {
             watcher: Some(lightline::watcher::FileWatcher::start()),
             settings: lightline::settings::Settings::load(),
             git_diff_cache: HashMap::new(),
+            extensions: vec![
+                Extension {
+                    id: "prettier",
+                    name: "Prettier - Code formatter",
+                    publisher: "esbenp",
+                    version: "v3.4.2",
+                    description: "Code formatter using prettier for JS, TS, HTML, CSS",
+                    downloads: "42.8M",
+                    rating: "★ 4.8",
+                    installed: false,
+                    installing: false,
+                },
+                Extension {
+                    id: "material-icons",
+                    name: "Material Icon Theme",
+                    publisher: "Philipp Kief",
+                    version: "v5.1.0",
+                    description: "Material Design file & folder icons for LightLine",
+                    downloads: "24.1M",
+                    rating: "★ 4.9",
+                    installed: true,
+                    installing: false,
+                },
+            ],
+            extensions_tab: ExtensionsTab::Marketplace,
+            extensions_query: String::new(),
+            debug: None,
+            debug_event_tx: debug_tx,
+            debug_events: debug_rx,
+            debug_state: DebugState {
+                status: "Not running".into(),
+                ..Default::default()
+            },
+            debug_pending_root: None,
+            debug_pending_breakpoints: Vec::new(),
+            extensions_search_active: false,
+        }
+    }
+
+    pub(super) fn has_extension(&self, id: &str) -> bool {
+        self.extensions
+            .iter()
+            .any(|ext| ext.id == id && ext.installed)
+    }
+
+    pub(super) fn filtered_extensions(&self) -> Vec<&Extension> {
+        let q = self.extensions_query.trim().to_lowercase();
+        self.extensions
+            .iter()
+            .filter(|ext| {
+                if self.extensions_tab == ExtensionsTab::Installed && !ext.installed {
+                    return false;
+                }
+                if !q.is_empty() {
+                    ext.name.to_lowercase().contains(&q)
+                        || ext.description.to_lowercase().contains(&q)
+                        || ext.publisher.to_lowercase().contains(&q)
+                } else {
+                    true
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn toggle_extension(&mut self, hwnd: HWND, id: &str) {
+        let Some(idx) = self.extensions.iter().position(|e| e.id == id) else {
+            return;
+        };
+        if self.extensions[idx].installing {
+            return;
+        }
+        if id == "material-icons" {
+            self.extensions[idx].installed = !self.extensions[idx].installed;
+            let installed = self.extensions[idx].installed;
+            self.status = if installed {
+                "Material Icon Theme activated".into()
+            } else {
+                "Material Icon Theme deactivated".into()
+            };
+            self.refresh(hwnd);
+            return;
+        }
+        if id == "prettier" {
+            if !self.extensions[idx].installed {
+                self.extensions[idx].installing = true;
+                self.status = "Installing Prettier via npm...".into();
+                let tx = self.worker_tx.clone();
+                self.worker_started(hwnd);
+                std::thread::spawn(move || {
+                    #[cfg(windows)]
+                    use std::os::windows::process::CommandExt;
+                    let mut cmd = std::process::Command::new("cmd");
+                    cmd.args(&["/C", "npm", "install", "-g", "prettier"]);
+                    #[cfg(windows)]
+                    cmd.creation_flags(0x08000000);
+                    let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+                    let final_ok = if ok {
+                        true
+                    } else {
+                        let mut check = std::process::Command::new("cmd");
+                        check.args(&["/C", "npx", "--yes", "prettier", "--version"]);
+                        #[cfg(windows)]
+                        check.creation_flags(0x08000000);
+                        check.status().map(|s| s.success()).unwrap_or(false)
+                    };
+                    let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), final_ok));
+                });
+            } else {
+                self.extensions[idx].installing = true;
+                self.status = "Uninstalling Prettier...".into();
+                let tx = self.worker_tx.clone();
+                self.worker_started(hwnd);
+                std::thread::spawn(move || {
+                    #[cfg(windows)]
+                    use std::os::windows::process::CommandExt;
+                    let mut cmd = std::process::Command::new("cmd");
+                    cmd.args(&["/C", "npm", "uninstall", "-g", "prettier"]);
+                    #[cfg(windows)]
+                    cmd.creation_flags(0x08000000);
+                    let _ = cmd.status();
+                    let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), false));
+                });
+            }
+            self.refresh(hwnd);
         }
     }
 
@@ -853,6 +1073,8 @@ impl App {
         if self.side_view == SideView::Search && view != SideView::Search {
             self.cancel_search();
         }
+        // The commit box only exists in the source control view.
+        self.commit_focus = false;
         if self.side_view == view && self.explorer_visible {
             self.set_sidebar_visible(hwnd, false);
         } else {
@@ -982,7 +1204,7 @@ impl App {
         self.update_scrollbar(hwnd);
         self.advance_syntax(hwnd);
         self.ensure_lsp(hwnd);
-        self.refresh_active_git_diff();
+        self.refresh_active_git_diff(hwnd);
         unsafe {
             InvalidateRect(hwnd, null(), 0);
         }
@@ -1502,14 +1724,53 @@ impl App {
         }
     }
 
-    pub(super) fn refresh_active_git_diff(&mut self) {
-        let Some(root) = self.workspace_root.as_ref() else { return; };
-        let Some(path) = self.doc().path.as_ref() else { return; };
-        let Ok(rel_path) = path.strip_prefix(root) else { return; };
-        let Ok(diff_rows) = workflow::git_diff(root, rel_path) else { return; };
+    /// Gutter change marks for the visible file, read with `git diff HEAD`.
+    /// This runs on the worker channel: doing it inline spawned two Git
+    /// processes per repaint, and repaints follow every keystroke.
+    pub(super) fn refresh_active_git_diff(&mut self, hwnd: HWND) {
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
+            return;
+        };
+        let Some(relative) = path.strip_prefix(&root).ok().map(Path::to_path_buf).or_else(|| {
+            self.workspace_root
+                .as_ref()
+                .and_then(|folder| path.strip_prefix(folder).ok().map(|rest| rest.to_path_buf()))
+        }) else {
+            return;
+        };
+        // Gutter marks compare the file on disk with HEAD, so unsaved edits do
+        // not change them: one read per file until it is saved or the
+        // repository moves. Drop `gutter_done` to ask again.
+        if self.gutter_done.as_deref() == Some(path.as_path()) {
+            return;
+        }
+        if self.gutter_request.as_ref() == Some(&path) {
+            return;
+        }
+        self.gutter_request = Some(path.clone());
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        std::thread::spawn(move || {
+            let result = workflow::git_diff(&root, &relative, DiffScope::Head);
+            let _ = tx.send(WorkerMessage::GutterDiff(path, relative, result));
+        });
+    }
+
+    pub(super) fn gutter_diff_finished(&mut self, path: &Path, result: Result<Vec<DiffRow>, String>) {
+        if self.gutter_request.as_deref() != Some(path) {
+            return;
+        }
+        self.gutter_request = None;
+        self.gutter_done = Some(path.to_path_buf());
+        let Ok(rows) = result else {
+            return;
+        };
         let mut added = HashSet::new();
         let mut modified = HashSet::new();
-        for row in diff_rows {
+        for row in rows {
             if row.changed && let Some(line) = row.after_number {
                 if row.before_number.is_none() {
                     added.insert(line.saturating_sub(1));
@@ -1518,7 +1779,7 @@ impl App {
                 }
             }
         }
-        self.git_diff_cache.insert(path.clone(), (added, modified));
+        self.git_diff_cache.insert(path.to_path_buf(), (added, modified));
     }
 
     pub(super) fn error(&mut self, hwnd: HWND, error: &impl std::fmt::Display) {
@@ -1613,7 +1874,11 @@ impl App {
                     "Saved {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 );
-                self.refresh_active_git_diff();
+                self.gutter_done = None;
+                self.refresh_active_git_diff(hwnd);
+                // A save is the moment a change appears or disappears, so the
+                // panel and the branch chip ask Git again rather than guessing.
+                self.refresh_git(hwnd);
                 self.refresh(hwnd);
                 true
             }
@@ -1715,7 +1980,8 @@ impl App {
                 if let Some(watcher) = &self.watcher {
                     watcher.watch_file(path.clone());
                 }
-                self.refresh_active_git_diff();
+                self.gutter_done = None;
+                self.refresh_active_git_diff(hwnd);
                 self.save_session();
             }
             Err(error) => self.error(hwnd, &error),
@@ -1794,5 +2060,59 @@ mod split_tests {
         }
         assert_eq!(count, 3);
         assert_eq!(doc.line(0), "hi world hi rust hi");
+    }
+
+    #[test]
+    fn extensions_initial_list_and_toggle() {
+        let mut extensions = vec![
+            Extension {
+                id: "prettier",
+                name: "Prettier - Code formatter",
+                publisher: "esbenp",
+                version: "v3.4.2",
+                description: "Code formatter using prettier for JS, TS, HTML, CSS",
+                downloads: "42.8M",
+                rating: "★ 4.8",
+                installed: false,
+                installing: false,
+            },
+            Extension {
+                id: "material-icons",
+                name: "Material Icon Theme",
+                publisher: "Philipp Kief",
+                version: "v5.1.0",
+                description: "Material Design file & folder icons for LightLine",
+                downloads: "24.1M",
+                rating: "★ 4.9",
+                installed: true,
+                installing: false,
+            },
+        ];
+        assert_eq!(extensions.len(), 2);
+        assert_eq!(extensions[0].name, "Prettier - Code formatter");
+        assert!(!extensions[0].installed);
+        assert_eq!(extensions[1].name, "Material Icon Theme");
+        assert!(extensions[1].installed);
+
+        // Toggle install
+        extensions[0].installed = !extensions[0].installed;
+        assert!(extensions[0].installed);
+        extensions[0].installed = !extensions[0].installed;
+        assert!(!extensions[0].installed);
+    }
+
+    #[test]
+    fn prettier_supported_extensions() {
+        use std::path::Path;
+        assert!(App::is_prettier_supported(Some(Path::new("app.js"))));
+        assert!(App::is_prettier_supported(Some(Path::new("index.ts"))));
+        assert!(App::is_prettier_supported(Some(Path::new("package.json"))));
+        assert!(App::is_prettier_supported(Some(Path::new("style.css"))));
+        assert!(App::is_prettier_supported(Some(Path::new("index.html"))));
+        assert!(App::is_prettier_supported(Some(Path::new("README.md"))));
+        assert!(App::is_prettier_supported(Some(Path::new("config.yaml"))));
+        assert!(!App::is_prettier_supported(Some(Path::new("main.rs"))));
+        assert!(!App::is_prettier_supported(Some(Path::new("script.py"))));
+        assert!(!App::is_prettier_supported(None));
     }
 }

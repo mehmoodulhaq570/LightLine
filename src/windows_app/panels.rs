@@ -266,11 +266,11 @@ impl App {
     }
 
     pub(super) fn show_review(&mut self, hwnd: HWND) {
-        let Some(root) = self.workspace_root.clone() else {
+        if self.workspace_root.is_none() {
             self.status = "Open a Git workspace to review changes".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
-        };
+        }
         self.welcome = false;
         self.cancel_search();
         self.search_input = false;
@@ -281,29 +281,24 @@ impl App {
         self.panel_focus = true;
         self.panel_selected = 0;
         self.panel_first = 0;
-        self.status = "Loading Git changes...".into();
-        self.review_loading = true;
-        let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
-        std::thread::spawn(move || {
-            let result = workflow::git_changes(&root);
-            let _ = tx.send(WorkerMessage::Changes(root, result));
-        });
+        self.refresh_git(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
-    pub(super) fn show_diff(&mut self, hwnd: HWND, path: PathBuf) {
-        let Some(root) = self.workspace_root.clone() else {
+    pub(super) fn show_diff(&mut self, hwnd: HWND, path: PathBuf, staged: bool) {
+        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
             return;
         };
+        self.review_staged = staged;
         self.review_file = Some(path.clone());
         self.diff_rows.clear();
         self.diff_first = 0;
         self.status = format!("Reviewing {}", path.display());
+        let scope = App::git_diff_scope(staged);
         let tx = self.worker_tx.clone();
         self.worker_started(hwnd);
         std::thread::spawn(move || {
-            let result = workflow::git_diff(&root, &path);
+            let result = workflow::git_diff(&root, &path, scope);
             let _ = tx.send(WorkerMessage::Diff(root, path, result));
         });
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -333,26 +328,43 @@ impl App {
                     self.status = format!("{} results for {}", hits.len(), query);
                     self.search_results = hits;
                 }
-                WorkerMessage::Changes(root, result)
-                    if self.workspace_root.as_ref() == Some(&root) =>
-                {
-                    self.review_loading = false;
-                    match result {
-                        Ok(changes) => {
-                            self.status = format!("{} changed files", changes.len());
-                            self.changes = changes;
+                WorkerMessage::Repo(generation, result) => {
+                    if generation == self.git_generation {
+                        self.review_loading = false;
+                        match result {
+                            Ok(state) => self.apply_repo_state(hwnd, state),
+                            Err(error) => self.status = error,
                         }
-                        Err(error) => self.status = error,
                     }
                 }
+                WorkerMessage::GitWrite(action, result) => {
+                    self.git_write_finished(hwnd, &action, result);
+                }
+                WorkerMessage::GutterDiff(_root, path, result) => {
+                    self.gutter_diff_finished(&path, result);
+                }
                 WorkerMessage::Diff(root, path, result)
-                    if self.workspace_root.as_ref() == Some(&root)
+                    if self.git_root.as_ref() == Some(&root)
                         && self.review_file.as_ref() == Some(&path) =>
                 {
                     match result {
                         Ok(rows) => self.diff_rows = rows,
                         Err(error) => self.status = error,
                     }
+                }
+                WorkerMessage::ExtensionInstalled(id, success) => {
+                    if let Some(ext) = self.extensions.iter_mut().find(|e| e.id == id) {
+                        ext.installing = false;
+                        ext.installed = success;
+                        self.status = if success {
+                            format!("{} installed successfully! Ready to format code.", ext.name)
+                        } else {
+                            format!("Failed to install {}", ext.name)
+                        };
+                    }
+                }
+                WorkerMessage::DebugBuild(result) => {
+                    self.debug_build_finished(hwnd, result);
                 }
                 _ => {}
             }

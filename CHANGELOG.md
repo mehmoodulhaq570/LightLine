@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Real Source Control**: The Git panel now stages (`git add`), unstages (`git restore --staged`), discards (`git restore`, `git clean -f` behind a native confirmation that names the file) and commits (`git commit`) instead of only listing changes. A commit message box sits above the change list; with nothing staged, committing offers to stage every change first.
+- **Staged and Changes Sections**: Status now comes from `git status --branch --porcelain=v2`, so the list splits into what will be committed and what will not, keeps both paths of a rename, marks conflicts, and shows a file that is partly staged in both sections.
+- **Status Words**: Rows read `Modified`, `Added`, `Deleted`, `Renamed`, `Conflicted` or `Untracked` instead of raw two-character plumbing codes, and the branch chip carries `↑n`/`↓n` ahead-and-behind counts from the `## branch...remote` record.
+- **Sync Commands**: Push, Pull (`--ff-only`) and Fetch (`--all`) buttons run in the terminal panel, so Git's own output and any Git Credential Manager prompt stay visible and no credentials are ever handled in-process.
+- **Diff Navigation**: Clicking a line in the side-by-side diff opens that file in the editor at the clicked line.
+
+### Fixed
+- **Branch Detection Beyond `.git/HEAD`**: The checked-out commit is resolved through Git (`symbolic-ref`, falling back to `rev-parse --short HEAD`) and the repository top level through `git rev-parse --show-toplevel`, so linked worktrees, submodules, detached HEAD and workspaces opened on a subfolder of a repository report correctly.
+- **Git Off The UI Thread**: Per-file gutter diffs no longer run inside `refresh()`, which had been spawning two Git processes after every repaint. Status, diff and history all arrive on the worker channel behind a generation counter, so a stale answer can never overwrite a newer one.
+- **Refresh On Real Triggers**: The panel and branch chip update on workspace change, on save, when the window regains focus and after every completed write, rather than only when the panel is opened.
+- **Serialised Writes**: One Git command may be in flight at a time; while it runs the row and commit buttons are drawn dimmed and further writes are refused instead of deadlocking on the index lock.
+
+---
+
 ## [v0.1.0] - 2026-09-20 — Initial Release
 
 This is the initial tagged and packaged public release of LightLine for Windows.

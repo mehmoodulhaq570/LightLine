@@ -2,12 +2,15 @@ mod app;
 mod binary_view;
 mod dialog;
 mod file_dialog;
+mod git;
 mod image_view;
 mod panels;
 mod session;
 mod terminal;
 mod workspace;
-use app::{App, EditorView, ExplorerEntry, ExplorerRow, SideView, Tab, TerminalPane, TerminalTab, WorkerMessage};
+use app::{App, EditorView, ExplorerEntry, ExplorerRow, ExtensionsTab, GitAction, SideView, Tab, TerminalPane, TerminalTab, WorkerMessage};
+mod debugger;
+use debugger::DEBUG_EVENT_MESSAGE;
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;
@@ -21,6 +24,10 @@ mod icons;
 
 use icons::{AppIcons, IconSet, material_icon_for};
 use lightline::clipboard;
+use lightline::debug::{
+    Command as DebugCommand, DebugClient, Event as DebugEvent, Scope as DebugScope,
+    StackFrame as DebugFrame,
+};
 use lightline::document::{Document, Pos};
 use lightline::lsp::{
     self, Client as LspClient, CompletionItem as LspCompletionItem, Diagnostic as LspDiagnostic,
@@ -32,7 +39,7 @@ use lightline::terminal::{
     Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, Snapshot, TerminalService,
     TerminalSize,
 };
-use lightline::workflow::{self, Change, DiffRow, SearchHit};
+pub use lightline::workflow::{self, Change, CommitEntry, DiffRow, DiffScope, RepoState, SearchHit};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;

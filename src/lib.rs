@@ -1,5 +1,6 @@
 #[cfg(windows)]
 pub mod clipboard;
+pub mod debug;
 pub mod document;
 pub mod lsp;
 pub mod settings;

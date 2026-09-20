@@ -1,5 +1,6 @@
-use super::*;
+use super::git::GitHit;
 use super::terminal::TerminalHeaderHit;
+use super::*;
 
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
@@ -108,6 +109,84 @@ impl App {
                 return true;
             }
         }
+        if self.side_view == SideView::Extensions && self.extensions_search_active {
+            match key {
+                x if x == VK_ESCAPE as u32 => {
+                    self.extensions_query.clear();
+                    self.extensions_search_active = false;
+                    self.panel_focus = false;
+                }
+                x if x == VK_RETURN as u32 => {
+                    self.extensions_search_active = false;
+                }
+                x if x == VK_BACK as u32 => {
+                    self.extensions_query.pop();
+                }
+                _ if !ctrl => return false,
+                _ => {}
+            }
+            if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+            }
+        }
+        // The commit message box borrows the same single-line text handling as
+        // the search box: keys here edit a string, they never touch a document.
+        if self.commit_focus && self.side_view == SideView::Review {
+            match key {
+                x if x == VK_ESCAPE as u32 => {
+                    self.commit_focus = false;
+                    self.panel_focus = true;
+                }
+                x if x == VK_RETURN as u32 => {
+                    self.commit_focus = false;
+                    self.panel_focus = true;
+                    self.git_commit_pressed(hwnd);
+                }
+                x if x == VK_BACK as u32 => {
+                    self.commit_message.pop();
+                }
+                _ if !ctrl => return false,
+                _ => {}
+            }
+            if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+            }
+        }
+        if self.panel_focus
+            && !ctrl
+            && self.side_view == SideView::Review
+            && !self.commit_focus
+        {
+            // The list mixes section titles with rows, so navigation has to
+            // step over the ones that cannot be opened.
+            let index = self.panel_selected;
+            match key {
+                x if x == VK_UP as u32 => {
+                    self.git_move_selection(hwnd, -1);
+                    return true;
+                }
+                x if x == VK_DOWN as u32 => {
+                    self.git_move_selection(hwnd, 1);
+                    return true;
+                }
+                x if x == VK_RETURN as u32 => {
+                    // Handing the keyboard to the diff lets Up/Down scroll it,
+                    // which is what opening a row was for.
+                    self.panel_focus = false;
+                    self.git_activate_row(hwnd, index);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                x if x == VK_SPACE as u32 => {
+                    self.git_toggle_row(hwnd, index);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if self.panel_focus && !ctrl {
             let count = if self.side_view == SideView::Search {
                 self.search_results.len()
@@ -137,7 +216,7 @@ impl App {
                         }
                     } else if let Some(change) = self.changes.get(self.panel_selected).cloned() {
                         self.panel_focus = false;
-                        self.show_diff(hwnd, change.path);
+                        self.show_diff(hwnd, change.path, change.staged);
                     }
                     return true;
                 }
@@ -209,6 +288,31 @@ impl App {
                     return true;
                 }
                 x if x == VK_BACK as u32 => return true,
+                _ => {}
+            }
+        }
+        if !ctrl {
+            match key {
+                x if x == VK_F5 as u32 && shift => {
+                    self.debug_stop(hwnd);
+                    return true;
+                }
+                x if x == VK_F5 as u32 => {
+                    self.debug_continue(hwnd);
+                    return true;
+                }
+                x if x == VK_F10 as u32 => {
+                    self.debug_step_over(hwnd);
+                    return true;
+                }
+                x if x == VK_F11 as u32 && shift => {
+                    self.debug_step_out(hwnd);
+                    return true;
+                }
+                x if x == VK_F11 as u32 => {
+                    self.debug_step_in(hwnd);
+                    return true;
+                }
                 _ => {}
             }
         }
@@ -637,7 +741,15 @@ impl App {
             }
             return;
         }
-        if self.quick_open || self.search_input {
+        if self.commit_focus && self.side_view == SideView::Review {
+            // Control characters arrive through key(); only real text lands here.
+            if unit >= 32 && unit != 127 && let Some(ch) = char::from_u32(unit as u32) {
+                self.commit_message.push(ch);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            return;
+        }
+        if self.quick_open || self.search_input || (self.side_view == SideView::Extensions && self.extensions_search_active) {
             if unit >= 32
                 && unit != 127
                 && let Some(ch) = char::from_u32(unit as u32)
@@ -645,9 +757,11 @@ impl App {
                 if self.quick_open {
                     self.quick_query.push(ch);
                     self.quick_selected = 0;
-                } else {
+                } else if self.search_input {
                     self.project_query.push(ch);
                     self.search_results.clear();
+                } else {
+                    self.extensions_query.push(ch);
                 }
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
@@ -780,6 +894,17 @@ impl App {
         }
     }
 
+    // Clicking the gutter toggles a breakpoint on that line instead of moving
+    // the caret; debugging is keyed off document state, not editor selection.
+    fn toggle_breakpoint_at(&mut self, hwnd: HWND, pane: usize, y: i32) {
+        let tab_index = self.tab_for_pane(pane);
+        let view = self.view_for_pane(pane);
+        let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
+        let line = (view.first_line + row).min(self.tabs[tab_index].document.line_count() - 1);
+        self.tabs[tab_index].document.toggle_breakpoint(line);
+        self.refresh(hwnd);
+    }
+
     pub(super) fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
         self.position_at_pane(hwnd, x, y, self.focused_pane)
     }
@@ -845,7 +970,10 @@ impl App {
                 }
             }
             WelcomeAction::Extensions => {
-                self.status = "Extensions are planned for a later release".into();
+                self.welcome = false;
+                self.set_sidebar_visible(hwnd, true);
+                self.side_view = SideView::Extensions;
+                self.status = "Extensions".into();
                 self.refresh(hwnd);
             }
             WelcomeAction::AiAssistant => {
@@ -1014,12 +1142,119 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Review {
-                if y >= self.scale(86) {
-                    let index = self.panel_first
-                        + ((y - self.scale(86)) / self.scale(EXPLORER_ROW).max(1)) as usize;
-                    if let Some(change) = self.changes.get(index).cloned() {
-                        self.panel_focus = false;
-                        self.show_diff(hwnd, change.path);
+                let panel_left = self.scale(RAIL);
+                match self.git_hit(x, y, panel_left, editor_left) {
+                    GitHit::CommitBox => {
+                        self.commit_focus = true;
+                        self.panel_focus = true;
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                    hit => {
+                        // Anywhere else takes the keyboard away from the box.
+                        self.commit_focus = false;
+                        match hit {
+                            GitHit::CommitButton => self.git_commit_pressed(hwnd),
+                            GitHit::Refresh => self.refresh_git(hwnd),
+                            GitHit::Push => self.git_remote(hwnd, workflow::RemoteAction::Push),
+                            GitHit::Pull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
+                            GitHit::Fetch => {
+                                self.git_remote(hwnd, workflow::RemoteAction::Fetch)
+                            }
+                            GitHit::StageAll => self.git_stage_all(hwnd),
+                            GitHit::UnstageAll => self.git_unstage_all(hwnd),
+                            GitHit::Toggle(index) => self.git_toggle_row(hwnd, index),
+                            GitHit::Discard(index) => self.git_discard_row(hwnd, index),
+                            GitHit::Row(index) => {
+                                self.panel_selected = index;
+                                self.panel_focus = false;
+                                self.git_activate_row(hwnd, index);
+                            }
+                            _ => {}
+                        }
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                }
+                return;
+            }
+            if self.side_view == SideView::Debug {
+                let rail = self.scale(RAIL);
+                if y >= self.scale(47) && y <= self.scale(75) {
+                    for index in 0..4 {
+                        let rect = self.debug_toolbar_button(rail, editor_left, index);
+                        if x >= rect.left && x < rect.right {
+                            match index {
+                                0 => self.debug_continue(hwnd),
+                                1 => self.debug_step_over(hwnd),
+                                2 => self.debug_step_in(hwnd),
+                                _ => self.debug_stop(hwnd),
+                            }
+                            return;
+                        }
+                    }
+                }
+                return;
+            }
+            if self.side_view == SideView::Extensions {
+                let s = |v: i32| self.scale(v);
+                let rail = self.scale(RAIL);
+                let left = rail;
+
+                // 1. Search bar click
+                if y >= s(46) && y <= s(76) {
+                    let search_right = editor_left - s(8);
+                    // Clear button click
+                    if !self.extensions_query.is_empty() && x >= search_right - s(30) && x <= search_right {
+                        self.extensions_query.clear();
+                        self.refresh(hwnd);
+                        return;
+                    }
+                    self.extensions_search_active = true;
+                    self.search_input = false;
+                    self.panel_focus = true;
+                    self.refresh(hwnd);
+                    return;
+                }
+
+                // 2. Subtabs click (Segmented Pill Capsule)
+                if y >= s(84) && y <= s(110) {
+                    let tabs_left = left + s(8);
+                    let tabs_right = editor_left - s(8);
+                    let half_w = (tabs_right - tabs_left) / 2;
+                    if x >= tabs_left && x < tabs_left + half_w {
+                        self.extensions_tab = ExtensionsTab::Marketplace;
+                        self.refresh(hwnd);
+                        return;
+                    }
+                    if x >= tabs_left + half_w && x <= tabs_right {
+                        self.extensions_tab = ExtensionsTab::Installed;
+                        self.refresh(hwnd);
+                        return;
+                    }
+                }
+
+                // 3. Card action button click
+                let card_h = s(86);
+                let card_step = card_h + s(8);
+                let start_y = s(136);
+                let visible = self.filtered_extensions();
+                if y >= start_y {
+                    let row = ((y - start_y) / card_step.max(1)) as usize;
+                    if row < visible.len() {
+                        let ey = start_y + row as i32 * card_step;
+                        let card_right = editor_left - s(8);
+                        let btn_w = s(76);
+                        let btn_h = s(22);
+                        let btn_left = card_right - btn_w - s(8);
+                        let btn_right = card_right - s(8);
+                        let btn_top = ey + s(51);
+                        let btn_bottom = btn_top + btn_h;
+
+                        // Generous hit box around the button
+                        if x >= btn_left - s(8) && x <= btn_right + s(8) && y >= btn_top - s(6) && y <= btn_bottom + s(8) {
+                            let id = visible[row].id.to_string();
+                            self.toggle_extension(hwnd, &id);
+                            return;
+                        }
                     }
                 }
                 return;
@@ -1086,6 +1321,9 @@ impl App {
             && self.review_file.is_some()
             && y >= self.editor_top()
         {
+            // The two panes mirror a file that is also open in the editor, so a
+            // click jumps to the line under the pointer instead of doing nothing.
+            self.open_diff_line(hwnd, y);
             return;
         }
         if self.split_visible
@@ -1141,6 +1379,11 @@ impl App {
         if self.split_visible {
             let pane = usize::from(x >= self.pane_divider(hwnd));
             self.focus_pane(hwnd, pane);
+        }
+        let pane = self.focused_pane;
+        if x < self.pane_left(hwnd, pane) + self.scale(GUTTER) {
+            self.toggle_breakpoint_at(hwnd, pane, y);
+            return;
         }
         let pos = self.position_at(hwnd, x, y);
         self.panel_focus = false;

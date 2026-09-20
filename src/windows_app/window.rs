@@ -92,6 +92,9 @@ unsafe extern "system" fn wnd_proc(
             }
             app.invalidate_caret(hwnd);
             app.poll_watcher(hwnd);
+            // Coming back to the window is when an outside commit, pull or
+            // branch switch is most likely to have happened.
+            app.refresh_git(hwnd);
             0
         }
         WM_KILLFOCUS => {
@@ -142,6 +145,10 @@ unsafe extern "system" fn wnd_proc(
         }
         TERMINAL_EVENT_MESSAGE => {
             app.poll_terminal(hwnd);
+            0
+        }
+        DEBUG_EVENT_MESSAGE => {
+            app.poll_debug(hwnd);
             0
         }
         WM_SETCURSOR if (lparam as u32 & 0xffff) == HTCLIENT => {
@@ -277,18 +284,22 @@ unsafe extern "system" fn wnd_proc(
                     return 0;
                 }
                 if app.side_view != SideView::Files {
-                    let count = if app.side_view == SideView::Search {
-                        app.search_results.len()
-                    } else {
-                        app.changes.len()
+                    // Every list scrolls by whole rows, and the source control
+                    // list mixes headers, files and commits, so its bound and
+                    // its page size come from the row model itself.
+                    let (count, visible) = match app.side_view {
+                        SideView::Search => (
+                            app.search_results.len(),
+                            ((rect.bottom - app.scale(STATUS + 113)) / app.scale(48).max(1))
+                                .max(1) as usize,
+                        ),
+                        SideView::Review => (app.git_rows().len(), app.git_visible_rows(hwnd)),
+                        _ => (
+                            app.changes.len(),
+                            ((rect.bottom - app.scale(STATUS + 113)) / app.scale(EXPLORER_ROW).max(1))
+                                .max(1) as usize,
+                        ),
                     };
-                    let rows = if app.side_view == SideView::Search {
-                        48
-                    } else {
-                        EXPLORER_ROW
-                    };
-                    let visible = ((rect.bottom - app.scale(STATUS + 113)) / app.scale(rows).max(1))
-                        .max(1) as usize;
                     let max = count.saturating_sub(visible);
                     app.panel_first = if delta > 0 {
                         app.panel_first.saturating_sub(3)
