@@ -29,6 +29,8 @@
 - 💻 **Multi-Session Terminal**: Persistent ConPTY terminal with multiple tabs and full VT100/ANSI support, cleanly separated from the read-only build/run **Output** stream.
 - 🗂️ **Workspaces & Project Drawer**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation.
 - 🌿 **Source Control**: Stage, commit and discard from the sidebar (`Ctrl+Shift+G`). Separate Staged and Changes lists, word status labels, ahead/behind branch chip, side-by-side diff review that jumps into the file, recent commit history, and Push/Pull/Fetch handed to Git Credential Manager.
+- 🐞 **Interactive Debugger**: Built-in Debug Adapter Protocol (DAP) client communicating with `lldb-dap`. Single-key build and launch (`F5`), editor gutter breakpoints, stepping (`F10`, `F11`, `Shift+F11`), variable scope trees (locals, registers), and call stack navigation.
+- 🧩 **Extensions View & Capabilities**: Modernized activity rail view (`Ctrl+Shift+X`) displaying rich extension cards, download metrics, ratings, install states, and a workflow tooling showcase.
 - ⚙️ **User Configuration**: JSON-backed settings at `%APPDATA%\LightLine\settings.json` (`Ctrl+,`) for fonts, indentation, themes, and behavior.
 - 💾 **Session Restore**: Automatically reopens your last workspace, tabs, cursor positions, and scroll offsets on launch.
 
@@ -63,10 +65,16 @@ cargo run --release
 | `Ctrl+\` | Split editor vertically / Unsplit |
 | `Ctrl+1` / `Ctrl+2` | Focus left or right split pane |
 | `Ctrl+B` | Toggle sidebar (Explorer, Search, Git, Debug, Extensions) |
+| `Ctrl+Shift+D` | Toggle **Run & Debug** panel |
+| `Ctrl+Shift+X` | Toggle **Extensions** panel |
 | `Ctrl+F` | Find in current file (`F3` / `Shift+F3` next / previous) |
 | `Ctrl+Shift+F` | Search across workspace files |
 | `Ctrl+Shift+G` | **Source Control**: stage, commit, diff review |
 | `↑` / `↓` / `Enter` / `Space` | In the source control list: move, open diff, stage or unstage |
+| `F5` / `Shift+F5` | Debug: Start & Continue / Stop session |
+| `F10` | Debug: Step Over |
+| `F11` / `Shift+F11` | Debug: Step Into / Step Out |
+| Gutter Click | Toggle line breakpoint (red gutter dot) |
 | `Ctrl+Shift+R` | Run active Python file |
 | `Ctrl+Shift+B` | Run Rust tests (`cargo test`) |
 | `Ctrl+\`` | Toggle terminal panel |
@@ -105,12 +113,13 @@ Open settings with **`Ctrl+,`** or run **`>Open Settings (JSON)`** from `Ctrl+P`
 
 ---
 
-## Language Support Requirements
+## Language & Debugger Requirements
 
 - **Rust**: For language intelligence, install components with:
   ```powershell
   rustup component add rust-analyzer rust-src
   ```
+- **Debugger (LLDB)**: For native Rust debugging via DAP (`F5`), ensure `lldb-dap` (bundled with LLVM or Visual Studio C++ Build Tools) is present on your system `PATH`.
 - **Python**: For Python diagnostics and hover, install Node.js once (e.g. `winget install OpenJS.NodeJS.LTS`). LightLine automatically downloads and manages Pyright into `%APPDATA%\LightLine\pyright`.
 
 ---

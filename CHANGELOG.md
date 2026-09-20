@@ -10,17 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Interactive DAP Debugger**: Integrated native Debug Adapter Protocol (DAP) client communicating with `lldb-dap`. Supports one-click build and debug launch (`F5`), execution stepping (`F10` Step Over, `F11` Step Into, `Shift+F11` Step Out), session stop (`Shift+F5`), and restart.
+- **Variables & Call Stack Inspection**: Added real-time scopes inspector (Locals, Arguments, Registers) with expandable variable trees and values, along with multi-threaded call stack inspection that jumps directly to source lines on click.
+- **Gutter Breakpoints**: Click any line number in the editor gutter to toggle visual red breakpoint indicators. Breakpoints automatically shift and persist when lines are inserted or deleted during editing.
 - **Real Source Control**: The Git panel now stages (`git add`), unstages (`git restore --staged`), discards (`git restore`, `git clean -f` behind a native confirmation that names the file) and commits (`git commit`) instead of only listing changes. A commit message box sits above the change list; with nothing staged, committing offers to stage every change first.
 - **Staged and Changes Sections**: Status now comes from `git status --branch --porcelain=v2`, so the list splits into what will be committed and what will not, keeps both paths of a rename, marks conflicts, and shows a file that is partly staged in both sections.
 - **Status Words**: Rows read `Modified`, `Added`, `Deleted`, `Renamed`, `Conflicted` or `Untracked` instead of raw two-character plumbing codes, and the branch chip carries `↑n`/`↓n` ahead-and-behind counts from the `## branch...remote` record.
 - **Sync Commands**: Push, Pull (`--ff-only`) and Fetch (`--all`) buttons run in the terminal panel, so Git's own output and any Git Credential Manager prompt stay visible and no credentials are ever handled in-process.
 - **Diff Navigation**: Clicking a line in the side-by-side diff opens that file in the editor at the clicked line.
+- **Modernized Extensions Panel**: Overhauled the extensions view (`Ctrl+Shift+X`) with authentic branding cards, detailed download metrics, ratings, installation states (`Install`, `Installing...`, `✓ Installed`), and a workflow capabilities guide.
+- **Activity Bar & Debug Shortcuts**: Added `Ctrl+Shift+D` to toggle Debug, `Ctrl+Shift+X` to toggle Extensions, and standard function keys (`F5`, `Shift+F5`, `F10`, `F11`, `Shift+F11`) for execution control.
 
 ### Fixed
 - **Branch Detection Beyond `.git/HEAD`**: The checked-out commit is resolved through Git (`symbolic-ref`, falling back to `rev-parse --short HEAD`) and the repository top level through `git rev-parse --show-toplevel`, so linked worktrees, submodules, detached HEAD and workspaces opened on a subfolder of a repository report correctly.
 - **Git Off The UI Thread**: Per-file gutter diffs no longer run inside `refresh()`, which had been spawning two Git processes after every repaint. Status, diff and history all arrive on the worker channel behind a generation counter, so a stale answer can never overwrite a newer one.
 - **Refresh On Real Triggers**: The panel and branch chip update on workspace change, on save, when the window regains focus and after every completed write, rather than only when the panel is opened.
 - **Serialised Writes**: One Git command may be in flight at a time; while it runs the row and commit buttons are drawn dimmed and further writes are refused instead of deadlocking on the index lock.
+- **Dead Code Warnings**: Cleaned up unread struct fields in the extension model and integrated rating metadata into the rendered UI cards.
 
 ---
 
