@@ -122,6 +122,33 @@ impl Tab {
         tab
     }
 
+    // A read-only hex dump of a file that is neither valid UTF-8 text nor a
+    // decodable image. `document` holds the generated dump text, which must
+    // never be edited or written back over the real bytes on disk.
+    fn new_binary_preview(path: PathBuf, bytes: &[u8]) -> Self {
+        let mut document = Document::new();
+        document.path = Some(path);
+        document.seed(&binary_view::hex_dump(bytes));
+        Self {
+            document,
+            views: [EditorView::default(), EditorView::default()],
+            syntax: None,
+            diagnostics: Vec::new(),
+            lsp_version: 1,
+            lsp_serial: 0,
+            lsp_opened: false,
+            lsp_language: None,
+            image: None,
+            binary_preview: true,
+        }
+    }
+
+    // True for a generated preview (image or hex dump) whose content is not
+    // real document text and must be treated as read-only everywhere else.
+    pub(super) fn read_only(&self) -> bool {
+        self.image.is_some() || self.binary_preview
+    }
+
     pub(super) fn is_rust(document: &Document) -> bool {
         document
             .path
@@ -1103,11 +1130,11 @@ impl App {
 
     pub(super) fn replace_range(&mut self, start: Pos, end: Pos, text: &str) {
         // The single choke point every edit path (typing, backspace, delete,
-        // paste, cut) goes through. An image tab's document is an unsaved
-        // placeholder that must never be written to disk as if it were real
-        // content, so refuse to touch it here rather than trusting every
-        // caller to check first.
-        if self.tab().image.is_some() {
+        // paste, cut) goes through. A generated preview tab (image or hex dump)
+        // holds a placeholder document that must never be written to disk as if
+        // it were real content, so refuse to touch it here rather than trusting
+        // every caller to check first.
+        if self.tab().read_only() {
             return;
         }
         let cursor = self.doc_mut().replace(start, end, text);
@@ -1250,6 +1277,10 @@ impl App {
             self.status = "This is an image preview; there is nothing to save".into();
             return false;
         }
+        if self.tab().binary_preview {
+            self.status = "This is a read-only hex preview; there is nothing to save".into();
+            return false;
+        }
         let old_path = self.doc().path.clone();
         let path = if save_as || self.doc().path.is_none() {
             match self.dialog(hwnd, true) {
@@ -1340,10 +1371,18 @@ impl App {
                     io::Error::new(io::ErrorKind::InvalidData, "Could not decode this image")
                 })
         } else {
-            Document::open(path.clone()).map(Tab::new)
+            match Document::open(path.clone()) {
+                Ok(document) => Ok(Tab::new(document)),
+                // Not valid UTF-8 text and not a decodable image: fall back to
+                // a read-only hex dump instead of refusing to open the file.
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => std::fs::read(&path)
+                    .map(|bytes| Tab::new_binary_preview(path.clone(), &bytes)),
+                Err(error) => Err(error),
+            }
         };
         match new_tab {
             Ok(tab) => {
+                let preview = tab.binary_preview;
                 self.terminal_focus = false;
                 let from_welcome = self.welcome;
                 self.welcome = false;
@@ -1369,10 +1408,12 @@ impl App {
                 }
                 self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
-                self.status = format!(
-                    "Opened {}",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                );
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                self.status = if preview {
+                    format!("Opened {name} (read-only hex preview)")
+                } else {
+                    format!("Opened {name}")
+                };
                 self.show_active_tab(hwnd);
             }
             Err(error) => self.error(hwnd, &error),
@@ -1413,5 +1454,19 @@ mod split_tests {
         assert_eq!(tab_index_after_close(2, 1, 2), 1);
         assert_eq!(tab_index_after_close(1, 1, 2), 1);
         assert_eq!(tab_index_after_close(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn binary_preview_tab_is_a_read_only_unsaved_hex_dump() {
+        let bytes = [0x00, 0x01, 0xff, b'H', b'i'];
+        let tab = Tab::new_binary_preview(std::path::PathBuf::from("blob.bin"), &bytes);
+        assert!(tab.binary_preview);
+        assert!(tab.read_only());
+        // Seeding must not mark the document dirty, so closing never prompts
+        // to save the generated hex text back over the real file.
+        assert!(!tab.document.is_dirty());
+        assert!(tab.document.line(0).starts_with("00000000  "));
+        assert!(tab.document.line(0).contains("00 01 ff 48 69"));
+        assert!(tab.document.line(0).ends_with("|...Hi|"));
     }
 }

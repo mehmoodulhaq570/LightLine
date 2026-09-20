@@ -551,7 +551,7 @@ impl App {
         if self.side_view == SideView::Review && self.review_file.is_some() {
             return;
         }
-        if self.tab().image.is_some() {
+        if self.tab().read_only() {
             return;
         }
         if self.find_mode && unit == 8 {
