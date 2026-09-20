@@ -271,6 +271,14 @@ impl App {
                     self.show_review(hwnd);
                     return true;
                 }
+                0x44 if shift => {
+                    self.toggle_side_view(hwnd, SideView::Debug);
+                    return true;
+                }
+                0x58 if shift => {
+                    self.toggle_side_view(hwnd, SideView::Extensions);
+                    return true;
+                }
                 0x42 if shift => {
                     self.run_project(hwnd);
                     return true;
@@ -904,6 +912,26 @@ impl App {
             }
             return;
         }
+        if self.ai_assistant_visible {
+            let gap = self.chrome_gap();
+            let ai_left = self.editor_right(hwnd) + gap;
+            if x >= ai_left && x < rect.right - gap {
+                let chrome_top = self.chrome_top();
+                if y >= chrome_top && y <= chrome_top + self.scale(42) {
+                    if x >= rect.right - gap - self.scale(30) {
+                        self.ai_assistant_visible = false;
+                        self.refresh(hwnd);
+                        return;
+                    }
+                    if x >= rect.right - gap - self.scale(54) {
+                        self.status = "Cleared Tera conversation".into();
+                        self.refresh(hwnd);
+                        return;
+                    }
+                }
+                return;
+            }
+        }
         if y >= rect.bottom - self.scale(STATUS) {
             return;
         }
@@ -917,32 +945,13 @@ impl App {
             {
                 let row = (y - self.scale(RAIL_FIRST_ROW)) / self.scale(RAIL_ROW).max(1);
                 match row {
-                    0 => {
-                        if self.side_view == SideView::Search {
-                            self.cancel_search();
-                        }
-                        let already_open =
-                            self.side_view == SideView::Files && self.explorer_visible;
-                        self.side_view = SideView::Files;
-                        self.panel_focus = false;
-                        self.set_sidebar_visible(hwnd, !already_open);
-                        self.show_active_tab(hwnd);
-                    }
-                    1 => self.open_project_search(hwnd),
-                    2 => self.show_review(hwnd),
-                    3 => {
-                        if Tab::is_python(self.doc()) {
-                            self.run_python_file(hwnd);
-                        } else {
-                            self.run_project(hwnd);
-                        }
-                    }
-                    4 => {
-                        self.status = "Extensions are planned for a later release".into();
-                        self.refresh(hwnd);
-                    }
+                    0 => self.toggle_side_view(hwnd, SideView::Files),
+                    1 => self.toggle_side_view(hwnd, SideView::Search),
+                    2 => self.toggle_side_view(hwnd, SideView::Review),
+                    3 => self.toggle_side_view(hwnd, SideView::Debug),
+                    4 => self.toggle_side_view(hwnd, SideView::Extensions),
                     5 => {
-                        self.status = "AI Assistant is not installed".into();
+                        self.status = "AI Assistant is planned for a future enhancement".into();
                         self.refresh(hwnd);
                     }
                     _ => {}
@@ -1080,30 +1089,33 @@ impl App {
             return;
         }
         if self.split_visible
-            && y >= self.scale(TAB_HEIGHT)
+            && y >= self.tab_strip_bottom()
             && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)
         {
             self.divider_dragging = true;
             unsafe { SetCapture(hwnd) };
             return;
         }
-        if y < self.scale(TAB_HEIGHT) {
+        // The editor is a card inset from the window edge, so the tab strip's
+        // controls are measured from the card's right edge, not the window's.
+        let card_right = rect.right - self.chrome_gap();
+        if y < self.tab_strip_bottom() {
             if Tab::is_python(self.doc())
-                && x >= rect.right - self.scale(326)
-                && x < rect.right - self.scale(296)
+                && x >= card_right - self.scale(326)
+                && x < card_right - self.scale(296)
             {
                 self.run_python_file(hwnd);
                 return;
             }
-            if x >= rect.right - self.scale(112) {
+            if x >= card_right - self.scale(112) {
                 self.toggle_split(hwnd);
                 return;
             }
             if editor_left
                 + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                 + self.scale(12)
-                < rect.right - self.scale(285)
-                && x >= rect.right - self.scale(285)
+                < card_right - self.scale(285)
+                && x >= card_right - self.scale(285)
             {
                 self.show_quick_open(hwnd);
                 return;

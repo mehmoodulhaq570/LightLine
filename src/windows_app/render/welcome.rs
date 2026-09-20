@@ -489,7 +489,7 @@ impl App {
         );
         Self::label(
             hdc,
-            "Code Faster. Think Smarter.",
+            "Build Faster, Think Smarter",
             left,
             logo_top + s(66),
             TEXT,
@@ -498,7 +498,7 @@ impl App {
         unsafe { SelectObject(hdc, self.ui_font) };
         Self::label(
             hdc,
-            "A modern, Rust-powered editor for developers.",
+            "A modern, AI-powered IDE for developers.",
             left,
             logo_top + s(110),
             MUTED,
@@ -506,7 +506,7 @@ impl App {
         );
         Self::label(
             hdc,
-            "Fast to start, quiet to work in.",
+            "Fast to start, focused to work in.",
             left,
             logo_top + s(132),
             MUTED,

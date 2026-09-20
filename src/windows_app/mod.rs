@@ -74,6 +74,12 @@ const EXPLORER_ROW: i32 = 24;
 const EXPLORER_TOP: i32 = 78;
 const RAIL_FIRST_ROW: i32 = 48;
 const RAIL_ROW: i32 = 32;
+// Gutter between the floating side-panel / editor / terminal cards.
+const CARD_GAP: i32 = 8;
+const CARD_RADIUS: i32 = 10;
+// Window backdrop the cards float on, and the cards' own border.
+const SHELL_BG: u32 = rgb(8, 12, 22);
+const CARD_EDGE: u32 = rgb(32, 48, 80);
 const TRANSITION_MS: u128 = 150;
 fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
     ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
@@ -89,21 +95,21 @@ fn display_path(path: &Path) -> String {
 const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | ((g as u32) << 8) | ((b as u32) << 16)
 }
-const EDITOR_BG: u32 = rgb(12, 21, 35);
-const RAIL_BG: u32 = rgb(12, 20, 34);
-const SIDEBAR_BG: u32 = rgb(15, 25, 41);
-const TAB_BG: u32 = rgb(15, 25, 42);
-const ACTIVE_BG: u32 = rgb(17, 29, 49);
-const STATUS_BG: u32 = rgb(18, 31, 51);
-const LINE_BG: u32 = rgb(21, 35, 57);
-const SELECT_BG: u32 = rgb(48, 55, 112);
-const EDGE: u32 = rgb(40, 58, 88);
-const TEXT: u32 = rgb(218, 228, 248);
-const MUTED: u32 = rgb(140, 164, 199);
-const BLUE: u32 = rgb(94, 153, 255);
-const VIOLET: u32 = rgb(149, 109, 255);
-const TEAL: u32 = rgb(103, 220, 215);
-const GREEN: u32 = rgb(111, 220, 163);
+const EDITOR_BG: u32 = rgb(10, 16, 30);
+const RAIL_BG: u32 = rgb(10, 15, 28);
+const SIDEBAR_BG: u32 = rgb(11, 18, 34);
+const TAB_BG: u32 = rgb(11, 18, 34);
+const ACTIVE_BG: u32 = rgb(20, 32, 60);
+const STATUS_BG: u32 = rgb(10, 16, 28);
+const LINE_BG: u32 = rgb(18, 28, 50);
+const SELECT_BG: u32 = rgb(28, 48, 96);
+const EDGE: u32 = rgb(28, 42, 70);
+const TEXT: u32 = rgb(226, 234, 248);
+const MUTED: u32 = rgb(136, 156, 188);
+const BLUE: u32 = rgb(56, 189, 248);
+const VIOLET: u32 = rgb(147, 112, 255);
+const TEAL: u32 = rgb(45, 212, 191);
+const GREEN: u32 = rgb(74, 222, 128);
 struct Surface {
     dc: HDC,
     bitmap: HBITMAP,

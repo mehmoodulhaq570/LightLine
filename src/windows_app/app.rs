@@ -5,6 +5,8 @@ pub(super) enum SideView {
     Files,
     Search,
     Review,
+    Debug,
+    Extensions,
 }
 
 // Output holds run/build results (cargo test, Run Python) in a dedicated
@@ -255,6 +257,7 @@ pub(super) struct App {
     pub(super) expanded_dirs: HashSet<PathBuf>,
     pub(super) directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
     pub(super) welcome: bool,
+    pub(super) ai_assistant_visible: bool,
     pub(super) side_view: SideView,
     pub(super) quick_open: bool,
     pub(super) quick_query: String,
@@ -410,7 +413,9 @@ impl App {
     pub(super) fn code_font_family() -> &'static str {
         static FAMILY: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
         FAMILY.get_or_init(|| {
-            if family_available("Cascadia Mono") {
+            if family_available("Cascadia Code") {
+                "Cascadia Code"
+            } else if family_available("Cascadia Mono") {
                 "Cascadia Mono"
             } else {
                 "Consolas"
@@ -434,7 +439,7 @@ impl App {
                 0,
                 0,
                 CLEARTYPE_QUALITY as u32,
-                0,
+                FIXED_PITCH as u32 | (FF_MODERN as u32),
                 font_name.as_ptr(),
             )
         }
@@ -595,6 +600,7 @@ impl App {
             expanded_dirs: HashSet::new(),
             directory_cache: HashMap::new(),
             welcome: true,
+            ai_assistant_visible: false,
             side_view: SideView::Files,
             quick_open: false,
             quick_query: String::new(),
@@ -723,17 +729,37 @@ impl App {
         self.cancel_transition(hwnd);
         self.show_active_tab(hwnd);
     }
-    pub(super) fn pane_divider(&self, hwnd: HWND) -> i32 {
+    pub(super) fn ai_width(&self, rect: RECT) -> i32 {
+        if self.ai_assistant_visible {
+            self.scale(360).min((rect.right - self.editor_left()) / 2).max(self.scale(260))
+        } else {
+            0
+        }
+    }
+
+    pub(super) fn editor_right(&self, hwnd: HWND) -> i32 {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
-        let width = (rect.right - self.editor_left()).max(0);
+        let gap = self.chrome_gap();
+        let total_right = rect.right - gap;
+        if self.ai_assistant_visible {
+            let ai_w = self.ai_width(rect);
+            (total_right - ai_w - gap).max(self.editor_left() + self.scale(160))
+        } else {
+            total_right
+        }
+    }
+
+
+    pub(super) fn pane_divider(&self, hwnd: HWND) -> i32 {
+        let right = self.editor_right(hwnd);
+        let width = (right - self.editor_left()).max(0);
         let minimum = self.scale(150).min(width / 2);
         self.editor_left() + (width * self.split_ratio / 100).clamp(minimum, width - minimum)
     }
     pub(super) fn resize_split(&mut self, hwnd: HWND, x: i32) {
-        let mut rect = RECT::default();
-        unsafe { GetClientRect(hwnd, &mut rect) };
-        let width = (rect.right - self.editor_left()).max(1);
+        let right = self.editor_right(hwnd);
+        let width = (right - self.editor_left()).max(1);
         self.split_ratio = (((x - self.editor_left()) * 100) / width).clamp(10, 90);
         self.update_scrollbar(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -774,17 +800,37 @@ impl App {
         if self.split_visible && pane == 0 {
             self.pane_divider(hwnd)
         } else {
-            let mut rect = RECT::default();
-            unsafe { GetClientRect(hwnd, &mut rect) };
-            rect.right
+            self.editor_right(hwnd)
         }
     }
+
+    // The side panel, editor and terminal are drawn as cards floating on the
+    // window background. These four are the single source of truth for that
+    // geometry: painting and hit testing both derive from them, so a card can
+    // never be drawn somewhere clicks do not follow.
+    pub(super) fn chrome_gap(&self) -> i32 {
+        self.scale(CARD_GAP)
+    }
+
+    pub(super) fn chrome_top(&self) -> i32 {
+        self.chrome_gap()
+    }
+
+    pub(super) fn tab_strip_bottom(&self) -> i32 {
+        self.chrome_top() + self.scale(TAB_HEIGHT)
+    }
+
+    // Right edge of the side panel card, which is one gap left of the editor.
+    pub(super) fn sidebar_right(&self) -> i32 {
+        self.scale(RAIL + self.sidebar_width)
+    }
+
     pub(super) fn editor_top(&self) -> i32 {
-        self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT + TOP)
+        self.chrome_top() + self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT + TOP)
     }
 
     pub(super) fn editor_left(&self) -> i32 {
-        self.scale(RAIL + self.sidebar_width)
+        self.sidebar_right() + self.chrome_gap()
     }
 
     pub(super) fn set_sidebar_visible(&mut self, hwnd: HWND, visible: bool) {
@@ -801,6 +847,20 @@ impl App {
             unsafe { SetTimer(hwnd, 5, 16, None) };
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn toggle_side_view(&mut self, hwnd: HWND, view: SideView) {
+        if self.side_view == SideView::Search && view != SideView::Search {
+            self.cancel_search();
+        }
+        if self.side_view == view && self.explorer_visible {
+            self.set_sidebar_visible(hwnd, false);
+        } else {
+            self.side_view = view;
+            self.panel_focus = false;
+            self.set_sidebar_visible(hwnd, true);
+        }
+        self.show_active_tab(hwnd);
     }
 
     pub(super) fn advance_sidebar(&mut self, hwnd: HWND) {

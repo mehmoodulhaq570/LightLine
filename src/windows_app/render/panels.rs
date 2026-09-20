@@ -59,37 +59,24 @@ impl App {
             SideView::Files => self.explorer_visible.then_some(0),
             SideView::Search => self.explorer_visible.then_some(1),
             SideView::Review => self.explorer_visible.then_some(2),
+            SideView::Debug => self.explorer_visible.then_some(3),
+            SideView::Extensions => self.explorer_visible.then_some(4),
         };
         for (index, label) in labels.iter().enumerate() {
             let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
-            let is_selected = selected == Some(index) || (index == 3 && self.terminal_visible);
+            let is_selected = selected == Some(index)
+                || (index == 5 && self.ai_assistant_visible);
             if is_selected {
-                Self::rounded_fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(8),
-                        top,
-                        right: self.scale(RAIL - 8),
-                        bottom: top + self.scale(28),
-                    },
-                    self.scale(8),
-                    ACTIVE_BG,
-                );
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: 0,
-                        top: top + self.scale(3),
-                        right: self.scale(3),
-                        bottom: top + self.scale(25),
-                    },
-                    BLUE,
-                );
+                let pill = RECT {
+                    left: self.scale(8),
+                    top,
+                    right: self.scale(RAIL - 8),
+                    bottom: top + self.scale(28),
+                };
+                self.panel_card(hdc, pill, self.scale(6), rgb(45, 78, 140), rgb(24, 40, 78));
             }
             let color = if is_selected {
-                TEXT
-            } else if index >= 4 {
-                rgb(111, 134, 166)
+                rgb(240, 245, 255)
             } else {
                 MUTED
             };
@@ -98,44 +85,46 @@ impl App {
                 index,
                 self.scale(23),
                 top + self.scale(5),
-                if is_selected { BLUE } else { color },
+                if is_selected { rgb(56, 189, 248) } else { color },
             );
             Self::label(hdc, label, self.scale(48), top + self.scale(5), color, clip);
         }
-        if let Some(root) = &self.workspace_root {
-            let name = root.file_name().unwrap_or_default().to_string_lossy();
-            Self::label(
-                hdc,
-                "◈  Workspace",
-                self.scale(23),
-                editor_bottom - self.scale(112),
-                MUTED,
-                clip,
-            );
-            Self::label(
-                hdc,
-                &name,
-                self.scale(23),
-                editor_bottom - self.scale(89),
-                TEXT,
-                clip,
-            );
-            if let Some(branch) = &self.workspace_branch {
-                Self::label(
-                    hdc,
-                    &format!("⑂  {branch}"),
-                    self.scale(23),
-                    editor_bottom - self.scale(65),
-                    MUTED,
-                    clip,
-                );
-            }
-        }
+        let name = self
+            .workspace_root
+            .as_ref()
+            .and_then(|r| r.file_name())
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_else(|| "my-project".into());
         Self::label(
             hdc,
-            "⚙",
-            self.scale(23),
-            editor_bottom - self.scale(31),
+            "WORKSPACE",
+            self.scale(20),
+            editor_bottom - self.scale(104),
+            MUTED,
+            clip,
+        );
+        Self::label(
+            hdc,
+            &name,
+            self.scale(20),
+            editor_bottom - self.scale(82),
+            TEXT,
+            clip,
+        );
+        let branch = self.workspace_branch.as_deref().unwrap_or("main");
+        Self::label(
+            hdc,
+            &format!("\u{2442}  {branch}"),
+            self.scale(20),
+            editor_bottom - self.scale(58),
+            MUTED,
+            clip,
+        );
+        Self::label(
+            hdc,
+            "\u{2699}   \u{2192}",
+            self.scale(20),
+            editor_bottom - self.scale(32),
             MUTED,
             clip,
         );
@@ -163,10 +152,12 @@ impl App {
             right: editor_left,
             bottom: editor_bottom,
         };
-        let title = if self.side_view == SideView::Search {
-            "SEARCH IN FILES"
-        } else {
-            "CHANGES"
+        let title = match self.side_view {
+            SideView::Files => "EXPLORER",
+            SideView::Search => "SEARCH IN FILES",
+            SideView::Review => "SOURCE CONTROL",
+            SideView::Debug => "RUN & DEBUG",
+            SideView::Extensions => "EXTENSIONS",
         };
         Self::label(
             hdc,
@@ -186,6 +177,14 @@ impl App {
             },
             EDGE,
         );
+        if self.side_view == SideView::Debug {
+            self.paint_debug_panel(hdc, left, editor_left, editor_bottom, clip);
+            return;
+        }
+        if self.side_view == SideView::Extensions {
+            self.paint_extensions_panel(hdc, left, editor_left, editor_bottom, clip);
+            return;
+        }
         if self.side_view == SideView::Search {
             Self::fill(
                 hdc,
@@ -718,6 +717,165 @@ impl App {
                     bottom,
                 },
             );
+        }
+    }
+
+    fn paint_debug_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
+        let s = |v: i32| self.scale(v);
+        // Configuration dropdown & play toolbar
+        let config_rect = RECT {
+            left: left + s(8),
+            top: s(47),
+            right: right - s(42),
+            bottom: s(75),
+        };
+        self.panel_card(hdc, config_rect, s(4), rgb(35, 52, 88), rgb(18, 28, 50));
+        Self::label(hdc, "C/C++ / Rust ▾", config_rect.left + s(8), config_rect.top + s(5), rgb(200, 215, 240), clip);
+
+        let play_btn = RECT {
+            left: right - s(38),
+            top: s(47),
+            right: right - s(8),
+            bottom: s(75),
+        };
+        self.panel_card(hdc, play_btn, s(4), rgb(34, 197, 94), rgb(20, 60, 40));
+        Self::label(hdc, "▷", play_btn.left + s(10), play_btn.top + s(5), rgb(255, 255, 255), clip);
+
+        // Sections
+        let mut y = s(86);
+
+        // 1. VARIABLES
+        Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+        Self::label(hdc, "▼ VARIABLES", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+        y += s(24);
+
+        let vars = [
+            ("self", "&mut Self"),
+            ("index", "0 (32)"),
+            ("tab_width", "132 (32)"),
+            ("tab_height", "28 (32)"),
+            ("bounds", "RECT { ... }"),
+        ];
+        for (idx, (name, val)) in vars.iter().enumerate() {
+            if y + s(18) > bottom { break; }
+            if idx == 3 {
+                // Highlight active hit
+                let hit_rect = RECT { left: left + s(6), top: y - s(1), right: right - s(6), bottom: y + s(17) };
+                self.panel_card(hdc, hit_rect, s(3), rgb(56, 189, 248), rgb(24, 42, 80));
+                Self::label(hdc, "▶", left + s(8), y + s(1), rgb(250, 204, 21), clip);
+                Self::label(hdc, name, left + s(20), y + s(1), rgb(255, 255, 255), clip);
+                Self::label(hdc, val, right - s(80), y + s(1), rgb(250, 204, 21), clip);
+            } else {
+                Self::label(hdc, ">", left + s(8), y, MUTED, clip);
+                Self::label(hdc, name, left + s(20), y, rgb(205, 220, 245), clip);
+                Self::label(hdc, val, right - s(80), y, rgb(130, 150, 180), clip);
+            }
+            y += s(18);
+        }
+
+        y += s(6);
+        // 2. WATCH
+        if y + s(50) <= bottom {
+            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+            Self::label(hdc, "▼ WATCH", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+            Self::label(hdc, "+", right - s(20), y + s(2), MUTED, clip);
+            y += s(24);
+
+            Self::label(hdc, "> active", left + s(8), y, rgb(205, 220, 245), clip);
+            Self::label(hdc, "true", right - s(50), y, rgb(56, 189, 248), clip);
+            y += s(18);
+            Self::label(hdc, "> left", left + s(8), y, rgb(205, 220, 245), clip);
+            Self::label(hdc, "0", right - s(50), y, rgb(56, 189, 248), clip);
+            y += s(22);
+        }
+
+        // 3. BREAKPOINTS
+        if y + s(50) <= bottom {
+            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+            Self::label(hdc, "▼ BREAKPOINTS", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+            y += s(24);
+
+            Self::label(hdc, "[✓]", left + s(8), y, rgb(56, 189, 248), clip);
+            Self::label(hdc, "main.rs: 562", left + s(26), y, TEXT, clip);
+            y += s(18);
+            Self::label(hdc, "[✓]", left + s(8), y, rgb(56, 189, 248), clip);
+            Self::label(hdc, "lib.rs: 42", left + s(26), y, TEXT, clip);
+        }
+    }
+
+    fn paint_extensions_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
+        let s = |v: i32| self.scale(v);
+        // Search bar
+        let search_rect = RECT {
+            left: left + s(8),
+            top: s(46),
+            right: right - s(8),
+            bottom: s(72),
+        };
+        self.panel_card(hdc, search_rect, s(4), rgb(35, 52, 88), rgb(16, 26, 48));
+        Self::label(hdc, "🔍 Search extensions...", search_rect.left + s(8), search_rect.top + s(4), MUTED, clip);
+
+        // Subtabs
+        let tabs_y = s(78);
+        Self::label(hdc, "Marketplace", left + s(12), tabs_y, TEXT, clip);
+        let tab_w = self.text_width(hdc, "Marketplace");
+        Self::fill(
+            hdc,
+            RECT {
+                left: left + s(12),
+                top: tabs_y + s(15),
+                right: left + s(12) + tab_w,
+                bottom: tabs_y + s(17),
+            },
+            rgb(56, 189, 248),
+        );
+        Self::label(hdc, "Installed", left + s(22) + tab_w, tabs_y, MUTED, clip);
+
+        // Extensions list
+        let extensions = [
+            ("Rust Analyzer", "Language support for Rust", "Install", true),
+            ("Tera AI", "Your AI coding companion", "✓ Installed", false),
+            ("GitLens", "Better Git integration", "Install", true),
+            ("Prettier", "Code formatter", "Install", true),
+            ("Bracket Pair Colorizer", "Highlights matching brackets", "Install", true),
+        ];
+
+        let mut ey = s(104);
+        for (title, desc, btn_label, is_install) in extensions.iter() {
+            if ey + s(38) > bottom {
+                break;
+            }
+            // Card outline
+            let row_rect = RECT {
+                left: left + s(6),
+                top: ey,
+                right: right - s(6),
+                bottom: ey + s(36),
+            };
+            self.panel_card(hdc, row_rect, s(4), rgb(26, 38, 64), rgb(13, 20, 36));
+
+            // Title & Description
+            Self::label(hdc, title, row_rect.left + s(8), ey + s(3), TEXT, row_rect);
+            Self::label(hdc, desc, row_rect.left + s(8), ey + s(18), rgb(120, 140, 175), row_rect);
+
+            // Install Button
+            let btn_w = s(56);
+            let btn_h = s(18);
+            let btn_rect = RECT {
+                left: row_rect.right - btn_w - s(6),
+                top: ey + s(8),
+                right: row_rect.right - s(6),
+                bottom: ey + s(8) + btn_h,
+            };
+            if *is_install {
+                Self::rounded_fill(hdc, btn_rect, s(4), rgb(37, 99, 235));
+                self.label_mid(hdc, btn_label, btn_rect.left + s(8), (btn_rect.top + btn_rect.bottom) / 2, rgb(255, 255, 255), btn_rect);
+            } else {
+                self.panel_card(hdc, btn_rect, s(4), rgb(45, 68, 100), rgb(20, 32, 58));
+                self.label_mid(hdc, btn_label, btn_rect.left + s(3), (btn_rect.top + btn_rect.bottom) / 2, rgb(160, 185, 220), btn_rect);
+            }
+
+            ey += s(40);
         }
     }
 }

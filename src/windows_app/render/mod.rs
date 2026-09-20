@@ -1,3 +1,4 @@
+mod ai_assistant;
 mod code_pane;
 mod completion;
 mod editor;

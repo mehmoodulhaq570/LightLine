@@ -65,42 +65,18 @@ impl App {
                     0
                 };
             let editor_left = self.editor_left();
+            let gap = self.chrome_gap();
+            let chrome_top = self.chrome_top();
+            let tab_strip_bottom = self.tab_strip_bottom();
+            let card_bottom = editor_bottom - gap;
+            let card_radius = self.scale(CARD_RADIUS);
             let bg = CreateSolidBrush(EDITOR_BG);
             let gutter_bg = CreateSolidBrush(EDITOR_BG);
             let status_bg = CreateSolidBrush(STATUS_BG);
             let selection_bg = CreateSolidBrush(SELECT_BG);
-            FillRect(
-                hdc,
-                &RECT {
-                    left: editor_left,
-                    top: 0,
-                    right: rect.right,
-                    bottom: editor_bottom,
-                },
-                bg,
-            );
-            FillRect(
-                hdc,
-                &RECT {
-                    left: editor_left,
-                    top: self.scale(TAB_HEIGHT),
-                    right: editor_left + self.scale(GUTTER),
-                    bottom: editor_bottom,
-                },
-                gutter_bg,
-            );
-            let tab_bg = CreateSolidBrush(TAB_BG);
-            let active_bg = CreateSolidBrush(ACTIVE_BG);
-            FillRect(
-                hdc,
-                &RECT {
-                    left: editor_left,
-                    top: 0,
-                    right: rect.right,
-                    bottom: self.scale(TAB_HEIGHT),
-                },
-                tab_bg,
-            );
+            // The backdrop the cards float on. The rail stays flush to the
+            // window edge; only the side panel and editor become cards.
+            Self::fill(hdc, rect, SHELL_BG);
             Self::fill(
                 hdc,
                 RECT {
@@ -112,59 +88,86 @@ impl App {
                 RAIL_BG,
             );
             if self.sidebar_width > 0 {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(RAIL),
-                        top: 0,
-                        right: editor_left,
-                        bottom: editor_bottom,
-                    },
-                    SIDEBAR_BG,
-                );
+                let panel = RECT {
+                    left: self.scale(RAIL) + gap,
+                    top: chrome_top,
+                    right: self.sidebar_right(),
+                    bottom: card_bottom,
+                };
+                self.panel_card(hdc, panel, card_radius, CARD_EDGE, SIDEBAR_BG);
             }
-            // Hairline separators so the rail, side panel and editor read as
-            // distinct surfaces instead of one continuous field of dark blue.
-            let hairline = self.scale(1).max(1);
-            Self::fill(
+            // Editor card: the rounded body first, then square-filled regions
+            // inside it for the gutter and tab strip, which stay clear of the
+            // rounded corners.
+            let editor_card = RECT {
+                left: editor_left,
+                top: chrome_top,
+                right: self.editor_right(hwnd),
+                bottom: card_bottom,
+            };
+            self.panel_card(hdc, editor_card, card_radius, CARD_EDGE, EDITOR_BG);
+            FillRect(
                 hdc,
-                RECT {
-                    left: self.scale(RAIL) - hairline,
-                    top: 0,
-                    right: self.scale(RAIL),
-                    bottom: editor_bottom,
+                &RECT {
+                    left: editor_left + card_radius,
+                    top: tab_strip_bottom,
+                    right: editor_card.right - card_radius,
+                    bottom: card_bottom - self.scale(1).max(1),
                 },
-                EDGE,
+                bg,
             );
-            if self.sidebar_width > 0 {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: editor_left - hairline,
-                        top: 0,
-                        right: editor_left,
-                        bottom: editor_bottom,
-                    },
-                    EDGE,
-                );
-            }
+            FillRect(
+                hdc,
+                &RECT {
+                    left: editor_left + self.scale(1).max(1),
+                    top: tab_strip_bottom,
+                    right: editor_left + self.scale(GUTTER),
+                    bottom: card_bottom - self.scale(1).max(1),
+                },
+                gutter_bg,
+            );
+            let tab_bg = CreateSolidBrush(TAB_BG);
+            let active_bg = CreateSolidBrush(ACTIVE_BG);
+            // Tab strip rides the card's rounded top, so it is drawn as a
+            // rounded fill clipped to the strip's height.
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: editor_left + self.scale(1).max(1),
+                    top: chrome_top + self.scale(1).max(1),
+                    right: editor_card.right - self.scale(1).max(1),
+                    bottom: tab_strip_bottom + card_radius,
+                },
+                card_radius,
+                TAB_BG,
+            );
+            FillRect(
+                hdc,
+                &RECT {
+                    left: editor_left + self.scale(1).max(1),
+                    top: tab_strip_bottom - card_radius,
+                    right: editor_card.right - self.scale(1).max(1),
+                    bottom: tab_strip_bottom,
+                },
+                tab_bg,
+            );
             Self::fill(
                 hdc,
                 RECT {
-                    left: editor_left,
-                    top: self.scale(TAB_HEIGHT),
-                    right: rect.right,
-                    bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                    left: editor_left + self.scale(1).max(1),
+                    top: tab_strip_bottom,
+                    right: editor_card.right - self.scale(1).max(1),
+                    bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                 },
                 ACTIVE_BG,
             );
             Self::fill(
                 hdc,
                 RECT {
-                    left: editor_left,
-                    top: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT - 1),
-                    right: rect.right,
-                    bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                    left: editor_left + self.scale(1).max(1),
+                    top: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT - 1),
+                    right: editor_card.right - self.scale(1).max(1),
+                    bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                 },
                 EDGE,
             );
@@ -182,9 +185,9 @@ impl App {
                     .unwrap_or_else(|| "Editor".into());
                 Self::label(
                     hdc,
-                    &format!("{}  ›  {}", path_part, self.tab_label(tab_index)),
+                    &format!("{}  >  {}", path_part, self.tab_label(tab_index)),
                     left + self.scale(18),
-                    self.scale(TAB_HEIGHT + 3),
+                    tab_strip_bottom + self.scale(3),
                     if pane == self.focused_pane {
                         TEXT
                     } else {
@@ -192,7 +195,20 @@ impl App {
                     },
                     RECT {
                         left,
-                        top: self.scale(TAB_HEIGHT),
+                        top: tab_strip_bottom,
+                        right: right - self.scale(50),
+                        bottom: self.editor_top(),
+                    },
+                );
+                Self::label(
+                    hdc,
+                    "[\u{2502}]   \u{2026}",
+                    right - self.scale(48),
+                    tab_strip_bottom + self.scale(3),
+                    MUTED,
+                    RECT {
+                        left: right - self.scale(50),
+                        top: tab_strip_bottom,
                         right,
                         bottom: self.editor_top(),
                     },
@@ -202,30 +218,29 @@ impl App {
                         hdc,
                         RECT {
                             left,
-                            top: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT - 2),
+                            top: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT - 2),
                             right,
-                            bottom: self.scale(TAB_HEIGHT + BREADCRUMB_HEIGHT),
+                            bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                         },
                         BLUE,
                     );
                 }
             }
             let tab_width = self.scale(TAB_WIDTH);
-            let tab_height = self.scale(TAB_HEIGHT);
             for slot in 0..self.visible_tab_count(hwnd) {
                 let index = self.tab_first + slot;
                 if index >= self.tabs.len() {
                     break;
                 }
                 let left = editor_left + slot as i32 * tab_width;
-                if left >= rect.right {
+                if left >= editor_card.right {
                     break;
                 }
                 let bounds = RECT {
                     left,
-                    top: 0,
-                    right: (left + tab_width).min(rect.right),
-                    bottom: tab_height,
+                    top: chrome_top,
+                    right: (left + tab_width).min(editor_card.right),
+                    bottom: tab_strip_bottom,
                 };
                 if index == self.active {
                     FillRect(hdc, &bounds, active_bg);
@@ -233,9 +248,9 @@ impl App {
                         hdc,
                         RECT {
                             left,
-                            top: 0,
+                            top: chrome_top,
                             right: bounds.right,
-                            bottom: self.scale(2),
+                            bottom: chrome_top + self.scale(2),
                         },
                         VIOLET,
                     );
@@ -250,7 +265,7 @@ impl App {
                     hdc,
                     tab_icon,
                     left + self.scale(11),
-                    self.scale(9),
+                    chrome_top + self.scale(9),
                     self.scale(18),
                 );
                 let label = self.tab_label(index);
@@ -258,14 +273,14 @@ impl App {
                 SetTextColor(hdc, if index == self.active { TEXT } else { MUTED });
                 let clip = RECT {
                     left: left + self.scale(37),
-                    top: 0,
-                    right: (left + tab_width - self.scale(30)).min(rect.right),
-                    bottom: tab_height,
+                    top: chrome_top,
+                    right: (left + tab_width - self.scale(30)).min(editor_card.right),
+                    bottom: tab_strip_bottom,
                 };
                 ExtTextOutW(
                     hdc,
                     clip.left,
-                    self.scale(5),
+                    chrome_top + self.scale(5),
                     ETO_CLIPPED,
                     &clip,
                     chars.as_ptr(),
@@ -276,7 +291,7 @@ impl App {
                 TextOutW(
                     hdc,
                     left + tab_width - self.scale(23),
-                    self.scale(5),
+                    chrome_top + self.scale(5),
                     close.as_ptr(),
                     1,
                 );
@@ -290,9 +305,9 @@ impl App {
                 && editor_left
                     + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                     + self.scale(12)
-                    < rect.right - self.scale(326)
+                    < editor_card.right - self.scale(326)
             {
-                let left = rect.right - self.scale(326);
+                let left = editor_card.right - self.scale(326);
                 let brush = CreateSolidBrush(GREEN);
                 let pen = CreatePen(PS_SOLID, 1, GREEN);
                 let old_brush = SelectObject(hdc, brush);
@@ -300,15 +315,15 @@ impl App {
                 let points = [
                     POINT {
                         x: left + self.scale(9),
-                        y: self.scale(11),
+                        y: chrome_top + self.scale(11),
                     },
                     POINT {
                         x: left + self.scale(9),
-                        y: self.scale(27),
+                        y: chrome_top + self.scale(27),
                     },
                     POINT {
                         x: left + self.scale(23),
-                        y: self.scale(19),
+                        y: chrome_top + self.scale(19),
                     },
                 ];
                 Polygon(hdc, points.as_ptr(), 3);
@@ -317,47 +332,19 @@ impl App {
                 DeleteObject(brush);
                 DeleteObject(pen);
             }
-            if editor_left
-                + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
-                + self.scale(12)
-                < rect.right - self.scale(285)
-            {
-                Self::label(
-                    hdc,
-                    "⌕  Quick Open  Ctrl+P",
-                    rect.right - self.scale(285),
-                    self.scale(7),
-                    MUTED,
-                    RECT {
-                        left: rect.right - self.scale(285),
-                        top: 0,
-                        right: rect.right - self.scale(112),
-                        bottom: self.scale(TAB_HEIGHT),
-                    },
-                );
-            }
-            Self::label(
-                hdc,
-                if self.split_visible {
-                    "×  Unsplit"
-                } else {
-                    "▥  Split"
-                },
-                rect.right - self.scale(107),
-                self.scale(7),
-                MUTED,
-                RECT {
-                    left: rect.right - self.scale(112),
-                    top: 0,
-                    right: rect.right,
-                    bottom: self.scale(TAB_HEIGHT),
-                },
-            );
             self.paint_rail(hdc, editor_bottom);
             let sidebar_state = SaveDC(hdc);
-            IntersectClipRect(hdc, self.scale(RAIL), 0, editor_left, editor_bottom);
+            // Clip the side panel to its card so its contents cannot spill
+            // into the gap between the cards.
+            IntersectClipRect(
+                hdc,
+                self.scale(RAIL) + gap,
+                chrome_top,
+                self.sidebar_right(),
+                card_bottom,
+            );
             if self.sidebar_width > 0 && self.side_view != SideView::Files {
-                self.paint_side_panel(hdc, editor_left, editor_bottom);
+                self.paint_side_panel(hdc, self.sidebar_right(), card_bottom);
             }
             if self.sidebar_width > 0 && self.side_view == SideView::Files {
                 let sidebar_clip = RECT {
@@ -454,16 +441,18 @@ impl App {
                             .as_deref()
                             .is_some_and(|path| path == item.entry.path);
                         if selected {
-                            Self::rounded_fill(
+                            let sel_rect = RECT {
+                                left: self.scale(RAIL + 7),
+                                top,
+                                right: editor_left - self.scale(8),
+                                bottom: top + self.scale(EXPLORER_ROW - 2),
+                            };
+                            self.panel_card(
                                 hdc,
-                                RECT {
-                                    left: self.scale(RAIL + 7),
-                                    top,
-                                    right: editor_left - self.scale(8),
-                                    bottom: top + self.scale(EXPLORER_ROW - 2),
-                                },
-                                self.scale(7),
-                                SELECT_BG,
+                                sel_rect,
+                                self.scale(6),
+                                rgb(48, 84, 156),
+                                rgb(26, 44, 90),
                             );
                         }
                         let name = item
@@ -539,69 +528,15 @@ impl App {
                         sidebar_clip,
                     );
                 }
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(RAIL),
-                        top: editor_bottom - self.scale(35),
-                        right: editor_left,
-                        bottom: editor_bottom,
-                    },
-                    SIDEBAR_BG,
-                );
-                if self.doc().path.is_some() {
-                    let chip_left = self.scale(RAIL + 7);
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: chip_left,
-                            top: editor_bottom - self.scale(30),
-                            right: (chip_left + self.scale(115)).min(editor_left),
-                            bottom: editor_bottom,
-                        },
-                        ACTIVE_BG,
-                    );
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: chip_left,
-                            top: editor_bottom - self.scale(30),
-                            right: (chip_left + self.scale(115)).min(editor_left),
-                            bottom: editor_bottom - self.scale(29),
-                        },
-                        BLUE,
-                    );
-                    let icon = self
-                        .doc()
-                        .path
-                        .as_deref()
-                        .map(|path| material_icon_for(path, false, false))
-                        .unwrap_or("file");
-                    self.icons.draw(
-                        hdc,
-                        icon,
-                        chip_left + self.scale(6),
-                        editor_bottom - self.scale(24),
-                        self.scale(15),
-                    );
-                    Self::label(
-                        hdc,
-                        &self.tab_label(self.active),
-                        chip_left + self.scale(24),
-                        editor_bottom - self.scale(24),
-                        MUTED,
-                        sidebar_clip,
-                    );
-                }
             }
             RestoreDC(hdc, sidebar_state);
             if self.side_view == SideView::Review && self.review_file.is_some() {
-                self.paint_diff(hdc, editor_left, rect.right, code_bottom);
+                self.paint_diff(hdc, editor_left, editor_card.right, code_bottom);
             } else {
                 let divider = if self.split_visible {
                     self.pane_divider(hwnd)
                 } else {
-                    rect.right
+                    editor_card.right
                 };
                 self.paint_code_pane(
                     hdc,
@@ -623,7 +558,7 @@ impl App {
                         RECT {
                             left: divider,
                             top: self.editor_top(),
-                            right: rect.right,
+                            right: editor_card.right,
                             bottom: code_bottom,
                         },
                         selection_bg,
@@ -647,7 +582,34 @@ impl App {
                 code_bottom,
             );
             if self.terminal_visible {
-                self.paint_terminal(hdc, editor_left, rect.right, editor_bottom);
+                self.paint_terminal(hdc, editor_left, editor_card.right, card_bottom);
+            }
+            // Card borders go on last: the interior fills above are square, so
+            // drawing the outlines now is what keeps the rounded corners and
+            // the 1px edge from being painted over.
+            if self.sidebar_width > 0 {
+                self.card_outline(
+                    hdc,
+                    RECT {
+                        left: self.scale(RAIL) + gap,
+                        top: chrome_top,
+                        right: self.sidebar_right(),
+                        bottom: card_bottom,
+                    },
+                    card_radius,
+                    CARD_EDGE,
+                );
+            }
+            self.card_outline(hdc, editor_card, card_radius, CARD_EDGE);
+            if self.ai_assistant_visible {
+                let ai_card = RECT {
+                    left: editor_card.right + gap,
+                    top: chrome_top,
+                    right: rect.right - gap,
+                    bottom: card_bottom,
+                };
+                self.paint_ai_assistant(hdc, ai_card);
+                self.card_outline(hdc, ai_card, card_radius, CARD_EDGE);
             }
             FillRect(
                 hdc,
@@ -670,103 +632,77 @@ impl App {
                 EDGE,
             );
             SelectObject(hdc, self.ui_font);
-            // A live language server for this file is the one "ready" signal
-            // the app actually has, so the indicator reflects that rather than
-            // being a decoration that is always green.
-            let lsp_ready = self
-                .tab()
-                .lsp_language
-                .is_some_and(|language| self.lsp.contains_key(&language));
-            let right_label = if self.side_view == SideView::Review && self.review_file.is_some() {
-                format!("Git review     {} lines", self.diff_rows.len())
-            } else {
-                let issues = self
-                    .tab()
-                    .diagnostics
-                    .iter()
-                    .filter(|item| item.severity <= 2)
-                    .count();
-                format!(
-                    "{}Ln {}, Col {}     Spaces: 4     UTF-8     {}{}{}",
-                    if issues == 0 {
-                        String::new()
-                    } else {
-                        format!("{issues} issues     ")
-                    },
-                    self.view().cursor.line + 1,
-                    self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
-                        .chars()
-                        .count()
-                        + 1,
-                    language_label(self.doc().path.as_deref()),
-                    match &self.workspace_branch {
-                        Some(branch) => format!("     {branch}"),
-                        None => String::new(),
-                    },
-                    if lsp_ready { "     Ready" } else { "" },
-                )
+
+            // Left file chip
+            let file_label = self.tab_label(self.active);
+            let chip_w = self.scale(28) + self.text_width(hdc, &file_label);
+            let chip_rect = RECT {
+                left: self.scale(12),
+                top: editor_bottom + self.scale(4),
+                right: self.scale(12) + chip_w,
+                bottom: rect.bottom - self.scale(4),
             };
-            let right_width = self.text_width(hdc, &right_label);
-            let right_x = (rect.right - right_width - self.scale(16)).max(self.scale(16));
-            let cursor = self.view().cursor;
-            let status_message = self
-                .tab()
-                .diagnostics
-                .iter()
-                .find(|item| {
-                    (item.range.start.line as usize..=item.range.end.line as usize)
-                        .contains(&cursor.line)
-                })
-                .and_then(|item| item.message.lines().next())
-                .unwrap_or(&self.status);
-            Self::label(
+            Self::rounded_fill(hdc, chip_rect, self.scale(4), rgb(24, 38, 70));
+            let icon = self
+                .doc()
+                .path
+                .as_deref()
+                .map(|path| material_icon_for(path, false, false))
+                .unwrap_or("file");
+            self.icons.draw(
                 hdc,
-                status_message,
-                self.scale(14),
-                editor_bottom + self.scale(4),
-                TEXT,
-                RECT {
-                    left: self.scale(14),
-                    top: editor_bottom,
-                    right: (right_x - self.scale(24)).max(self.scale(14)),
-                    bottom: rect.bottom,
-                },
+                icon,
+                chip_rect.left + self.scale(6),
+                chip_rect.top + self.scale(2),
+                self.scale(15),
             );
             Self::label(
                 hdc,
-                &right_label,
-                right_x,
+                &file_label,
+                chip_rect.left + self.scale(24),
+                chip_rect.top + self.scale(2),
+                TEXT,
+                chip_rect,
+            );
+
+            // Right side: branch and Ready status indicator
+            let branch = self.workspace_branch.as_deref().unwrap_or("main");
+            let right_branch = format!("\u{2442}  {branch}");
+            let right_ready = "\u{25cf}  Ready";
+            let ready_width = self.text_width(hdc, right_ready);
+            let branch_width = self.text_width(hdc, &right_branch);
+
+            let ready_x = rect.right - ready_width - self.scale(16);
+            let branch_x = ready_x - branch_width - self.scale(20);
+
+            Self::label(hdc, &right_branch, branch_x, editor_bottom + self.scale(4), MUTED, rect);
+            Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(4), rgb(52, 211, 153), rect);
+            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(4), TEXT, rect);
+
+            // Middle info: Ln, Col, Spaces, Encoding, Language
+            let mid_info = format!(
+                "Ln {}, Col {}    Spaces: 4    UTF-8    {}",
+                self.view().cursor.line + 1,
+                self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
+                    .chars()
+                    .count()
+                    + 1,
+                language_label(self.doc().path.as_deref()),
+            );
+            let mid_x = chip_rect.right + self.scale(24);
+            Self::label(
+                hdc,
+                &mid_info,
+                mid_x,
                 editor_bottom + self.scale(4),
                 MUTED,
                 RECT {
-                    left: right_x,
+                    left: mid_x,
                     top: editor_bottom,
-                    right: rect.right,
+                    right: (branch_x - self.scale(16)).max(mid_x),
                     bottom: rect.bottom,
                 },
             );
-            if lsp_ready && right_label.ends_with("Ready") {
-                // Sits in the run of spaces the label already leaves before
-                // "Ready", so it never collides with the text.
-                let dot_right = rect.right - self.scale(16)
-                    - self.text_width(hdc, "Ready")
-                    - self.scale(5);
-                let middle = (editor_bottom + rect.bottom) / 2;
-                let size = self.scale(8).max(6);
-                let brush = CreateSolidBrush(GREEN);
-                let previous_brush = SelectObject(hdc, brush);
-                let previous_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-                Ellipse(
-                    hdc,
-                    dot_right - size,
-                    middle - size / 2,
-                    dot_right,
-                    middle + size / 2,
-                );
-                SelectObject(hdc, previous_pen);
-                SelectObject(hdc, previous_brush);
-                DeleteObject(brush);
-            }
             DeleteObject(bg);
             DeleteObject(gutter_bg);
             DeleteObject(status_bg);

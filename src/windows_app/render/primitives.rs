@@ -101,6 +101,37 @@ impl App {
         }
     }
 
+    // Just the rounded outline of a card. Drawn after a card's contents so
+    // interior fills, which are square, cannot paint over the border.
+    pub(in crate::windows_app) fn card_outline(
+        &self,
+        hdc: HDC,
+        rect: RECT,
+        radius: i32,
+        color: u32,
+    ) {
+        unsafe {
+            let pen = CreatePen(PS_SOLID, self.scale(1).max(1), color);
+            if pen.is_null() {
+                return;
+            }
+            let previous_pen = SelectObject(hdc, pen);
+            let previous_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            RoundRect(
+                hdc,
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                radius,
+                radius,
+            );
+            SelectObject(hdc, previous_brush);
+            SelectObject(hdc, previous_pen);
+            DeleteObject(pen);
+        }
+    }
+
     // A rounded panel: 1px border in `edge` with `body` filled inside it.
     pub(in crate::windows_app) fn panel_card(
         &self,
