@@ -25,6 +25,9 @@ pub enum Color {
     Type,
     Number,
     Macro,
+    Function,
+    Operator,
+    Attribute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +166,12 @@ fn rust_capture_color(name: &str) -> Option<Color> {
         Some(Color::Number)
     } else if name == "function.macro" {
         Some(Color::Macro)
+    } else if name == "function" || name == "function.method" {
+        Some(Color::Function)
+    } else if name == "operator" {
+        Some(Color::Operator)
+    } else if name == "attribute" || name.starts_with("attribute") {
+        Some(Color::Attribute)
     } else {
         None
     }
@@ -179,6 +188,12 @@ fn python_capture_color(name: &str) -> Option<Color> {
         Some(Color::Type)
     } else if name.starts_with("number") || name.starts_with("constant") {
         Some(Color::Number)
+    } else if name == "function" || name == "function.method" {
+        Some(Color::Function)
+    } else if name == "operator" {
+        Some(Color::Operator)
+    } else if name == "decorator" || name.starts_with("attribute") {
+        Some(Color::Attribute)
     } else {
         None
     }
@@ -717,7 +732,25 @@ fn scan(source: &str, mut state: State, mut spans: Option<&mut Vec<Span>>) -> St
                     } else if b.get(i) == Some(&b'!') {
                         i += 1;
                         push(&mut spans, start, i, Color::Macro);
+                    } else {
+                        let mut k = i;
+                        while k < b.len() && b[k] == b' ' {
+                            k += 1;
+                        }
+                        if k < b.len() && b[k] == b'(' {
+                            push(&mut spans, start, i, Color::Function);
+                        }
                     }
+                } else if matches!(
+                    b[i],
+                    b'+' | b'-' | b'*' | b'/' | b'%' | b'=' | b'<' | b'>' | b'&' | b'|' | b'^'
+                ) {
+                    let op_start = i;
+                    i += 1;
+                    if i < b.len() && matches!(b[i], b'=' | b'&' | b'|' | b'<' | b'>') {
+                        i += 1;
+                    }
+                    push(&mut spans, op_start, i, Color::Operator);
                 } else {
                     i += 1;
                 }

@@ -46,6 +46,9 @@ impl App {
             SelectObject(hdc, self.font);
             let space_width = self.text_width(hdc, " ").max(1);
             let guide_brush = CreateSolidBrush(EDGE);
+            let git_added_brush = CreateSolidBrush(GREEN);
+            let git_mod_brush = CreateSolidBrush(BLUE);
+            let git_diff = doc.path.as_ref().and_then(|p| self.git_diff_cache.get(p));
             for row in 0..visible {
                 let index = view.first_line + row;
                 if index >= doc.line_count() {
@@ -93,6 +96,32 @@ impl App {
                     num.len() as u32,
                     null(),
                 );
+                if let Some((added, modified)) = git_diff {
+                    let gutter_edge = left + self.scale(GUTTER) - self.scale(3);
+                    if added.contains(&index) {
+                        FillRect(
+                            hdc,
+                            &RECT {
+                                left: gutter_edge,
+                                top: y,
+                                right: gutter_edge + self.scale(3),
+                                bottom: (y + self.line_height).min(bottom),
+                            },
+                            git_added_brush,
+                        );
+                    } else if modified.contains(&index) {
+                        FillRect(
+                            hdc,
+                            &RECT {
+                                left: gutter_edge,
+                                top: y,
+                                right: gutter_edge + self.scale(3),
+                                bottom: (y + self.line_height).min(bottom),
+                            },
+                            git_mod_brush,
+                        );
+                    }
+                }
                 let source = doc.line(index);
                 let indent_columns = source
                     .chars()
@@ -173,6 +202,9 @@ impl App {
                             Color::Type => TEAL,
                             Color::Number => rgb(248, 180, 130),
                             Color::Macro => VIOLET,
+                            Color::Function => rgb(220, 210, 130),
+                            Color::Operator => rgb(200, 200, 220),
+                            Color::Attribute => rgb(180, 140, 230),
                         };
                         SetTextColor(hdc, color);
                         let left = code_left + self.text_width(hdc, &source[..span.start]);
@@ -234,6 +266,110 @@ impl App {
                 }
             }
             DeleteObject(guide_brush);
+            DeleteObject(git_added_brush);
+            DeleteObject(git_mod_brush);
+            // Bracket matching: highlight the matching bracket pair.
+            if pane == self.focused_pane && !self.terminal_focus {
+                let match_brush = CreateSolidBrush(rgb(60, 80, 120));
+                let bracket_at = |byte: usize, line_idx: usize| -> Option<(char, usize)> {
+                    let text = doc.line(line_idx);
+                    let ch = text[byte..].chars().next()?;
+                    if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
+                        Some((ch, byte))
+                    } else {
+                        None
+                    }
+                };
+                let cursor_line = view.cursor.line;
+                let cursor_byte = view.cursor.byte;
+                // Check the character at the cursor, then the one before it.
+                let bracket = bracket_at(cursor_byte, cursor_line).or_else(|| {
+                    if cursor_byte > 0 {
+                        let text = doc.line(cursor_line);
+                        let prev_byte = text[..cursor_byte]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)?;
+                        bracket_at(prev_byte, cursor_line)
+                    } else {
+                        None
+                    }
+                });
+                if let Some((ch, byte)) = bracket {
+                    let (open, close, forward) = match ch {
+                        '(' => ('(', ')', true),
+                        ')' => ('(', ')', false),
+                        '[' => ('[', ']', true),
+                        ']' => ('[', ']', false),
+                        '{' => ('{', '}', true),
+                        '}' => ('{', '}', false),
+                        _ => ('(', ')', true),
+                    };
+                    // Scan for the matching bracket, tracking nesting depth.
+                    let mut depth: i32 = 0;
+                    let mut match_pos: Option<(usize, usize)> = None;
+                    if forward {
+                        let mut scan_line = cursor_line;
+                        let mut scan_start = byte;
+                        'outer_fwd: while scan_line < doc.line_count() && scan_line < cursor_line + 500 {
+                            let text = doc.line(scan_line);
+                            for (i, c) in text[scan_start..].char_indices() {
+                                let abs = scan_start + i;
+                                if c == open { depth += 1; }
+                                if c == close { depth -= 1; }
+                                if depth == 0 {
+                                    match_pos = Some((scan_line, abs));
+                                    break 'outer_fwd;
+                                }
+                            }
+                            scan_line += 1;
+                            scan_start = 0;
+                        }
+                    } else {
+                        let mut scan_line = cursor_line;
+                        let mut first = true;
+                        'outer_bwd: loop {
+                            let text = doc.line(scan_line);
+                            let end = if first { byte } else { text.len() };
+                            first = false;
+                            let indices: Vec<(usize, char)> = text[..end].char_indices().collect();
+                            for &(i, c) in indices.iter().rev() {
+                                if c == close { depth += 1; }
+                                if c == open { depth -= 1; }
+                                if depth == 0 {
+                                    match_pos = Some((scan_line, i));
+                                    break 'outer_bwd;
+                                }
+                            }
+                            if scan_line == 0 || cursor_line - scan_line > 500 { break; }
+                            scan_line -= 1;
+                        }
+                    }
+                    // Draw the highlight rectangles for both brackets.
+                    let draw_bracket_bg = |line_idx: usize, b: usize| {
+                        if line_idx < view.first_line { return; }
+                        let row = line_idx - view.first_line;
+                        let y = self.editor_top() + row as i32 * self.line_height;
+                        if y >= bottom { return; }
+                        let text = doc.line(line_idx);
+                        let x = code_left + self.text_width(hdc, &text[..b]);
+                        let ch_text = &text[b..text.len().min(b + 1)];
+                        let w = self.text_width(hdc, if ch_text.is_empty() { " " } else { ch_text });
+                        if x < right {
+                            FillRect(hdc, &RECT {
+                                left: x, top: y,
+                                right: (x + w).min(right),
+                                bottom: (y + self.line_height).min(bottom),
+                            }, match_brush);
+                        }
+                    };
+                    draw_bracket_bg(cursor_line, byte);
+                    if let Some((ml, mb)) = match_pos {
+                        draw_bracket_bg(ml, mb);
+                    }
+                }
+                DeleteObject(match_brush);
+            }
             if self.focused && self.caret_on && !self.terminal_focus && pane == self.focused_pane {
                 let line = doc.line(view.cursor.line);
                 let x = code_left + self.text_width(hdc, &line[..view.cursor.byte]);

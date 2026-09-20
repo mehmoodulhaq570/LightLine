@@ -52,11 +52,15 @@ impl App {
                 7,
             ),
             ("New Terminal", 9),
+            ("Kill Active Terminal", 15),
             ("Restart Terminal", 10),
             ("Restart Terminal (No Profile)", 11),
             ("Go to Definition", 12),
             ("Format Document", 13),
             ("Trigger Completion", 14),
+            ("Open Settings (JSON)", 16),
+            ("Find in File", 17),
+            ("Find and Replace", 18),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -89,13 +93,33 @@ impl App {
                 Some(6) => self.select_python_environment(hwnd),
                 Some(7) => self.toggle_split(hwnd),
                 Some(9) => {
-                    self.open_terminal(hwnd);
+                    self.new_terminal(hwnd, false);
                 }
+                Some(15) => self.close_active_terminal(hwnd),
                 Some(10) => self.restart_terminal(hwnd, false),
                 Some(11) => self.restart_terminal(hwnd, true),
                 Some(12) => self.goto_definition(hwnd),
                 Some(13) => self.format_document(hwnd),
                 Some(14) => self.trigger_completion(hwnd),
+                Some(16) => self.open_settings(hwnd),
+                Some(17) => {
+                    self.search_input = false;
+                    self.panel_focus = false;
+                    self.find_mode = true;
+                    self.replace_mode = false;
+                    self.find_query.clear();
+                    self.status = "Find: ".into();
+                }
+                Some(18) => {
+                    self.search_input = false;
+                    self.panel_focus = false;
+                    self.find_mode = true;
+                    self.replace_mode = true;
+                    self.find_query.clear();
+                    self.replace_query.clear();
+                    self.replace_field = 0;
+                    self.update_find_replace_status();
+                }
                 _ => {}
             }
         } else {
@@ -107,6 +131,16 @@ impl App {
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn open_settings(&mut self, hwnd: HWND) {
+        if let Some(path) = lightline::settings::Settings::settings_path() {
+            if !path.exists() {
+                let _ = lightline::settings::Settings::default().save();
+            }
+            self.settings = lightline::settings::Settings::load();
+            self.open(hwnd, Some(path));
+        }
     }
 
     pub(super) fn open_project_search(&mut self, hwnd: HWND) {

@@ -7,12 +7,13 @@ mod panels;
 mod session;
 mod terminal;
 mod workspace;
-use app::{App, EditorView, ExplorerEntry, ExplorerRow, SideView, Tab, TerminalTab, WorkerMessage};
+use app::{App, EditorView, ExplorerEntry, ExplorerRow, SideView, Tab, TerminalPane, TerminalTab, WorkerMessage};
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;
 use terminal::TERMINAL_EVENT_MESSAGE;
 mod render;
+use render::WelcomeAction;
 mod window;
 pub use window::run;
 
@@ -53,7 +54,7 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::Dialogs::*;
-use windows_sys::Win32::UI::Controls::SetScrollInfo;
+use windows_sys::Win32::UI::Controls::{SetScrollInfo, ShowScrollBar};
 use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
 };

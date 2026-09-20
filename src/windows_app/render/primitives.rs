@@ -11,6 +11,119 @@ impl App {
         size.cx
     }
 
+    // Height of the currently selected font's text, so rows can center their
+    // label instead of relying on a hand-tuned offset per font size.
+    pub(in crate::windows_app) fn text_height(&self, hdc: HDC) -> i32 {
+        let sample: Vec<u16> = "Ag".encode_utf16().collect();
+        let mut size = SIZE::default();
+        unsafe {
+            GetTextExtentPoint32W(hdc, sample.as_ptr(), sample.len() as i32, &mut size);
+        }
+        size.cy
+    }
+
+    // Draws `text` vertically centered on `center_y` rather than top-aligned.
+    pub(in crate::windows_app) fn label_mid(
+        &self,
+        hdc: HDC,
+        text: &str,
+        x: i32,
+        center_y: i32,
+        color: u32,
+        clip: RECT,
+    ) {
+        let top = center_y - self.text_height(hdc) / 2;
+        Self::label(hdc, text, x, top, color, clip);
+    }
+
+    // A rounded card with a vertical two-stop gradient. GradientFill only
+    // paints rectangles, so the rounded corners come from clipping to a
+    // round-rect region for the duration of the fill.
+    pub(in crate::windows_app) fn gradient_card(
+        &self,
+        hdc: HDC,
+        rect: RECT,
+        radius: i32,
+        top_color: u32,
+        bottom_color: u32,
+    ) {
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return;
+        }
+        // COLORREF packs as 0x00BBGGRR; TRIVERTEX wants 16-bit channels.
+        let channel = |color: u32, shift: u32| ((color >> shift) & 0xff) as u16 * 257;
+        let vertices = [
+            TRIVERTEX {
+                x: rect.left,
+                y: rect.top,
+                Red: channel(top_color, 0),
+                Green: channel(top_color, 8),
+                Blue: channel(top_color, 16),
+                Alpha: 0,
+            },
+            TRIVERTEX {
+                x: rect.right,
+                y: rect.bottom,
+                Red: channel(bottom_color, 0),
+                Green: channel(bottom_color, 8),
+                Blue: channel(bottom_color, 16),
+                Alpha: 0,
+            },
+        ];
+        let mesh = GRADIENT_RECT {
+            UpperLeft: 0,
+            LowerRight: 1,
+        };
+        unsafe {
+            let region = CreateRoundRectRgn(
+                rect.left,
+                rect.top,
+                rect.right + 1,
+                rect.bottom + 1,
+                radius,
+                radius,
+            );
+            if region.is_null() {
+                Self::fill(hdc, rect, top_color);
+                return;
+            }
+            SelectClipRgn(hdc, region);
+            GradientFill(
+                hdc,
+                vertices.as_ptr(),
+                vertices.len() as u32,
+                std::ptr::from_ref(&mesh).cast(),
+                1,
+                GRADIENT_FILL_RECT_V,
+            );
+            SelectClipRgn(hdc, null_mut());
+            DeleteObject(region);
+        }
+    }
+
+    // A rounded panel: 1px border in `edge` with `body` filled inside it.
+    pub(in crate::windows_app) fn panel_card(
+        &self,
+        hdc: HDC,
+        rect: RECT,
+        radius: i32,
+        edge: u32,
+        body: u32,
+    ) {
+        Self::rounded_fill(hdc, rect, radius, edge);
+        Self::rounded_fill(
+            hdc,
+            RECT {
+                left: rect.left + self.scale(1).max(1),
+                top: rect.top + self.scale(1).max(1),
+                right: rect.right - self.scale(1).max(1),
+                bottom: rect.bottom - self.scale(1).max(1),
+            },
+            (radius - self.scale(1)).max(1),
+            body,
+        );
+    }
+
     pub(in crate::windows_app) fn caret_rect(&self, hwnd: HWND) -> RECT {
         unsafe {
             let hdc = GetDC(hwnd);

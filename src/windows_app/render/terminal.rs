@@ -35,41 +35,58 @@ impl App {
             EDGE,
         );
         self.refresh_terminal_cell_width(hdc);
-        let header_bottom = top + self.scale(34);
+        // The tab strip (OUTPUT, one tab per shell, add/kill buttons, panel
+        // close) is laid out by the same helper input.rs hit-tests, so painted
+        // rectangles and click targets can never drift apart.
+        let layout = self.terminal_header_layout(left, right, top);
+        let header_bottom = layout.header_bottom;
 
-        // Output (run/build results, its own session) and Terminal (the
-        // persistent interactive shell) sit in fixed-width tab slots so hit
-        // testing in input.rs doesn't need to re-measure label text.
-        let tab_slot = self.scale(90);
-        for (index, (tab, label)) in [
-            (TerminalTab::Output, "OUTPUT"),
-            (TerminalTab::Terminal, "TERMINAL"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let slot_left = left + self.scale(16) + index as i32 * tab_slot;
-            let active = self.terminal_tab == tab;
-            Self::label(
+        let output_active = self.terminal_tab == TerminalTab::Output;
+        Self::label(
+            hdc,
+            "OUTPUT",
+            layout.output.left,
+            top + self.scale(9),
+            if output_active { TEXT } else { MUTED },
+            layout.output,
+        );
+        if output_active {
+            Self::fill(
                 hdc,
-                label,
-                slot_left,
-                top + self.scale(9),
-                if active { TEXT } else { MUTED },
                 RECT {
-                    left: slot_left,
-                    top,
-                    right: slot_left + tab_slot,
+                    left: layout.output.left,
+                    top: header_bottom - self.scale(2),
+                    right: layout.output.right - self.scale(14),
                     bottom: header_bottom,
                 },
+                BLUE,
+            );
+        }
+
+        // One tab per interactive shell session, marked with a leading bullet.
+        for (index, rect) in layout.terminals.iter().enumerate() {
+            let title = self
+                .terminals
+                .get(index)
+                .map(|pane| pane.title.as_str())
+                .unwrap_or("?");
+            let label = format!("\u{2022} {title}");
+            let active = self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
+            Self::label(
+                hdc,
+                &label,
+                rect.left + self.scale(6),
+                top + self.scale(9),
+                if active { TEXT } else { MUTED },
+                *rect,
             );
             if active {
                 Self::fill(
                     hdc,
                     RECT {
-                        left: slot_left,
+                        left: rect.left,
                         top: header_bottom - self.scale(2),
-                        right: slot_left + tab_slot - self.scale(16),
+                        right: rect.right,
                         bottom: header_bottom,
                     },
                     BLUE,
@@ -77,9 +94,31 @@ impl App {
             }
         }
 
-        let active_snapshot = match self.terminal_tab {
+        let shell_open = self.terminal_tab == TerminalTab::Terminal
+            && self.terminal_active < self.terminals.len();
+        Self::label(
+            hdc,
+            "+",
+            layout.plus.left + self.scale(8),
+            top + self.scale(8),
+            MUTED,
+            layout.plus,
+        );
+        Self::label(
+            hdc,
+            "\u{2715}",
+            layout.kill.left + self.scale(4),
+            top + self.scale(9),
+            if shell_open { MUTED } else { rgb(74, 80, 94) },
+            layout.kill,
+        );
+
+        let active_snapshot: Option<Arc<Snapshot>> = match self.terminal_tab {
             TerminalTab::Output => self.run_snapshot.clone(),
-            TerminalTab::Terminal => self.shell_snapshot.clone(),
+            TerminalTab::Terminal => self
+                .terminals
+                .get(self.terminal_active)
+                .and_then(|pane| pane.snapshot.clone()),
         };
         let status = match &active_snapshot {
             Some(snapshot) => match &snapshot.status {
@@ -94,16 +133,19 @@ impl App {
         };
         if !status.is_empty() {
             let width = self.text_width(hdc, &status);
+            let x = (layout.kill.right + self.scale(18))
+                .min(right - self.scale(48) - width)
+                .max(layout.kill.right);
             Self::label(
                 hdc,
                 &status,
-                right - self.scale(48) - width,
+                x,
                 top + self.scale(10),
                 MUTED,
                 RECT {
                     left,
                     top,
-                    right: right - self.scale(44),
+                    right: layout.hide.left,
                     bottom: header_bottom,
                 },
             );
@@ -111,15 +153,10 @@ impl App {
         Self::label(
             hdc,
             "\u{d7}",
-            right - self.scale(28),
+            layout.hide.left + self.scale(6),
             top + self.scale(6),
             MUTED,
-            RECT {
-                left: right - self.scale(30),
-                top,
-                right,
-                bottom: header_bottom,
-            },
+            layout.hide,
         );
         let Some(snapshot) = active_snapshot else {
             return;

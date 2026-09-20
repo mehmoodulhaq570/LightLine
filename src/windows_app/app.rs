@@ -16,6 +16,18 @@ pub(super) enum TerminalTab {
     Terminal,
 }
 
+// One interactive shell instance in the bottom Terminal area. Each pane owns
+// its own TerminalService, which hosts a single Shell session, so many
+// terminals coexist (VS Code style) without reworking the core service's
+// fixed Shell + ManagedRun mailbox that the Output session still uses.
+pub(super) struct TerminalPane {
+    pub(super) title: String,
+    pub(super) service: TerminalService,
+    pub(super) id: SessionId,
+    pub(super) snapshot: Option<Arc<Snapshot>>,
+    pub(super) applied_size: Option<TerminalSize>,
+}
+
 pub(super) enum WorkerMessage {
     Files(PathBuf, Vec<PathBuf>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
@@ -202,7 +214,10 @@ pub(super) struct App {
     pub(super) font: HFONT,
     pub(super) ui_font: HFONT,
     pub(super) brand_font: HFONT,
+    pub(super) title_font: HFONT,
+    pub(super) hero_font: HFONT,
     pub(super) brand_icon: HICON,
+    pub(super) hero_icon: HICON,
     pub(super) icons: IconSet,
     pub(super) dpi: u32,
     pub(super) zoom: i32,
@@ -215,6 +230,9 @@ pub(super) struct App {
     pub(super) dragging: bool,
     pub(super) find_mode: bool,
     pub(super) find_query: String,
+    pub(super) replace_mode: bool,
+    pub(super) replace_query: String,
+    pub(super) replace_field: usize,
     pub(super) pending_high_surrogate: Option<u16>,
     pub(super) explorer_visible: bool,
     pub(super) sidebar_width: i32,
@@ -249,17 +267,17 @@ pub(super) struct App {
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     pub(super) terminal: TerminalService,
     pub(super) terminal_tab: TerminalTab,
-    pub(super) shell_session: Option<SessionId>,
-    pub(super) shell_snapshot: Option<Arc<Snapshot>>,
-    pub(super) shell_applied_size: Option<TerminalSize>,
+    // Interactive shell sessions shown as tabs in the Terminal area; the
+    // active index points into `terminals`. `terminal_counter` only feeds
+    // the "1", "2", ... tab labels so a closed tab's number is not reused.
+    pub(super) terminals: Vec<TerminalPane>,
+    pub(super) terminal_active: usize,
+    pub(super) terminal_counter: usize,
     pub(super) run_session: Option<SessionId>,
     pub(super) run_snapshot: Option<Arc<Snapshot>>,
     pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
     pub(super) terminal_focus: bool,
-    // Set while waiting for a stopped Terminal session to finish reaping
-    // before starting its replacement; see terminal::restart_terminal.
-    pub(super) pending_terminal_restart: Option<bool>,
     pub(super) cell_width: i32,
     pub(super) changes: Vec<Change>,
     pub(super) review_loading: bool,
@@ -290,6 +308,9 @@ pub(super) struct App {
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     pub(super) restoring: bool,
+    pub(super) watcher: Option<lightline::watcher::FileWatcher>,
+    pub(super) settings: lightline::settings::Settings,
+    pub(super) git_diff_cache: HashMap<PathBuf, (HashSet<usize>, HashSet<usize>)>,
 }
 
 // Records which pane/request an in-flight definition or format call belongs to
@@ -485,7 +506,39 @@ impl App {
         }
     }
 
-    pub(super) fn new(hwnd: HWND, brand_icon: HICON) -> Self {
+    // Display sizes used by the welcome screen's hero block. They are far
+    // larger than brand_font, which is sized for tab strips and headers.
+    pub(super) fn title_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
+        Self::display_font(23, dpi, zoom)
+    }
+
+    pub(super) fn hero_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
+        Self::display_font(38, dpi, zoom)
+    }
+
+    fn display_font(points: i32, dpi: u32, zoom: i32) -> HFONT {
+        let font_name = wide("Segoe UI Semibold");
+        unsafe {
+            CreateFontW(
+                -scaled(points, dpi, zoom),
+                0,
+                0,
+                0,
+                600,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                CLEARTYPE_QUALITY as u32,
+                0,
+                font_name.as_ptr(),
+            )
+        }
+    }
+
+    pub(super) fn new(hwnd: HWND, brand_icon: HICON, hero_icon: HICON) -> Self {
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let font = Self::font_for_dpi(dpi, zoom);
@@ -504,7 +557,10 @@ impl App {
             font,
             ui_font: Self::ui_font_for_dpi(dpi, zoom),
             brand_font: Self::brand_font_for_dpi(dpi, zoom),
+            title_font: Self::title_font_for_dpi(dpi, zoom),
+            hero_font: Self::hero_font_for_dpi(dpi, zoom),
             brand_icon,
+            hero_icon,
             icons: IconSet::new(dpi, zoom),
             dpi,
             zoom,
@@ -517,6 +573,9 @@ impl App {
             dragging: false,
             find_mode: false,
             find_query: String::new(),
+            replace_mode: false,
+            replace_query: String::new(),
+            replace_field: 0,
             pending_high_surrogate: None,
             explorer_visible: true,
             sidebar_width: SIDEBAR,
@@ -553,15 +612,14 @@ impl App {
                 }
             }),
             terminal_tab: TerminalTab::Terminal,
-            shell_session: None,
-            shell_snapshot: None,
-            shell_applied_size: None,
+            terminals: Vec::new(),
+            terminal_active: 0,
+            terminal_counter: 0,
             run_session: None,
             run_snapshot: None,
             run_applied_size: None,
             terminal_visible: false,
             terminal_focus: false,
-            pending_terminal_restart: None,
             cell_width: 0,
             changes: Vec::new(),
             review_loading: false,
@@ -590,6 +648,9 @@ impl App {
             completion_request: None,
             completion: None,
             restoring: false,
+            watcher: Some(lightline::watcher::FileWatcher::start()),
+            settings: lightline::settings::Settings::load(),
+            git_diff_cache: HashMap::new(),
         }
     }
 
@@ -775,6 +836,7 @@ impl App {
         self.terminal_focus = false;
         self.find_mode = false;
         self.update_title(hwnd);
+        self.update_scrollbar(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
@@ -854,11 +916,13 @@ impl App {
             self.tab_first = self.active + 1 - count;
         }
         self.find_mode = false;
+        self.replace_mode = false;
         self.dragging = false;
         self.update_title(hwnd);
         self.update_scrollbar(hwnd);
         self.advance_syntax(hwnd);
         self.ensure_lsp(hwnd);
+        self.refresh_active_git_diff();
         unsafe {
             InvalidateRect(hwnd, null(), 0);
         }
@@ -901,6 +965,11 @@ impl App {
         self.activate_tab(hwnd, index);
         if !self.can_discard(hwnd) {
             return;
+        }
+        if let Some(path) = self.tabs.get(index).and_then(|t| t.document.path.clone())
+            && let Some(watcher) = &self.watcher
+        {
+            watcher.unwatch_file(path);
         }
         self.close_lsp_tab(index);
         self.start_transition(hwnd);
@@ -973,20 +1042,17 @@ impl App {
         let font = Self::font_for_dpi(dpi, zoom);
         let ui_font = Self::ui_font_for_dpi(dpi, zoom);
         let brand_font = Self::brand_font_for_dpi(dpi, zoom);
-        if font.is_null() || ui_font.is_null() || brand_font.is_null() {
-            if !font.is_null() {
-                unsafe {
-                    DeleteObject(font);
-                }
-            }
-            if !ui_font.is_null() {
-                unsafe {
-                    DeleteObject(ui_font);
-                }
-            }
-            if !brand_font.is_null() {
-                unsafe {
-                    DeleteObject(brand_font);
+        let title_font = Self::title_font_for_dpi(dpi, zoom);
+        let hero_font = Self::hero_font_for_dpi(dpi, zoom);
+        // All or nothing: a partial swap would leave the app drawing with a
+        // mix of old and new metrics, so drop everything and keep the old set.
+        let created = [font, ui_font, brand_font, title_font, hero_font];
+        if created.iter().any(|handle| handle.is_null()) {
+            for handle in created {
+                if !handle.is_null() {
+                    unsafe {
+                        DeleteObject(handle);
+                    }
                 }
             }
             return;
@@ -995,11 +1061,15 @@ impl App {
             DeleteObject(self.font);
             DeleteObject(self.ui_font);
             DeleteObject(self.brand_font);
+            DeleteObject(self.title_font);
+            DeleteObject(self.hero_font);
         }
         self.line_height = Self::measured_line_height(font, dpi, zoom);
         self.font = font;
         self.ui_font = ui_font;
         self.brand_font = brand_font;
+        self.title_font = title_font;
+        self.hero_font = hero_font;
         self.icons = IconSet::new(dpi, zoom);
         self.dpi = dpi;
         self.zoom = zoom;
@@ -1069,6 +1139,14 @@ impl App {
     }
 
     pub(super) fn update_scrollbar(&self, hwnd: HWND) {
+        // The vertical scrollbar is a permanent window-style feature (WS_VSCROLL),
+        // so it stays visible with whatever thumb was last set for the editor
+        // unless explicitly hidden here — it must not bleed into the welcome pane.
+        if self.welcome {
+            unsafe { ShowScrollBar(hwnd, SB_VERT, 0) };
+            return;
+        }
+        unsafe { ShowScrollBar(hwnd, SB_VERT, 1) };
         let visible = self.visible_lines(hwnd);
         let info = SCROLLINFO {
             cbSize: size_of::<SCROLLINFO>() as u32,
@@ -1260,6 +1338,129 @@ impl App {
         self.refresh(hwnd);
     }
 
+    pub(super) fn replace_next(&mut self, hwnd: HWND) {
+        if self.find_query.is_empty() {
+            self.status = "Find & Replace: enter search term".into();
+            self.refresh(hwnd);
+            return;
+        }
+        let replacement = self.replace_query.clone();
+        if let Some((start, end)) = self.selection_range() {
+            let sel_text = self.doc().text_range(start, end);
+            if sel_text == self.find_query {
+                self.replace_selection(&replacement);
+            }
+        }
+        self.find(hwnd, true);
+    }
+
+    pub(super) fn replace_all(&mut self, hwnd: HWND) {
+        if self.find_query.is_empty() {
+            self.status = "Find & Replace: enter search term".into();
+            self.refresh(hwnd);
+            return;
+        }
+        let replacement = self.replace_query.clone();
+        let mut count = 0;
+        let mut pos = Pos::default();
+        while let Some(start) = self.doc().find_forward(pos, &self.find_query) {
+            let end = Pos {
+                line: start.line,
+                byte: start.byte + self.find_query.len(),
+            };
+            self.replace_range(start, end, &replacement);
+            count += 1;
+            pos = Pos {
+                line: start.line,
+                byte: start.byte + replacement.len(),
+            };
+            if pos.line >= self.doc().line_count() {
+                break;
+            }
+        }
+        self.find_mode = false;
+        self.replace_mode = false;
+        self.status = format!("Replaced {} occurrence(s) of '{}'", count, self.find_query);
+        self.refresh(hwnd);
+    }
+
+    pub(super) fn update_find_replace_status(&mut self) {
+        let f_marker = if self.replace_field == 0 { "> " } else { "  " };
+        let r_marker = if self.replace_field == 1 { "> " } else { "  " };
+        self.status = format!(
+            "{}Find: {} | {}Replace: {}  [Tab: switch, Enter: Replace Next, Alt+Enter: Replace All, Esc: Exit]",
+            f_marker, self.find_query, r_marker, self.replace_query
+        );
+    }
+
+    pub(super) fn poll_watcher(&mut self, hwnd: HWND) {
+        let Some(watcher) = &self.watcher else { return; };
+        let events = watcher.poll();
+        if events.is_empty() { return; }
+        let mut needs_refresh = false;
+        for event in events {
+            match event {
+                lightline::watcher::WatchEvent::FileChanged(path) => {
+                    for tab in &mut self.tabs {
+                        if tab
+                            .document
+                            .path
+                            .as_deref()
+                            .is_some_and(|p| Self::same_path(p, &path))
+                        {
+                            if !tab.document.is_dirty() {
+                                if let Ok(doc) = Document::open(path.clone()) {
+                                    tab.document = doc;
+                                    if let Some(syntax) = &mut tab.syntax {
+                                        syntax.invalidate_from(0);
+                                    }
+                                    self.status = format!(
+                                        "Reloaded: {}",
+                                        path.file_name().unwrap_or_default().to_string_lossy()
+                                    );
+                                    needs_refresh = true;
+                                }
+                            } else {
+                                self.status = format!(
+                                    "External change in {} (unsaved edits kept)",
+                                    path.file_name().unwrap_or_default().to_string_lossy()
+                                );
+                                needs_refresh = true;
+                            }
+                        }
+                    }
+                }
+                lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
+                    self.directory_cache.remove(&dir);
+                    needs_refresh = true;
+                }
+            }
+        }
+        if needs_refresh {
+            self.backbuffer = None;
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
+    pub(super) fn refresh_active_git_diff(&mut self) {
+        let Some(root) = self.workspace_root.as_ref() else { return; };
+        let Some(path) = self.doc().path.as_ref() else { return; };
+        let Ok(rel_path) = path.strip_prefix(root) else { return; };
+        let Ok(diff_rows) = workflow::git_diff(root, rel_path) else { return; };
+        let mut added = HashSet::new();
+        let mut modified = HashSet::new();
+        for row in diff_rows {
+            if row.changed && let Some(line) = row.after_number {
+                if row.before_number.is_none() {
+                    added.insert(line.saturating_sub(1));
+                } else {
+                    modified.insert(line.saturating_sub(1));
+                }
+            }
+        }
+        self.git_diff_cache.insert(path.clone(), (added, modified));
+    }
+
     pub(super) fn error(&mut self, hwnd: HWND, error: &impl std::fmt::Display) {
         self.status = error.to_string();
         dialog::show_dialog(
@@ -1352,6 +1553,7 @@ impl App {
                     "Saved {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 );
+                self.refresh_active_git_diff();
                 self.refresh(hwnd);
                 true
             }
@@ -1450,6 +1652,10 @@ impl App {
                     format!("Opened {name}")
                 };
                 self.show_active_tab(hwnd);
+                if let Some(watcher) = &self.watcher {
+                    watcher.watch_file(path.clone());
+                }
+                self.refresh_active_git_diff();
                 self.save_session();
             }
             Err(error) => self.error(hwnd, &error),
@@ -1504,5 +1710,29 @@ mod split_tests {
         assert!(tab.document.line(0).starts_with("00000000  "));
         assert!(tab.document.line(0).contains("00 01 ff 48 69"));
         assert!(tab.document.line(0).ends_with("|...Hi|"));
+    }
+
+    #[test]
+    fn find_and_replace_all_replaces_all_occurrences() {
+        let mut doc = Document::new();
+        doc.replace(Pos::default(), Pos::default(), "hello world hello rust hello");
+        let query = "hello";
+        let replacement = "hi";
+        let mut count = 0;
+        let mut pos = Pos::default();
+        while let Some(start) = doc.find_forward(pos, query) {
+            let end = Pos {
+                line: start.line,
+                byte: start.byte + query.len(),
+            };
+            doc.replace(start, end, replacement);
+            count += 1;
+            pos = Pos {
+                line: start.line,
+                byte: start.byte + replacement.len(),
+            };
+        }
+        assert_eq!(count, 3);
+        assert_eq!(doc.line(0), "hi world hi rust hi");
     }
 }

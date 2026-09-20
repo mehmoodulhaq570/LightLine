@@ -154,168 +154,187 @@ fn vk_to_terminal_key(vk: u32, control: bool) -> Option<TermKey> {
     Some(key)
 }
 
+// Regions of the terminal header tab strip. Painted by render/terminal.rs and
+// hit-tested by input.rs through the exact same layout, so the two never drift.
+pub(super) enum TerminalHeaderHit {
+    OutputTab,
+    TerminalTab(usize),
+    New,
+    Kill,
+    Hide,
+    Body,
+}
+
+pub(super) struct TerminalHeaderLayout {
+    pub(super) header_bottom: i32,
+    pub(super) output: RECT,
+    pub(super) terminals: Vec<RECT>,
+    pub(super) plus: RECT,
+    pub(super) kill: RECT,
+    pub(super) hide: RECT,
+}
+
 impl App {
-    fn session_for(&self, tab: TerminalTab) -> Option<SessionId> {
-        match tab {
-            TerminalTab::Terminal => self.shell_session,
-            TerminalTab::Output => self.run_session,
-        }
-    }
-
-    fn snapshot_for(&self, tab: TerminalTab) -> Option<&Arc<Snapshot>> {
-        match tab {
-            TerminalTab::Terminal => self.shell_snapshot.as_ref(),
-            TerminalTab::Output => self.run_snapshot.as_ref(),
-        }
-    }
-
-    fn set_session(&mut self, tab: TerminalTab, id: Option<SessionId>) {
-        match tab {
-            TerminalTab::Terminal => self.shell_session = id,
-            TerminalTab::Output => self.run_session = id,
-        }
-    }
-
-    fn set_snapshot(&mut self, tab: TerminalTab, snapshot: Option<Arc<Snapshot>>) {
-        match tab {
-            TerminalTab::Terminal => self.shell_snapshot = snapshot,
-            TerminalTab::Output => self.run_snapshot = snapshot,
-        }
-    }
-
-    fn set_applied_size(&mut self, tab: TerminalTab, size: Option<TerminalSize>) {
-        match tab {
-            TerminalTab::Terminal => self.shell_applied_size = size,
-            TerminalTab::Output => self.run_applied_size = size,
-        }
-    }
-
-    fn kind_for(tab: TerminalTab) -> SessionKind {
-        match tab {
-            TerminalTab::Terminal => SessionKind::Shell,
-            TerminalTab::Output => SessionKind::ManagedRun,
-        }
-    }
-
-    // Output is a fast, deterministic run session (build/script output), so it
-    // skips profile scripts by default. Terminal is the user's actual shell,
-    // so per spec it loads their normal profile unless explicitly restarted
-    // without one for troubleshooting.
+    // Output holds run/build results (cargo test, Run Python) in a dedicated
+    // ManagedRun session on the shared `terminal` service; the interactive
+    // shells live in `self.terminals`, one service each. Never conflate the
+    // two: run output must not be typed into the user's shell.
     fn default_no_profile(tab: TerminalTab) -> bool {
         matches!(tab, TerminalTab::Output)
     }
 
-    // Ensure the session backing `tab` exists, show the panel on that tab, and
-    // take keyboard focus. Shared by the interactive shell (Terminal) and run
-    // output (Output) — they are always distinct sessions, never the same one.
-    fn ensure_session(
-        &mut self,
-        hwnd: HWND,
-        tab: TerminalTab,
-        no_profile: bool,
-    ) -> Option<SessionId> {
+    fn terminal_launch_request(&self, no_profile: bool) -> LaunchRequest {
+        let cwd = self
+            .workspace_root
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        // Strip canonicalize()'s \\?\ prefix so PowerShell's own prompt shows
+        // an ordinary path instead of the extended form.
+        let mut request = LaunchRequest::shell(PathBuf::from(display_path(&cwd)));
+        if no_profile {
+            request = request.without_profile();
+        }
+        request
+    }
+
+    // Create a fresh interactive shell pane, spawn its session, and make it
+    // the active tab. Returns the new pane's index, or None on spawn failure.
+    fn spawn_terminal_pane(&mut self, hwnd: HWND, no_profile: bool) -> Option<usize> {
+        let request = self.terminal_launch_request(no_profile);
+        let size = self.terminal_size_for(hwnd);
+        let hwnd_value = hwnd as isize;
+        let mut service = TerminalService::new(move || unsafe {
+            PostMessageW(hwnd_value as HWND, TERMINAL_EVENT_MESSAGE, 0, 0);
+        });
+        match service.start(SessionKind::Shell, request, size) {
+            Ok(id) => {
+                self.terminal_counter += 1;
+                let title = self.terminal_counter.to_string();
+                self.terminals.push(TerminalPane {
+                    title,
+                    service,
+                    id,
+                    snapshot: None,
+                    applied_size: Some(size),
+                });
+                self.terminal_active = self.terminals.len() - 1;
+                Some(self.terminal_active)
+            }
+            Err(error) => {
+                self.status = format!("Terminal could not start: {error}");
+                None
+            }
+        }
+    }
+
+    // Snapshot backing the currently shown area (active shell or run output).
+    fn active_snapshot(&self) -> Option<&Arc<Snapshot>> {
+        match self.terminal_tab {
+            TerminalTab::Terminal => self.terminals.get(self.terminal_active)?.snapshot.as_ref(),
+            TerminalTab::Output => self.run_snapshot.as_ref(),
+        }
+    }
+
+    // Add a new shell session, reveal the panel on it, and take keyboard
+    // focus with the block cursor shown immediately.
+    pub(super) fn new_terminal(&mut self, hwnd: HWND, no_profile: bool) {
         self.welcome = false;
         self.terminal_visible = true;
-        self.terminal_tab = tab;
-        if let Some(id) = self.session_for(tab)
-            && self
-                .snapshot_for(tab)
-                .is_some_and(|snapshot| snapshot.status.is_final())
-        {
-            let _ = self.terminal.remove(id);
-            self.set_session(tab, None);
-            self.set_applied_size(tab, None);
-        }
-        let id = match self.session_for(tab) {
-            Some(id) => Some(id),
-            None => {
-                let cwd = self
-                    .workspace_root
-                    .clone()
-                    .or_else(|| std::env::current_dir().ok())
-                    .unwrap_or_else(|| PathBuf::from("."));
-                // Strip canonicalize()'s \\?\ prefix so PowerShell's own
-                // prompt shows an ordinary path instead of the extended form.
-                let cwd = PathBuf::from(display_path(&cwd));
-                let mut request = LaunchRequest::shell(cwd);
-                if no_profile {
-                    request = request.without_profile();
-                }
-                let size = self.terminal_size_for(hwnd);
-                match self.terminal.start(Self::kind_for(tab), request, size) {
-                    Ok(id) => {
-                        self.set_session(tab, Some(id));
-                        self.set_applied_size(tab, Some(size));
-                        self.set_snapshot(tab, None);
-                        Some(id)
-                    }
-                    Err(error) => {
-                        self.status = format!("Terminal could not start: {error}");
-                        None
-                    }
-                }
-            }
-        };
-        // Output is a read-only log, like VS Code's Output panel: it still
-        // runs on a real session underneath so streamed text keeps arriving,
-        // but it never takes keyboard focus. Only Terminal is typable.
-        if id.is_some() && tab == TerminalTab::Terminal {
-            self.terminal_focus = true;
+        self.terminal_tab = TerminalTab::Terminal;
+        if self.spawn_terminal_pane(hwnd, no_profile).is_some() {
+            self.focus_active_shell(hwnd);
         }
         self.update_title(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
-        id
     }
 
-    // Show (or create) the persistent interactive user shell on the Terminal tab.
-    pub(super) fn open_terminal(&mut self, hwnd: HWND) -> Option<SessionId> {
-        self.ensure_session(
-            hwnd,
-            TerminalTab::Terminal,
-            Self::default_no_profile(TerminalTab::Terminal),
-        )
-    }
-
-    // Show (or reuse) the dedicated run session on the Output tab. Reusing a
-    // still-running session means a new command queues behind whatever is
-    // already executing there rather than silently killing it.
-    fn ensure_run_session(&mut self, hwnd: HWND) -> Option<SessionId> {
-        self.ensure_session(
-            hwnd,
-            TerminalTab::Output,
-            Self::default_no_profile(TerminalTab::Output),
-        )
-    }
-
-    // Recycle the Terminal session: stop it and, once poll_terminal finishes
-    // reaping it, start a fresh one — optionally skipping the profile, e.g.
-    // to recover from a broken profile script. If nothing is running yet,
-    // this just starts one directly.
-    pub(super) fn restart_terminal(&mut self, hwnd: HWND, no_profile: bool) {
-        match self.shell_session {
-            Some(id) => {
-                let _ = self.terminal.stop(id);
-                self.pending_terminal_restart = Some(no_profile);
-                self.terminal_tab = TerminalTab::Terminal;
-                self.terminal_visible = true;
-                self.status = "Restarting terminal\u{2026}".into();
-                unsafe { InvalidateRect(hwnd, null(), 0) };
-            }
-            None => {
-                self.ensure_session(hwnd, TerminalTab::Terminal, no_profile);
-            }
+    fn focus_active_shell(&mut self, hwnd: HWND) {
+        self.terminal_focus = !self.terminals.is_empty();
+        if self.terminal_focus {
+            // Beat the 530ms blink timer so the caret is visible the instant
+            // focus lands in the terminal rather than after half a cycle.
+            self.caret_on = true;
         }
+        unsafe { SetFocus(hwnd) };
     }
 
-    // Stop the active tab's session and hide the panel; reaped in poll_terminal.
-    pub(super) fn close_terminal(&mut self, hwnd: HWND) {
-        if let Some(id) = self.session_for(self.terminal_tab) {
-            let _ = self.terminal.stop(id);
+    // Reveal the Terminal area: start the first shell if none exist yet,
+    // otherwise just focus (keeping the already-running sessions alive).
+    pub(super) fn open_terminal(&mut self, hwnd: HWND) {
+        if self.terminals.is_empty() {
+            self.new_terminal(hwnd, Self::default_no_profile(TerminalTab::Terminal));
+            return;
         }
-        self.terminal_visible = false;
-        self.terminal_focus = false;
-        self.keep_cursor_visible(hwnd);
+        self.welcome = false;
+        self.terminal_visible = true;
+        self.terminal_tab = TerminalTab::Terminal;
+        self.terminal_active = self.terminal_active.min(self.terminals.len() - 1);
+        self.focus_active_shell(hwnd);
+        self.update_title(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // Close the active shell: dropping its pane drops the service, which
+    // signals stop and lets the owner thread reap the child. Hides the panel
+    // once the last terminal is gone.
+    pub(super) fn close_active_terminal(&mut self, hwnd: HWND) {
+        if self.terminals.is_empty() {
+            self.hide_terminal(hwnd);
+            return;
+        }
+        let index = self.terminal_active.min(self.terminals.len() - 1);
+        self.terminals.remove(index);
+        if self.terminals.is_empty() {
+            self.terminal_visible = false;
+            self.terminal_focus = false;
+            self.terminal_active = 0;
+            self.keep_cursor_visible(hwnd);
+        } else {
+            self.terminal_active = index.min(self.terminals.len() - 1);
+            self.focus_active_shell(hwnd);
+        }
+        self.update_title(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // Recycle the active shell: spawn a replacement first, then drop the old
+    // pane, so indices stay valid and the panel never flashes empty.
+    pub(super) fn restart_terminal(&mut self, hwnd: HWND, no_profile: bool) {
+        if self.terminals.is_empty() {
+            self.new_terminal(hwnd, no_profile);
+            return;
+        }
+        self.welcome = false;
+        self.terminal_visible = true;
+        self.terminal_tab = TerminalTab::Terminal;
+        let old = self.terminal_active.min(self.terminals.len() - 1);
+        if self.spawn_terminal_pane(hwnd, no_profile).is_some() {
+            self.terminals.remove(old);
+            self.terminal_active = self.terminals.len() - 1;
+            self.focus_active_shell(hwnd);
+            self.status = "Restarted terminal\u{2026}".into();
+        }
+        self.update_title(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn select_terminal(&mut self, hwnd: HWND, index: usize) {
+        if index >= self.terminals.len() {
+            return;
+        }
+        self.welcome = false;
+        self.terminal_visible = true;
+        self.terminal_tab = TerminalTab::Terminal;
+        self.terminal_active = index;
+        self.focus_active_shell(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // Hide the panel without stopping any session, so shells keep running and
+    // reappear where they left off. The far-right close and Esc both do this.
+    pub(super) fn close_terminal(&mut self, hwnd: HWND) {
+        self.hide_terminal(hwnd);
     }
 
     pub(super) fn hide_terminal(&mut self, hwnd: HWND) {
@@ -327,25 +346,17 @@ impl App {
 
     pub(super) fn toggle_terminal(&mut self, hwnd: HWND) {
         if self.terminal_visible {
-            self.terminal_visible = false;
-            self.terminal_focus = false;
-            self.keep_cursor_visible(hwnd);
-            unsafe { InvalidateRect(hwnd, null(), 0) };
+            self.hide_terminal(hwnd);
         } else {
             self.open_terminal(hwnd);
         }
     }
 
     pub(super) fn switch_terminal_tab(&mut self, hwnd: HWND, tab: TerminalTab) {
-        if self.terminal_tab == tab {
-            return;
-        }
         match tab {
             // Clicking Terminal should just work, the way opening the panel
-            // does in any other editor: start the shell if none is running yet.
-            TerminalTab::Terminal => {
-                self.open_terminal(hwnd);
-            }
+            // does in any other editor: focus the shell, or start one if none.
+            TerminalTab::Terminal => self.open_terminal(hwnd),
             // Output has nothing to auto-start; it only ever shows whatever a
             // run has already produced, and never takes keyboard focus.
             TerminalTab::Output => {
@@ -359,48 +370,166 @@ impl App {
     pub(super) fn focus_terminal(&mut self, hwnd: HWND) {
         self.terminal_visible = true;
         // Output is read-only; clicking its body must not start capturing keys.
-        self.terminal_focus = self.terminal_tab == TerminalTab::Terminal;
-        unsafe {
-            SetFocus(hwnd);
-            InvalidateRect(hwnd, null(), 0);
+        if self.terminal_tab == TerminalTab::Terminal && !self.terminals.is_empty() {
+            self.focus_active_shell(hwnd);
+        } else {
+            self.terminal_focus = false;
+            unsafe { SetFocus(hwnd) };
+        }
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // Show (or create) the dedicated run session on the Output tab. Reusing a
+    // still-running session means a new command queues behind whatever is
+    // already executing there rather than silently killing it.
+    fn ensure_run_session(&mut self, hwnd: HWND) -> Option<SessionId> {
+        self.welcome = false;
+        self.terminal_visible = true;
+        self.terminal_tab = TerminalTab::Output;
+        self.terminal_focus = false;
+        if let Some(id) = self.run_session
+            && self
+                .run_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.status.is_final())
+        {
+            let _ = self.terminal.remove(id);
+            self.run_session = None;
+            self.run_applied_size = None;
+            self.run_snapshot = None;
+        }
+        if let Some(id) = self.run_session {
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return Some(id);
+        }
+        let request = self.terminal_launch_request(true);
+        let size = self.terminal_size_for(hwnd);
+        let started = self
+            .terminal
+            .start(SessionKind::ManagedRun, request, size)
+            .map_err(|error| self.status = format!("Terminal could not start: {error}"));
+        match started {
+            Ok(id) => {
+                self.run_session = Some(id);
+                self.run_applied_size = Some(size);
+                self.run_snapshot = None;
+                self.update_title(hwnd);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                Some(id)
+            }
+            Err(()) => None,
         }
     }
 
-    // Drain terminal events for both sessions; keep the latest snapshot for
-    // each live session and reap one once its final frame arrives.
+    // Drain terminal events for every shell pane plus the run session, keeping
+    // the latest snapshot for each. Exited shells keep their final frame visible
+    // (like VS Code) until the user closes the tab; only the run session is
+    // auto-reaped on a final status.
     pub(super) fn poll_terminal(&mut self, hwnd: HWND) {
-        let events = self.terminal.poll(MAX_DRAIN_EVENTS);
         let mut repaint = false;
-        for event in events {
-            let tab = if Some(event.session_id) == self.shell_session {
-                TerminalTab::Terminal
-            } else if Some(event.session_id) == self.run_session {
-                TerminalTab::Output
-            } else {
-                continue;
-            };
-            let final_status = event.snapshot.status.is_final();
-            self.set_snapshot(tab, Some(event.snapshot));
-            repaint = true;
-            if final_status {
-                if let Some(id) = self.session_for(tab) {
-                    let _ = self.terminal.remove(id);
-                }
-                self.set_session(tab, None);
-                self.set_applied_size(tab, None);
-                if self.terminal_tab == tab {
-                    self.terminal_focus = false;
-                }
-                if tab == TerminalTab::Terminal
-                    && let Some(no_profile) = self.pending_terminal_restart.take()
-                {
-                    self.ensure_session(hwnd, TerminalTab::Terminal, no_profile);
-                }
+        for pane in self.terminals.iter_mut() {
+            for event in pane.service.poll(MAX_DRAIN_EVENTS) {
+                pane.snapshot = Some(event.snapshot);
+                repaint = true;
             }
         }
-        if repaint || self.shell_session.is_some() || self.run_session.is_some() {
+        for event in self.terminal.poll(MAX_DRAIN_EVENTS) {
+            if Some(event.session_id) != self.run_session {
+                continue;
+            }
+            let final_status = event.snapshot.status.is_final();
+            self.run_snapshot = Some(event.snapshot);
+            repaint = true;
+            if final_status {
+                let _ = self.terminal.remove(event.session_id);
+                self.run_session = None;
+                self.run_applied_size = None;
+            }
+        }
+        if repaint || !self.terminals.is_empty() || self.run_session.is_some() {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
+    }
+
+    // Header tab-strip geometry, shared by painting and hit testing so they
+    // can never disagree about where a tab, `+`, kill, or hide button sits.
+    pub(super) fn terminal_header_layout(
+        &self,
+        left: i32,
+        right: i32,
+        top: i32,
+    ) -> TerminalHeaderLayout {
+        let header_bottom = top + self.scale(TERMINAL_HEADER);
+        let mut x = left + self.scale(16);
+        let output = RECT {
+            left: x,
+            top,
+            right: x + self.scale(78),
+            bottom: header_bottom,
+        };
+        x += self.scale(78);
+        let tab_width = self.scale(60);
+        let gap = self.scale(6);
+        let mut terminals = Vec::with_capacity(self.terminals.len());
+        for _ in 0..self.terminals.len() {
+            terminals.push(RECT {
+                left: x + gap,
+                top,
+                right: x + gap + tab_width,
+                bottom: header_bottom,
+            });
+            x += gap + tab_width;
+        }
+        let plus = RECT {
+            left: x + gap,
+            top,
+            right: x + gap + self.scale(28),
+            bottom: header_bottom,
+        };
+        x += gap + self.scale(34);
+        let kill = RECT {
+            left: x,
+            top,
+            right: x + self.scale(28),
+            bottom: header_bottom,
+        };
+        let hide = RECT {
+            left: right - self.scale(34),
+            top,
+            right: right - self.scale(6),
+            bottom: header_bottom,
+        };
+        TerminalHeaderLayout {
+            header_bottom,
+            output,
+            terminals,
+            plus,
+            kill,
+            hide,
+        }
+    }
+
+    pub(super) fn terminal_header_hit(&self, left: i32, right: i32, top: i32, x: i32, y: i32) -> TerminalHeaderHit {
+        let layout = self.terminal_header_layout(left, right, top);
+        let inside = |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+        if inside(&layout.hide) {
+            return TerminalHeaderHit::Hide;
+        }
+        if inside(&layout.output) {
+            return TerminalHeaderHit::OutputTab;
+        }
+        for (index, rect) in layout.terminals.iter().enumerate() {
+            if inside(rect) {
+                return TerminalHeaderHit::TerminalTab(index);
+            }
+        }
+        if inside(&layout.plus) {
+            return TerminalHeaderHit::New;
+        }
+        if inside(&layout.kill) {
+            return TerminalHeaderHit::Kill;
+        }
+        TerminalHeaderHit::Body
     }
 
     pub(super) fn terminal_top(&self, hwnd: HWND) -> i32 {
@@ -462,7 +591,7 @@ impl App {
     // trailing padding spaces off each line the way a real terminal's copy does.
     fn terminal_selected_text(&self) -> Option<String> {
         let (start, finish) = self.terminal_selection_range()?;
-        let snapshot = self.snapshot_for(self.terminal_tab)?;
+        let snapshot = self.active_snapshot()?;
         let mut lines = Vec::new();
         for row_index in start.1..=finish.1 {
             let Some(row) = snapshot.rows.get(row_index as usize) else {
@@ -523,23 +652,19 @@ impl App {
 
     pub(super) fn resize_terminal_to_fit(&mut self, hwnd: HWND) {
         let size = self.terminal_size_for(hwnd);
-        for tab in [TerminalTab::Terminal, TerminalTab::Output] {
-            let Some(id) = self.session_for(tab) else {
-                continue;
-            };
-            if self.applied_size(tab) == Some(size) {
+        for pane in self.terminals.iter_mut() {
+            if pane.applied_size == Some(size) {
                 continue;
             }
-            if self.terminal.resize(id, size).is_ok() {
-                self.set_applied_size(tab, Some(size));
+            if pane.service.resize(pane.id, size).is_ok() {
+                pane.applied_size = Some(size);
             }
         }
-    }
-
-    fn applied_size(&self, tab: TerminalTab) -> Option<TerminalSize> {
-        match tab {
-            TerminalTab::Terminal => self.shell_applied_size,
-            TerminalTab::Output => self.run_applied_size,
+        if self.run_applied_size != Some(size)
+            && let Some(id) = self.run_session
+            && self.terminal.resize(id, size).is_ok()
+        {
+            self.run_applied_size = Some(size);
         }
     }
 
@@ -553,9 +678,6 @@ impl App {
         shift: bool,
         alt: bool,
     ) -> bool {
-        let Some(id) = self.session_for(self.terminal_tab) else {
-            return false;
-        };
         let Some(key) = vk_to_terminal_key(vk, control) else {
             return false;
         };
@@ -565,70 +687,115 @@ impl App {
             alt,
         };
         self.reset_terminal_scrollback();
-        if self.terminal.key(id, key, modifiers).is_ok() {
+        let delivered = match self.terminal_tab {
+            TerminalTab::Terminal => match self.terminals.get_mut(self.terminal_active) {
+                Some(pane) => pane.service.key(pane.id, key, modifiers).is_ok(),
+                None => false,
+            },
+            TerminalTab::Output => {
+                self.run_session
+                    .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
+            }
+        };
+        if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
-            true
-        } else {
-            false
         }
+        delivered
     }
 
     pub(super) fn send_terminal_char(&mut self, hwnd: HWND, ch: char) {
-        let Some(id) = self.session_for(self.terminal_tab) else {
-            return;
-        };
         self.reset_terminal_scrollback();
         let mut buffer = [0u8; 4];
         let bytes = ch.encode_utf8(&mut buffer).as_bytes();
-        if self.terminal.input(id, bytes).is_ok() {
+        let delivered = match self.terminal_tab {
+            TerminalTab::Terminal => match self.terminals.get_mut(self.terminal_active) {
+                Some(pane) => pane.service.input(pane.id, bytes).is_ok(),
+                None => false,
+            },
+            TerminalTab::Output => self
+                .run_session
+                .is_some_and(|id| self.terminal.input(id, bytes).is_ok()),
+        };
+        if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 
     fn reset_terminal_scrollback(&mut self) {
-        let tab = self.terminal_tab;
-        if let Some(id) = self.session_for(tab)
-            && self
-                .snapshot_for(tab)
-                .is_some_and(|snapshot| snapshot.scrollback_offset != 0)
-        {
-            let _ = self.terminal.scrollback(id, 0);
+        match self.terminal_tab {
+            TerminalTab::Terminal => {
+                if let Some(pane) = self.terminals.get_mut(self.terminal_active)
+                    && pane
+                        .snapshot
+                        .as_ref()
+                        .is_some_and(|snapshot| snapshot.scrollback_offset != 0)
+                {
+                    let _ = pane.service.scrollback(pane.id, 0);
+                }
+            }
+            TerminalTab::Output => {
+                if let Some(id) = self.run_session
+                    && self
+                        .run_snapshot
+                        .as_ref()
+                        .is_some_and(|snapshot| snapshot.scrollback_offset != 0)
+                {
+                    let _ = self.terminal.scrollback(id, 0);
+                }
+            }
         }
     }
 
     pub(super) fn scroll_terminal(&mut self, hwnd: HWND, delta: i32) {
-        let Some(id) = self.session_for(self.terminal_tab) else {
+        let Some(snapshot) = self.active_snapshot() else {
             return;
         };
-        let (current, available) = self
-            .snapshot_for(self.terminal_tab)
-            .map_or((0, 0), |snapshot| {
-                (snapshot.scrollback_offset, snapshot.scrollback_available)
-            });
+        let current = snapshot.scrollback_offset;
+        let available = snapshot.scrollback_available;
         let step = 3;
         let next = if delta > 0 {
             current.saturating_add(step).min(available)
         } else {
             current.saturating_sub(step)
         };
-        if next != current && self.terminal.scrollback(id, next).is_ok() {
+        if next == current {
+            return;
+        }
+        let ok = match self.terminal_tab {
+            TerminalTab::Terminal => match self.terminals.get(self.terminal_active) {
+                Some(pane) => pane.service.scrollback(pane.id, next).is_ok(),
+                None => false,
+            },
+            TerminalTab::Output => {
+                self.run_session.is_some_and(|id| self.terminal.scrollback(id, next).is_ok())
+            }
+        };
+        if ok {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 
     pub(super) fn paste_into_terminal(&mut self, hwnd: HWND) {
-        let Some(id) = self.session_for(self.terminal_tab) else {
-            return;
-        };
-        match clipboard::paste(hwnd) {
-            Ok(Some(text)) => {
-                self.reset_terminal_scrollback();
-                if self.terminal.paste(id, &text).is_err() {
-                    self.status = "Terminal is busy; try pasting again".into();
-                }
+        let text = match clipboard::paste(hwnd) {
+            Ok(Some(text)) => text,
+            Ok(None) => return,
+            Err(error) => {
+                self.error(hwnd, &error);
+                return;
             }
-            Ok(None) => {}
-            Err(error) => self.error(hwnd, &error),
+        };
+        self.reset_terminal_scrollback();
+        let sent = match self.terminal_tab {
+            TerminalTab::Terminal => match self.terminals.get_mut(self.terminal_active) {
+                Some(pane) => pane.service.paste(pane.id, &text).is_ok(),
+                None => false,
+            },
+            TerminalTab::Output => self
+                .run_session
+                .is_some_and(|id| self.terminal.paste(id, &text).is_ok()),
+        };
+        if !sent {
+            self.status = "Terminal is busy; try pasting again".into();
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -643,21 +810,25 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
-    // Stops both sessions (reaped asynchronously by poll_terminal, same as
-    // close_terminal) and hides the panel, e.g. when switching workspaces: the
-    // old shell's cwd/venv no longer matches, so nothing should carry over.
+    // Stop every shell and the run session and hide the panel, e.g. when
+    // switching workspaces: the old shell's cwd/venv no longer matches, so
+    // nothing should carry over. Clearing `terminals` drops each service,
+    // which signals stop and lets its owner thread reap the child.
     pub(super) fn reset_terminal_sessions(&mut self, hwnd: HWND) {
         self.stop_terminal_for_close();
+        self.terminals.clear();
+        self.terminal_active = 0;
         self.terminal_visible = false;
         self.terminal_focus = false;
         self.keep_cursor_visible(hwnd);
     }
 
     pub(super) fn stop_terminal_for_close(&mut self) {
-        for tab in [TerminalTab::Terminal, TerminalTab::Output] {
-            if let Some(id) = self.session_for(tab) {
-                let _ = self.terminal.stop(id);
-            }
+        for pane in self.terminals.iter() {
+            let _ = pane.service.stop(pane.id);
+        }
+        if let Some(id) = self.run_session {
+            let _ = self.terminal.stop(id);
         }
     }
 

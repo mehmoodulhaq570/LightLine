@@ -1,4 +1,5 @@
 use super::*;
+use super::terminal::TerminalHeaderHit;
 
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
@@ -10,6 +11,11 @@ impl App {
             // Ctrl+` hides the panel even while the shell has focus.
             if ctrl && !shift && key == VK_OEM_3 as u32 {
                 self.hide_terminal(hwnd);
+                return true;
+            }
+            // Ctrl+Shift+` opens a fresh shell session and focuses it.
+            if ctrl && shift && key == VK_OEM_3 as u32 {
+                self.new_terminal(hwnd, false);
                 return true;
             }
             // Escape hides the panel; the shell keeps running until it is closed.
@@ -177,11 +183,32 @@ impl App {
             match key {
                 x if x == VK_ESCAPE as u32 => {
                     self.find_mode = false;
+                    self.replace_mode = false;
                     self.status = "Ready".into();
                     self.refresh(hwnd);
                     return true;
                 }
-                x if x == VK_BACK as u32 || x == VK_RETURN as u32 => return true,
+                x if x == VK_TAB as u32 && self.replace_mode => {
+                    self.replace_field = 1 - self.replace_field;
+                    self.update_find_replace_status();
+                    self.refresh(hwnd);
+                    return true;
+                }
+                x if x == VK_RETURN as u32 => {
+                    if self.replace_mode {
+                        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+                        if alt || ctrl {
+                            self.replace_all(hwnd);
+                        } else {
+                            self.replace_next(hwnd);
+                        }
+                    } else {
+                        self.find_mode = false;
+                        self.find(hwnd, !shift);
+                    }
+                    return true;
+                }
+                x if x == VK_BACK as u32 => return true,
                 _ => {}
             }
         }
@@ -192,7 +219,11 @@ impl App {
                     self.trigger_completion(hwnd);
                     return true;
                 }
-                x if x == VK_OEM_3 as u32 && !shift => {
+                x if x == VK_OEM_3 as u32 && shift => {
+                    self.new_terminal(hwnd, false);
+                    return true;
+                }
+                x if x == VK_OEM_3 as u32 => {
                     self.toggle_terminal(hwnd);
                     return true;
                 }
@@ -210,6 +241,18 @@ impl App {
                 }
                 0x48 if shift => {
                     self.show_welcome(hwnd);
+                    return true;
+                }
+                0x48 if !shift => {
+                    self.search_input = false;
+                    self.panel_focus = false;
+                    self.find_mode = true;
+                    self.replace_mode = true;
+                    self.find_query.clear();
+                    self.replace_query.clear();
+                    self.replace_field = 0;
+                    self.update_find_replace_status();
+                    self.refresh(hwnd);
                     return true;
                 }
                 0x50 => {
@@ -300,6 +343,10 @@ impl App {
                 }
                 0x57 => {
                     self.close_tab(hwnd, self.active);
+                    return true;
+                }
+                x if x == VK_OEM_COMMA as u32 => {
+                    self.open_settings(hwnd);
                     return true;
                 }
                 x if x == VK_TAB as u32 => {
@@ -513,8 +560,31 @@ impl App {
                 if self.selection_range().is_some() {
                     self.replace_selection("");
                 } else {
-                    let previous = self.doc().previous(cursor);
-                    self.replace_range(previous, cursor, "");
+                    // Delete both characters of an empty auto-closed pair.
+                    let line = self.doc().line(cursor.line);
+                    let before = if cursor.byte > 0 {
+                        line.as_bytes().get(cursor.byte - 1).copied()
+                    } else {
+                        None
+                    };
+                    let after = line.as_bytes().get(cursor.byte).copied();
+                    let is_empty_pair = matches!(
+                        (before, after),
+                        (Some(b'('), Some(b')'))
+                            | (Some(b'['), Some(b']'))
+                            | (Some(b'{'), Some(b'}'))
+                            | (Some(b'"'), Some(b'"'))
+                            | (Some(b'\''), Some(b'\''))
+                            | (Some(b'`'), Some(b'`'))
+                    );
+                    if is_empty_pair {
+                        let previous = self.doc().previous(cursor);
+                        let next = self.doc().next(cursor);
+                        self.replace_range(previous, next, "");
+                    } else {
+                        let previous = self.doc().previous(cursor);
+                        self.replace_range(previous, cursor, "");
+                    }
                 }
             }
             x if x == VK_DELETE as u32 => {
@@ -584,14 +654,21 @@ impl App {
         // Typing over the identifier closes the popup; Ctrl+Space re-opens it.
         self.dismiss_completion(hwnd);
         if self.find_mode && unit == 8 {
-            self.find_query.pop();
-            self.status = format!("Find: {}", self.find_query);
+            if self.replace_mode {
+                if self.replace_field == 0 {
+                    self.find_query.pop();
+                } else {
+                    self.replace_query.pop();
+                }
+                self.update_find_replace_status();
+            } else {
+                self.find_query.pop();
+                self.status = format!("Find: {}", self.find_query);
+            }
             self.refresh(hwnd);
             return;
         }
         if self.find_mode && unit == 13 {
-            self.find_mode = false;
-            self.find(hwnd, true);
             return;
         }
         if (unit < 32 && unit != 9 && unit != 13) || unit == 127 {
@@ -612,19 +689,85 @@ impl App {
         if let Some(ch) = ch {
             if self.find_mode {
                 if !ch.is_control() {
-                    self.find_query.push(ch);
-                    self.status = format!("Find: {}", self.find_query);
+                    if self.replace_mode {
+                        if self.replace_field == 0 {
+                            self.find_query.push(ch);
+                        } else {
+                            self.replace_query.push(ch);
+                        }
+                        self.update_find_replace_status();
+                    } else {
+                        self.find_query.push(ch);
+                        self.status = format!("Find: {}", self.find_query);
+                    }
                     self.refresh(hwnd);
                 }
                 return;
             }
+            // Auto-closing pairs: when typing an opening bracket or quote,
+            // insert the closing counterpart and leave the cursor between them.
+            let closing = if self.settings.auto_close_pairs {
+                match ch {
+                    '(' => Some(')'),
+                    '[' => Some(']'),
+                    '{' => Some('}'),
+                    '"' => Some('"'),
+                    '\'' => Some('\''),
+                    '`' => Some('`'),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            // For quotes, only auto-close when the character after the cursor
+            // is whitespace, end-of-line, or a closing bracket — not mid-word.
+            let should_auto_close = closing.is_some_and(|close| {
+                if matches!(ch, '"' | '\'' | '`') {
+                    let line = self.doc().line(self.view().cursor.line);
+                    let after = &line[self.view().cursor.byte..];
+                    after.is_empty()
+                        || after.starts_with(|c: char| c.is_whitespace() || ")]}".contains(c))
+                        || (close == ch && after.starts_with(ch))
+                } else {
+                    true
+                }
+            });
+            // Skip over a closing quote/bracket if the cursor is already on it.
+            if matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') {
+                let line = self.doc().line(self.view().cursor.line);
+                if line[self.view().cursor.byte..].starts_with(ch) {
+                    let next = self.doc().next(self.view().cursor);
+                    self.view_mut().cursor = next;
+                    self.refresh(hwnd);
+                    return;
+                }
+            }
             let text = if ch == '\r' {
-                "\n".to_owned()
+                // Auto-indent: add extra indentation after { or :
+                let cursor = self.view().cursor;
+                let line = self.doc().line(cursor.line);
+                let indent: String = line
+                    .chars()
+                    .take_while(|c| *c == ' ' || *c == '\t')
+                    .collect();
+                let trimmed = line.trim_end();
+                if trimmed.ends_with('{') || trimmed.ends_with(':') {
+                    format!("\n{}    ", indent)
+                } else {
+                    format!("\n{}", indent)
+                }
+            } else if should_auto_close {
+                format!("{}{}", ch, closing.unwrap())
             } else {
                 ch.to_string()
             };
             self.cancel_transition(hwnd);
             self.replace_selection(&text);
+            // For auto-close pairs, move the cursor back before the closing char.
+            if should_auto_close && ch != '\r' {
+                let pos = self.doc().previous(self.view().cursor);
+                self.view_mut().cursor = pos;
+            }
             self.refresh(hwnd);
         }
     }
@@ -673,6 +816,64 @@ impl App {
         }
     }
 
+    // Every welcome-screen target maps onto an existing command, so the page
+    // never offers something the rest of the app cannot actually do.
+    fn run_welcome_action(&mut self, hwnd: HWND, action: WelcomeAction) {
+        match action {
+            WelcomeAction::Explorer => {
+                self.welcome = false;
+                self.side_view = SideView::Files;
+                self.panel_focus = false;
+                self.set_sidebar_visible(hwnd, true);
+                self.show_active_tab(hwnd);
+            }
+            WelcomeAction::Search => self.open_project_search(hwnd),
+            WelcomeAction::SourceControl => self.show_review(hwnd),
+            WelcomeAction::RunDebug => {
+                if Tab::is_python(self.doc()) {
+                    self.run_python_file(hwnd);
+                } else {
+                    self.run_project(hwnd);
+                }
+            }
+            WelcomeAction::Extensions => {
+                self.status = "Extensions are planned for a later release".into();
+                self.refresh(hwnd);
+            }
+            WelcomeAction::AiAssistant => {
+                self.status = "AI Assistant is not installed".into();
+                self.refresh(hwnd);
+            }
+            WelcomeAction::OpenFile => self.open(hwnd, None),
+            WelcomeAction::OpenFolder => self.open_folder(hwnd),
+            WelcomeAction::NewFile => self.new_file(hwnd),
+            WelcomeAction::Terminal => self.open_terminal(hwnd),
+            WelcomeAction::CommandPalette => self.show_quick_open(hwnd),
+            WelcomeAction::Community => {
+                use windows_sys::Win32::UI::Shell::ShellExecuteW;
+                let operation = wide("open");
+                let url = wide("https://github.com/mehmoodulhaq570/LightLine");
+                unsafe {
+                    ShellExecuteW(
+                        hwnd,
+                        operation.as_ptr(),
+                        url.as_ptr(),
+                        null(),
+                        null(),
+                        SW_SHOWNORMAL,
+                    );
+                }
+                self.status = "Opened the project page in your browser".into();
+                self.refresh(hwnd);
+            }
+            WelcomeAction::Recent(index) => {
+                if let Some(path) = self.recent.get(index).cloned() {
+                    self.set_workspace(hwnd, path);
+                }
+            }
+        }
+    }
+
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
         self.clear_hover(hwnd);
         let mut rect = RECT::default();
@@ -680,24 +881,8 @@ impl App {
             GetClientRect(hwnd, &mut rect);
         }
         if self.welcome {
-            let left = (rect.right / 2 - self.scale(250)).max(self.scale(28));
-            if y >= self.scale(251) && y < self.scale(289) {
-                let button = (x - left) / self.scale(145).max(1);
-                if x >= left && button == 0 {
-                    self.open(hwnd, None);
-                } else if x >= left && button == 1 {
-                    self.open_folder(hwnd);
-                } else if x >= left && button == 2 {
-                    self.new_file(hwnd);
-                }
-            } else if y >= self.scale(351) {
-                let index = ((y - self.scale(351)) / self.scale(49).max(1)) as usize;
-                if x >= left
-                    && x < left + self.scale(430)
-                    && let Some(path) = self.recent.get(index).cloned()
-                {
-                    self.set_workspace(hwnd, path);
-                }
+            if let Some(action) = self.welcome_layout(rect).hit(x, y) {
+                self.run_welcome_action(hwnd, action);
             }
             return;
         }
@@ -864,22 +1049,25 @@ impl App {
             return;
         }
         if self.terminal_visible && y >= self.terminal_top(hwnd) {
-            let header_bottom = self.terminal_top(hwnd) + self.scale(34);
-            if y < header_bottom && x >= rect.right - self.scale(40) {
-                self.close_terminal(hwnd);
-                return;
-            }
+            let top = self.terminal_top(hwnd);
+            let header_bottom = top + self.scale(34);
             if y < header_bottom {
-                let tab_slot = self.scale(90);
-                let tabs_left = editor_left + self.scale(16);
-                if x >= tabs_left && x < tabs_left + tab_slot {
-                    self.switch_terminal_tab(hwnd, TerminalTab::Output);
-                    return;
+                match self.terminal_header_hit(editor_left, rect.right, top, x, y) {
+                    // The far-right close hides the panel but keeps every
+                    // shell session running, exactly like dismissing a dock.
+                    TerminalHeaderHit::Hide => self.close_terminal(hwnd),
+                    TerminalHeaderHit::OutputTab => {
+                        self.switch_terminal_tab(hwnd, TerminalTab::Output);
+                    }
+                    TerminalHeaderHit::TerminalTab(index) => self.select_terminal(hwnd, index),
+                    TerminalHeaderHit::New => self.new_terminal(hwnd, false),
+                    TerminalHeaderHit::Kill => self.close_active_terminal(hwnd),
+                    TerminalHeaderHit::Body => {
+                        self.focus_terminal(hwnd);
+                        self.start_terminal_selection(hwnd, x, y);
+                    }
                 }
-                if x >= tabs_left + tab_slot && x < tabs_left + tab_slot * 2 {
-                    self.switch_terminal_tab(hwnd, TerminalTab::Terminal);
-                    return;
-                }
+                return;
             }
             self.focus_terminal(hwnd);
             self.start_terminal_selection(hwnd, x, y);

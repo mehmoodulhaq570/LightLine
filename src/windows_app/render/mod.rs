@@ -5,3 +5,6 @@ mod hover;
 mod panels;
 mod primitives;
 mod terminal;
+mod welcome;
+
+pub(in crate::windows_app) use welcome::WelcomeAction;

@@ -38,7 +38,7 @@ There is no tagged release yet — LightLine is built and dogfooded directly fro
 - UTF-8 file editing with undo/redo, multiple tabs, and vertical split panes
 - Rust and Python syntax coloring via Tree-sitter, with a lexical fallback for large Rust files
 - rust-analyzer diagnostics, hover, go-to-definition, completion and formatting for Rust; Pyright diagnostics, hover, go-to-definition, completion and formatting for Python (self-installing, no manual setup)
-- An integrated terminal with a persistent interactive shell separate from build/run output
+- An integrated terminal with multiple simultaneous shell sessions in switchable tabs (add, kill, and reopen like VS Code), separate from build/run output; opening it moves keyboard focus and the block cursor straight into the shell
 - Run the active Python file, or run `cargo test`, straight from the editor
 - Workspace explorer, project-wide search, Quick Open (files and commands), and read-only Git review with side-by-side diffs
 - Read-only previews for files that are not editable text: raster images, and a bounded hex dump for other binary files instead of a "not UTF-8" error
@@ -84,7 +84,9 @@ You can pass a UTF-8 file path as the first argument.
 | Show completions at the cursor | Ctrl+Space, or Ctrl+P, type `>`, choose **Trigger Completion** |
 | Select a Python interpreter or virtual environment | Ctrl+P, type `>python`, choose the interpreter or virtual-environment command |
 | Show or hide the terminal panel | Ctrl+\` |
-| Open a new terminal, or restart the current one (with or without your profile) | Ctrl+P, type `>`, choose **New Terminal**, **Restart Terminal**, or **Restart Terminal (No Profile)** |
+| Open a new terminal session alongside the current one | Ctrl+Shift+\`, the **+** button in the terminal header, or Ctrl+P, type `>`, choose **New Terminal** |
+| Switch between open terminal sessions | Click a session's tab in the terminal header |
+| Close the active terminal session, or restart it (with or without your profile) | The **×** button in the header, or Ctrl+P, type `>`, choose **Kill Active Terminal**, **Restart Terminal**, or **Restart Terminal (No Profile)** |
 
 ## Workspaces and the explorer
 
@@ -92,7 +94,9 @@ The Start screen offers Open File, Open Folder, New File, and recent workspaces.
 
 ## Terminal
 
-The terminal panel (Ctrl+\` to show or hide it) has two independent tabs. **Terminal** is a persistent, interactive PowerShell session — type in it, paste with Ctrl+V or Ctrl+Shift+V, scroll back through its history, and press Ctrl+C to interrupt whatever is running in the foreground without closing the shell itself. It loads your normal PowerShell profile, the same as opening a regular PowerShell window. **Output** is where `cargo test` and Run Python results stream in; it is read-only in the UI (no cursor, does not take keyboard focus), so you can keep typing in the editor while something runs in the background, and it skips profile scripts so runs stay fast and predictable. Clicking the Terminal tab starts a shell automatically if none is running yet. Both the sidebar and the terminal panel can be resized by dragging their edges; the sidebar remembers its width across hiding and showing it again. Ctrl+P, type `>`, then choose **New Terminal** to open another Terminal session, or **Restart Terminal** / **Restart Terminal (No Profile)** to recycle a stuck or misbehaving shell — the no-profile variant is useful for recovering from a broken `$PROFILE` script.
+The bottom **Terminal** panel is a real ConPTY shell that supports many sessions at once, the way VS Code does. Each open shell gets its own tab in the panel header; the **+** button (or **Ctrl+Shift+\`**, or the **New Terminal** command) spawns another independent session with its own working directory and process, a numbered tab switches between them, and the header **×** kills just the active one — while the panel's far-right **×** merely hides the panel and leaves every shell running. Opening or switching to the terminal immediately takes keyboard focus and shows the block cursor in the shell, so you can start typing right away. **Ctrl+\`** toggles the panel, **Esc** hides it, and **Ctrl+Shift+C** / **Ctrl+V** (or **Ctrl+Shift+V**) copy and paste. Choose **Restart Terminal** or **Restart Terminal (No Profile)** to recycle a stuck shell — the no-profile variant recovers from a broken `$PROFILE` script.
+
+The interactive **Terminal** loads your normal PowerShell profile, the same as opening a regular PowerShell window, and Ctrl+C interrupts whatever is running in the foreground without closing the shell. The separate **Output** tab is where `cargo test` and Run Python results stream in; it is read-only in the UI (no cursor, never takes keyboard focus) and skips profile scripts, so you can keep editing while something runs and the run output never types into your shell. Both the sidebar and the terminal panel resize by dragging their edges, and the sidebar remembers its width across hide and show.
 
 To stop a `cargo run` session (the external shell you launched LightLine from, not LightLine's own integrated terminal panel), close the editor window with its X button. The host `cargo run` command will then finish. You can also focus that external shell and press Ctrl+C there; the editor will follow its normal close path and ask about unsaved changes. Ctrl+C while the editor itself has focus is Copy. If an older editor process remains open, save your work and stop that process from PowerShell with `Get-Process lightline | Stop-Process`.
 

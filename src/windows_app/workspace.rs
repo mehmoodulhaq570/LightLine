@@ -83,6 +83,9 @@ impl App {
             return;
         }
         self.workspace_root = Some(root.clone());
+        if let Some(watcher) = &self.watcher {
+            watcher.watch_directory(root.clone());
+        }
         self.workspace_branch = Self::head_branch(&root);
         self.directory_cache.clear();
         self.expanded_dirs.clear();

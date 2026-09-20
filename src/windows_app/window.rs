@@ -91,6 +91,7 @@ unsafe extern "system" fn wnd_proc(
                 SetTimer(hwnd, 1, 530, None);
             }
             app.invalidate_caret(hwnd);
+            app.poll_watcher(hwnd);
             0
         }
         WM_KILLFOCUS => {
@@ -129,6 +130,10 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_TIMER if wparam == 6 => {
             app.begin_mouse_hover(hwnd);
+            0
+        }
+        WM_TIMER if wparam == 7 => {
+            app.poll_watcher(hwnd);
             0
         }
         LSP_EVENT_MESSAGE => {
@@ -437,7 +442,7 @@ pub fn run() -> io::Result<()> {
             &dark_titlebar as *const i32 as *const std::ffi::c_void,
             size_of::<i32>() as u32,
         );
-        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large)));
+        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large, app_icons.hero)));
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,
@@ -448,6 +453,7 @@ pub fn run() -> io::Result<()> {
         app.borrow().update_scrollbar(hwnd);
         ShowWindow(hwnd, SW_SHOW);
         SetFocus(hwnd);
+        SetTimer(hwnd, 7, 1000, None);
         if let Some(path) = std::env::args_os().nth(1) {
             app.borrow_mut().open(hwnd, Some(PathBuf::from(path)));
         } else {

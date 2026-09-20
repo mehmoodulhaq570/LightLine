@@ -38,22 +38,25 @@ const LIGHTLINE_ICON: &[u8] = include_bytes!("../../assets/lightline.ico");
 pub(super) struct AppIcons {
     pub(super) small: HICON,
     pub(super) large: HICON,
+    // The welcome screen draws the mark far larger than the title bar does;
+    // upscaling the 32px icon there is visibly soft, so keep a 64px copy.
+    pub(super) hero: HICON,
 }
 
 impl AppIcons {
     pub(super) fn new() -> Option<Self> {
         let small = IconSet::load_ico(LIGHTLINE_ICON, 16);
         let large = IconSet::load_ico(LIGHTLINE_ICON, 32);
-        if small.is_null() || large.is_null() {
-            if !small.is_null() {
-                unsafe { DestroyIcon(small) };
-            }
-            if !large.is_null() {
-                unsafe { DestroyIcon(large) };
+        let hero = IconSet::load_ico(LIGHTLINE_ICON, 64);
+        if small.is_null() || large.is_null() || hero.is_null() {
+            for icon in [small, large, hero] {
+                if !icon.is_null() {
+                    unsafe { DestroyIcon(icon) };
+                }
             }
             return None;
         }
-        Some(Self { small, large })
+        Some(Self { small, large, hero })
     }
 }
 
@@ -62,6 +65,7 @@ impl Drop for AppIcons {
         unsafe {
             DestroyIcon(self.small);
             DestroyIcon(self.large);
+            DestroyIcon(self.hero);
         }
     }
 }
