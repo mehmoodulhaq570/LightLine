@@ -23,7 +23,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DETACHED_PROCESS,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentThreadId,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     OpenThread, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread,
@@ -282,10 +282,13 @@ fn spawn(spec: &LaunchSpec, console: &PseudoConsole, job: &Handle) -> Result<Pro
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup.lpAttributeList = attributes.pointer();
     let mut information = PROCESS_INFORMATION::default();
-    let flags = EXTENDED_STARTUPINFO_PRESENT
-        | CREATE_SUSPENDED
-        | CREATE_UNICODE_ENVIRONMENT
-        | DETACHED_PROCESS;
+    // A ConPTY child must be attached ONLY through the pseudoconsole attribute
+    // set above. DETACHED_PROCESS (and CREATE_NEW_CONSOLE / CREATE_NO_WINDOW)
+    // override that attribute and leave the child with no console at all, so
+    // its stdin reads EOF immediately and PowerShell (and Python's input())
+    // exits right after one prompt. This combination broke both the interactive
+    // shell and the managed run-output session, which share this spawn path.
+    let flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
     if unsafe {
         CreateProcessW(
             executable.as_ptr(),
