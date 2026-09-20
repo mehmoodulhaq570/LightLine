@@ -160,7 +160,8 @@ impl App {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
             let line = self.doc().line(self.view().cursor.line);
-            let x = self.code_left(hwnd) + self.text_width(hdc, &line[..self.view().cursor.byte]);
+            let cursor_prefix = safe_slice_prefix(line, self.view().cursor.byte);
+            let x = self.code_left(hwnd) + self.text_width(hdc, cursor_prefix);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             let y = self.editor_top()
@@ -406,3 +407,29 @@ impl App {
         }
     }
 }
+
+#[inline]
+pub(in crate::windows_app) fn safe_slice_prefix(s: &str, byte: usize) -> &str {
+    let mut end = byte.min(s.len());
+    while !s.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    &s[..end]
+}
+
+#[inline]
+pub(in crate::windows_app) fn safe_slice_range(s: &str, start: usize, end: usize) -> &str {
+    let mut st = start.min(s.len());
+    while !s.is_char_boundary(st) {
+        st = st.saturating_sub(1);
+    }
+    let mut en = end.min(s.len());
+    while !s.is_char_boundary(en) {
+        en = en.saturating_sub(1);
+    }
+    if en < st {
+        en = st;
+    }
+    &s[st..en]
+}
+

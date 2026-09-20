@@ -1,4 +1,5 @@
 use super::super::*;
+use super::*;
 
 impl App {
     pub(in crate::windows_app) fn paint_code_pane(
@@ -155,9 +156,11 @@ impl App {
                     } else {
                         source.len()
                     };
-                    let x1 = code_left + self.text_width(hdc, &source[..from]);
+                    let from_str = safe_slice_prefix(source, from);
+                    let to_str = safe_slice_prefix(source, to);
+                    let x1 = code_left + self.text_width(hdc, from_str);
                     let x2 = code_left
-                        + self.text_width(hdc, &source[..to])
+                        + self.text_width(hdc, to_str)
                         + if index < end.line { self.scale(8) } else { 0 };
                     if x2 > x1 && x1 < right {
                         FillRect(
@@ -207,8 +210,8 @@ impl App {
                             Color::Attribute => rgb(180, 140, 230),
                         };
                         SetTextColor(hdc, color);
-                        let left = code_left + self.text_width(hdc, &source[..span.start]);
-                        let text = source[span.start..span.end].replace('\t', "    ");
+                        let left = code_left + self.text_width(hdc, safe_slice_prefix(source, span.start));
+                        let text = safe_slice_range(source, span.start, span.end).replace('\t', "    ");
                         let chars: Vec<u16> = text.encode_utf16().collect();
                         ExtTextOutW(
                             hdc,
@@ -239,8 +242,8 @@ impl App {
                     } else {
                         source.len()
                     };
-                    let x1 = code_left + self.text_width(hdc, &source[..start_byte]);
-                    let x2 = code_left + self.text_width(hdc, &source[..end_byte.max(start_byte)]);
+                    let x1 = code_left + self.text_width(hdc, safe_slice_prefix(source, start_byte));
+                    let x2 = code_left + self.text_width(hdc, safe_slice_prefix(source, end_byte.max(start_byte)));
                     Self::fill(
                         hdc,
                         RECT {
@@ -273,6 +276,9 @@ impl App {
                 let match_brush = CreateSolidBrush(rgb(60, 80, 120));
                 let bracket_at = |byte: usize, line_idx: usize| -> Option<(char, usize)> {
                     let text = doc.line(line_idx);
+                    if byte >= text.len() || !text.is_char_boundary(byte) {
+                        return None;
+                    }
                     let ch = text[byte..].chars().next()?;
                     if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
                         Some((ch, byte))
@@ -286,7 +292,7 @@ impl App {
                 let bracket = bracket_at(cursor_byte, cursor_line).or_else(|| {
                     if cursor_byte > 0 {
                         let text = doc.line(cursor_line);
-                        let prev_byte = text[..cursor_byte]
+                        let prev_byte = safe_slice_prefix(text, cursor_byte)
                             .char_indices()
                             .last()
                             .map(|(i, _)| i)?;
@@ -313,7 +319,12 @@ impl App {
                         let mut scan_start = byte;
                         'outer_fwd: while scan_line < doc.line_count() && scan_line < cursor_line + 500 {
                             let text = doc.line(scan_line);
-                            for (i, c) in text[scan_start..].char_indices() {
+                            let scan_text = if scan_start < text.len() && text.is_char_boundary(scan_start) {
+                                &text[scan_start..]
+                            } else {
+                                ""
+                            };
+                            for (i, c) in scan_text.char_indices() {
                                 let abs = scan_start + i;
                                 if c == open { depth += 1; }
                                 if c == close { depth -= 1; }
@@ -332,7 +343,8 @@ impl App {
                             let text = doc.line(scan_line);
                             let end = if first { byte } else { text.len() };
                             first = false;
-                            let indices: Vec<(usize, char)> = text[..end].char_indices().collect();
+                            let bwd_text = safe_slice_prefix(text, end);
+                            let indices: Vec<(usize, char)> = bwd_text.char_indices().collect();
                             for &(i, c) in indices.iter().rev() {
                                 if c == close { depth += 1; }
                                 if c == open { depth -= 1; }
@@ -352,9 +364,10 @@ impl App {
                         let y = self.editor_top() + row as i32 * self.line_height;
                         if y >= bottom { return; }
                         let text = doc.line(line_idx);
-                        let x = code_left + self.text_width(hdc, &text[..b]);
-                        let ch_text = &text[b..text.len().min(b + 1)];
-                        let w = self.text_width(hdc, if ch_text.is_empty() { " " } else { ch_text });
+                        let x = code_left + self.text_width(hdc, safe_slice_prefix(text, b));
+                        let rest = if b < text.len() && text.is_char_boundary(b) { &text[b..] } else { "" };
+                        let ch_text = rest.chars().next().map(|c| &rest[..c.len_utf8()]).unwrap_or(" ");
+                        let w = self.text_width(hdc, ch_text);
                         if x < right {
                             FillRect(hdc, &RECT {
                                 left: x, top: y,
@@ -372,7 +385,7 @@ impl App {
             }
             if self.focused && self.caret_on && !self.terminal_focus && pane == self.focused_pane {
                 let line = doc.line(view.cursor.line);
-                let x = code_left + self.text_width(hdc, &line[..view.cursor.byte]);
+                let x = code_left + self.text_width(hdc, safe_slice_prefix(line, view.cursor.byte));
                 let y = self.editor_top()
                     + (view.cursor.line as i64 - view.first_line as i64) as i32 * self.line_height;
                 if y >= self.editor_top() && y < bottom && x < right {
