@@ -13,7 +13,7 @@
 
 </div>
 
-LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics, hover, go-to-definition, completion and formatting, Pyright diagnostics, hover, go-to-definition, completion and formatting for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, read-only Git review, and read-only image and hex-dump previews for non-text files. It paints only visible document lines.
+LightLine supports UTF-8 files, editing, undo/redo, saving, multiple tabs, vertical split panes, Rust and Python syntax coloring, rust-analyzer diagnostics, hover, go-to-definition, completion and formatting, Pyright diagnostics, hover, go-to-definition, completion and formatting for Python, an integrated terminal, workspaces, project search, Quick Open, Rust test output, read-only Git review, read-only image and hex-dump previews for non-text files, and session restore that reopens your last workspace, tabs, and cursor positions. It paints only visible document lines.
 
 There is no tagged release yet — LightLine is built and dogfooded directly from `main`. The project's direction is recorded in [the v0.1 architecture](docs/ARCHITECTURE.md). Implemented changes are tracked in the [changelog](CHANGELOG.md). The native editor's current visual direction is documented in the [reference adaptation](design/REFERENCE_ADAPTATION.md); an earlier interactive concept remains in the [Quiet Workbench prototype](design/workbench-prototype.html).
 
@@ -43,6 +43,7 @@ There is no tagged release yet — LightLine is built and dogfooded directly fro
 - Workspace explorer, project-wide search, Quick Open (files and commands), and read-only Git review with side-by-side diffs
 - Read-only previews for files that are not editable text: raster images, and a bounded hex dump for other binary files instead of a "not UTF-8" error
 - Interface zoom (60%–200%), a resizable sidebar and terminal panel, and a dark, native Windows 11-style folder picker
+- Reopens where you left off: the last workspace, open tabs, and each tab's cursor and scroll position are restored on launch (saved to `%APPDATA%\LightLine\session.json`)
 
 ## Requirements
 

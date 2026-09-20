@@ -287,6 +287,9 @@ pub(super) struct App {
     pub(super) request_id: u64,
     pub(super) completion_request: Option<CompletionRequest>,
     pub(super) completion: Option<CompletionPopup>,
+    // Suppresses session snapshots while restore_session replays the last
+    // run's tabs, so opening many files does not rewrite the file each time.
+    pub(super) restoring: bool,
 }
 
 // Records which pane/request an in-flight definition or format call belongs to
@@ -586,6 +589,7 @@ impl App {
             request_id: 5000,
             completion_request: None,
             completion: None,
+            restoring: false,
         }
     }
 
@@ -912,6 +916,7 @@ impl App {
         self.active = self.pane_tabs[self.focused_pane];
         self.status = "Ready".into();
         self.show_active_tab(hwnd);
+        self.save_session();
     }
 
     pub(super) fn can_close_window(&mut self, hwnd: HWND) -> bool {
@@ -1445,6 +1450,7 @@ impl App {
                     format!("Opened {name}")
                 };
                 self.show_active_tab(hwnd);
+                self.save_session();
             }
             Err(error) => self.error(hwnd, &error),
         }

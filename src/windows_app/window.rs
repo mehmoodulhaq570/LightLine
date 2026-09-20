@@ -371,6 +371,7 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_CLOSE => {
             if app.can_close_window(hwnd) {
+                app.save_session();
                 app.stop_terminal_for_close();
                 unsafe {
                     DestroyWindow(hwnd);
@@ -449,6 +450,8 @@ pub fn run() -> io::Result<()> {
         SetFocus(hwnd);
         if let Some(path) = std::env::args_os().nth(1) {
             app.borrow_mut().open(hwnd, Some(PathBuf::from(path)));
+        } else {
+            app.borrow_mut().restore_session(hwnd);
         }
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {

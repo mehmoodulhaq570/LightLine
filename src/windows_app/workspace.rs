@@ -122,6 +122,7 @@ impl App {
             root.file_name().unwrap_or_default().to_string_lossy()
         );
         self.show_active_tab(hwnd);
+        self.save_session();
     }
 
     pub(super) fn folder_dialog(&self, hwnd: HWND) -> Option<PathBuf> {

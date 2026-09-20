@@ -1,4 +1,5 @@
 use std::fs;
+use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -59,6 +60,135 @@ pub fn remember_workspace(root: &Path) {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
+    }
+}
+
+// A snapshot of the last editing session, stored as JSON beside the recent
+// workspace list, so reopening LightLine restores the workspace, the open
+// tabs, and each tab's cursor/scroll position rather than starting blank.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionView {
+    pub cursor: (usize, usize),
+    pub anchor: Option<(usize, usize)>,
+    pub first_line: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionTab {
+    pub path: PathBuf,
+    pub views: [SessionView; 2],
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Session {
+    pub root: Option<PathBuf>,
+    pub active: usize,
+    pub tabs: Vec<SessionTab>,
+}
+
+fn session_path() -> Option<PathBuf> {
+    Some(
+        PathBuf::from(std::env::var_os("APPDATA")?)
+            .join("LightLine")
+            .join("session.json"),
+    )
+}
+
+fn session_view_from(value: &Value) -> SessionView {
+    let pair = |value: &Value| {
+        value.as_array().and_then(|items| {
+            Some((
+                items.first()?.as_u64()? as usize,
+                items.get(1)?.as_u64()? as usize,
+            ))
+        })
+    };
+    SessionView {
+        cursor: value
+            .get("cursor")
+            .and_then(pair)
+            .unwrap_or((0, 0)),
+        anchor: value.get("anchor").and_then(pair),
+        first_line: value.get("first").and_then(Value::as_u64).unwrap_or(0) as usize,
+    }
+}
+
+fn session_view_to_json(view: &SessionView) -> Value {
+    serde_json::json!({
+        "cursor": [view.cursor.0, view.cursor.1],
+        "anchor": view.anchor.map(|(line, byte)| serde_json::json!([line, byte])),
+        "first": view.first_line,
+    })
+}
+
+pub fn load_session() -> Session {
+    let text = session_path()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Session::default();
+    };
+    let root = value
+        .get("root")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir());
+    let active = value.get("active").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let tabs = value
+        .get("tabs")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let path = item.get("path").and_then(Value::as_str).map(PathBuf::from)?;
+                    if !path.is_file() {
+                        return None;
+                    }
+                    let views = item.get("views").and_then(Value::as_array);
+                    let default = SessionView {
+                        cursor: (0, 0),
+                        anchor: None,
+                        first_line: 0,
+                    };
+                    let views = match views {
+                        Some(views) => [
+                            views.first().map(session_view_from).unwrap_or_else(|| default.clone()),
+                            views.get(1).map(session_view_from).unwrap_or_else(|| default.clone()),
+                        ],
+                        None => [default.clone(), default],
+                    };
+                    Some(SessionTab { path, views })
+                })
+                .take(64)
+                .collect()
+        })
+        .unwrap_or_default();
+    Session {
+        root,
+        active,
+        tabs,
+    }
+}
+
+pub fn save_session(session: &Session) {
+    let Some(path) = session_path() else { return };
+    let value = serde_json::json!({
+        "root": session.root.as_ref().map(|root| root.to_string_lossy().to_string()),
+        "active": session.active,
+        "tabs": session
+            .tabs
+            .iter()
+            .map(|tab| serde_json::json!({
+                "path": tab.path.to_string_lossy().to_string(),
+                "views": tab.views.iter().map(session_view_to_json).collect::<Vec<_>>(),
+            }))
+            .collect::<Vec<_>>(),
+    });
+    if let Some(parent) = path.parent()
+        && fs::create_dir_all(parent).is_ok()
+    {
+        let _ = fs::write(path, value.to_string());
     }
 }
 
