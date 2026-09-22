@@ -1055,6 +1055,7 @@ impl App {
             }
         }
         if y >= rect.bottom - self.scale(STATUS) {
+            self.click_status_language(hwnd, rect, x, y);
             return;
         }
         let rail = self.scale(RAIL);

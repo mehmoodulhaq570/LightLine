@@ -2,7 +2,7 @@ use super::super::*;
 
 // The status bar names the language the way an editor does ("Rust", not "RS"),
 // falling back to the bare extension for types we have no display name for.
-fn language_label(path: Option<&Path>) -> String {
+pub(in crate::windows_app) fn language_label(path: Option<&Path>) -> String {
     let extension = path
         .and_then(Path::extension)
         .map(|ext| ext.to_string_lossy().to_ascii_lowercase());
@@ -25,6 +25,70 @@ fn language_label(path: Option<&Path>) -> String {
 }
 
 impl App {
+    // Geometry for the trailing "{Language}" name in the bottom status bar's
+    // "Ln X, Col Y  Spaces: 4  UTF-8  {Language}" line. Shared between
+    // painting and the click handler (input.rs) so clicking it is guaranteed
+    // to land on exactly what was drawn. Previously this whole line was a
+    // single opaque label with nothing behind it to click.
+    pub(in crate::windows_app) fn status_language_control(
+        &self,
+        hdc: HDC,
+        rect: RECT,
+        editor_bottom: i32,
+        chip_right: i32,
+        branch_x: i32,
+    ) -> (i32, i32, String, RECT) {
+        let s = |v: i32| self.scale(v);
+        let mid_x = chip_right + s(24);
+        let clip_right = (branch_x - s(16)).max(mid_x);
+        let prefix = format!(
+            "Ln {}, Col {}    Spaces: 4    UTF-8    ",
+            self.view().cursor.line + 1,
+            self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
+                .chars()
+                .count()
+                + 1,
+        );
+        let prefix_width = self.text_width(hdc, &prefix);
+        let language = language_label(self.doc().path.as_deref());
+        let language_width = self.text_width(hdc, &language);
+        let language_left = (mid_x + prefix_width).min(clip_right);
+        let hit_rect = RECT {
+            left: language_left,
+            top: editor_bottom,
+            right: (language_left + language_width).min(clip_right),
+            bottom: rect.bottom,
+        };
+        (mid_x, clip_right, prefix, hit_rect)
+    }
+
+    // Mirrors the paint-time geometry in status_language_control using a
+    // throwaway HDC, the same way App::position_at_pane measures text for
+    // click-to-cursor mapping outside of a paint call.
+    pub(in crate::windows_app) fn click_status_language(&mut self, hwnd: HWND, rect: RECT, x: i32, y: i32) {
+        let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
+        let language_rect = unsafe {
+            let hdc = GetDC(hwnd);
+            let old = SelectObject(hdc, self.ui_font);
+            let file_label = self.tab_label(self.active);
+            let chip_right = self.scale(12) + self.scale(28) + self.text_width(hdc, &file_label);
+            let branch = self.git_head_label();
+            let right_branch = format!("\u{2442}  {branch}");
+            let ready_width = self.text_width(hdc, "\u{25cf}  Ready");
+            let branch_width = self.text_width(hdc, &right_branch);
+            let ready_x = rect.right - ready_width - self.scale(16);
+            let branch_x = ready_x - branch_width - self.scale(20);
+            let (_, _, _, language_rect) =
+                self.status_language_control(hdc, rect, editor_bottom, chip_right, branch_x);
+            SelectObject(hdc, old);
+            ReleaseDC(hwnd, hdc);
+            language_rect
+        };
+        if x >= language_rect.left && x < language_rect.right && y >= language_rect.top {
+            self.open_language_actions(hwnd);
+        }
+    }
+
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
         unsafe {
             let mut ps = PAINTSTRUCT::default();
@@ -690,29 +754,22 @@ impl App {
             Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(4), rgb(52, 211, 153), rect);
             Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(4), TEXT, rect);
 
-            // Middle info: Ln, Col, Spaces, Encoding, Language
-            let mid_info = format!(
-                "Ln {}, Col {}    Spaces: 4    UTF-8    {}",
-                self.view().cursor.line + 1,
-                self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
-                    .chars()
-                    .count()
-                    + 1,
-                language_label(self.doc().path.as_deref()),
-            );
-            let mid_x = chip_rect.right + self.scale(24);
+            // Middle info: Ln, Col, Spaces, Encoding, Language. The language
+            // name is a real clickable control (see status_language_control),
+            // so it's drawn in the accent color used for other clickable
+            // labels instead of blending into the plain muted text.
+            let (mid_x, clip_right, prefix, language_rect) =
+                self.status_language_control(hdc, rect, editor_bottom, chip_rect.right, branch_x);
+            let label_clip = RECT { left: mid_x, top: editor_bottom, right: clip_right, bottom: rect.bottom };
+            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(4), MUTED, label_clip);
+            let language = language_label(self.doc().path.as_deref());
             Self::label(
                 hdc,
-                &mid_info,
-                mid_x,
+                &language,
+                language_rect.left,
                 editor_bottom + self.scale(4),
-                MUTED,
-                RECT {
-                    left: mid_x,
-                    top: editor_bottom,
-                    right: (branch_x - self.scale(16)).max(mid_x),
-                    bottom: rect.bottom,
-                },
+                rgb(80, 160, 220),
+                label_clip,
             );
             DeleteObject(bg);
             DeleteObject(gutter_bg);

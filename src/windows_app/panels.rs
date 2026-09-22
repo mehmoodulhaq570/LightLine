@@ -270,6 +270,7 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
+        self.check_c_syntax(hwnd, file.clone(), compiler, is_cpp);
         let source = display_path(&file);
         let mut output = file.clone();
         output.set_extension("exe");
@@ -331,6 +332,32 @@ impl App {
             terminal::powershell_quoted(Path::new(&display_path(&file)))
         );
         self.run_in_terminal(hwnd, &command);
+    }
+
+    // Runs the same syntax check as run_c_file, but on every save instead of
+    // only on Run, so a C/C++ error shows up as soon as VS Code-style LSP
+    // diagnostics would for Rust/Python, not only once the user tries to run.
+    pub(super) fn check_c_syntax_on_save(&mut self, hwnd: HWND, path: &Path) {
+        if !is_c_family_path(path) {
+            return;
+        }
+        let is_cpp = is_cpp_path(path);
+        if let Some(compiler) = workflow::detect_c_compiler(is_cpp) {
+            self.check_c_syntax(hwnd, path.to_path_buf(), compiler, is_cpp);
+        }
+    }
+
+    // C/C++ has no LSP wired up (see Tab::lsp_language), so this is the only
+    // source of the same squiggly-underline error/warning feedback Rust and
+    // Python get: a quick `-fsyntax-only` compile, off the UI thread, whose
+    // diagnostics land in tab.diagnostics exactly like an LSP response would.
+    fn check_c_syntax(&mut self, hwnd: HWND, file: PathBuf, compiler: &'static str, is_cpp: bool) {
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        std::thread::spawn(move || {
+            let diagnostics = workflow::c_syntax_diagnostics(&file, compiler, is_cpp);
+            let _ = tx.send(WorkerMessage::CDiagnostics(file, diagnostics));
+        });
     }
 
     pub(super) fn show_review(&mut self, hwnd: HWND) {
@@ -433,6 +460,19 @@ impl App {
                 }
                 WorkerMessage::DebugBuild(result) => {
                     self.debug_build_finished(hwnd, result);
+                }
+                WorkerMessage::CDiagnostics(file, diagnostics) => {
+                    if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.document.path.as_deref() == Some(file.as_path())) {
+                        let count = diagnostics.len();
+                        tab.diagnostics = diagnostics;
+                        if count > 0 {
+                            self.status = format!(
+                                "{count} issue{} found while checking {}",
+                                if count == 1 { "" } else { "s" },
+                                file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                            );
+                        }
+                    }
                 }
                 _ => {}
             }

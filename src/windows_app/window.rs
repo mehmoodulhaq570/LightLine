@@ -461,7 +461,7 @@ pub fn run() -> io::Result<()> {
         );
         connect_parent_console(hwnd);
         app.borrow().update_title(hwnd);
-        app.borrow().update_scrollbar(hwnd);
+        app.borrow_mut().update_scrollbar(hwnd);
         ShowWindow(hwnd, SW_SHOW);
         SetFocus(hwnd);
         SetTimer(hwnd, 7, 1000, None);

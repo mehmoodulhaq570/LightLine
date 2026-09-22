@@ -390,6 +390,13 @@ impl App {
                                 right: (x + w).min(right),
                                 bottom: (y + self.line_height).min(bottom),
                             }, match_brush);
+                            // The fill above paints over the bracket glyph
+                            // that the earlier syntax-color pass already
+                            // drew, leaving a blank highlighted box instead
+                            // of a highlighted character; redraw it on top.
+                            SetTextColor(hdc, TEXT);
+                            let chars: Vec<u16> = ch_text.encode_utf16().collect();
+                            TextOutW(hdc, x, y, chars.as_ptr(), chars.len() as i32);
                         }
                     };
                     draw_bracket_bg(cursor_line, byte);

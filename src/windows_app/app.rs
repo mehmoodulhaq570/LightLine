@@ -41,6 +41,7 @@ pub(super) enum WorkerMessage {
     GitWrite(GitAction, Result<(), String>),
     ExtensionInstalled(String, bool),
     DebugBuild(Result<PathBuf, String>),
+    CDiagnostics(PathBuf, Vec<LspDiagnostic>),
 }
 
 // A pending source-control write. Each one runs on the shared worker channel
@@ -145,6 +146,20 @@ pub(super) struct ExplorerRow {
     pub(super) expanded: bool,
 }
 
+// Shared by Tab::is_c_family/is_cpp and the on-save syntax check
+// (panels::check_c_syntax_on_save), which only has a bare path, not a Document.
+pub(super) fn is_c_family_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "c" | "cc" | "cpp" | "cxx"))
+}
+
+pub(super) fn is_cpp_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "cc" | "cpp" | "cxx"))
+}
+
 impl Tab {
     fn new(document: Document) -> Self {
         let syntax = if Self::is_rust(&document) {
@@ -222,15 +237,7 @@ impl Tab {
     // True for a standalone C or C++ source file that can be compiled and run
     // on its own (not a header, which has no entry point to run).
     pub(super) fn is_c_family(document: &Document) -> bool {
-        document
-            .path
-            .as_deref()
-            .and_then(Path::extension)
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| {
-                let ext = ext.to_ascii_lowercase();
-                matches!(ext.as_str(), "c" | "cc" | "cpp" | "cxx")
-            })
+        document.path.as_deref().is_some_and(is_c_family_path)
     }
 
     // True for any file the Run action knows how to execute on its own.
@@ -239,12 +246,7 @@ impl Tab {
     }
 
     pub(super) fn is_cpp(document: &Document) -> bool {
-        document
-            .path
-            .as_deref()
-            .and_then(Path::extension)
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "cc" | "cpp" | "cxx"))
+        document.path.as_deref().is_some_and(is_cpp_path)
     }
 
     pub(super) fn lsp_language(document: &Document) -> Option<LspLanguage> {
@@ -293,6 +295,12 @@ pub(super) struct App {
     pub(super) zoom: i32,
     pub(super) line_height: i32,
     pub(super) backbuffer: Option<Surface>,
+    // Tracks the native scrollbar's last ShowScrollBar state so
+    // update_scrollbar only calls it on an actual change. Calling
+    // ShowScrollBar every keystroke (it used to run unconditionally on every
+    // cursor move) forces Windows to recompute the non-client frame each
+    // time, which is what caused the reported flicker while typing.
+    pub(super) scrollbar_visible: Option<bool>,
     pub(super) transition: Option<Transition>,
     pub(super) status: String,
     pub(super) focused: bool,
@@ -688,6 +696,7 @@ impl App {
             zoom,
             line_height,
             backbuffer: None,
+            scrollbar_visible: None,
             transition: None,
             status: "Ready".into(),
             focused: false,
@@ -879,7 +888,7 @@ impl App {
                     #[cfg(windows)]
                     use std::os::windows::process::CommandExt;
                     let mut cmd = std::process::Command::new("cmd");
-                    cmd.args(&["/C", "npm", "install", "-g", "prettier"]);
+                    cmd.args(["/C", "npm", "install", "-g", "prettier"]);
                     #[cfg(windows)]
                     cmd.creation_flags(0x08000000);
                     let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
@@ -887,7 +896,7 @@ impl App {
                         true
                     } else {
                         let mut check = std::process::Command::new("cmd");
-                        check.args(&["/C", "npx", "--yes", "prettier", "--version"]);
+                        check.args(["/C", "npx", "--yes", "prettier", "--version"]);
                         #[cfg(windows)]
                         check.creation_flags(0x08000000);
                         check.status().map(|s| s.success()).unwrap_or(false)
@@ -903,7 +912,7 @@ impl App {
                     #[cfg(windows)]
                     use std::os::windows::process::CommandExt;
                     let mut cmd = std::process::Command::new("cmd");
-                    cmd.args(&["/C", "npm", "uninstall", "-g", "prettier"]);
+                    cmd.args(["/C", "npm", "uninstall", "-g", "prettier"]);
                     #[cfg(windows)]
                     cmd.creation_flags(0x08000000);
                     let _ = cmd.status();
@@ -1454,15 +1463,18 @@ impl App {
             .max(1) as usize
     }
 
-    pub(super) fn update_scrollbar(&self, hwnd: HWND) {
+    pub(super) fn update_scrollbar(&mut self, hwnd: HWND) {
         // The vertical scrollbar is a permanent window-style feature (WS_VSCROLL),
         // so it stays visible with whatever thumb was last set for the editor
         // unless explicitly hidden here — it must not bleed into the welcome pane.
-        if self.welcome {
-            unsafe { ShowScrollBar(hwnd, SB_VERT, 0) };
+        let show = !self.welcome;
+        if self.scrollbar_visible != Some(show) {
+            unsafe { ShowScrollBar(hwnd, SB_VERT, show as i32) };
+            self.scrollbar_visible = Some(show);
+        }
+        if !show {
             return;
         }
-        unsafe { ShowScrollBar(hwnd, SB_VERT, 1) };
         let visible = self.visible_lines(hwnd);
         let info = SCROLLINFO {
             cbSize: size_of::<SCROLLINFO>() as u32,
@@ -1896,6 +1908,7 @@ impl App {
             Ok(()) => {
                 self.lsp_after_save(hwnd, old_path.as_deref());
                 self.tab_mut().update_syntax_language();
+                self.check_c_syntax_on_save(hwnd, &path);
                 self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
@@ -2098,7 +2111,7 @@ mod split_tests {
 
     #[test]
     fn extensions_initial_list_and_toggle() {
-        let mut extensions = vec![
+        let mut extensions = [
             Extension {
                 id: "prettier",
                 name: "Prettier - Code formatter",

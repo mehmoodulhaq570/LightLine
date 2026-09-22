@@ -626,6 +626,59 @@ pub fn detect_c_compiler(is_cpp: bool) -> Option<&'static str> {
     ordered.into_iter().find(|name| command_available(name))
 }
 
+/// Runs a syntax-only compile of a single C/C++ file (no object file or
+/// binary produced) and turns gcc/clang's diagnostics into the same
+/// `Diagnostic` type LSP servers report, so the existing squiggly-underline
+/// rendering can show C/C++ errors too without a persistent language server.
+pub fn c_syntax_diagnostics(file: &Path, compiler: &str, is_cpp: bool) -> Vec<crate::lsp::Diagnostic> {
+    let mut command = background_command(compiler);
+    command.arg("-fsyntax-only").arg("-Wall");
+    if is_cpp {
+        command.arg("-std=c++17");
+    }
+    command.arg(file);
+    let Ok(output) = command.output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(parse_gcc_diagnostic)
+        .collect()
+}
+
+// Parses a gcc/clang diagnostic line: "<path>:<line>:<col>: <severity>: <message>".
+// The path is split off from the right (not the left) because a Windows path
+// carries its own drive-letter colon (e.g. "C:\src\main.cpp:5:10: error: ...").
+fn parse_gcc_diagnostic(line: &str) -> Option<crate::lsp::Diagnostic> {
+    use crate::lsp::{Diagnostic, Position, Range};
+    let (marker, severity) = if line.contains(" error: ") {
+        (" error: ", 1u8)
+    } else if line.contains(" warning: ") {
+        (" warning: ", 2u8)
+    } else {
+        return None;
+    };
+    let index = line.find(marker)?;
+    let prefix = &line[..index];
+    let message = &line[index + marker.len()..];
+    let mut parts = prefix.rsplitn(3, ':');
+    let column: u32 = parts.next()?.trim().parse().ok()?;
+    let line_number: u32 = parts.next()?.trim().parse().ok()?;
+    if line_number == 0 {
+        return None;
+    }
+    let character = column.saturating_sub(1);
+    let line_index = line_number - 1;
+    Some(Diagnostic {
+        range: Range {
+            start: Position { line: line_index, character },
+            end: Position { line: line_index, character: character + 1 },
+        },
+        severity,
+        message: message.trim().to_string(),
+    })
+}
+
 /// Run Git in `root` and return its standard output.
 pub fn git_output(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = git_command(root, args)
