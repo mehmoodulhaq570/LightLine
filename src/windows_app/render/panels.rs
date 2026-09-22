@@ -1141,12 +1141,28 @@ impl App {
         let card_gap = s(8);
 
         if visible.is_empty() {
+            let query = self.extensions_query.trim();
             let notice = if self.extensions_tab == ExtensionsTab::Installed {
-                "No installed extensions"
+                "No installed extensions".to_string()
+            } else if query.is_empty() {
+                "No extensions found".to_string()
             } else {
-                "No extensions found"
+                format!("No extensions match \"{query}\"")
             };
-            Self::label(hdc, notice, left + s(16), ey + s(12), MUTED, clip);
+            Self::label(hdc, &notice, left + s(16), ey + s(12), MUTED, clip);
+            // This isn't a real marketplace search yet, just a small curated
+            // list; say so instead of leaving an unexplained blank panel that
+            // reads as "search is broken".
+            if self.extensions_tab == ExtensionsTab::Marketplace && !query.is_empty() {
+                Self::label(
+                    hdc,
+                    "Only Prettier and Material Icon Theme are available so far",
+                    left + s(16),
+                    ey + s(12) + s(18),
+                    MUTED,
+                    clip,
+                );
+            }
             return;
         }
 
@@ -1253,9 +1269,9 @@ impl App {
 
             if ext.installing {
                 self.panel_card(hdc, btn_rect, s(4), rgb(56, 189, 248), rgb(18, 38, 72));
-                let text_w = self.text_width(hdc, "Installing...");
+                let text_w = self.text_width(hdc, "Checking...");
                 let tx = btn_rect.left + ((btn_rect.right - btn_rect.left) - text_w) / 2;
-                self.label_mid(hdc, "Installing...", tx, (btn_rect.top + btn_rect.bottom) / 2, rgb(186, 230, 253), btn_rect);
+                self.label_mid(hdc, "Checking...", tx, (btn_rect.top + btn_rect.bottom) / 2, rgb(186, 230, 253), btn_rect);
             } else if ext.installed {
                 self.panel_card(hdc, btn_rect, s(4), rgb(48, 70, 105), rgb(20, 32, 54));
                 let text_w = self.text_width(hdc, "✓ Installed");

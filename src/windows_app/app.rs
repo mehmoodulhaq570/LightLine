@@ -879,46 +879,44 @@ impl App {
             return;
         }
         if id == "prettier" {
-            if !self.extensions[idx].installed {
-                self.extensions[idx].installing = true;
-                self.status = "Installing Prettier via npm...".into();
-                let tx = self.worker_tx.clone();
-                self.worker_started(hwnd);
-                std::thread::spawn(move || {
-                    #[cfg(windows)]
-                    use std::os::windows::process::CommandExt;
-                    let mut cmd = std::process::Command::new("cmd");
-                    cmd.args(["/C", "npm", "install", "-g", "prettier"]);
-                    #[cfg(windows)]
-                    cmd.creation_flags(0x08000000);
-                    let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
-                    let final_ok = if ok {
-                        true
-                    } else {
-                        let mut check = std::process::Command::new("cmd");
-                        check.args(["/C", "npx", "--yes", "prettier", "--version"]);
-                        #[cfg(windows)]
-                        check.creation_flags(0x08000000);
-                        check.status().map(|s| s.success()).unwrap_or(false)
-                    };
-                    let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), final_ok));
-                });
-            } else {
-                self.extensions[idx].installing = true;
-                self.status = "Uninstalling Prettier...".into();
-                let tx = self.worker_tx.clone();
-                self.worker_started(hwnd);
-                std::thread::spawn(move || {
-                    #[cfg(windows)]
-                    use std::os::windows::process::CommandExt;
-                    let mut cmd = std::process::Command::new("cmd");
-                    cmd.args(["/C", "npm", "uninstall", "-g", "prettier"]);
-                    #[cfg(windows)]
-                    cmd.creation_flags(0x08000000);
-                    let _ = cmd.status();
-                    let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), false));
-                });
+            if self.extensions[idx].installed {
+                // Turning this off is just a preference flip: LightLine never
+                // owned an install to undo, so there's nothing to uninstall.
+                self.extensions[idx].installed = false;
+                self.status = "Prettier formatting disabled".into();
+                self.refresh(hwnd);
+                return;
             }
+            // This used to run `npm install -g prettier`, mutating the
+            // user's global npm state from a toggle in the editor, and would
+            // still mark the extension "installed" via an npx fallback even
+            // when that global install failed — an install state that wasn't
+            // true and that LightLine didn't actually own. Detect instead:
+            // format_with_prettier already tries `prettier` directly and
+            // falls back to `npx --yes prettier`, so this only needs to
+            // confirm one of those paths is actually usable before turning
+            // the feature on.
+            self.extensions[idx].installing = true;
+            self.status = "Checking for Prettier...".into();
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                #[cfg(windows)]
+                use std::os::windows::process::CommandExt;
+                let probe = |program: &str, args: &[&str]| {
+                    let mut cmd = std::process::Command::new(program);
+                    cmd.args(args)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                    #[cfg(windows)]
+                    cmd.creation_flags(0x08000000);
+                    cmd.status().map(|status| status.success()).unwrap_or(false)
+                };
+                let found = probe("prettier", &["--version"])
+                    || probe("npx", &["--yes", "prettier", "--version"]);
+                let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), found));
+            });
             self.refresh(hwnd);
         }
     }

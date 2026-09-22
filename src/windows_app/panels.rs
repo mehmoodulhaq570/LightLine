@@ -447,14 +447,18 @@ impl App {
                         Err(error) => self.status = error,
                     }
                 }
-                WorkerMessage::ExtensionInstalled(id, success) => {
+                WorkerMessage::ExtensionInstalled(id, found) => {
                     if let Some(ext) = self.extensions.iter_mut().find(|e| e.id == id) {
                         ext.installing = false;
-                        ext.installed = success;
-                        self.status = if success {
-                            format!("{} installed successfully! Ready to format code.", ext.name)
+                        ext.installed = found;
+                        self.status = if found {
+                            format!("{} found — ready to format code", ext.name)
                         } else {
-                            format!("Failed to install {}", ext.name)
+                            format!(
+                                "{} isn't available. Install it with \"npm install -g prettier\" \
+                                 or add it to this project, then try again.",
+                                ext.name
+                            )
                         };
                     }
                 }
