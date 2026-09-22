@@ -50,15 +50,19 @@ pub fn resolve(id: &str) -> Result<ResolvedExtension, String> {
     })
 }
 
-/// Lists every id currently in the registry, for populating an "Install"
-/// search list. Only the id/version is returned here -- resolving a git URL
-/// (a second network round trip against `.gitmodules`) only happens for the
-/// one extension the user actually chooses to install, via `resolve()`.
-pub fn list_ids() -> Result<Vec<String>, String> {
+/// Lists every id (and its pinned version) currently in the registry, for
+/// populating an "Install" search list. Git URLs aren't resolved here (that
+/// needs a second round trip against `.gitmodules`, via `resolve()`) --
+/// listing hundreds of ids is one fetch; resolving all of them up front
+/// would be hundreds.
+pub fn list_ids() -> Result<Vec<(String, String)>, String> {
     let extensions_toml = fetch(EXTENSIONS_TOML_URL)?;
     let entries: HashMap<String, RegistryEntry> = toml::from_str(&extensions_toml)
         .map_err(|error| format!("could not parse the Zed extensions registry: {error}"))?;
-    let mut ids: Vec<String> = entries.into_keys().collect();
+    let mut ids: Vec<(String, String)> = entries
+        .into_iter()
+        .map(|(id, entry)| (id, entry.version))
+        .collect();
     ids.sort();
     Ok(ids)
 }
@@ -127,5 +131,17 @@ mod tests {
     fn resolves_the_real_material_icon_theme_entry() {
         let resolved = resolve("material-icon-theme").expect("should resolve from the live registry");
         assert_eq!(resolved.git_url, "https://github.com/zed-extensions/material-icon-theme.git");
+    }
+
+    #[test]
+    #[ignore = "hits the real network; run explicitly with --ignored"]
+    fn lists_hundreds_of_real_ids_including_material_icon_theme() {
+        let ids = list_ids().expect("should list from the live registry");
+        assert!(ids.len() > 100, "expected hundreds of real registry entries, got {}", ids.len());
+        let material = ids
+            .iter()
+            .find(|(id, _)| id == "material-icon-theme")
+            .expect("material-icon-theme should be in the live registry");
+        assert_eq!(material.1, "1.3.1");
     }
 }

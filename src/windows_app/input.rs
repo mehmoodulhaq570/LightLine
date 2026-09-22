@@ -1222,6 +1222,7 @@ impl App {
                     self.extensions_search_active = true;
                     self.search_input = false;
                     self.panel_focus = true;
+                    self.ensure_zed_registry_loaded(hwnd);
                     self.refresh(hwnd);
                     return;
                 }

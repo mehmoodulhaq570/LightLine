@@ -40,6 +40,15 @@ pub(super) enum WorkerMessage {
     GutterDiff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
     GitWrite(GitAction, Result<(), String>),
     ExtensionInstalled(String, bool),
+    // The full Zed registry id/version list, for the Extensions panel search.
+    ZedRegistryList(Result<Vec<(String, String)>, String>),
+    // id, and Ok(is_icon_theme). An extension that isn't an icon theme
+    // (needs WASM execution or a color-theme system LightLine doesn't have)
+    // is uninstalled again before this fires and reported as Err(reason)
+    // instead of a silent partial success. Ok(true) doesn't necessarily mean
+    // the icon set visibly changed -- only the "material-icon-theme" id is
+    // ever actually read by IconSet; see the handler.
+    ZedExtensionInstalled(String, Result<bool, String>),
     DebugBuild(Result<PathBuf, String>),
     CDiagnostics(PathBuf, Vec<LspDiagnostic>),
 }
@@ -102,16 +111,19 @@ pub(super) enum ExtensionsTab {
     Installed,
 }
 
+// Owned strings (not &'static str) because entries can now come from the
+// live Zed registry at runtime, not just the two extensions LightLine ships
+// knowledge of.
 #[derive(Clone, Debug)]
 pub(super) struct Extension {
-    pub(super) id: &'static str,
-    pub(super) name: &'static str,
-    pub(super) publisher: &'static str,
-    pub(super) version: &'static str,
-    pub(super) description: &'static str,
-    pub(super) downloads: &'static str,
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) publisher: String,
+    pub(super) version: String,
+    pub(super) description: String,
+    pub(super) downloads: String,
     #[allow(dead_code)]
-    pub(super) rating: &'static str,
+    pub(super) rating: String,
     pub(super) installed: bool,
     pub(super) installing: bool,
 }
@@ -152,6 +164,19 @@ pub(super) fn is_c_family_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "c" | "cc" | "cpp" | "cxx"))
+}
+
+// LightLine's internal extension id for Material Icon Theme predates this
+// session's registry work and is used throughout the UI (has_extension
+// checks, keybinding hints, ...); the real Zed registry entry is named
+// "material-icon-theme". Every other id (found via registry search) is
+// already the real registry id, so this is the identity function for them.
+fn zed_registry_id(internal_id: &str) -> &str {
+    if internal_id == "material-icons" {
+        "material-icon-theme"
+    } else {
+        internal_id
+    }
 }
 
 pub(super) fn is_cpp_path(path: &Path) -> bool {
@@ -415,6 +440,8 @@ pub(super) struct App {
     pub(super) extensions_tab: ExtensionsTab,
     pub(super) extensions_query: String,
     pub(super) extensions_search_active: bool,
+    pub(super) zed_registry_loaded: bool,
+    pub(super) zed_registry_loading: bool,
     pub(super) debug: Option<DebugClient>,
     pub(super) debug_event_tx: Sender<DebugEvent>,
     pub(super) debug_events: Receiver<DebugEvent>,
@@ -801,30 +828,32 @@ impl App {
             git_diff_cache: HashMap::new(),
             extensions: vec![
                 Extension {
-                    id: "prettier",
-                    name: "Prettier - Code formatter",
-                    publisher: "esbenp",
-                    version: "v3.4.2",
-                    description: "Code formatter using prettier for JS, TS, HTML, CSS",
-                    downloads: "42.8M",
-                    rating: "★ 4.8",
+                    id: "prettier".into(),
+                    name: "Prettier - Code formatter".into(),
+                    publisher: "esbenp".into(),
+                    version: "v3.4.2".into(),
+                    description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
+                    downloads: "42.8M".into(),
+                    rating: "★ 4.8".into(),
                     installed: false,
                     installing: false,
                 },
                 Extension {
-                    id: "material-icons",
-                    name: "Material Icon Theme",
-                    publisher: "Zed Industries (zed-extensions/material-icon-theme)",
-                    version: "1.3.1",
-                    description: "Material Design file & folder icons, consumed from the real Zed extension registry",
-                    downloads: "24.1M",
-                    rating: "★ 4.9",
+                    id: "material-icons".into(),
+                    name: "Material Icon Theme".into(),
+                    publisher: "Zed Industries (zed-extensions/material-icon-theme)".into(),
+                    version: "1.3.1".into(),
+                    description: "Material Design file & folder icons, consumed from the real Zed extension registry".into(),
+                    downloads: "24.1M".into(),
+                    rating: "★ 4.9".into(),
                     installed: lightline::extensions::installer::is_installed("material-icon-theme"),
                     installing: false,
                 },
             ],
             extensions_tab: ExtensionsTab::Marketplace,
             extensions_query: String::new(),
+            zed_registry_loaded: false,
+            zed_registry_loading: false,
             debug: None,
             debug_event_tx: debug_tx,
             debug_events: debug_rx,
@@ -849,18 +878,38 @@ impl App {
         self.extensions
             .iter()
             .filter(|ext| {
-                if self.extensions_tab == ExtensionsTab::Installed && !ext.installed {
-                    return false;
+                if self.extensions_tab == ExtensionsTab::Installed {
+                    return ext.installed;
                 }
-                if !q.is_empty() {
-                    ext.name.to_lowercase().contains(&q)
-                        || ext.description.to_lowercase().contains(&q)
-                        || ext.publisher.to_lowercase().contains(&q)
-                } else {
-                    true
+                if q.is_empty() {
+                    // Marketplace with no search yet: only the two curated
+                    // entries LightLine ships knowledge of, not every id in
+                    // the Zed registry the moment it's loaded -- the search
+                    // box is what reveals the rest.
+                    return ext.id == "prettier" || ext.id == "material-icons";
                 }
+                ext.id.to_lowercase().contains(&q)
+                    || ext.name.to_lowercase().contains(&q)
+                    || ext.description.to_lowercase().contains(&q)
+                    || ext.publisher.to_lowercase().contains(&q)
             })
             .collect()
+    }
+
+    // Kicks off a one-time fetch of every id/version in the Zed registry, so
+    // the search box has something beyond the two curated entries to match
+    // against. Idempotent: does nothing once loaded or while already loading.
+    pub(super) fn ensure_zed_registry_loaded(&mut self, hwnd: HWND) {
+        if self.zed_registry_loaded || self.zed_registry_loading {
+            return;
+        }
+        self.zed_registry_loading = true;
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        std::thread::spawn(move || {
+            let result = lightline::extensions::zed_registry::list_ids();
+            let _ = tx.send(WorkerMessage::ZedRegistryList(result));
+        });
     }
 
     pub(super) fn toggle_extension(&mut self, hwnd: HWND, id: &str) {
@@ -870,39 +919,62 @@ impl App {
         if self.extensions[idx].installing {
             return;
         }
-        if id == "material-icons" {
+        if id != "prettier" {
+            // Every non-Prettier entry is a real Zed extension -- either the
+            // one LightLine installs itself (material-icons) or one found
+            // via registry search -- installed/uninstalled the same way.
+            let registry_id = zed_registry_id(id).to_string();
             if self.extensions[idx].installed {
                 // A real uninstall (deletes the local files), not just a
                 // preference flip -- IconSet already handles "no theme
                 // loaded" gracefully, so this is a safe, meaningful action.
-                let _ = lightline::extensions::installer::uninstall("material-icon-theme");
+                let _ = lightline::extensions::installer::uninstall(&registry_id);
                 self.extensions[idx].installed = false;
-                self.icons = IconSet::new(self.dpi, self.zoom);
-                self.status = "Material Icon Theme removed".into();
+                let name = self.extensions[idx].name.clone();
+                if registry_id == "material-icon-theme" {
+                    self.icons = IconSet::new(self.dpi, self.zoom);
+                }
+                self.status = format!("{name} removed");
                 self.refresh(hwnd);
                 return;
             }
             self.extensions[idx].installing = true;
-            self.status = "Resolving Material Icon Theme from the Zed registry...".into();
+            let name = self.extensions[idx].name.clone();
+            self.status = format!("Resolving {name} from the Zed registry...");
             let tx = self.worker_tx.clone();
+            let worker_id = id.to_string();
             self.worker_started(hwnd);
             std::thread::spawn(move || {
-                let installed = lightline::extensions::zed_registry::resolve("material-icon-theme")
-                    .and_then(|resolved| {
-                        lightline::extensions::installer::install(
-                            "material-icon-theme",
+                let outcome = lightline::extensions::zed_registry::resolve(&registry_id).and_then(
+                    |resolved| {
+                        let dir = lightline::extensions::installer::install(
+                            &registry_id,
                             &resolved.git_url,
                             Some(&format!("v{}", resolved.version)),
-                        )
-                        .map_err(|error| error)
-                    })
-                    .is_ok();
-                let _ = tx.send(WorkerMessage::ExtensionInstalled("material-icons".into(), installed));
+                        )?;
+                        let is_icon_theme = lightline::extensions::zed_manifest::is_icon_theme(&dir);
+                        if !is_icon_theme {
+                            // Not something LightLine can actually use yet
+                            // (needs WASM execution, or a color-theme system
+                            // that doesn't exist) -- don't leave a dead,
+                            // silently-half-installed entry behind.
+                            let _ = lightline::extensions::installer::uninstall(&registry_id);
+                            return Err(
+                                "isn't supported yet (LightLine can only use icon-theme \
+                                 extensions right now)"
+                                    .to_string(),
+                            );
+                        }
+                        Ok(is_icon_theme)
+                    },
+                );
+                let _ = tx.send(WorkerMessage::ZedExtensionInstalled(worker_id, outcome));
             });
             self.refresh(hwnd);
             return;
         }
-        if id == "prettier" {
+        // Prettier: unrelated to the Zed registry, detected via PATH probing.
+        {
             if self.extensions[idx].installed {
                 // Turning this off is just a preference flip: LightLine never
                 // owned an install to undo, so there's nothing to uninstall.
@@ -2135,24 +2207,24 @@ mod split_tests {
     fn extensions_initial_list_and_toggle() {
         let mut extensions = [
             Extension {
-                id: "prettier",
-                name: "Prettier - Code formatter",
-                publisher: "esbenp",
-                version: "v3.4.2",
-                description: "Code formatter using prettier for JS, TS, HTML, CSS",
-                downloads: "42.8M",
-                rating: "★ 4.8",
+                id: "prettier".into(),
+                name: "Prettier - Code formatter".into(),
+                publisher: "esbenp".into(),
+                version: "v3.4.2".into(),
+                description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
+                downloads: "42.8M".into(),
+                rating: "★ 4.8".into(),
                 installed: false,
                 installing: false,
             },
             Extension {
-                id: "material-icons",
-                name: "Material Icon Theme",
-                publisher: "Philipp Kief",
-                version: "v5.1.0",
-                description: "Material Design file & folder icons for LightLine",
-                downloads: "24.1M",
-                rating: "★ 4.9",
+                id: "material-icons".into(),
+                name: "Material Icon Theme".into(),
+                publisher: "Philipp Kief".into(),
+                version: "v5.1.0".into(),
+                description: "Material Design file & folder icons for LightLine".into(),
+                downloads: "24.1M".into(),
+                rating: "★ 4.9".into(),
                 installed: true,
                 installing: false,
             },

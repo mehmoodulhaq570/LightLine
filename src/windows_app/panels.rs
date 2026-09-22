@@ -449,33 +449,71 @@ impl App {
                         Err(error) => self.status = error,
                     }
                 }
+                // Prettier's own detect-only flow (see toggle_extension) --
+                // unrelated to the Zed registry.
                 WorkerMessage::ExtensionInstalled(id, found) => {
                     if let Some(ext) = self.extensions.iter_mut().find(|e| e.id == id) {
                         ext.installing = false;
                         ext.installed = found;
-                        self.status = match (id.as_str(), found) {
-                            ("material-icons", true) => {
-                                "Material Icon Theme installed from the Zed registry".into()
-                            }
-                            ("material-icons", false) => {
-                                "Could not install Material Icon Theme (check your network connection \
-                                 and that git is on PATH)"
-                                    .into()
-                            }
-                            (_, true) => format!("{} found — ready to format code", ext.name),
-                            (_, false) => format!(
+                        self.status = if found {
+                            format!("{} found — ready to format code", ext.name)
+                        } else {
+                            format!(
                                 "{} isn't available. Install it with \"npm install -g prettier\" \
                                  or add it to this project, then try again.",
                                 ext.name
-                            ),
+                            )
                         };
-                        if id == "material-icons" {
-                            // Picks up the freshly installed (or removed)
-                            // theme immediately, instead of waiting for a
-                            // restart -- IconSet::new() already re-reads it
-                            // from disk.
-                            self.icons = IconSet::new(self.dpi, self.zoom);
+                    }
+                }
+                WorkerMessage::ZedRegistryList(result) => {
+                    self.zed_registry_loading = false;
+                    match result {
+                        Ok(entries) => {
+                            self.zed_registry_loaded = true;
+                            for (id, version) in entries {
+                                if self.extensions.iter().any(|ext| ext.id == id) {
+                                    continue;
+                                }
+                                self.extensions.push(Extension {
+                                    id: id.clone(),
+                                    name: id,
+                                    publisher: "zed-industries/extensions".into(),
+                                    version,
+                                    description: "Zed extension — install to see whether LightLine \
+                                                   supports it yet (icon themes only, for now)"
+                                        .into(),
+                                    downloads: String::new(),
+                                    rating: String::new(),
+                                    installed: false,
+                                    installing: false,
+                                });
+                            }
                         }
+                        Err(error) => {
+                            self.status = format!("Could not reach the Zed extension registry: {error}");
+                        }
+                    }
+                }
+                WorkerMessage::ZedExtensionInstalled(id, result) => {
+                    let registry_id = if id == "material-icons" {
+                        "material-icon-theme".to_string()
+                    } else {
+                        id.clone()
+                    };
+                    if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
+                        ext.installing = false;
+                        self.status = match &result {
+                            Ok(_) => format!("{} installed", ext.name),
+                            Err(error) => format!("Could not install {}: {error}", ext.name),
+                        };
+                        ext.installed = result.is_ok();
+                    }
+                    // IconSet only ever reads the "material-icon-theme"
+                    // folder -- reloading for any other icon-theme id would
+                    // be a no-op, since there's no active-theme selection.
+                    if result.is_ok() && registry_id == "material-icon-theme" {
+                        self.icons = IconSet::new(self.dpi, self.zoom);
                     }
                 }
                 WorkerMessage::DebugBuild(result) => {

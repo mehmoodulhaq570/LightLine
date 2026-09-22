@@ -1215,7 +1215,7 @@ impl App {
             let content_right = card_rect.right - s(8);
 
             // Row 1: Extension Title & Verified badge & Version
-            let display_title = ext.name.split(" - ").next().unwrap_or(ext.name);
+            let display_title = ext.name.split(" - ").next().unwrap_or(&ext.name);
             unsafe { SelectObject(hdc, self.brand_font); }
             Self::label(hdc, display_title, content_left, ey + s(6), rgb(245, 247, 250), card_rect);
             let title_w = self.text_width(hdc, display_title);
@@ -1236,7 +1236,7 @@ impl App {
             Self::label(hdc, "✓", badge_x + s(2), ey + s(7), rgb(255, 255, 255), card_rect);
 
             let ver_x = badge_x + s(16);
-            Self::label(hdc, ext.version, ver_x, ey + s(7), rgb(100, 116, 140), card_rect);
+            Self::label(hdc, &ext.version, ver_x, ey + s(7), rgb(100, 116, 140), card_rect);
 
             // Row 2: Description (clean single-line with ellipsis)
             let desc_clip = RECT {
@@ -1245,7 +1245,7 @@ impl App {
                 right: content_right,
                 bottom: ey + s(46),
             };
-            self.label_ellipsis(hdc, ext.description, content_left, ey + s(27), rgb(148, 163, 184), desc_clip);
+            self.label_ellipsis(hdc, &ext.description, content_left, ey + s(27), rgb(148, 163, 184), desc_clip);
 
             // Row 3: Metadata (Publisher, Downloads & Rating) on left
             let meta_text = format!("by {}   ↓ {}   {}", ext.publisher, ext.downloads, ext.rating);
