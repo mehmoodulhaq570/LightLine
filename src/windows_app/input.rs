@@ -571,6 +571,10 @@ impl App {
                 self.hover_at_cursor(hwnd);
                 return true;
             }
+            x if x == VK_F12 as u32 && shift => {
+                self.find_references(hwnd);
+                return true;
+            }
             x if x == VK_F12 as u32 => {
                 self.goto_definition(hwnd);
                 return true;

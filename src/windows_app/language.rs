@@ -287,6 +287,7 @@ impl App {
                     self.hover_target = None;
                     self.hover_card = None;
                     self.definition_target = None;
+                    self.references_target = None;
                     self.format_target = None;
                     self.completion_request = None;
                     self.completion = None;
@@ -328,6 +329,63 @@ impl App {
                     self.move_cursor(Pos { line: byte.0, byte: byte.1 }, false);
                     self.keep_cursor_visible(hwnd);
                     self.status = format!("Jumped to definition (line {})", byte.0 + 1);
+                }
+                LspEvent::References {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    locations,
+                } => {
+                    let Some(target) = self.references_target.take().filter(|target| {
+                        target.language == language
+                            && target.id == id
+                            && target.uri == uri
+                            && target.version == version
+                    }) else {
+                        continue;
+                    };
+                    let index = self.tab_for_pane(target.pane);
+                    if self.tabs[index].lsp_version != version {
+                        continue;
+                    }
+                    if locations.is_empty() {
+                        self.status = "No references found".into();
+                        continue;
+                    }
+                    // References can span files that aren't open in any tab,
+                    // so their preview text is read straight from disk rather
+                    // than reusing document state the way the search panel's
+                    // own results do.
+                    let hits: Vec<SearchHit> = locations
+                        .iter()
+                        .filter_map(|location| {
+                            let path = lsp::uri_to_path(&location.uri)?;
+                            let text = std::fs::read_to_string(&path).ok()?;
+                            let line_number = location.range.start.line as usize;
+                            let line_text = text.lines().nth(line_number).unwrap_or("");
+                            let byte = lsp::utf16_to_byte(line_text, location.range.start.character);
+                            Some(SearchHit {
+                                path,
+                                line: line_number,
+                                byte,
+                                preview: line_text.trim().chars().take(110).collect(),
+                                context: Vec::new(),
+                            })
+                        })
+                        .collect();
+                    self.status = format!(
+                        "{} reference{} found",
+                        hits.len(),
+                        if hits.len() == 1 { "" } else { "s" }
+                    );
+                    self.search_results = hits;
+                    self.panel_selected = 0;
+                    self.panel_first = 0;
+                    self.welcome = false;
+                    self.side_view = SideView::Search;
+                    self.set_sidebar_visible(hwnd, true);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
                 }
                 LspEvent::Format {
                     language,
@@ -694,6 +752,51 @@ impl App {
                 pane,
             });
             self.status = "Finding definition...".into();
+        }
+    }
+
+    pub(super) fn find_references(&mut self, hwnd: HWND) {
+        let pane = self.focused_pane;
+        let pos = self.view().cursor;
+        let index = self.tab_for_pane(pane);
+        if !self.tabs[index].lsp_opened {
+            self.ensure_lsp(hwnd);
+        }
+        let tab = &self.tabs[index];
+        if !tab.lsp_opened {
+            self.status = "Language server not ready yet".into();
+            return;
+        }
+        let Some(language) = tab.lsp_language else {
+            return;
+        };
+        let Some(path) = tab.document.path.as_deref() else {
+            return;
+        };
+        let uri = lsp::file_uri(path);
+        let version = tab.lsp_version;
+        let position = LspPosition {
+            line: pos.line as u32,
+            character: tab.document.utf16_column(pos) as u32,
+        };
+        self.request_id += 1;
+        let id = self.request_id;
+        if self.lsp.get(&language).is_some_and(|client| {
+            client.send(LspCommand::References {
+                id,
+                uri: uri.clone(),
+                version,
+                position,
+            })
+        }) {
+            self.references_target = Some(NavTarget {
+                language,
+                id,
+                uri,
+                version,
+                pane,
+            });
+            self.status = "Finding references...".into();
         }
     }
 

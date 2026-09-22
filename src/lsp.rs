@@ -108,6 +108,12 @@ pub enum Command {
         version: i32,
         position: Position,
     },
+    References {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
+    },
     Format {
         id: u64,
         uri: String,
@@ -145,6 +151,13 @@ pub enum Event {
         uri: String,
         version: i32,
         targets: Vec<Location>,
+    },
+    References {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        locations: Vec<Location>,
     },
     Format {
         language: Language,
@@ -199,6 +212,7 @@ struct PendingHover {
 struct Pending {
     hovers: HashMap<u64, PendingHover>,
     definitions: HashMap<u64, PendingHover>,
+    references: HashMap<u64, PendingHover>,
     formats: HashMap<u64, (String, i32)>,
     completions: HashMap<u64, PendingHover>,
 }
@@ -214,6 +228,14 @@ fn definition_request(id: u64, request: &PendingHover) -> Value {
     json!({"jsonrpc":"2.0","id":id,"method":"textDocument/definition","params":{
         "textDocument":{"uri":request.uri},
         "position":{"line":request.position.line,"character":request.position.character}
+    }})
+}
+
+fn references_request(id: u64, request: &PendingHover) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/references","params":{
+        "textDocument":{"uri":request.uri},
+        "position":{"line":request.position.line,"character":request.position.character},
+        "context":{"includeDeclaration":true}
     }})
 }
 
@@ -765,6 +787,19 @@ fn run_server(
                         &events,
                         &wake,
                     );
+                } else if let Some(request) = pending.references.remove(&id) {
+                    let locations = parse_locations(&message);
+                    emit(
+                        Event::References {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            locations,
+                        },
+                        &events,
+                        &wake,
+                    );
                 } else if let Some((uri, version)) = pending.formats.remove(&id) {
                     let edits = parse_text_edits(&message);
                     emit(
@@ -931,6 +966,22 @@ fn send_command(
             };
             let request = definition_request(id, &request_state);
             pending.definitions.insert(id, request_state);
+            request
+        }
+        Command::References {
+            id,
+            uri,
+            version,
+            position,
+        } => {
+            let request_state = PendingHover {
+                uri,
+                version,
+                position,
+                retries: 0,
+            };
+            let request = references_request(id, &request_state);
+            pending.references.insert(id, request_state);
             request
         }
         Command::Format { id, uri, version } => {

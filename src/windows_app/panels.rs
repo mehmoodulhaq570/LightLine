@@ -62,6 +62,7 @@ impl App {
             ("Find in File", 17),
             ("Find and Replace", 18),
             ("Run C/C++ File", 19),
+            ("Find All References", 20),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -100,6 +101,7 @@ impl App {
                 Some(10) => self.restart_terminal(hwnd, false),
                 Some(11) => self.restart_terminal(hwnd, true),
                 Some(12) => self.goto_definition(hwnd),
+                Some(20) => self.find_references(hwnd),
                 Some(13) => self.format_document(hwnd),
                 Some(14) => self.trigger_completion(hwnd),
                 Some(16) => self.open_settings(hwnd),
