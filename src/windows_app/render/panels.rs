@@ -1208,7 +1208,7 @@ impl App {
             } else {
                 Self::rounded_fill(hdc, icon_rect, s(6), rgb(14, 28, 54));
                 self.card_outline(hdc, icon_rect, s(6), rgb(35, 70, 125));
-                self.icons.draw(hdc, "folder-src", icon_rect.left + s(7), icon_rect.top + s(7), s(26));
+                self.icons.draw_generic(hdc, GenericIcon::FolderSrc, icon_rect.left + s(7), icon_rect.top + s(7), s(26));
             }
 
             let content_left = card_rect.left + s(54);
@@ -1320,7 +1320,7 @@ impl App {
 
             // Row 2: Material Icons
             let r2_y = r1_y + s(40);
-            self.icons.draw(hdc, "folder-src", guide_rect.left + s(8), r2_y, s(16));
+            self.icons.draw_generic(hdc, GenericIcon::FolderSrc, guide_rect.left + s(8), r2_y, s(16));
             Self::label(hdc, "Material Icon Theme", guide_rect.left + s(30), r2_y, rgb(226, 232, 240), guide_rect);
             Self::label(hdc, "Visual themes for 20+ file types and tabs", guide_rect.left + s(30), r2_y + s(16), rgb(100, 116, 145), guide_rect);
 

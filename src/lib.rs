@@ -2,6 +2,8 @@
 pub mod clipboard;
 pub mod debug;
 pub mod document;
+pub mod extensions;
+pub mod icon_theme;
 pub mod lsp;
 pub mod settings;
 pub mod syntax;

@@ -302,7 +302,7 @@ impl App {
         color: u32,
     ) {
         if kind == 0 {
-            self.icons.draw(hdc, "folder-open", x, y, self.scale(17));
+            self.icons.draw_generic(hdc, GenericIcon::FolderOpen, x, y, self.scale(17));
             return;
         }
         unsafe {

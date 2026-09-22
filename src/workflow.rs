@@ -30,6 +30,14 @@ fn recent_path() -> Option<PathBuf> {
     )
 }
 
+/// Where locally-installed extensions live, e.g.
+/// `extensions_dir().join("material-icon-theme")` for a Zed icon-theme
+/// extension a user has placed there. No installer/registry writes here yet —
+/// this is only ever read from.
+pub fn extensions_dir() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("LightLine").join("extensions"))
+}
+
 pub fn recent_workspaces() -> Vec<PathBuf> {
     let Some(path) = recent_path() else {
         return Vec::new();

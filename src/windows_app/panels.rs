@@ -453,15 +453,29 @@ impl App {
                     if let Some(ext) = self.extensions.iter_mut().find(|e| e.id == id) {
                         ext.installing = false;
                         ext.installed = found;
-                        self.status = if found {
-                            format!("{} found — ready to format code", ext.name)
-                        } else {
-                            format!(
+                        self.status = match (id.as_str(), found) {
+                            ("material-icons", true) => {
+                                "Material Icon Theme installed from the Zed registry".into()
+                            }
+                            ("material-icons", false) => {
+                                "Could not install Material Icon Theme (check your network connection \
+                                 and that git is on PATH)"
+                                    .into()
+                            }
+                            (_, true) => format!("{} found — ready to format code", ext.name),
+                            (_, false) => format!(
                                 "{} isn't available. Install it with \"npm install -g prettier\" \
                                  or add it to this project, then try again.",
                                 ext.name
-                            )
+                            ),
                         };
+                        if id == "material-icons" {
+                            // Picks up the freshly installed (or removed)
+                            // theme immediately, instead of waiting for a
+                            // restart -- IconSet::new() already re-reads it
+                            // from disk.
+                            self.icons = IconSet::new(self.dpi, self.zoom);
+                        }
                     }
                 }
                 WorkerMessage::DebugBuild(result) => {

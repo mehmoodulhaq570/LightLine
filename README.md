@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="LightLine-icon2.png" alt="LightLine icon" width="96" height="96">
+<img src="LightLine-icon.png" alt="LightLine icon" width="96" height="96">
 
 # LightLine
 

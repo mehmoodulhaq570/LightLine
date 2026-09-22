@@ -669,6 +669,7 @@ impl App {
     }
 
     pub(super) fn new(hwnd: HWND, brand_icon: HICON, hero_icon: HICON) -> Self {
+        lightline::extensions::installer::ensure_material_icon_theme();
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let font = Self::font_for_dpi(dpi, zoom);
@@ -813,12 +814,12 @@ impl App {
                 Extension {
                     id: "material-icons",
                     name: "Material Icon Theme",
-                    publisher: "Philipp Kief",
-                    version: "v5.1.0",
-                    description: "Material Design file & folder icons for LightLine",
+                    publisher: "Zed Industries (zed-extensions/material-icon-theme)",
+                    version: "1.3.1",
+                    description: "Material Design file & folder icons, consumed from the real Zed extension registry",
                     downloads: "24.1M",
                     rating: "★ 4.9",
-                    installed: true,
+                    installed: lightline::extensions::installer::is_installed("material-icon-theme"),
                     installing: false,
                 },
             ],
@@ -870,13 +871,34 @@ impl App {
             return;
         }
         if id == "material-icons" {
-            self.extensions[idx].installed = !self.extensions[idx].installed;
-            let installed = self.extensions[idx].installed;
-            self.status = if installed {
-                "Material Icon Theme activated".into()
-            } else {
-                "Material Icon Theme deactivated".into()
-            };
+            if self.extensions[idx].installed {
+                // A real uninstall (deletes the local files), not just a
+                // preference flip -- IconSet already handles "no theme
+                // loaded" gracefully, so this is a safe, meaningful action.
+                let _ = lightline::extensions::installer::uninstall("material-icon-theme");
+                self.extensions[idx].installed = false;
+                self.icons = IconSet::new(self.dpi, self.zoom);
+                self.status = "Material Icon Theme removed".into();
+                self.refresh(hwnd);
+                return;
+            }
+            self.extensions[idx].installing = true;
+            self.status = "Resolving Material Icon Theme from the Zed registry...".into();
+            let tx = self.worker_tx.clone();
+            self.worker_started(hwnd);
+            std::thread::spawn(move || {
+                let installed = lightline::extensions::zed_registry::resolve("material-icon-theme")
+                    .and_then(|resolved| {
+                        lightline::extensions::installer::install(
+                            "material-icon-theme",
+                            &resolved.git_url,
+                            Some(&format!("v{}", resolved.version)),
+                        )
+                        .map_err(|error| error)
+                    })
+                    .is_ok();
+                let _ = tx.send(WorkerMessage::ExtensionInstalled("material-icons".into(), installed));
+            });
             self.refresh(hwnd);
             return;
         }

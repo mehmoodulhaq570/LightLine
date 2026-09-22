@@ -319,23 +319,30 @@ impl App {
                         VIOLET,
                     );
                 }
-                let tab_icon = if self.has_extension("material-icons") {
-                    self.tabs[index]
-                        .document
-                        .path
-                        .as_deref()
-                        .map(|path| material_icon_for(path, false, false))
-                        .unwrap_or("file")
-                } else {
-                    "file"
-                };
-                self.icons.draw(
-                    hdc,
-                    tab_icon,
-                    left + self.scale(11),
-                    chrome_top + self.scale(9),
-                    self.scale(18),
-                );
+                let use_theme = self.has_extension("material-icons");
+                match self.tabs[index].document.path.as_deref() {
+                    Some(path) => {
+                        self.icons.draw_for_path(
+                            hdc,
+                            path,
+                            false,
+                            false,
+                            use_theme,
+                            left + self.scale(11),
+                            chrome_top + self.scale(9),
+                            self.scale(18),
+                        );
+                    }
+                    None => {
+                        self.icons.draw_generic(
+                            hdc,
+                            GenericIcon::File,
+                            left + self.scale(11),
+                            chrome_top + self.scale(9),
+                            self.scale(18),
+                        );
+                    }
+                }
                 let label = self.tab_label(index);
                 let chars: Vec<u16> = label.encode_utf16().collect();
                 SetTextColor(hdc, if index == self.active { TEXT } else { MUTED });
@@ -471,9 +478,9 @@ impl App {
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| display_path(root));
                     self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), true);
-                    self.icons.draw(
+                    self.icons.draw_generic(
                         hdc,
-                        "folder-open",
+                        GenericIcon::FolderOpen,
                         self.scale(RAIL + 23),
                         self.scale(48),
                         self.scale(17),
@@ -533,20 +540,12 @@ impl App {
                                 item.expanded,
                             );
                         }
-                        let icon_name = if self.has_extension("material-icons") {
-                            material_icon_for(&item.entry.path, item.entry.is_dir, item.expanded)
-                        } else if item.entry.is_dir {
-                            if item.expanded {
-                                "folder-open"
-                            } else {
-                                "folder"
-                            }
-                        } else {
-                            "file"
-                        };
-                        if !self.icons.draw(
+                        if !self.icons.draw_for_path(
                             hdc,
-                            icon_name,
+                            &item.entry.path,
+                            item.entry.is_dir,
+                            item.expanded,
+                            self.has_extension("material-icons"),
                             left + self.scale(12),
                             top + self.scale(2),
                             self.scale(18),
@@ -715,22 +714,30 @@ impl App {
                 bottom: rect.bottom - self.scale(4),
             };
             Self::rounded_fill(hdc, chip_rect, self.scale(4), rgb(24, 38, 70));
-            let icon = if self.has_extension("material-icons") {
-                self.doc()
-                    .path
-                    .as_deref()
-                    .map(|path| material_icon_for(path, false, false))
-                    .unwrap_or("file")
-            } else {
-                "file"
-            };
-            self.icons.draw(
-                hdc,
-                icon,
-                chip_rect.left + self.scale(6),
-                chip_rect.top + self.scale(2),
-                self.scale(15),
-            );
+            let use_theme = self.has_extension("material-icons");
+            match self.doc().path.as_deref() {
+                Some(path) => {
+                    self.icons.draw_for_path(
+                        hdc,
+                        path,
+                        false,
+                        false,
+                        use_theme,
+                        chip_rect.left + self.scale(6),
+                        chip_rect.top + self.scale(2),
+                        self.scale(15),
+                    );
+                }
+                None => {
+                    self.icons.draw_generic(
+                        hdc,
+                        GenericIcon::File,
+                        chip_rect.left + self.scale(6),
+                        chip_rect.top + self.scale(2),
+                        self.scale(15),
+                    );
+                }
+            }
             Self::label(
                 hdc,
                 &file_label,

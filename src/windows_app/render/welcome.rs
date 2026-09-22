@@ -409,9 +409,9 @@ impl App {
             },
         );
         self.panel_card(hdc, layout.open_folder, s(8), EDGE, ACTIVE_BG);
-        self.icons.draw(
+        self.icons.draw_generic(
             hdc,
-            "folder",
+            GenericIcon::Folder,
             layout.open_folder.left + s(14),
             layout.open_folder.top + s(11),
             s(16),
@@ -535,12 +535,22 @@ impl App {
             Self::rounded_fill(hdc, badge, s(9), badge_color);
             match index {
                 0 => {
-                    self.icons
-                        .draw(hdc, "folder-open", badge.left + s(11), badge.top + s(11), s(18));
+                    self.icons.draw_generic(
+                        hdc,
+                        GenericIcon::FolderOpen,
+                        badge.left + s(11),
+                        badge.top + s(11),
+                        s(18),
+                    );
                 }
                 1 => {
-                    self.icons
-                        .draw(hdc, "file", badge.left + s(11), badge.top + s(11), s(18));
+                    self.icons.draw_generic(
+                        hdc,
+                        GenericIcon::File,
+                        badge.left + s(11),
+                        badge.top + s(11),
+                        s(18),
+                    );
                 }
                 2 => self.rail_icon(hdc, 3, badge.left + s(11), badge.top + s(11), TEXT),
                 _ => self.prompt_glyph(hdc, badge.left + s(10), badge.top + s(10), s(20), TEXT),
@@ -616,7 +626,7 @@ impl App {
             };
             Self::rounded_fill(hdc, row, s(8), ACTIVE_BG);
             self.icons
-                .draw(hdc, "folder", row.left + s(12), top + s(15), s(17));
+                .draw_generic(hdc, GenericIcon::Folder, row.left + s(12), top + s(15), s(17));
             let text_left = row.left + s(40);
             let row_clip = RECT {
                 left: text_left,

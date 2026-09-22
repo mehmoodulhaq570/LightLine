@@ -25,7 +25,7 @@ pub use window::run;
 
 mod icons;
 
-use icons::{AppIcons, IconSet, material_icon_for};
+use icons::{AppIcons, GenericIcon, IconSet};
 use lightline::clipboard;
 use lightline::debug::{
     Command as DebugCommand, DebugClient, Event as DebugEvent, Scope as DebugScope,
