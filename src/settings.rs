@@ -13,6 +13,7 @@ pub struct Settings {
     pub word_wrap: bool,
     pub auto_close_pairs: bool,
     pub auto_indent: bool,
+    pub format_on_save: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
@@ -32,6 +33,7 @@ impl Default for Settings {
             word_wrap: false,
             auto_close_pairs: true,
             auto_indent: true,
+            format_on_save: false,
             bracket_matching: true,
             indent_guides: true,
             minimap: false,
@@ -99,6 +101,9 @@ impl Settings {
         if let Some(b) = value.get("autoIndent").and_then(|v| v.as_bool()) {
             settings.auto_indent = b;
         }
+        if let Some(b) = value.get("formatOnSave").and_then(|v| v.as_bool()) {
+            settings.format_on_save = b;
+        }
         if let Some(b) = value.get("bracketMatching").and_then(|v| v.as_bool()) {
             settings.bracket_matching = b;
         }
@@ -159,6 +164,10 @@ impl Settings {
             serde_json::Value::Bool(self.auto_indent),
         );
         obj.insert(
+            "formatOnSave".into(),
+            serde_json::Value::Bool(self.format_on_save),
+        );
+        obj.insert(
             "bracketMatching".into(),
             serde_json::Value::Bool(self.bracket_matching),
         );
@@ -207,6 +216,15 @@ mod tests {
         assert!(s.auto_close_pairs);
         assert!(s.auto_indent);
         assert!(s.bracket_matching);
+        assert!(!s.format_on_save);
+    }
+
+    #[test]
+    fn format_on_save_round_trips() {
+        let mut s = Settings::default();
+        s.format_on_save = true;
+        let loaded = Settings::from_json(&s.to_json());
+        assert!(loaded.format_on_save);
     }
 
     #[test]

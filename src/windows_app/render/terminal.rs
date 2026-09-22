@@ -22,7 +22,7 @@ impl App {
                 right,
                 bottom,
             },
-            SIDEBAR_BG,
+            self.theme.sidebar_bg,
         );
         Self::fill(
             hdc,
@@ -32,7 +32,7 @@ impl App {
                 right,
                 bottom: top + self.scale(1),
             },
-            EDGE,
+            self.theme.edge,
         );
         self.refresh_terminal_cell_width(hdc);
         // The tab strip (OUTPUT, one tab per shell, add/kill buttons, panel
@@ -47,7 +47,7 @@ impl App {
             "OUTPUT",
             layout.output.left,
             top + self.scale(9),
-            if output_active { TEXT } else { MUTED },
+            if output_active { self.theme.text } else { self.theme.muted },
             layout.output,
         );
         if output_active {
@@ -59,7 +59,7 @@ impl App {
                     right: layout.output.right - self.scale(14),
                     bottom: header_bottom,
                 },
-                BLUE,
+                self.theme.blue,
             );
         }
 
@@ -77,7 +77,7 @@ impl App {
                 &label,
                 rect.left + self.scale(6),
                 top + self.scale(9),
-                if active { TEXT } else { MUTED },
+                if active { self.theme.text } else { self.theme.muted },
                 *rect,
             );
             if active {
@@ -89,7 +89,7 @@ impl App {
                         right: rect.right,
                         bottom: header_bottom,
                     },
-                    BLUE,
+                    self.theme.blue,
                 );
             }
         }
@@ -101,7 +101,7 @@ impl App {
             "+",
             layout.plus.left + self.scale(8),
             top + self.scale(8),
-            MUTED,
+            self.theme.muted,
             layout.plus,
         );
         Self::label(
@@ -109,7 +109,7 @@ impl App {
             "\u{2715}",
             layout.kill.left + self.scale(4),
             top + self.scale(9),
-            if shell_open { MUTED } else { rgb(74, 80, 94) },
+            if shell_open { self.theme.muted } else { rgb(74, 80, 94) },
             layout.kill,
         );
 
@@ -141,7 +141,7 @@ impl App {
                 &status,
                 x,
                 top + self.scale(10),
-                MUTED,
+                self.theme.muted,
                 RECT {
                     left,
                     top,
@@ -155,7 +155,7 @@ impl App {
             "\u{d7}",
             layout.hide.left + self.scale(6),
             top + self.scale(6),
-            MUTED,
+            self.theme.muted,
             layout.hide,
         );
         let Some(snapshot) = active_snapshot else {
@@ -192,9 +192,10 @@ impl App {
                 .iter()
                 .enumerate()
                 .map(|(column, cell)| {
-                    let (foreground, background) = cell_colors(cell);
+                    let (foreground, background) =
+                        cell_colors(cell, self.theme.text, self.theme.sidebar_bg);
                     if cell_selected(row_index, column) {
-                        (foreground, SELECT_BG)
+                        (foreground, self.theme.select_bg)
                     } else {
                         (foreground, background)
                     }
@@ -208,7 +209,7 @@ impl App {
                     end += 1;
                 }
                 let x = content_left + column as i32 * cell_width;
-                if background != SIDEBAR_BG {
+                if background != self.theme.sidebar_bg {
                     Self::fill(
                         hdc,
                         RECT {

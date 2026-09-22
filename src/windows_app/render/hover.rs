@@ -51,7 +51,7 @@ impl App {
                 right: x + width,
                 bottom: y + height,
             },
-            EDGE,
+            self.theme.edge,
         );
         Self::fill(
             hdc,
@@ -70,7 +70,7 @@ impl App {
             bottom: y + height - padding,
         };
         unsafe {
-            SetTextColor(hdc, TEXT);
+            SetTextColor(hdc, self.theme.text);
             DrawTextW(
                 hdc,
                 chars.as_ptr(),

@@ -532,6 +532,40 @@ impl App {
                         }
                     }
                 }
+                WorkerMessage::Formatted(path, formatter_name, serial, result) => {
+                    // Only apply to the tab the format request was actually
+                    // made against, and only if its content hasn't changed
+                    // since -- the user may have kept typing (or switched
+                    // tabs entirely) while the formatter ran in the
+                    // background. A stale result is silently dropped rather
+                    // than clobbering newer text.
+                    let still_current = self.doc().path.as_deref() == Some(path.as_path())
+                        && self.doc().change_serial() == serial;
+                    if !still_current {
+                        continue;
+                    }
+                    match result {
+                        Ok(formatted) => {
+                            let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
+                            let current_clean = self.doc().text().replace("\r\n", "\n").replace('\r', "\n");
+                            if formatted_clean == current_clean {
+                                self.status = format!("Already formatted with {formatter_name}");
+                            } else {
+                                let doc = self.doc();
+                                let last_line = doc.line_count().saturating_sub(1);
+                                let end = Pos {
+                                    line: last_line,
+                                    byte: doc.line(last_line).len(),
+                                };
+                                self.replace_range(Pos::default(), end, &formatted_clean);
+                                self.status = format!("Document formatted with {formatter_name}");
+                            }
+                        }
+                        Err(error) => {
+                            self.status = format!("{formatter_name} formatting failed: {error}");
+                        }
+                    }
+                }
                 _ => {}
             }
         }

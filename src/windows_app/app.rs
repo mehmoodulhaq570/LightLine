@@ -51,6 +51,10 @@ pub(super) enum WorkerMessage {
     ZedExtensionInstalled(String, Result<bool, String>),
     DebugBuild(Result<PathBuf, String>),
     CDiagnostics(PathBuf, Vec<LspDiagnostic>),
+    // path, the formatter's display name, the document's change_serial() at
+    // request time (so a stale result from a buffer the user kept editing is
+    // discarded instead of clobbering newer text), and the outcome.
+    Formatted(PathBuf, &'static str, u64, Result<String, String>),
 }
 
 // A pending source-control write. Each one runs on the shared worker channel
@@ -316,6 +320,7 @@ pub(super) struct App {
     pub(super) brand_icon: HICON,
     pub(super) hero_icon: HICON,
     pub(super) icons: IconSet,
+    pub(super) theme: Theme,
     pub(super) dpi: u32,
     pub(super) zoom: i32,
     pub(super) line_height: i32,
@@ -704,6 +709,8 @@ impl App {
         let (worker_tx, worker_rx) = mpsc::channel();
         let (lsp_tx, lsp_rx) = mpsc::channel();
         let (debug_tx, debug_rx) = mpsc::channel();
+        let settings = lightline::settings::Settings::load();
+        let theme = Theme::default_dark().with_overrides(&settings.colors);
         Self {
             tabs: vec![Tab::new(Document::new())],
             active: 0,
@@ -721,6 +728,7 @@ impl App {
             brand_icon,
             hero_icon,
             icons: IconSet::new(dpi, zoom),
+            theme,
             dpi,
             zoom,
             line_height,
@@ -824,7 +832,7 @@ impl App {
             completion: None,
             restoring: false,
             watcher: Some(lightline::watcher::FileWatcher::start()),
-            settings: lightline::settings::Settings::load(),
+            settings,
             git_diff_cache: HashMap::new(),
             extensions: vec![
                 Extension {
@@ -865,6 +873,16 @@ impl App {
             debug_pending_breakpoints: Vec::new(),
             extensions_search_active: false,
         }
+    }
+
+    // Replaces the active color theme at runtime and repaints. Not called
+    // from anywhere yet (no theme-switching UI, no color-theme parser) --
+    // this is the extension point a future Zed color-theme adapter uses,
+    // the same way icon themes already replace `self.icons`' loaded theme.
+    #[allow(dead_code)]
+    pub(super) fn set_theme(&mut self, hwnd: HWND, theme: Theme) {
+        self.theme = theme;
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn has_extension(&self, id: &str) -> bool {
@@ -1998,6 +2016,7 @@ impl App {
             self.error(hwnd, &"That file is already open in another tab");
             return false;
         }
+        self.apply_format_on_save(&path);
         match self.doc_mut().save(&path) {
             Ok(()) => {
                 self.lsp_after_save(hwnd, old_path.as_deref());

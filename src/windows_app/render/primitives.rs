@@ -2,7 +2,7 @@ use super::super::*;
 
 impl App {
     pub(in crate::windows_app) fn text_width(&self, hdc: HDC, text: &str) -> i32 {
-        let expanded = text.replace('\t', "    ");
+        let expanded = text.replace('\t', &" ".repeat(self.settings.tab_size));
         let utf16: Vec<u16> = expanded.encode_utf16().collect();
         let mut size = SIZE::default();
         unsafe {
@@ -274,7 +274,7 @@ impl App {
     pub(in crate::windows_app) fn chevron(&self, hdc: HDC, x: i32, y: i32, expanded: bool) {
         unsafe {
             let half = self.scale(4).max(4);
-            let pen = CreatePen(PS_SOLID, self.scale(2).max(2), MUTED);
+            let pen = CreatePen(PS_SOLID, self.scale(2).max(2), self.theme.muted);
             if pen.is_null() {
                 return;
             }

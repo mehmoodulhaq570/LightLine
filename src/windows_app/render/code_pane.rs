@@ -46,9 +46,9 @@ impl App {
             let visible = self.visible_lines(hwnd) + 1;
             SelectObject(hdc, self.font);
             let space_width = self.text_width(hdc, " ").max(1);
-            let guide_brush = CreateSolidBrush(EDGE);
-            let git_added_brush = CreateSolidBrush(GREEN);
-            let git_mod_brush = CreateSolidBrush(BLUE);
+            let guide_brush = CreateSolidBrush(self.theme.edge);
+            let git_added_brush = CreateSolidBrush(self.theme.green);
+            let git_mod_brush = CreateSolidBrush(self.theme.blue);
             let git_diff = doc.path.as_ref().and_then(|p| self.git_diff_cache.get(p));
             for row in 0..visible {
                 let index = view.first_line + row;
@@ -68,7 +68,7 @@ impl App {
                             right,
                             bottom: (y + self.line_height).min(bottom),
                         },
-                        LINE_BG,
+                        self.theme.line_bg,
                     );
                 }
                 if doc.has_breakpoint(index) {
@@ -92,9 +92,9 @@ impl App {
                 SetTextColor(
                     hdc,
                     if index == view.cursor.line {
-                        TEXT
+                        self.theme.line_number_active
                     } else {
-                        MUTED
+                        self.theme.line_number
                     },
                 );
                 let number_clip = RECT {
@@ -191,9 +191,9 @@ impl App {
                         );
                     }
                 }
-                let line = source.replace('\t', "    ");
+                let line = source.replace('\t', &" ".repeat(self.settings.tab_size));
                 let chars: Vec<u16> = line.encode_utf16().collect();
-                SetTextColor(hdc, TEXT);
+                SetTextColor(hdc, self.theme.text);
                 let clip = RECT {
                     left: code_left,
                     top: y,
@@ -214,20 +214,26 @@ impl App {
                     && let Some(syntax) = &tab.syntax
                 {
                     for span in syntax.spans(doc, index) {
+                        // self.theme is the single resolved source for these
+                        // -- Theme::with_overrides already folded in any
+                        // settings.json "colors" override once, at startup,
+                        // instead of re-checking a HashMap on every span of
+                        // every repaint.
                         let color = match span.color {
-                            Color::Comment => MUTED,
-                            Color::String => GREEN,
-                            Color::Keyword => BLUE,
-                            Color::Type => TEAL,
-                            Color::Number => rgb(248, 180, 130),
-                            Color::Macro => VIOLET,
-                            Color::Function => rgb(220, 210, 130),
-                            Color::Operator => rgb(200, 200, 220),
-                            Color::Attribute => rgb(180, 140, 230),
+                            Color::Comment => self.theme.comment,
+                            Color::String => self.theme.string,
+                            Color::Keyword => self.theme.keyword,
+                            Color::Type => self.theme.type_color,
+                            Color::Number => self.theme.number,
+                            Color::Macro => self.theme.macro_color,
+                            Color::Function => self.theme.function,
+                            Color::Operator => self.theme.operator,
+                            Color::Attribute => self.theme.attribute,
                         };
                         SetTextColor(hdc, color);
                         let left = code_left + self.text_width(hdc, safe_slice_prefix(source, span.start));
-                        let text = safe_slice_range(source, span.start, span.end).replace('\t', "    ");
+                        let text = safe_slice_range(source, span.start, span.end)
+                            .replace('\t', &" ".repeat(self.settings.tab_size));
                         let chars: Vec<u16> = text.encode_utf16().collect();
                         ExtTextOutW(
                             hdc,
@@ -248,9 +254,9 @@ impl App {
                     .take(3)
                 {
                     let color = if diagnostic.severity == 1 {
-                        rgb(246, 110, 120)
+                        self.theme.error
                     } else {
-                        rgb(245, 184, 95)
+                        self.theme.warning
                     };
                     let start_byte = lsp::utf16_to_byte(source, diagnostic.range.start.character);
                     let end_byte = if diagnostic.range.end.line as usize == index {
@@ -394,7 +400,7 @@ impl App {
                             // that the earlier syntax-color pass already
                             // drew, leaving a blank highlighted box instead
                             // of a highlighted character; redraw it on top.
-                            SetTextColor(hdc, TEXT);
+                            SetTextColor(hdc, self.theme.text);
                             let chars: Vec<u16> = ch_text.encode_utf16().collect();
                             TextOutW(hdc, x, y, chars.as_ptr(), chars.len() as i32);
                         }
@@ -412,7 +418,7 @@ impl App {
                 let y = self.editor_top()
                     + (view.cursor.line as i64 - view.first_line as i64) as i32 * self.line_height;
                 if y >= self.editor_top() && y < bottom && x < right {
-                    let caret = CreateSolidBrush(BLUE);
+                    let caret = CreateSolidBrush(self.theme.cursor);
                     FillRect(
                         hdc,
                         &RECT {

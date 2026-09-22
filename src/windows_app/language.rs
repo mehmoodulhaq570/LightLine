@@ -821,7 +821,12 @@ impl App {
         )
     }
 
-    pub(super) fn format_with_prettier(&mut self, hwnd: HWND) {
+    // Runs whichever formatter::formatter_for() picks for the active file
+    // (Prettier today; the one place a second formatter -- rustfmt, black,
+    // clang-format -- plugs in later) on a background thread, so a slow or
+    // stuck process (bounded by formatter::DEFAULT_TIMEOUT either way) never
+    // blocks the UI thread the way the old synchronous implementation did.
+    pub(super) fn format_with_external_formatter(&mut self, hwnd: HWND) {
         if self.tab().read_only() {
             return;
         }
@@ -831,88 +836,57 @@ impl App {
             self.refresh(hwnd);
             return;
         }
-        let filepath = self
-            .doc()
-            .path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "document.js".to_string());
-
-        #[cfg(windows)]
-        use std::os::windows::process::CommandExt;
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-
-        let mut child_res = {
-            let mut cmd = Command::new("cmd");
-            cmd.args(["/C", "prettier", "--stdin-filepath", &filepath]);
-            #[cfg(windows)]
-            cmd.creation_flags(0x08000000);
-            cmd.stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
+        let Some(path) = self.doc().path.clone() else {
+            self.status = "Save the file before formatting it".into();
+            self.refresh(hwnd);
+            return;
         };
-
-        if child_res.is_err() {
-            let mut cmd = Command::new("cmd");
-            cmd.args(["/C", "npx", "--yes", "prettier", "--stdin-filepath", &filepath]);
-            #[cfg(windows)]
-            cmd.creation_flags(0x08000000);
-            child_res = cmd
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn();
-        }
-
-        let mut child = match child_res {
-            Ok(c) => c,
-            Err(e) => {
-                self.status = format!("Could not launch Prettier: {e}");
-                self.refresh(hwnd);
-                return;
-            }
+        let Some(formatter) = lightline::formatter::formatter_for(&path) else {
+            return;
         };
-
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(code.as_bytes());
-        }
-
-        let output = match child.wait_with_output() {
-            Ok(o) => o,
-            Err(e) => {
-                self.status = format!("Prettier failed: {e}");
-                self.refresh(hwnd);
-                return;
-            }
-        };
-
-        if output.status.success() {
-            let formatted = String::from_utf8_lossy(&output.stdout).to_string();
-            let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
-            let current_clean = code.replace("\r\n", "\n").replace('\r', "\n");
-            if formatted_clean == current_clean {
-                self.status = "Already formatted with Prettier".into();
-            } else {
-                let doc = self.doc();
-                let last_line = doc.line_count().saturating_sub(1);
-                let end = Pos {
-                    line: last_line,
-                    byte: doc.line(last_line).len(),
-                };
-                self.replace_range(Pos::default(), end, &formatted_clean);
-                self.status = "Document formatted with Prettier".into();
-            }
-        } else {
-            let err = String::from_utf8_lossy(&output.stderr);
-            let first_err = err
-                .lines()
-                .find(|l| l.contains("Error") || l.contains("SyntaxError"))
-                .unwrap_or("Prettier formatting error");
-            self.status = first_err.trim().to_string();
-        }
+        let serial = self.doc().change_serial();
+        self.status = format!("Formatting with {}...", formatter.name());
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        std::thread::spawn(move || {
+            let result = formatter.format(&code, &path).map_err(|error| error.to_string());
+            let _ = tx.send(WorkerMessage::Formatted(path, formatter.name(), serial, result));
+        });
         self.refresh(hwnd);
+    }
+
+    // Formats the active buffer in place, synchronously, before it's written
+    // to disk -- called from save() when settings.format_on_save is on.
+    // Bounded by the same formatter::DEFAULT_TIMEOUT as the async path
+    // above, so a stuck formatter delays a save by at most that long rather
+    // than hanging it; a failure here doesn't block the save; the file just
+    // saves unformatted, same as if the setting were off.
+    pub(super) fn apply_format_on_save(&mut self, path: &Path) {
+        if !self.settings.format_on_save || !self.has_extension("prettier") {
+            return;
+        }
+        let Some(formatter) = lightline::formatter::formatter_for(path) else {
+            return;
+        };
+        let code = self.doc().text();
+        if code.trim().is_empty() {
+            return;
+        }
+        let Ok(formatted) = formatter.format(&code, path) else {
+            return;
+        };
+        let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
+        let current_clean = code.replace("\r\n", "\n").replace('\r', "\n");
+        if formatted_clean == current_clean {
+            return;
+        }
+        let doc = self.doc();
+        let last_line = doc.line_count().saturating_sub(1);
+        let end = Pos {
+            line: last_line,
+            byte: doc.line(last_line).len(),
+        };
+        self.replace_range(Pos::default(), end, &formatted_clean);
     }
 
     pub(super) fn format_document(&mut self, hwnd: HWND) {
@@ -921,7 +895,7 @@ impl App {
         let path = self.tabs[index].document.path.clone();
 
         if self.has_extension("prettier") && Self::is_prettier_supported(path.as_deref()) {
-            self.format_with_prettier(hwnd);
+            self.format_with_external_formatter(hwnd);
             return;
         }
 

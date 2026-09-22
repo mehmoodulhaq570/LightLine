@@ -869,7 +869,6 @@ impl App {
                 }
             }
             let text = if ch == '\r' {
-                // Auto-indent: add extra indentation after { or :
                 let cursor = self.view().cursor;
                 let line = self.doc().line(cursor.line);
                 let indent: String = line
@@ -877,10 +876,17 @@ impl App {
                     .take_while(|c| *c == ' ' || *c == '\t')
                     .collect();
                 let trimmed = line.trim_end();
-                if trimmed.ends_with('{') || trimmed.ends_with(':') {
-                    format!("\n{}    ", indent)
+                // Auto-indent: add one extra indent level after { or :,
+                // unless the user has turned it off.
+                if self.settings.auto_indent && (trimmed.ends_with('{') || trimmed.ends_with(':')) {
+                    let unit = if self.settings.insert_spaces {
+                        " ".repeat(self.settings.tab_size)
+                    } else {
+                        "\t".to_string()
+                    };
+                    format!("\n{indent}{unit}")
                 } else {
-                    format!("\n{}", indent)
+                    format!("\n{indent}")
                 }
             } else if should_auto_close {
                 format!("{}{}", ch, closing.unwrap())

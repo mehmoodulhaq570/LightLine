@@ -4,7 +4,7 @@ impl App {
     pub(in crate::windows_app) fn paint_ai_assistant(&self, hdc: HDC, rect: RECT) {
         let s = |value: i32| self.scale(value);
         let card_radius = s(CARD_RADIUS);
-        self.panel_card(hdc, rect, card_radius, CARD_EDGE, SIDEBAR_BG);
+        self.panel_card(hdc, rect, card_radius, self.theme.card_edge, self.theme.sidebar_bg);
 
         let clip = rect;
         let header_h = s(42);
@@ -12,13 +12,13 @@ impl App {
 
         // --- Header Bar ---
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.sparkle_glyph(hdc, rect.left + s(14), rect.top + s(13), s(16), VIOLET);
+        self.sparkle_glyph(hdc, rect.left + s(14), rect.top + s(13), s(16), self.theme.violet);
         Self::label(
             hdc,
             "AI Assistant",
             rect.left + s(36),
             rect.top + s(11),
-            TEXT,
+            self.theme.text,
             clip,
         );
 
@@ -44,9 +44,9 @@ impl App {
 
         // Header controls (minimize, refresh, close)
         let btn_y = rect.top + s(11);
-        Self::label(hdc, "\u{2014}", rect.right - s(66), btn_y, MUTED, clip);
-        Self::label(hdc, "\u{21bb}", rect.right - s(46), btn_y, MUTED, clip);
-        Self::label(hdc, "\u{00d7}", rect.right - s(24), btn_y, MUTED, clip);
+        Self::label(hdc, "\u{2014}", rect.right - s(66), btn_y, self.theme.muted, clip);
+        Self::label(hdc, "\u{21bb}", rect.right - s(46), btn_y, self.theme.muted, clip);
+        Self::label(hdc, "\u{00d7}", rect.right - s(24), btn_y, self.theme.muted, clip);
 
         // Header bottom divider
         Self::fill(
@@ -57,7 +57,7 @@ impl App {
                 right: rect.right - s(1),
                 bottom: header_bottom + s(1).max(1),
             },
-            EDGE,
+            self.theme.edge,
         );
 
         // --- Chat Body Area ---
@@ -77,7 +77,7 @@ impl App {
             "Explain this function and suggest an",
             user_bubble.left + s(12),
             user_bubble.top + s(6),
-            TEXT,
+            self.theme.text,
             user_bubble,
         );
         Self::label(
@@ -85,7 +85,7 @@ impl App {
             "optimization if possible.",
             user_bubble.left + s(12),
             user_bubble.top + s(22),
-            TEXT,
+            self.theme.text,
             user_bubble,
         );
 
@@ -98,7 +98,7 @@ impl App {
             bottom: assistant_top + s(22),
         };
         Self::rounded_fill(hdc, avatar_rect, s(6), rgb(72, 50, 175));
-        self.sparkle_glyph(hdc, avatar_rect.left + s(5), avatar_rect.top + s(5), s(12), TEXT);
+        self.sparkle_glyph(hdc, avatar_rect.left + s(5), avatar_rect.top + s(5), s(12), self.theme.text);
 
         unsafe { SelectObject(hdc, self.brand_font) };
         Self::label(
@@ -106,7 +106,7 @@ impl App {
             "Tera",
             avatar_rect.right + s(8),
             assistant_top + s(2),
-            TEXT,
+            self.theme.text,
             clip,
         );
 
@@ -124,7 +124,7 @@ impl App {
             "This function calculates the tabs UI layout for a",
             text_clip.left,
             text_y,
-            TEXT,
+            self.theme.text,
             text_clip,
         );
         Self::label(
@@ -132,7 +132,7 @@ impl App {
             "window. It iterates through visible tabs, computes",
             text_clip.left,
             text_y + s(17),
-            TEXT,
+            self.theme.text,
             text_clip,
         );
         Self::label(
@@ -140,7 +140,7 @@ impl App {
             "their bounds and draws them on the screen.",
             text_clip.left,
             text_y + s(34),
-            TEXT,
+            self.theme.text,
             text_clip,
         );
 
@@ -157,7 +157,7 @@ impl App {
             "1. Avoid repeated method calls inside the loop",
             text_clip.left,
             text_y + s(75),
-            MUTED,
+            self.theme.muted,
             text_clip,
         );
         Self::label(
@@ -165,7 +165,7 @@ impl App {
             "   (e.g., self.scale(TAB_WIDTH)) by caching the values.",
             text_clip.left,
             text_y + s(90),
-            MUTED,
+            self.theme.muted,
             text_clip,
         );
         Self::label(
@@ -173,7 +173,7 @@ impl App {
             "2. Use an iterator instead of manual index handling",
             text_clip.left,
             text_y + s(107),
-            MUTED,
+            self.theme.muted,
             text_clip,
         );
         Self::label(
@@ -181,7 +181,7 @@ impl App {
             "   for cleaner and safer code.",
             text_clip.left,
             text_y + s(122),
-            MUTED,
+            self.theme.muted,
             text_clip,
         );
 
@@ -212,7 +212,7 @@ impl App {
             bottom: code_rect.top + s(24),
         };
         Self::rounded_fill(hdc, copy_rect, s(4), rgb(22, 34, 58));
-        Self::label(hdc, "Copy", copy_rect.left + s(8), copy_rect.top + s(2), MUTED, copy_rect);
+        Self::label(hdc, "Copy", copy_rect.left + s(8), copy_rect.top + s(2), self.theme.muted, copy_rect);
 
         // Code lines (monospace font)
         unsafe { SelectObject(hdc, self.font) };
@@ -220,12 +220,12 @@ impl App {
         let c_top = code_rect.top + s(30);
 
         let lines = [
-            ("let ", BLUE, "tab_width = self.scale(TAB_WIDTH);", TEXT),
-            ("let ", BLUE, "tab_height = self.scale(TAB_HEIGHT);", TEXT),
-            ("", TEXT, "", TEXT),
-            ("for ", BLUE, "(index, _) in self.visible_tabs().enumerate() {", TEXT),
-            ("    if ", BLUE, "index >= self.tabs.len() { break; }", TEXT),
-            ("    let ", BLUE, "left = index as i32 * tab_width;", TEXT),
+            ("let ", self.theme.blue, "tab_width = self.scale(TAB_WIDTH);", self.theme.text),
+            ("let ", self.theme.blue, "tab_height = self.scale(TAB_HEIGHT);", self.theme.text),
+            ("", self.theme.text, "", self.theme.text),
+            ("for ", self.theme.blue, "(index, _) in self.visible_tabs().enumerate() {", self.theme.text),
+            ("    if ", self.theme.blue, "index >= self.tabs.len() { break; }", self.theme.text),
+            ("    let ", self.theme.blue, "left = index as i32 * tab_width;", self.theme.text),
         ];
 
         for (i, (kw, kw_col, rest, rest_col)) in lines.iter().enumerate() {
@@ -259,7 +259,7 @@ impl App {
             "Ask Tera anything...",
             input_rect.left + s(12),
             input_rect.top + s(12),
-            MUTED,
+            self.theme.muted,
             input_rect,
         );
 
@@ -271,7 +271,7 @@ impl App {
             bottom: input_rect.top + s(32),
         };
         Self::rounded_fill(hdc, send_btn, s(12), rgb(68, 88, 225));
-        Self::label(hdc, "\u{27a4}", send_btn.left + s(6), send_btn.top + s(4), TEXT, send_btn);
+        Self::label(hdc, "\u{27a4}", send_btn.left + s(6), send_btn.top + s(4), self.theme.text, send_btn);
 
         // Bottom chips row
         let chip_y = input_rect.bottom + s(8);
@@ -292,11 +292,11 @@ impl App {
             bottom: chip_y + s(20),
         };
         Self::rounded_fill(hdc, model_chip, s(4), rgb(20, 32, 58));
-        Self::label(hdc, "Medium \u{25be}", model_chip.left + s(8), chip_y + s(2), MUTED, clip);
+        Self::label(hdc, "Medium \u{25be}", model_chip.left + s(8), chip_y + s(2), self.theme.muted, clip);
 
         // Attachment & Mic icons on right
-        Self::label(hdc, "\u{2301}", rect.right - s(48), chip_y + s(2), MUTED, clip);
-        Self::label(hdc, "\u{25c8}", rect.right - s(28), chip_y + s(2), MUTED, clip);
+        Self::label(hdc, "\u{2301}", rect.right - s(48), chip_y + s(2), self.theme.muted, clip);
+        Self::label(hdc, "\u{25c8}", rect.right - s(28), chip_y + s(2), self.theme.muted, clip);
     }
 
     pub(in crate::windows_app) fn sparkle_glyph(

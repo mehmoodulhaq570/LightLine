@@ -54,9 +54,14 @@ pub(super) enum DialogIcon {
 }
 
 impl DialogIcon {
+    // DialogIcon is a small standalone enum (modal dialogs are built before
+    // an App reference is threaded through their call chain), so it can't
+    // reach `self.theme` here the way render code can. Kept as the same
+    // fixed literal Theme::default_dark().blue currently holds rather than
+    // expanding this refactor into rewiring the dialog module's call chain.
     fn tint(self) -> u32 {
         match self {
-            DialogIcon::Question => BLUE,
+            DialogIcon::Question => rgb(56, 189, 248),
             DialogIcon::Error => rgb(205, 79, 79),
         }
     }
@@ -110,7 +115,17 @@ pub(super) fn yes_no_cancel() -> [DialogButton; 3] {
 const DLG_BG: u32 = rgb(15, 25, 41);
 const DLG_HEADER: u32 = rgb(20, 33, 55);
 const DLG_BORDER: u32 = rgb(48, 68, 100);
-const DLG_ACCENT: u32 = BLUE;
+// Same tradeoff as DialogIcon::tint above: a module-level const can't read
+// `self.theme` at all, so this stays the fixed default value.
+const DLG_ACCENT: u32 = rgb(56, 189, 248);
+// paint_dialog() below is a standalone free function with no App/theme
+// reference reachable at all: modal dialogs run their own nested message
+// loop, architecturally outside the main window's paint pipeline (see the
+// module doc comment at the top of this file). Rewiring that to reach
+// self.theme is real scope beyond this foundation pass, so these stay fixed
+// at Theme::default_dark()'s text/muted values.
+const DLG_TEXT: u32 = rgb(226, 234, 248);
+const DLG_MUTED: u32 = rgb(136, 156, 188);
 const DLG_BTN: u32 = rgb(31, 47, 74);
 const DLG_BTN_HOVER: u32 = rgb(41, 60, 93);
 const DLG_BTN_PRESSED: u32 = rgb(24, 37, 60);
@@ -607,7 +622,7 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
 
         // Title.
         SelectObject(hdc, state.title_font);
-        SetTextColor(hdc, TEXT);
+        SetTextColor(hdc, DLG_TEXT);
         let mut title_rect = RECT {
             left: state.pad,
             top: 0,
@@ -622,7 +637,7 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
         // Close glyph.
-        SetTextColor(hdc, if state.hover_close { TEXT } else { MUTED });
+        SetTextColor(hdc, if state.hover_close { DLG_TEXT } else { DLG_MUTED });
         let mut close_rect = state.close_rect;
         let close_glyph = utf16("\u{2715}");
         DrawTextW(
@@ -637,7 +652,7 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
 
         // Message body.
         SelectObject(hdc, state.font);
-        SetTextColor(hdc, TEXT);
+        SetTextColor(hdc, DLG_TEXT);
         let mut text_rect = state.text_rect;
         DrawTextW(
             hdc,
@@ -666,7 +681,7 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
                 DLG_BTN
             };
             App::rounded_fill(hdc, button.rect, state.radius, color);
-            let text_color = if is_primary { rgb(240, 246, 255) } else { TEXT };
+            let text_color = if is_primary { rgb(240, 246, 255) } else { DLG_TEXT };
             SetTextColor(hdc, text_color);
             let mut rect = button.rect;
             DrawTextW(

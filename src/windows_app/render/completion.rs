@@ -59,7 +59,7 @@ impl App {
             right: x + width,
             bottom: y + height,
         };
-        Self::fill(hdc, outer, EDGE);
+        Self::fill(hdc, outer, self.theme.edge);
         Self::fill(
             hdc,
             RECT {
@@ -85,10 +85,10 @@ impl App {
                         right: x + width - 1,
                         bottom: top + row_height,
                     },
-                    SELECT_BG,
+                    self.theme.select_bg,
                 );
             }
-            let glyph_color = if selected_row { TEXT } else { MUTED };
+            let glyph_color = if selected_row { self.theme.text } else { self.theme.muted };
             Self::label(
                 hdc,
                 completion_glyph(item.kind),
@@ -109,7 +109,7 @@ impl App {
                 &item.label,
                 text_x,
                 text_y,
-                TEXT,
+                self.theme.text,
                 RECT {
                     left: text_x,
                     top,
@@ -123,7 +123,7 @@ impl App {
                     detail,
                     label_right + self.scale(6),
                     text_y,
-                    MUTED,
+                    self.theme.muted,
                     RECT {
                         left: label_right + self.scale(6),
                         top,

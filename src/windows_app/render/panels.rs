@@ -22,7 +22,7 @@ impl App {
             );
             SelectObject(hdc, self.brand_font);
         }
-        Self::label(hdc, "LightLine", self.scale(48), self.scale(9), TEXT, clip);
+        Self::label(hdc, "LightLine", self.scale(48), self.scale(9), self.theme.text, clip);
         Self::rounded_fill(
             hdc,
             RECT {
@@ -35,7 +35,7 @@ impl App {
             rgb(61, 45, 145),
         );
         unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(hdc, "IDE", self.scale(121), self.scale(12), TEXT, clip);
+        Self::label(hdc, "IDE", self.scale(121), self.scale(12), self.theme.text, clip);
         Self::fill(
             hdc,
             RECT {
@@ -44,7 +44,7 @@ impl App {
                 right: self.scale(RAIL),
                 bottom: self.scale(41),
             },
-            EDGE,
+            self.theme.edge,
         );
 
         let labels = [
@@ -78,7 +78,7 @@ impl App {
             let color = if is_selected {
                 rgb(240, 245, 255)
             } else {
-                MUTED
+                self.theme.muted
             };
             self.rail_icon(
                 hdc,
@@ -100,7 +100,7 @@ impl App {
             "WORKSPACE",
             self.scale(20),
             editor_bottom - self.scale(104),
-            MUTED,
+            self.theme.muted,
             clip,
         );
         Self::label(
@@ -108,7 +108,7 @@ impl App {
             &name,
             self.scale(20),
             editor_bottom - self.scale(82),
-            TEXT,
+            self.theme.text,
             clip,
         );
         let branch = self.git_head_label();
@@ -117,7 +117,7 @@ impl App {
             &format!("\u{2442}  {branch}"),
             self.scale(20),
             editor_bottom - self.scale(58),
-            MUTED,
+            self.theme.muted,
             clip,
         );
         Self::label(
@@ -125,7 +125,7 @@ impl App {
             "\u{2699}   \u{2192}",
             self.scale(20),
             editor_bottom - self.scale(32),
-            MUTED,
+            self.theme.muted,
             clip,
         );
         Self::label(
@@ -133,7 +133,7 @@ impl App {
             "→",
             self.scale(54),
             editor_bottom - self.scale(31),
-            MUTED,
+            self.theme.muted,
             clip,
         );
     }
@@ -164,7 +164,7 @@ impl App {
             title,
             left + self.scale(16),
             self.scale(11),
-            MUTED,
+            self.theme.muted,
             clip,
         );
         Self::fill(
@@ -175,7 +175,7 @@ impl App {
                 right: editor_left,
                 bottom: self.scale(40),
             },
-            EDGE,
+            self.theme.edge,
         );
         if self.side_view == SideView::Debug {
             self.paint_debug_panel(hdc, left, editor_left, editor_bottom, clip);
@@ -194,7 +194,7 @@ impl App {
                     right: editor_left - self.scale(8),
                     bottom: self.scale(78),
                 },
-                ACTIVE_BG,
+                self.theme.active_bg,
             );
             let query_label = if self.project_query.is_empty() && !self.search_input {
                 "Type query, press Enter".to_owned()
@@ -215,9 +215,9 @@ impl App {
                 left + self.scale(16),
                 self.scale(52),
                 if self.project_query.is_empty() {
-                    MUTED
+                    self.theme.muted
                 } else {
-                    TEXT
+                    self.theme.text
                 },
                 clip,
             );
@@ -230,7 +230,7 @@ impl App {
                 },
                 left + self.scale(16),
                 self.scale(87),
-                MUTED,
+                self.theme.muted,
                 clip,
             );
             for (index, hit) in self
@@ -252,7 +252,7 @@ impl App {
                             right: editor_left - self.scale(7),
                             bottom: top + self.scale(45),
                         },
-                        SELECT_BG,
+                        self.theme.select_bg,
                     );
                 }
                 Self::label(
@@ -264,7 +264,7 @@ impl App {
                     ),
                     left + self.scale(14),
                     top,
-                    TEXT,
+                    self.theme.text,
                     clip,
                 );
                 Self::label(
@@ -272,7 +272,7 @@ impl App {
                     &hit.preview,
                     left + self.scale(14),
                     top + self.scale(19),
-                    MUTED,
+                    self.theme.muted,
                     RECT {
                         left: left + self.scale(14),
                         top,
@@ -297,7 +297,7 @@ impl App {
                 right,
                 bottom,
             },
-            EDITOR_BG,
+            self.theme.editor_bg,
         );
         Self::fill(
             hdc,
@@ -307,7 +307,7 @@ impl App {
                 right: mid + 1,
                 bottom,
             },
-            EDGE,
+            self.theme.edge,
         );
         let name = self
             .review_file
@@ -319,7 +319,7 @@ impl App {
             &format!("BEFORE  ·  {name}"),
             left + self.scale(16),
             top + self.scale(9),
-            MUTED,
+            self.theme.muted,
             RECT {
                 left,
                 top,
@@ -332,7 +332,7 @@ impl App {
             &format!("AFTER  ·  {name}"),
             mid + self.scale(16),
             top + self.scale(9),
-            MUTED,
+            self.theme.muted,
             RECT {
                 left: mid,
                 top,
@@ -376,7 +376,7 @@ impl App {
                     &number.to_string(),
                     left + self.scale(10),
                     y,
-                    MUTED,
+                    self.theme.muted,
                     RECT {
                         left,
                         top: y,
@@ -391,7 +391,7 @@ impl App {
                     &number.to_string(),
                     mid + self.scale(10),
                     y,
-                    MUTED,
+                    self.theme.muted,
                     RECT {
                         left: mid,
                         top: y,
@@ -405,7 +405,7 @@ impl App {
                 &row.before,
                 left + self.scale(50),
                 y,
-                TEXT,
+                self.theme.text,
                 RECT {
                     left: left + self.scale(50),
                     top: y,
@@ -418,7 +418,7 @@ impl App {
                 &row.after,
                 mid + self.scale(50),
                 y,
-                TEXT,
+                self.theme.text,
                 RECT {
                     left: mid + self.scale(50),
                     top: y,
@@ -438,7 +438,7 @@ impl App {
                 },
                 left + self.scale(18),
                 top + self.scale(62),
-                MUTED,
+                self.theme.muted,
                 RECT {
                     left,
                     top,
@@ -476,7 +476,7 @@ impl App {
                 right: x + width,
                 bottom: y + self.scale(152),
             },
-            STATUS_BG,
+            self.theme.status_bg,
         );
         Self::fill(
             hdc,
@@ -486,7 +486,7 @@ impl App {
                 right: x + self.scale(3),
                 bottom: y + self.scale(152),
             },
-            BLUE,
+            self.theme.blue,
         );
         Self::label(
             hdc,
@@ -497,7 +497,7 @@ impl App {
             ),
             x + self.scale(13),
             y + self.scale(8),
-            TEXT,
+            self.theme.text,
             RECT {
                 left: x,
                 top: y,
@@ -509,9 +509,9 @@ impl App {
         for (index, (number, line)) in hit.context.iter().enumerate() {
             let top = y + self.scale(34) + index as i32 * self.scale(21);
             let color = if *number == hit.line + 1 {
-                GREEN
+                self.theme.green
             } else {
-                MUTED
+                self.theme.muted
             };
             Self::label(
                 hdc,
@@ -546,7 +546,7 @@ impl App {
                 right: left + width,
                 bottom,
             },
-            STATUS_BG,
+            self.theme.status_bg,
         );
         Self::fill(
             hdc,
@@ -556,7 +556,7 @@ impl App {
                 right: left + width,
                 bottom: top + self.scale(2),
             },
-            VIOLET,
+            self.theme.violet,
         );
         Self::label(
             hdc,
@@ -571,7 +571,7 @@ impl App {
             ),
             left + self.scale(16),
             top + self.scale(11),
-            TEXT,
+            self.theme.text,
             RECT {
                 left,
                 top,
@@ -584,7 +584,7 @@ impl App {
             "Type to filter  ·  Enter opens  ·  Esc closes",
             left + self.scale(16),
             top + self.scale(39),
-            MUTED,
+            self.theme.muted,
             RECT {
                 left,
                 top,
@@ -623,7 +623,7 @@ impl App {
                         right: left + width - self.scale(8),
                         bottom: y + self.scale(30),
                     },
-                    SELECT_BG,
+                    self.theme.select_bg,
                 );
             }
             Self::label(
@@ -631,7 +631,7 @@ impl App {
                 label,
                 left + self.scale(18),
                 y + self.scale(2),
-                TEXT,
+                self.theme.text,
                 RECT {
                     left: left + self.scale(18),
                     top: y,
@@ -652,7 +652,7 @@ impl App {
                 },
                 left + self.scale(18),
                 top + self.scale(80),
-                MUTED,
+                self.theme.muted,
                 RECT {
                     left,
                     top,
@@ -667,7 +667,7 @@ impl App {
                 "Type > for commands",
                 left + self.scale(18),
                 bottom - self.scale(28),
-                MUTED,
+                self.theme.muted,
                 RECT {
                     left,
                     top,
@@ -807,7 +807,7 @@ impl App {
         } else if has_session {
             (rgb(250, 204, 21), rgb(200, 220, 245))
         } else {
-            (MUTED, MUTED)
+            (self.theme.muted, self.theme.muted)
         };
         unsafe {
             let brush = CreateSolidBrush(dot_color);
@@ -829,23 +829,23 @@ impl App {
         y += s(24);
 
         // 1. VARIABLES
-        Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+        Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
         Self::label(hdc, "▼ VARIABLES", left + s(8), y + s(3), rgb(80, 160, 220), clip);
         y += s(24);
 
         if state.scopes.is_empty() {
-            Self::label(hdc, "Not stopped", left + s(8), y, MUTED, clip);
+            Self::label(hdc, "Not stopped", left + s(8), y, self.theme.muted, clip);
             y += s(18);
         } else {
             let (rows, next_y) = self.debug_variable_rows(y, bottom, s(18), s(16));
             for row in &rows {
                 let indent = s(12) * row.depth as i32;
                 if row.is_header {
-                    Self::label(hdc, &row.name, left + s(8), row.y, MUTED, clip);
+                    Self::label(hdc, &row.name, left + s(8), row.y, self.theme.muted, clip);
                     continue;
                 }
                 if row.loading {
-                    Self::label(hdc, &row.name, left + s(20) + indent, row.y, MUTED, clip);
+                    Self::label(hdc, &row.name, left + s(20) + indent, row.y, self.theme.muted, clip);
                     continue;
                 }
                 // Only an expandable variable gets an arrow; a plain value
@@ -858,7 +858,7 @@ impl App {
                 } else {
                     "\u{25b8}"
                 };
-                Self::label(hdc, glyph, left + s(8) + indent, row.y, MUTED, clip);
+                Self::label(hdc, glyph, left + s(8) + indent, row.y, self.theme.muted, clip);
                 self.label_ellipsis(
                     hdc,
                     &row.name,
@@ -882,11 +882,11 @@ impl App {
         y += s(6);
         // 2. CALL STACK
         if y + s(28) <= bottom {
-            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
             Self::label(hdc, "▼ CALL STACK", left + s(8), y + s(3), rgb(80, 160, 220), clip);
             y += s(24);
             if state.frames.is_empty() {
-                Self::label(hdc, "Not stopped", left + s(8), y, MUTED, clip);
+                Self::label(hdc, "Not stopped", left + s(8), y, self.theme.muted, clip);
                 y += s(18);
             }
             for frame in &state.frames {
@@ -904,10 +904,10 @@ impl App {
                     &frame.name,
                     left + s(8),
                     y,
-                    TEXT,
+                    self.theme.text,
                     RECT { left, top: clip.top, right: right - s(94), bottom: clip.bottom },
                 );
-                Self::label(hdc, &location, right - s(90), y, MUTED, clip);
+                Self::label(hdc, &location, right - s(90), y, self.theme.muted, clip);
                 y += s(18);
             }
         }
@@ -915,7 +915,7 @@ impl App {
         y += s(6);
         // 3. BREAKPOINTS
         if y + s(28) <= bottom {
-            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, ACTIVE_BG);
+            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
             Self::label(hdc, "▼ BREAKPOINTS", left + s(8), y + s(3), rgb(80, 160, 220), clip);
             y += s(24);
             let breakpoints: Vec<(String, usize)> = self
@@ -928,7 +928,7 @@ impl App {
                 .flat_map(|(name, lines)| lines.iter().map(move |line| (name.clone(), line + 1)))
                 .collect();
             if breakpoints.is_empty() {
-                Self::label(hdc, "Click a line's gutter to add one", left + s(8), y, MUTED, clip);
+                Self::label(hdc, "Click a line's gutter to add one", left + s(8), y, self.theme.muted, clip);
             }
             for (name, line) in &breakpoints {
                 if y + s(18) > bottom {
@@ -948,7 +948,7 @@ impl App {
                     &format!("{name}: {line}"),
                     left + s(24),
                     y,
-                    TEXT,
+                    self.theme.text,
                     RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
                 );
                 y += s(18);
@@ -1018,7 +1018,7 @@ impl App {
             } else {
                 self.extensions_query.clone()
             };
-            Self::label(hdc, &display, text_x, text_y, TEXT, text_clip);
+            Self::label(hdc, &display, text_x, text_y, self.theme.text, text_clip);
 
             // Clear "×" button
             let clear_x = search_rect.right - s(18);
@@ -1149,7 +1149,7 @@ impl App {
             } else {
                 format!("No extensions match \"{query}\"")
             };
-            Self::label(hdc, &notice, left + s(16), ey + s(12), MUTED, clip);
+            Self::label(hdc, &notice, left + s(16), ey + s(12), self.theme.muted, clip);
             // This isn't a real marketplace search yet, just a small curated
             // list; say so instead of leaving an unexplained blank panel that
             // reads as "search is broken".
@@ -1159,7 +1159,7 @@ impl App {
                     "Only Prettier and Material Icon Theme are available so far",
                     left + s(16),
                     ey + s(12) + s(18),
-                    MUTED,
+                    self.theme.muted,
                     clip,
                 );
             }

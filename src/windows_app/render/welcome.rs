@@ -17,7 +17,11 @@ const STEP_ROW_H: i32 = 60;
 const COMMUNITY_H: i32 = 104;
 
 const CARD_BG: u32 = rgb(16, 27, 45);
-const CARD_EDGE: u32 = rgb(32, 48, 76);
+// Distinct from (and one shade lighter than) the theme's general
+// card_edge -- a pre-existing welcome-screen-only variation, not a copy/
+// paste of the theme color, so it keeps its own name rather than being
+// folded into Theme.
+const WELCOME_CARD_EDGE: u32 = rgb(32, 48, 76);
 const CHIP_BG: u32 = rgb(24, 38, 62);
 
 // Everything on this screen maps to a real command; nothing is decorative.
@@ -291,7 +295,7 @@ impl App {
 
     pub(in crate::windows_app) fn paint_welcome(&self, hdc: HDC, rect: RECT) {
         let layout = self.welcome_layout(rect);
-        Self::fill(hdc, rect, EDITOR_BG);
+        Self::fill(hdc, rect, self.theme.editor_bg);
         self.paint_welcome_nav(hdc, &layout);
         self.paint_welcome_hero(hdc, &layout);
         self.paint_welcome_cards(hdc, &layout);
@@ -309,7 +313,7 @@ impl App {
             right: layout.nav_right,
             bottom: layout.status_top,
         };
-        Self::fill(hdc, clip, RAIL_BG);
+        Self::fill(hdc, clip, self.theme.rail_bg);
         Self::fill(
             hdc,
             RECT {
@@ -318,7 +322,7 @@ impl App {
                 right: layout.nav_right,
                 bottom: layout.status_top,
             },
-            EDGE,
+            self.theme.edge,
         );
         unsafe {
             DrawIconEx(
@@ -334,7 +338,7 @@ impl App {
             );
             SelectObject(hdc, self.brand_font);
         }
-        Self::label(hdc, "Lightline", s(56), s(26), TEXT, clip);
+        Self::label(hdc, "Lightline", s(56), s(26), self.theme.text, clip);
         let badge_left = s(56) + self.text_width(hdc, "Lightline") + s(10);
         Self::rounded_fill(
             hdc,
@@ -348,7 +352,7 @@ impl App {
             rgb(78, 56, 176),
         );
         unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(hdc, "IDE", badge_left + s(8), s(29), TEXT, clip);
+        Self::label(hdc, "IDE", badge_left + s(8), s(29), self.theme.text, clip);
 
         // "Welcome" is where we already are, so it renders active and inert.
         let welcome_row = RECT {
@@ -358,21 +362,21 @@ impl App {
             bottom: s(NAV_FIRST_ROW) + s(NAV_ROW_H) - s(4),
         };
         Self::rounded_fill(hdc, welcome_row, s(8), rgb(40, 52, 122));
-        self.home_glyph(hdc, s(24), welcome_row.top + s(10), s(16), TEXT);
+        self.home_glyph(hdc, s(24), welcome_row.top + s(10), s(16), self.theme.text);
         self.label_mid(
             hdc,
             "Welcome",
             s(56),
             (welcome_row.top + welcome_row.bottom) / 2,
-            TEXT,
+            self.theme.text,
             clip,
         );
 
         for (index, (label, icon, _)) in NAV_ITEMS.iter().enumerate() {
             let top = s(NAV_FIRST_ROW) + (index as i32 + 1) * s(NAV_ROW_H);
             let middle = top + (s(NAV_ROW_H) - s(4)) / 2;
-            self.rail_icon(hdc, *icon, s(22), top + s(9), MUTED);
-            self.label_mid(hdc, label, s(56), middle, MUTED, clip);
+            self.rail_icon(hdc, *icon, s(22), top + s(9), self.theme.muted);
+            self.label_mid(hdc, label, s(56), middle, self.theme.muted, clip);
         }
 
         let divider = layout.open_folder.top - s(76);
@@ -384,9 +388,9 @@ impl App {
                 right: layout.nav_right - s(18),
                 bottom: divider + s(1).max(1),
             },
-            EDGE,
+            self.theme.edge,
         );
-        Self::label(hdc, "WORKSPACE", s(18), divider + s(18), MUTED, clip);
+        Self::label(hdc, "WORKSPACE", s(18), divider + s(18), self.theme.muted, clip);
         let workspace = match &self.workspace_root {
             Some(root) => root.file_name().unwrap_or_default().to_string_lossy(),
             None => "No project open".into(),
@@ -397,9 +401,9 @@ impl App {
             s(18),
             divider + s(42),
             if self.workspace_root.is_some() {
-                TEXT
+                self.theme.text
             } else {
-                MUTED
+                self.theme.muted
             },
             RECT {
                 left: s(18),
@@ -408,7 +412,7 @@ impl App {
                 bottom: divider + s(66),
             },
         );
-        self.panel_card(hdc, layout.open_folder, s(8), EDGE, ACTIVE_BG);
+        self.panel_card(hdc, layout.open_folder, s(8), self.theme.edge, self.theme.active_bg);
         self.icons.draw_generic(
             hdc,
             GenericIcon::Folder,
@@ -421,7 +425,7 @@ impl App {
             "Open Folder",
             layout.open_folder.left + s(40),
             (layout.open_folder.top + layout.open_folder.bottom) / 2,
-            TEXT,
+            self.theme.text,
             clip,
         );
     }
@@ -439,7 +443,7 @@ impl App {
             SelectObject(hdc, self.ui_font);
             SetTextCharacterExtra(hdc, s(2));
         }
-        Self::label(hdc, "WELCOME TO", left, layout.hero_top, VIOLET, clip);
+        Self::label(hdc, "WELCOME TO", left, layout.hero_top, self.theme.violet, clip);
         unsafe { SetTextCharacterExtra(hdc, 0) };
 
         let logo_top = layout.hero_top + s(26);
@@ -463,7 +467,7 @@ impl App {
             "Lightline",
             word_left,
             logo_top + s(27),
-            TEXT,
+            self.theme.text,
             clip,
         );
         let badge_left = word_left + self.text_width(hdc, "Lightline") + s(16);
@@ -484,7 +488,7 @@ impl App {
             "IDE",
             badge_left + s(12),
             logo_top + s(27),
-            TEXT,
+            self.theme.text,
             clip,
         );
         Self::label(
@@ -492,7 +496,7 @@ impl App {
             "Build Faster, Think Smarter",
             left,
             logo_top + s(66),
-            TEXT,
+            self.theme.text,
             clip,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
@@ -501,7 +505,7 @@ impl App {
             "A modern, AI-powered IDE for developers.",
             left,
             logo_top + s(110),
-            MUTED,
+            self.theme.muted,
             clip,
         );
         Self::label(
@@ -509,7 +513,7 @@ impl App {
             "Fast to start, focused to work in.",
             left,
             logo_top + s(132),
-            MUTED,
+            self.theme.muted,
             clip,
         );
     }
@@ -552,8 +556,8 @@ impl App {
                         s(18),
                     );
                 }
-                2 => self.rail_icon(hdc, 3, badge.left + s(11), badge.top + s(11), TEXT),
-                _ => self.prompt_glyph(hdc, badge.left + s(10), badge.top + s(10), s(20), TEXT),
+                2 => self.rail_icon(hdc, 3, badge.left + s(11), badge.top + s(11), self.theme.text),
+                _ => self.prompt_glyph(hdc, badge.left + s(10), badge.top + s(10), s(20), self.theme.text),
             }
             unsafe { SelectObject(hdc, self.brand_font) };
             Self::label(
@@ -561,7 +565,7 @@ impl App {
                 title,
                 bounds.left + s(16),
                 bounds.top + s(70),
-                TEXT,
+                self.theme.text,
                 clip,
             );
             unsafe { SelectObject(hdc, self.ui_font) };
@@ -578,7 +582,7 @@ impl App {
                 "\u{2192}",
                 bounds.left + s(16),
                 bounds.bottom - s(30),
-                TEXT,
+                self.theme.text,
                 clip,
             );
         }
@@ -587,7 +591,7 @@ impl App {
     fn paint_welcome_recent(&self, hdc: HDC, layout: &WelcomeLayout) {
         let s = |value: i32| self.scale(value);
         let panel = layout.recent_panel;
-        self.panel_card(hdc, panel, s(12), CARD_EDGE, CARD_BG);
+        self.panel_card(hdc, panel, s(12), WELCOME_CARD_EDGE, CARD_BG);
         let clip = RECT {
             left: panel.left + s(14),
             top: panel.top,
@@ -595,13 +599,13 @@ impl App {
             bottom: panel.bottom,
         };
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.clock_glyph(hdc, panel.left + s(16), panel.top + s(17), s(17), BLUE);
+        self.clock_glyph(hdc, panel.left + s(16), panel.top + s(17), s(17), self.theme.blue);
         self.label_mid(
             hdc,
             "Recent Projects",
             panel.left + s(42),
             panel.top + s(26),
-            TEXT,
+            self.theme.text,
             clip,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
@@ -611,7 +615,7 @@ impl App {
                 "Workspaces you open will show up here.",
                 panel.left + s(18),
                 panel.top + s(60),
-                MUTED,
+                self.theme.muted,
                 clip,
             );
             return;
@@ -624,7 +628,7 @@ impl App {
                 right: panel.right - s(8),
                 bottom: top + s(RECENT_ROW_H) - s(4),
             };
-            Self::rounded_fill(hdc, row, s(8), ACTIVE_BG);
+            Self::rounded_fill(hdc, row, s(8), self.theme.active_bg);
             self.icons
                 .draw_generic(hdc, GenericIcon::Folder, row.left + s(12), top + s(15), s(17));
             let text_left = row.left + s(40);
@@ -639,7 +643,7 @@ impl App {
                 &path.file_name().unwrap_or_default().to_string_lossy(),
                 text_left,
                 top + s(8),
-                TEXT,
+                self.theme.text,
                 row_clip,
             );
             self.label_ellipsis(
@@ -647,7 +651,7 @@ impl App {
                 &display_path(path),
                 text_left,
                 top + s(27),
-                MUTED,
+                self.theme.muted,
                 row_clip,
             );
         }
@@ -656,7 +660,7 @@ impl App {
     fn paint_welcome_quick(&self, hdc: HDC, layout: &WelcomeLayout) {
         let s = |value: i32| self.scale(value);
         let panel = layout.quick_panel;
-        self.panel_card(hdc, panel, s(12), CARD_EDGE, CARD_BG);
+        self.panel_card(hdc, panel, s(12), WELCOME_CARD_EDGE, CARD_BG);
         let clip = RECT {
             left: panel.left + s(14),
             top: panel.top,
@@ -664,13 +668,13 @@ impl App {
             bottom: panel.bottom,
         };
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.rail_icon(hdc, 5, panel.left + s(14), panel.top + s(17), VIOLET);
+        self.rail_icon(hdc, 5, panel.left + s(14), panel.top + s(17), self.theme.violet);
         self.label_mid(
             hdc,
             "Quick Actions",
             panel.left + s(42),
             panel.top + s(26),
-            TEXT,
+            self.theme.text,
             clip,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
@@ -685,8 +689,8 @@ impl App {
                 bottom: middle + s(11),
             };
             Self::rounded_fill(hdc, chip, s(5), CHIP_BG);
-            self.label_mid(hdc, shortcut, chip.left + s(8), middle, MUTED, clip);
-            self.label_mid(hdc, label, panel.left + s(42), middle, TEXT, clip);
+            self.label_mid(hdc, shortcut, chip.left + s(8), middle, self.theme.muted, clip);
+            self.label_mid(hdc, label, panel.left + s(42), middle, self.theme.text, clip);
         }
     }
 
@@ -695,7 +699,7 @@ impl App {
         let Some(panel) = layout.steps_panel else {
             return;
         };
-        self.panel_card(hdc, panel, s(12), CARD_EDGE, CARD_BG);
+        self.panel_card(hdc, panel, s(12), WELCOME_CARD_EDGE, CARD_BG);
         let clip = RECT {
             left: panel.left + s(14),
             top: panel.top,
@@ -709,13 +713,13 @@ impl App {
             "Getting Started",
             panel.left + s(44),
             panel.top + s(26),
-            TEXT,
+            self.theme.text,
             clip,
         );
         for (index, (title, subtitle, _)) in STEPS.iter().enumerate() {
             let top = panel.top + s(PANEL_HEADER_H) + index as i32 * s(STEP_ROW_H);
             let middle = top + s(STEP_ROW_H) / 2;
-            self.ring_glyph(hdc, panel.left + s(18), middle - s(11), s(22), VIOLET);
+            self.ring_glyph(hdc, panel.left + s(18), middle - s(11), s(22), self.theme.violet);
             let row_clip = RECT {
                 left: panel.left + s(52),
                 top,
@@ -723,9 +727,9 @@ impl App {
                 bottom: top + s(STEP_ROW_H),
             };
             unsafe { SelectObject(hdc, self.brand_font) };
-            self.label_ellipsis(hdc, title, panel.left + s(52), middle - s(19), TEXT, row_clip);
+            self.label_ellipsis(hdc, title, panel.left + s(52), middle - s(19), self.theme.text, row_clip);
             unsafe { SelectObject(hdc, self.ui_font) };
-            self.label_ellipsis(hdc, subtitle, panel.left + s(52), middle + s(2), MUTED, row_clip);
+            self.label_ellipsis(hdc, subtitle, panel.left + s(52), middle + s(2), self.theme.muted, row_clip);
             self.chevron(hdc, panel.right - s(20), middle, false);
         }
 
@@ -752,14 +756,14 @@ impl App {
             bottom: community.top + s(68),
         };
         Self::rounded_fill(hdc, badge, s(10), rgb(96, 82, 220));
-        self.rail_icon(hdc, 2, badge.left + s(15), badge.top + s(15), TEXT);
+        self.rail_icon(hdc, 2, badge.left + s(15), badge.top + s(15), self.theme.text);
         unsafe { SelectObject(hdc, self.brand_font) };
         Self::label(
             hdc,
             "Join the Community",
             community.left + s(78),
             community.top + s(22),
-            TEXT,
+            self.theme.text,
             clip,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
@@ -791,7 +795,7 @@ impl App {
                 right: rect.right,
                 bottom: rect.bottom,
             },
-            STATUS_BG,
+            self.theme.status_bg,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
         let middle = (layout.status_top + rect.bottom) / 2;
@@ -805,10 +809,10 @@ impl App {
             Some(branch) => format!("{}  \u{2022}  {}", self.status, branch),
             None => self.status.clone(),
         };
-        self.label_mid(hdc, &left_text, s(16), middle, MUTED, clip);
+        self.label_mid(hdc, &left_text, s(16), middle, self.theme.muted, clip);
         let hint = "Ctrl+O file  \u{2022}  Ctrl+N new  \u{2022}  Ctrl+Shift+O folder";
         let width = self.text_width(hdc, hint);
-        self.label_mid(hdc, hint, rect.right - s(16) - width, middle, MUTED, clip);
+        self.label_mid(hdc, hint, rect.right - s(16) - width, middle, self.theme.muted, clip);
     }
 
     // --- small vector glyphs, drawn to match the hand-drawn rail icons ---

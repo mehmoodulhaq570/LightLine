@@ -41,13 +41,15 @@ impl App {
         let s = |v: i32| self.scale(v);
         let mid_x = chip_right + s(24);
         let clip_right = (branch_x - s(16)).max(mid_x);
+        let indent_label = if self.settings.insert_spaces { "Spaces" } else { "Tab Size" };
         let prefix = format!(
-            "Ln {}, Col {}    Spaces: 4    UTF-8    ",
+            "Ln {}, Col {}    {indent_label}: {}    UTF-8    ",
             self.view().cursor.line + 1,
             self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
                 .chars()
                 .count()
                 + 1,
+            self.settings.tab_size,
         );
         let prefix_width = self.text_width(hdc, &prefix);
         let language = language_label(self.doc().path.as_deref());
@@ -134,13 +136,13 @@ impl App {
             let tab_strip_bottom = self.tab_strip_bottom();
             let card_bottom = editor_bottom - gap;
             let card_radius = self.scale(CARD_RADIUS);
-            let bg = CreateSolidBrush(EDITOR_BG);
-            let gutter_bg = CreateSolidBrush(EDITOR_BG);
-            let status_bg = CreateSolidBrush(STATUS_BG);
-            let selection_bg = CreateSolidBrush(SELECT_BG);
+            let bg = CreateSolidBrush(self.theme.editor_bg);
+            let gutter_bg = CreateSolidBrush(self.theme.editor_bg);
+            let status_bg = CreateSolidBrush(self.theme.status_bg);
+            let selection_bg = CreateSolidBrush(self.theme.select_bg);
             // The backdrop the cards float on. The rail stays flush to the
             // window edge; only the side panel and editor become cards.
-            Self::fill(hdc, rect, SHELL_BG);
+            Self::fill(hdc, rect, self.theme.shell_bg);
             Self::fill(
                 hdc,
                 RECT {
@@ -149,7 +151,7 @@ impl App {
                     right: self.scale(RAIL),
                     bottom: editor_bottom,
                 },
-                RAIL_BG,
+                self.theme.rail_bg,
             );
             if self.sidebar_width > 0 {
                 let panel = RECT {
@@ -158,7 +160,7 @@ impl App {
                     right: self.sidebar_right(),
                     bottom: card_bottom,
                 };
-                self.panel_card(hdc, panel, card_radius, CARD_EDGE, SIDEBAR_BG);
+                self.panel_card(hdc, panel, card_radius, self.theme.card_edge, self.theme.sidebar_bg);
             }
             // Editor card: the rounded body first, then square-filled regions
             // inside it for the gutter and tab strip, which stay clear of the
@@ -169,7 +171,7 @@ impl App {
                 right: self.editor_right(hwnd),
                 bottom: card_bottom,
             };
-            self.panel_card(hdc, editor_card, card_radius, CARD_EDGE, EDITOR_BG);
+            self.panel_card(hdc, editor_card, card_radius, self.theme.card_edge, self.theme.editor_bg);
             FillRect(
                 hdc,
                 &RECT {
@@ -190,8 +192,8 @@ impl App {
                 },
                 gutter_bg,
             );
-            let tab_bg = CreateSolidBrush(TAB_BG);
-            let active_bg = CreateSolidBrush(ACTIVE_BG);
+            let tab_bg = CreateSolidBrush(self.theme.tab_bg);
+            let active_bg = CreateSolidBrush(self.theme.active_bg);
             // Tab strip rides the card's rounded top, so it is drawn as a
             // rounded fill clipped to the strip's height.
             Self::rounded_fill(
@@ -203,7 +205,7 @@ impl App {
                     bottom: tab_strip_bottom + card_radius,
                 },
                 card_radius,
-                TAB_BG,
+                self.theme.tab_bg,
             );
             FillRect(
                 hdc,
@@ -223,7 +225,7 @@ impl App {
                     right: editor_card.right - self.scale(1).max(1),
                     bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                 },
-                ACTIVE_BG,
+                self.theme.active_bg,
             );
             Self::fill(
                 hdc,
@@ -233,7 +235,7 @@ impl App {
                     right: editor_card.right - self.scale(1).max(1),
                     bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                 },
-                EDGE,
+                self.theme.edge,
             );
             for pane in 0..if self.split_visible { 2 } else { 1 } {
                 let left = self.pane_left(hwnd, pane);
@@ -253,9 +255,9 @@ impl App {
                     left + self.scale(18),
                     tab_strip_bottom + self.scale(3),
                     if pane == self.focused_pane {
-                        TEXT
+                        self.theme.text
                     } else {
-                        MUTED
+                        self.theme.muted
                     },
                     RECT {
                         left,
@@ -269,7 +271,7 @@ impl App {
                     "[\u{2502}]   \u{2026}",
                     right - self.scale(48),
                     tab_strip_bottom + self.scale(3),
-                    MUTED,
+                    self.theme.muted,
                     RECT {
                         left: right - self.scale(50),
                         top: tab_strip_bottom,
@@ -286,7 +288,7 @@ impl App {
                             right,
                             bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                         },
-                        BLUE,
+                        self.theme.blue,
                     );
                 }
             }
@@ -316,7 +318,7 @@ impl App {
                             right: bounds.right,
                             bottom: chrome_top + self.scale(2),
                         },
-                        VIOLET,
+                        self.theme.violet,
                     );
                 }
                 let use_theme = self.has_extension("material-icons");
@@ -345,7 +347,7 @@ impl App {
                 }
                 let label = self.tab_label(index);
                 let chars: Vec<u16> = label.encode_utf16().collect();
-                SetTextColor(hdc, if index == self.active { TEXT } else { MUTED });
+                SetTextColor(hdc, if index == self.active { self.theme.text } else { self.theme.muted });
                 let clip = RECT {
                     left: left + self.scale(37),
                     top: chrome_top,
@@ -378,8 +380,8 @@ impl App {
                     < editor_card.right - self.scale(326)
             {
                 let left = editor_card.right - self.scale(326);
-                let brush = CreateSolidBrush(GREEN);
-                let pen = CreatePen(PS_SOLID, 1, GREEN);
+                let brush = CreateSolidBrush(self.theme.green);
+                let pen = CreatePen(PS_SOLID, 1, self.theme.green);
                 let old_brush = SelectObject(hdc, brush);
                 let old_pen = SelectObject(hdc, pen);
                 let points = [
@@ -431,7 +433,7 @@ impl App {
                         right: self.scale(RAIL + 23),
                         bottom: self.scale(26),
                     },
-                    EDGE,
+                    self.theme.edge,
                 );
                 Self::fill(
                     hdc,
@@ -441,7 +443,7 @@ impl App {
                         right: self.scale(RAIL + 21),
                         bottom: self.scale(24),
                     },
-                    SIDEBAR_BG,
+                    self.theme.sidebar_bg,
                 );
                 // Collapse-all-folders glyph: a single dash inside the button square.
                 Self::fill(
@@ -452,14 +454,14 @@ impl App {
                         right: self.scale(RAIL + 20),
                         bottom: self.scale(21),
                     },
-                    MUTED,
+                    self.theme.muted,
                 );
                 Self::label(
                     hdc,
                     "×",
                     editor_left - self.scale(25),
                     self.scale(8),
-                    MUTED,
+                    self.theme.muted,
                     sidebar_clip,
                 );
                 Self::fill(
@@ -470,7 +472,7 @@ impl App {
                         right: editor_left,
                         bottom: self.scale(40),
                     },
-                    EDGE,
+                    self.theme.edge,
                 );
                 if let Some(root) = &self.workspace_root {
                     let root_name = root
@@ -490,7 +492,7 @@ impl App {
                         &root_name,
                         self.scale(RAIL + 43),
                         self.scale(49),
-                        TEXT,
+                        self.theme.text,
                         sidebar_clip,
                     );
                     for (row, item) in self
@@ -558,7 +560,7 @@ impl App {
                                     right: left + self.scale(22),
                                     bottom: top + self.scale(14),
                                 },
-                                MUTED,
+                                self.theme.muted,
                             );
                         }
                         Self::label(
@@ -567,9 +569,9 @@ impl App {
                             left + self.scale(36),
                             top + self.scale(1),
                             if selected {
-                                TEXT
+                                self.theme.text
                             } else if item.entry.is_dir {
-                                MUTED
+                                self.theme.muted
                             } else {
                                 rgb(185, 205, 230)
                             },
@@ -587,7 +589,7 @@ impl App {
                         "Open a file to browse",
                         self.scale(RAIL + 16),
                         self.scale(49),
-                        MUTED,
+                        self.theme.muted,
                         sidebar_clip,
                     );
                     Self::label(
@@ -595,7 +597,7 @@ impl App {
                         "its folder  (Ctrl+O)",
                         self.scale(RAIL + 16),
                         self.scale(73),
-                        MUTED,
+                        self.theme.muted,
                         sidebar_clip,
                     );
                 }
@@ -642,7 +644,7 @@ impl App {
                             right: divider + self.scale(1),
                             bottom: code_bottom,
                         },
-                        EDGE,
+                        self.theme.edge,
                     );
                 }
             }
@@ -668,10 +670,10 @@ impl App {
                         bottom: card_bottom,
                     },
                     card_radius,
-                    CARD_EDGE,
+                    self.theme.card_edge,
                 );
             }
-            self.card_outline(hdc, editor_card, card_radius, CARD_EDGE);
+            self.card_outline(hdc, editor_card, card_radius, self.theme.card_edge);
             if self.ai_assistant_visible {
                 let ai_card = RECT {
                     left: editor_card.right + gap,
@@ -680,7 +682,7 @@ impl App {
                     bottom: card_bottom,
                 };
                 self.paint_ai_assistant(hdc, ai_card);
-                self.card_outline(hdc, ai_card, card_radius, CARD_EDGE);
+                self.card_outline(hdc, ai_card, card_radius, self.theme.card_edge);
             }
             FillRect(
                 hdc,
@@ -700,7 +702,7 @@ impl App {
                     right: rect.right,
                     bottom: editor_bottom + self.scale(1).max(1),
                 },
-                EDGE,
+                self.theme.edge,
             );
             SelectObject(hdc, self.ui_font);
 
@@ -743,7 +745,7 @@ impl App {
                 &file_label,
                 chip_rect.left + self.scale(24),
                 chip_rect.top + self.scale(2),
-                TEXT,
+                self.theme.text,
                 chip_rect,
             );
 
@@ -757,9 +759,9 @@ impl App {
             let ready_x = rect.right - ready_width - self.scale(16);
             let branch_x = ready_x - branch_width - self.scale(20);
 
-            Self::label(hdc, &right_branch, branch_x, editor_bottom + self.scale(4), MUTED, rect);
+            Self::label(hdc, &right_branch, branch_x, editor_bottom + self.scale(4), self.theme.muted, rect);
             Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(4), rgb(52, 211, 153), rect);
-            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(4), TEXT, rect);
+            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(4), self.theme.text, rect);
 
             // Middle info: Ln, Col, Spaces, Encoding, Language. The language
             // name is a real clickable control (see status_language_control),
@@ -768,7 +770,7 @@ impl App {
             let (mid_x, clip_right, prefix, language_rect) =
                 self.status_language_control(hdc, rect, editor_bottom, chip_rect.right, branch_x);
             let label_clip = RECT { left: mid_x, top: editor_bottom, right: clip_right, bottom: rect.bottom };
-            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(4), MUTED, label_clip);
+            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(4), self.theme.muted, label_clip);
             let language = language_label(self.doc().path.as_deref());
             Self::label(
                 hdc,

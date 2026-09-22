@@ -39,6 +39,7 @@ resvg = "0.48.1"
 tiny-skia = "0.12.0"
 toml = "1.1.6"
 ureq = "3.4.2"
+wait-timeout = "0.2.1"
 
 [profile.release]
 lto = "thin"

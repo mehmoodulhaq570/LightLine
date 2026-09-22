@@ -23,7 +23,7 @@ const fn argb(r: u8, g: u8, b: u8) -> u32 {
     0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
-// Matches EDITOR_BG, so transparent pixels composite into the pane
+// Matches self.theme.editor_bg, so transparent pixels composite into the pane
 // background instead of GDI+'s default white.
 const IMAGE_BACKGROUND: u32 = argb(12, 21, 35);
 
@@ -94,7 +94,7 @@ impl App {
         bounds: RECT,
     ) {
         unsafe {
-            Self::fill(hdc, bounds, EDITOR_BG);
+            Self::fill(hdc, bounds, self.theme.editor_bg);
             let pane_w = (bounds.right - bounds.left).max(1);
             let pane_h = (bounds.bottom - bounds.top).max(1);
             let fit = (pane_w as f64 / image.width as f64).min(pane_h as f64 / image.height as f64);

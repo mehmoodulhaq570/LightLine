@@ -18,7 +18,7 @@ impl App {
         let layout = self.git_layout(left, right);
         // The panel header already carries the "SOURCE CONTROL" title, so only
         // the refresh affordance belongs in the strip below it.
-        self.git_glyph(hdc, REFRESH_GLYPH, &layout.refresh, MUTED, clip);
+        self.git_glyph(hdc, REFRESH_GLYPH, &layout.refresh, self.theme.muted, clip);
 
         self.paint_commit_box(hdc, layout.commit_box, clip);
         self.paint_commit_button(hdc, &layout, clip);
@@ -51,7 +51,7 @@ impl App {
                         &format!("{title}  {count}"),
                         left + self.scale(14),
                         top + self.scale(4),
-                        MUTED,
+                        self.theme.muted,
                         clip,
                     );
                     let glyph = match section {
@@ -68,7 +68,7 @@ impl App {
                             right: edge,
                             bottom: rect.bottom,
                         };
-                        self.git_glyph(hdc, glyph, &button, MUTED, clip);
+                        self.git_glyph(hdc, glyph, &button, self.theme.muted, clip);
                     }
                 }
                 GitRow::Change { change, staged } => {
@@ -83,17 +83,17 @@ impl App {
                                 right: right - self.scale(7),
                                 bottom: top + self.scale(ROW_CHANGE - 2),
                             },
-                            SELECT_BG,
+                            self.theme.select_bg,
                         );
                     }
                     let color = if change.unmerged {
                         rgb(240, 150, 90)
                     } else if change.untracked {
-                        MUTED
+                        self.theme.muted
                     } else if *staged {
-                        VIOLET
+                        self.theme.violet
                     } else {
-                        GREEN
+                        self.theme.green
                     };
                     // The status word reads better than a two character plumbing
                     // code, and the name stays the primary thing in the row, so
@@ -114,7 +114,7 @@ impl App {
                         &display_path(&change.path),
                         left + self.scale(14),
                         top,
-                        TEXT,
+                        self.theme.text,
                         RECT {
                             left: left + self.scale(14),
                             top,
@@ -123,7 +123,7 @@ impl App {
                         },
                     );
                     let (toggle, discard) = self.git_row_buttons(right, rect, *staged);
-                    let busy = if self.git_busy { EDGE } else { MUTED };
+                    let busy = if self.git_busy { self.theme.edge } else { self.theme.muted };
                     self.git_glyph(hdc, if *staged { "-" } else { "+" }, &toggle, busy, clip);
                     if let Some(discard) = discard {
                         self.git_glyph(hdc, "\u{21b3}", &discard, busy, clip);
@@ -139,7 +139,7 @@ impl App {
                                 right: right - self.scale(7),
                                 bottom: top + self.scale(ROW_COMMIT - 2),
                             },
-                            SELECT_BG,
+                            self.theme.select_bg,
                         );
                     }
                     self.label_ellipsis(
@@ -147,7 +147,7 @@ impl App {
                         &entry.subject,
                         left + self.scale(14),
                         top + self.scale(2),
-                        TEXT,
+                        self.theme.text,
                         RECT {
                             left: left + self.scale(14),
                             top,
@@ -160,12 +160,12 @@ impl App {
                         &format!("{}  ·  {}  ·  {}", entry.oid, entry.author, entry.date),
                         left + self.scale(14),
                         top + self.scale(17),
-                        MUTED,
+                        self.theme.muted,
                         clip,
                     );
                 }
                 GitRow::Note(text) => {
-                    Self::label(hdc, text, left + self.scale(14), top, MUTED, clip);
+                    Self::label(hdc, text, left + self.scale(14), top, self.theme.muted, clip);
                 }
             }
             top = rect.bottom;
@@ -173,7 +173,7 @@ impl App {
     }
 
     fn paint_commit_box(&self, hdc: HDC, box_rect: RECT, clip: RECT) {
-        Self::fill(hdc, box_rect, ACTIVE_BG);
+        Self::fill(hdc, box_rect, self.theme.active_bg);
         let focused = self.commit_focus && self.focused;
         if focused {
             let edge = RECT {
@@ -182,7 +182,7 @@ impl App {
                 right: box_rect.right,
                 bottom: box_rect.bottom,
             };
-            Self::fill(hdc, edge, BLUE);
+            Self::fill(hdc, edge, self.theme.blue);
         }
         let empty = self.commit_message.is_empty();
         let text = if empty {
@@ -195,7 +195,7 @@ impl App {
             &text,
             box_rect.left + self.scale(10),
             box_rect.top + self.scale(8),
-            if empty { MUTED } else { TEXT },
+            if empty { self.theme.muted } else { self.theme.text },
             clip,
         );
         if focused && self.caret_on {
@@ -212,7 +212,7 @@ impl App {
                     right: caret_x + 1,
                     bottom: box_rect.top + self.scale(24),
                 },
-                TEXT,
+                self.theme.text,
             );
         }
     }
@@ -225,7 +225,7 @@ impl App {
             if ready {
                 rgb(52, 96, 168)
             } else {
-                EDGE
+                self.theme.edge
             },
         );
         let label = if self.git_busy {
@@ -241,7 +241,7 @@ impl App {
             label,
             (layout.commit_button.left + layout.commit_button.right - width) / 2,
             layout.commit_button.top + self.scale(5),
-            if ready { TEXT } else { MUTED },
+            if ready { self.theme.text } else { self.theme.muted },
             clip,
         );
     }
@@ -249,14 +249,14 @@ impl App {
     /// One of the three sync buttons. They run in the terminal panel, so the
     /// label is the whole affordance and gets no state of its own.
     fn paint_git_tool(&self, hdc: HDC, rect: &RECT, label: &str, clip: RECT) {
-        Self::fill(hdc, *rect, ACTIVE_BG);
+        Self::fill(hdc, *rect, self.theme.active_bg);
         let width = self.text_width(hdc, label);
         Self::label(
             hdc,
             label,
             (rect.left + rect.right - width) / 2,
             rect.top + self.scale(4),
-            MUTED,
+            self.theme.muted,
             clip,
         );
     }
