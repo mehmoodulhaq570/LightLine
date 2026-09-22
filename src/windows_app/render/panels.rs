@@ -837,36 +837,46 @@ impl App {
             Self::label(hdc, "Not stopped", left + s(8), y, MUTED, clip);
             y += s(18);
         } else {
-            'scopes: for scope in &state.scopes {
-                if y + s(16) > bottom {
-                    break;
+            let (rows, next_y) = self.debug_variable_rows(y, bottom, s(18), s(16));
+            for row in &rows {
+                let indent = s(12) * row.depth as i32;
+                if row.is_header {
+                    Self::label(hdc, &row.name, left + s(8), row.y, MUTED, clip);
+                    continue;
                 }
-                Self::label(hdc, &scope.name, left + s(8), y, MUTED, clip);
-                y += s(16);
-                for variable in &scope.variables {
-                    if y + s(18) > bottom {
-                        break 'scopes;
-                    }
-                    Self::label(hdc, ">", left + s(8), y, MUTED, clip);
-                    self.label_ellipsis(
-                        hdc,
-                        &variable.name,
-                        left + s(20),
-                        y,
-                        rgb(205, 220, 245),
-                        RECT { left, top: clip.top, right: right - s(84), bottom: clip.bottom },
-                    );
-                    self.label_ellipsis(
-                        hdc,
-                        &variable.value,
-                        right - s(80),
-                        y,
-                        rgb(130, 150, 180),
-                        RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
-                    );
-                    y += s(18);
+                if row.loading {
+                    Self::label(hdc, &row.name, left + s(20) + indent, row.y, MUTED, clip);
+                    continue;
                 }
+                // Only an expandable variable gets an arrow; a plain value
+                // (an int, a string, ...) has nothing to click, so it stays
+                // blank instead of showing a ">" that does nothing.
+                let glyph = if !row.expandable {
+                    " "
+                } else if row.expanded {
+                    "\u{25be}"
+                } else {
+                    "\u{25b8}"
+                };
+                Self::label(hdc, glyph, left + s(8) + indent, row.y, MUTED, clip);
+                self.label_ellipsis(
+                    hdc,
+                    &row.name,
+                    left + s(20) + indent,
+                    row.y,
+                    rgb(205, 220, 245),
+                    RECT { left, top: clip.top, right: right - s(96), bottom: clip.bottom },
+                );
+                self.label_ellipsis(
+                    hdc,
+                    &row.value,
+                    right - s(92),
+                    row.y,
+                    rgb(130, 150, 180),
+                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
+                );
             }
+            y = next_y;
         }
 
         y += s(6);

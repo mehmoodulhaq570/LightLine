@@ -29,6 +29,9 @@ pub enum Command {
     StepOut,
     Pause,
     Disconnect,
+    /// Fetch the children of a struct/collection variable on demand, keyed by
+    /// its `variablesReference` (0 means "no children" and is never sent).
+    Variables(i64),
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +47,9 @@ pub struct Variable {
     pub name: String,
     pub value: String,
     pub kind: String,
+    /// Non-zero when this variable has children (struct fields, array
+    /// elements, ...) that can be fetched with `Command::Variables`.
+    pub variables_reference: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +70,11 @@ pub enum Event {
     Continued,
     Output {
         text: String,
+    },
+    /// Children of a variable requested via `Command::Variables`.
+    Variables {
+        reference: i64,
+        variables: Vec<Variable>,
     },
     Terminated,
     Failed {
@@ -125,6 +136,9 @@ enum PendingKind {
     StackTrace,
     Scopes,
     Variables { scope_name: String },
+    /// A user-initiated expand-on-click fetch, not part of the stop flow;
+    /// answered directly with `Event::Variables` instead of feeding `StopFlow`.
+    VariablesOnDemand { reference: i64 },
     Other,
 }
 
@@ -491,6 +505,18 @@ fn run_adapter(
                                 }
                             }
                         }
+                        PendingKind::VariablesOnDemand { reference } => {
+                            let variables = message
+                                .pointer("/body/variables")
+                                .and_then(Value::as_array)
+                                .map(|vars| vars.iter().filter_map(parse_variable).collect())
+                                .unwrap_or_default();
+                            emit(
+                                Event::Variables { reference, variables },
+                                &events,
+                                &wake,
+                            );
+                        }
                         PendingKind::Other => {}
                     }
                 }
@@ -607,6 +633,14 @@ fn run_adapter(
             Ok(Command::Pause) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "pause", active_thread)
             }
+            Ok(Command::Variables(reference)) => send_request(
+                &mut stdin,
+                &mut seq,
+                &mut pending,
+                "variables",
+                json!({"variablesReference": reference}),
+                PendingKind::VariablesOnDemand { reference },
+            ),
             Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
         };
         if sent.is_err() {
@@ -667,6 +701,10 @@ fn parse_variable(value: &Value) -> Option<Variable> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        variables_reference: value
+            .get("variablesReference")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
     })
 }
 

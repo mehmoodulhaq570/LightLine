@@ -513,11 +513,11 @@ impl App {
                     },
             );
         if y < self.scale(TAB_HEIGHT)
-            && Tab::is_python(self.doc())
+            && Tab::is_runnable(self.doc())
             && x >= rect.right - self.scale(326)
             && x < rect.right - self.scale(296)
         {
-            let hint = "Run Python File (Ctrl+Shift+R)";
+            let hint = "Run File (Ctrl+Shift+R)";
             if self.status != hint {
                 self.status = hint.into();
                 unsafe { InvalidateRect(hwnd, null(), 0) };

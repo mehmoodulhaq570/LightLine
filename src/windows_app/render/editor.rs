@@ -300,12 +300,7 @@ impl App {
                     1,
                 );
             }
-            if self
-                .doc()
-                .path
-                .as_deref()
-                .and_then(Path::extension)
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+            if Tab::is_runnable(self.doc())
                 && editor_left
                     + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                     + self.scale(12)

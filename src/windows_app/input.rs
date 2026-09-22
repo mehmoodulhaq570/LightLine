@@ -388,7 +388,7 @@ impl App {
                     return true;
                 }
                 0x52 if shift => {
-                    self.run_python_file(hwnd);
+                    self.run_active_file(hwnd);
                     return true;
                 }
                 x if x == VK_OEM_PLUS as u32 || x == VK_ADD as u32 => {
@@ -962,13 +962,7 @@ impl App {
             }
             WelcomeAction::Search => self.open_project_search(hwnd),
             WelcomeAction::SourceControl => self.show_review(hwnd),
-            WelcomeAction::RunDebug => {
-                if Tab::is_python(self.doc()) {
-                    self.run_python_file(hwnd);
-                } else {
-                    self.run_project(hwnd);
-                }
-            }
+            WelcomeAction::RunDebug => self.run_active_file(hwnd),
             WelcomeAction::Extensions => {
                 self.welcome = false;
                 self.set_sidebar_visible(hwnd, true);
@@ -1191,6 +1185,18 @@ impl App {
                             return;
                         }
                     }
+                    return;
+                }
+                if x >= rail && x < editor_left {
+                    let bottom = (rect.bottom - self.scale(STATUS)).max(0);
+                    let start_y = self.debug_variables_start_y();
+                    let (rows, _) = self.debug_variable_rows(start_y, bottom, self.scale(18), self.scale(16));
+                    for row in &rows {
+                        if row.expandable && y >= row.y && y < row.y + self.scale(18) {
+                            self.toggle_debug_variable(hwnd, row.reference);
+                            return;
+                        }
+                    }
                 }
                 return;
             }
@@ -1338,11 +1344,11 @@ impl App {
         // controls are measured from the card's right edge, not the window's.
         let card_right = rect.right - self.chrome_gap();
         if y < self.tab_strip_bottom() {
-            if Tab::is_python(self.doc())
+            if Tab::is_runnable(self.doc())
                 && x >= card_right - self.scale(326)
                 && x < card_right - self.scale(296)
             {
-                self.run_python_file(hwnd);
+                self.run_active_file(hwnd);
                 return;
             }
             if x >= card_right - self.scale(112) {

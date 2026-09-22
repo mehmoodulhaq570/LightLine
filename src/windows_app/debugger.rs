@@ -6,6 +6,22 @@ use std::process::{Command as ProcessCommand, Stdio};
 
 pub(super) const DEBUG_EVENT_MESSAGE: u32 = WM_APP + 9;
 
+// A single flattened VARIABLES-tree row: either a scope header, a variable
+// (leaf or expandable), or a "Loading..." placeholder for children still in
+// flight. See `App::debug_variable_rows`.
+pub(super) struct DebugVariableRow {
+    pub(super) y: i32,
+    pub(super) depth: usize,
+    // DAP variablesReference; 0 for headers, leaves, and the loading row.
+    pub(super) reference: i64,
+    pub(super) expandable: bool,
+    pub(super) expanded: bool,
+    pub(super) is_header: bool,
+    pub(super) loading: bool,
+    pub(super) name: String,
+    pub(super) value: String,
+}
+
 impl App {
     // Play button / F5: build the workspace, then launch it under lldb-dap
     // with the breakpoints currently set across all open tabs.
@@ -99,6 +115,11 @@ impl App {
                     self.debug_state.thread_id = thread_id;
                     self.debug_state.frames = frames;
                     self.debug_state.scopes = scopes;
+                    // Old variablesReference ids are meaningless once the
+                    // debuggee moves; a stale expansion would fetch garbage
+                    // or a now-reused reference.
+                    self.debug_state.expanded.clear();
+                    self.debug_state.children.clear();
                     self.status = format!("Debugger stopped ({reason})");
                     if let Some(frame) = self.debug_state.frames.first()
                         && let Some(path) = frame.path.clone()
@@ -119,6 +140,11 @@ impl App {
                     self.debug_state.running = true;
                     self.debug_state.frames.clear();
                     self.debug_state.scopes.clear();
+                    self.debug_state.expanded.clear();
+                    self.debug_state.children.clear();
+                }
+                DebugEvent::Variables { reference, variables } => {
+                    self.debug_state.children.insert(reference, variables);
                 }
                 DebugEvent::Output { text } => {
                     let trimmed = text.trim_end();
@@ -174,6 +200,139 @@ impl App {
         if let Some(client) = &self.debug {
             client.send(DebugCommand::StepOut);
             unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
+    // Toggles a struct/collection variable's expansion. `reference` is its
+    // DAP `variablesReference`; a bare/leaf value has 0 and is never clickable
+    // (checked by the caller). Expanding for the first time kicks off the
+    // fetch; the children arrive later as `DebugEvent::Variables`.
+    pub(super) fn toggle_debug_variable(&mut self, hwnd: HWND, reference: i64) {
+        if reference == 0 {
+            return;
+        }
+        if !self.debug_state.expanded.remove(&reference) {
+            self.debug_state.expanded.insert(reference);
+            if !self.debug_state.children.contains_key(&reference)
+                && let Some(client) = &self.debug
+            {
+                client.send(DebugCommand::Variables(reference));
+            }
+        }
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // Where the VARIABLES tree body starts, in the same window coordinates
+    // paint_debug_panel draws in: past the toolbar, the status line, and the
+    // "VARIABLES" section header. Shared so the click handler in input.rs
+    // lands on exactly the rows that were actually painted.
+    pub(super) fn debug_variables_start_y(&self) -> i32 {
+        let s = |v: i32| self.scale(v);
+        s(88) + s(24) + s(24)
+    }
+
+    // Flattens the VARIABLES tree (scope headers, their variables, and any
+    // expanded children) into rows with absolute y positions. Used by both
+    // paint_debug_panel (to draw) and the click handler (to hit-test), so the
+    // two can never drift apart the way "renders one thing, clicks another"
+    // bugs usually happen.
+    pub(super) fn debug_variable_rows(
+        &self,
+        start_y: i32,
+        bottom: i32,
+        row_height: i32,
+        header_height: i32,
+    ) -> (Vec<DebugVariableRow>, i32) {
+        let mut rows = Vec::new();
+        let mut y = start_y;
+        for scope in &self.debug_state.scopes {
+            if y + header_height > bottom {
+                break;
+            }
+            rows.push(DebugVariableRow {
+                y,
+                depth: 0,
+                reference: 0,
+                expandable: false,
+                expanded: false,
+                is_header: true,
+                loading: false,
+                name: scope.name.clone(),
+                value: String::new(),
+            });
+            y += header_height;
+            let mut truncated = false;
+            for variable in &scope.variables {
+                if !self.push_debug_variable_row(&mut rows, variable, 0, &mut y, bottom, row_height) {
+                    truncated = true;
+                    break;
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+        (rows, y)
+    }
+
+    // Returns false once `bottom` is reached, so the caller can stop walking
+    // remaining scopes/siblings instead of producing invisible rows.
+    fn push_debug_variable_row(
+        &self,
+        rows: &mut Vec<DebugVariableRow>,
+        variable: &DebugVariable,
+        depth: usize,
+        y: &mut i32,
+        bottom: i32,
+        row_height: i32,
+    ) -> bool {
+        if *y + row_height > bottom {
+            return false;
+        }
+        let expandable = variable.variables_reference != 0;
+        let expanded = expandable && self.debug_state.expanded.contains(&variable.variables_reference);
+        rows.push(DebugVariableRow {
+            y: *y,
+            depth,
+            reference: variable.variables_reference,
+            expandable,
+            expanded,
+            is_header: false,
+            loading: false,
+            name: variable.name.clone(),
+            value: variable.value.clone(),
+        });
+        *y += row_height;
+        if !expanded {
+            return true;
+        }
+        match self.debug_state.children.get(&variable.variables_reference) {
+            Some(children) => {
+                for child in children {
+                    if !self.push_debug_variable_row(rows, child, depth + 1, y, bottom, row_height) {
+                        return false;
+                    }
+                }
+                true
+            }
+            None => {
+                if *y + row_height > bottom {
+                    return false;
+                }
+                rows.push(DebugVariableRow {
+                    y: *y,
+                    depth: depth + 1,
+                    reference: 0,
+                    expandable: false,
+                    expanded: false,
+                    is_header: false,
+                    loading: true,
+                    name: "Loading\u{2026}".into(),
+                    value: String::new(),
+                });
+                *y += row_height;
+                true
+            }
         }
     }
 

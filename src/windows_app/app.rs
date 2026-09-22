@@ -219,6 +219,34 @@ impl Tab {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
     }
 
+    // True for a standalone C or C++ source file that can be compiled and run
+    // on its own (not a header, which has no entry point to run).
+    pub(super) fn is_c_family(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                let ext = ext.to_ascii_lowercase();
+                matches!(ext.as_str(), "c" | "cc" | "cpp" | "cxx")
+            })
+    }
+
+    // True for any file the Run action knows how to execute on its own.
+    pub(super) fn is_runnable(document: &Document) -> bool {
+        Self::is_python(document) || Self::is_c_family(document)
+    }
+
+    pub(super) fn is_cpp(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "cc" | "cpp" | "cxx"))
+    }
+
     pub(super) fn lsp_language(document: &Document) -> Option<LspLanguage> {
         if Self::is_rust(document) {
             Some(LspLanguage::Rust)
@@ -396,6 +424,12 @@ pub(super) struct DebugState {
     pub(super) thread_id: i64,
     pub(super) frames: Vec<DebugFrame>,
     pub(super) scopes: Vec<DebugScope>,
+    // Which struct/collection variables the user has expanded, and the
+    // children fetched for each (keyed by DAP `variablesReference`); a
+    // reference present in `expanded` but absent from `children` is still
+    // waiting on its `Command::Variables` round trip.
+    pub(super) expanded: HashSet<i64>,
+    pub(super) children: HashMap<i64, Vec<DebugVariable>>,
 }
 
 // Records which pane/request an in-flight definition or format call belongs to

@@ -600,6 +600,32 @@ pub fn detect_python_interpreter(root: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
+/// Returns true when `name` (e.g. "cargo", "g++") resolves to a file on PATH,
+/// so callers can surface a clear "not installed" message instead of letting
+/// the child process spawn fail (or, worse, run and crash midway through).
+pub fn command_available(name: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let candidates: &[String] = &[name.to_string(), format!("{name}.exe")];
+    std::env::split_paths(&paths).any(|directory| {
+        candidates
+            .iter()
+            .any(|candidate| directory.join(candidate).is_file())
+    })
+}
+
+/// Finds a C or C++ compiler on PATH, preferring the one that matches the
+/// source language. Returns `None` when no usable toolchain is installed, so
+/// the caller can tell the user instead of spawning a command that can't run.
+// MSVC's cl.exe is deliberately not offered here: it takes /Fe: instead of
+// -o and only works from inside a Developer Command Prompt environment, so
+// detecting it on PATH doesn't mean the -o command line below would work.
+pub fn detect_c_compiler(is_cpp: bool) -> Option<&'static str> {
+    let ordered = if is_cpp { ["g++", "clang++"] } else { ["gcc", "clang"] };
+    ordered.into_iter().find(|name| command_available(name))
+}
+
 /// Run Git in `root` and return its standard output.
 pub fn git_output(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = git_command(root, args)

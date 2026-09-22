@@ -26,7 +26,7 @@ use icons::{AppIcons, IconSet, material_icon_for};
 use lightline::clipboard;
 use lightline::debug::{
     Command as DebugCommand, DebugClient, Event as DebugEvent, Scope as DebugScope,
-    StackFrame as DebugFrame,
+    StackFrame as DebugFrame, Variable as DebugVariable,
 };
 use lightline::document::{Document, Pos};
 use lightline::lsp::{

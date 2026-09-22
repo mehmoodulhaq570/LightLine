@@ -358,10 +358,16 @@ impl App {
             // does in any other editor: focus the shell, or start one if none.
             TerminalTab::Terminal => self.open_terminal(hwnd),
             // Output has nothing to auto-start; it only ever shows whatever a
-            // run has already produced, and never takes keyboard focus.
+            // run has already produced. It takes keyboard focus only while a
+            // run is still live, so the program's own stdin prompts (e.g.
+            // Python's input()) can be answered; a finished run is read-only.
             TerminalTab::Output => {
                 self.terminal_tab = tab;
-                self.terminal_focus = false;
+                self.terminal_focus = self.run_session.is_some();
+                if self.terminal_focus {
+                    self.caret_on = true;
+                }
+                unsafe { SetFocus(hwnd) };
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
         }
@@ -369,11 +375,17 @@ impl App {
 
     pub(super) fn focus_terminal(&mut self, hwnd: HWND) {
         self.terminal_visible = true;
-        // Output is read-only; clicking its body must not start capturing keys.
+        // A finished Output pane is read-only; clicking its body must not
+        // start capturing keys. But while a run is still executing, clicking
+        // it should let the user answer the program's own stdin prompts.
         if self.terminal_tab == TerminalTab::Terminal && !self.terminals.is_empty() {
             self.focus_active_shell(hwnd);
         } else {
-            self.terminal_focus = false;
+            self.terminal_focus =
+                self.terminal_tab == TerminalTab::Output && self.run_session.is_some();
+            if self.terminal_focus {
+                self.caret_on = true;
+            }
             unsafe { SetFocus(hwnd) };
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -386,7 +398,6 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Output;
-        self.terminal_focus = false;
         if let Some(id) = self.run_session
             && self
                 .run_snapshot
@@ -399,7 +410,7 @@ impl App {
             self.run_snapshot = None;
         }
         if let Some(id) = self.run_session {
-            unsafe { InvalidateRect(hwnd, null(), 0) };
+            self.focus_run_session(hwnd);
             return Some(id);
         }
         let request = self.terminal_launch_request(true);
@@ -414,11 +425,21 @@ impl App {
                 self.run_applied_size = Some(size);
                 self.run_snapshot = None;
                 self.update_title(hwnd);
-                unsafe { InvalidateRect(hwnd, null(), 0) };
+                self.focus_run_session(hwnd);
                 Some(id)
             }
             Err(()) => None,
         }
+    }
+
+    // Grab keyboard focus for the live run session so the user can answer a
+    // program's own stdin prompts (e.g. Python's input()) without keystrokes
+    // leaking into the code editor.
+    fn focus_run_session(&mut self, hwnd: HWND) {
+        self.terminal_focus = true;
+        self.caret_on = true;
+        unsafe { SetFocus(hwnd) };
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     // Drain terminal events for every shell pane plus the run session, keeping
@@ -444,6 +465,9 @@ impl App {
                 let _ = self.terminal.remove(event.session_id);
                 self.run_session = None;
                 self.run_applied_size = None;
+                if self.terminal_tab == TerminalTab::Output {
+                    self.terminal_focus = false;
+                }
             }
         }
         if repaint || !self.terminals.is_empty() || self.run_session.is_some() {

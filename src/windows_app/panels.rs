@@ -61,6 +61,7 @@ impl App {
             ("Open Settings (JSON)", 16),
             ("Find in File", 17),
             ("Find and Replace", 18),
+            ("Run C/C++ File", 19),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -120,6 +121,7 @@ impl App {
                     self.replace_field = 0;
                     self.update_find_replace_status();
                 }
+                Some(19) => self.run_c_file(hwnd),
                 _ => {}
             }
         } else {
@@ -209,13 +211,79 @@ impl App {
         }
     }
 
+    // Single entry point for the Run button/shortcut: dispatches on the
+    // active file's language instead of always assuming a Cargo workspace,
+    // which previously made Run silently no-op (or run the wrong thing) for
+    // Python and C/C++ files.
+    pub(super) fn run_active_file(&mut self, hwnd: HWND) {
+        if Tab::is_python(self.doc()) {
+            self.run_python_file(hwnd);
+        } else if Tab::is_c_family(self.doc()) {
+            self.run_c_file(hwnd);
+        } else if Tab::is_rust(self.doc()) || self.workspace_root.is_some() {
+            self.run_project(hwnd);
+        } else {
+            self.status = "Open a Python, C/C++, or Rust file to run it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
     pub(super) fn run_project(&mut self, hwnd: HWND) {
         if self.workspace_root.is_none() {
             self.status = "Open a Rust workspace to run tests".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         }
+        if !workflow::command_available("cargo") {
+            self.status =
+                "Cargo was not found on PATH. Install Rust (rustup.rs) and restart LightLine."
+                    .into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
         self.run_in_terminal(hwnd, "cargo test --offline");
+    }
+
+    pub(super) fn run_c_file(&mut self, hwnd: HWND) {
+        if !Tab::is_c_family(self.doc()) {
+            self.status = "Open a C/C++ file to run it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
+        if self.doc().is_dirty() && !self.save(hwnd, false) {
+            self.status = "Save the file before running it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
+        let Some(file) = self.doc().path.clone() else {
+            self.status = "Save the file before running it".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+        let is_cpp = Tab::is_cpp(self.doc());
+        let Some(compiler) = workflow::detect_c_compiler(is_cpp) else {
+            self.status = if is_cpp {
+                "No C++ compiler found on PATH (install g++/MinGW or MSVC Build Tools)".into()
+            } else {
+                "No C compiler found on PATH (install gcc/MinGW or MSVC Build Tools)".into()
+            };
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+        let source = display_path(&file);
+        let mut output = file.clone();
+        output.set_extension("exe");
+        let output = display_path(&output);
+        // Compile then run in one shell command so a compile error is shown
+        // in place of a crash from trying to run a binary that was never
+        // produced; `&&` short-circuits the run half on a nonzero exit.
+        let command = format!(
+            "& {compiler} {} -o {} && & {}",
+            terminal::powershell_quoted(Path::new(&source)),
+            terminal::powershell_quoted(Path::new(&output)),
+            terminal::powershell_quoted(Path::new(&output)),
+        );
+        self.run_in_terminal(hwnd, &command);
     }
 
     pub(super) fn run_python_file(&mut self, hwnd: HWND) {
