@@ -2311,19 +2311,4 @@ mod split_tests {
         extensions[0].installed = !extensions[0].installed;
         assert!(!extensions[0].installed);
     }
-
-    #[test]
-    fn prettier_supported_extensions() {
-        use std::path::Path;
-        assert!(App::is_prettier_supported(Some(Path::new("app.js"))));
-        assert!(App::is_prettier_supported(Some(Path::new("index.ts"))));
-        assert!(App::is_prettier_supported(Some(Path::new("package.json"))));
-        assert!(App::is_prettier_supported(Some(Path::new("style.css"))));
-        assert!(App::is_prettier_supported(Some(Path::new("index.html"))));
-        assert!(App::is_prettier_supported(Some(Path::new("README.md"))));
-        assert!(App::is_prettier_supported(Some(Path::new("config.yaml"))));
-        assert!(!App::is_prettier_supported(Some(Path::new("main.rs"))));
-        assert!(!App::is_prettier_supported(Some(Path::new("script.py"))));
-        assert!(!App::is_prettier_supported(None));
-    }
 }

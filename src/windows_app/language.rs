@@ -800,27 +800,6 @@ impl App {
         }
     }
 
-    pub(super) fn is_prettier_supported(path: Option<&std::path::Path>) -> bool {
-        let Some(path) = path else { return false };
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        matches!(
-            ext.as_str(),
-            "js" | "mjs" | "cjs" | "jsx"
-                | "ts" | "mts" | "cts" | "tsx"
-                | "json"
-                | "css" | "scss" | "less"
-                | "html" | "htm"
-                | "md" | "markdown"
-                | "yaml" | "yml"
-                | "graphql" | "gql"
-                | "vue"
-        )
-    }
-
     // Runs whichever formatter::formatter_for() picks for the active file
     // (Prettier today; the one place a second formatter -- rustfmt, black,
     // clang-format -- plugs in later) on a background thread, so a slow or
@@ -894,14 +873,20 @@ impl App {
         let index = self.tab_for_pane(pane);
         let path = self.tabs[index].document.path.clone();
 
-        if self.has_extension("prettier") && Self::is_prettier_supported(path.as_deref()) {
-            self.format_with_external_formatter(hwnd);
-            return;
-        }
-
-        if Self::is_prettier_supported(path.as_deref()) {
-            self.status = "Install Prettier extension to format this file (Ctrl+Shift+X)".into();
-            self.refresh(hwnd);
+        // formatter::formatter_for() is the single source of truth for "is
+        // there a formatter for this file" -- asking it here instead of a
+        // second, hand-maintained extension list means a future formatter
+        // (rustfmt, black, clang-format) is picked up automatically, with
+        // nothing to keep in sync in this file.
+        if let Some(path) = path.as_deref()
+            && lightline::formatter::formatter_for(path).is_some()
+        {
+            if self.has_extension("prettier") {
+                self.format_with_external_formatter(hwnd);
+            } else {
+                self.status = "Install Prettier extension to format this file (Ctrl+Shift+X)".into();
+                self.refresh(hwnd);
+            }
             return;
         }
 
