@@ -1344,6 +1344,21 @@ impl App {
             self.open_diff_line(hwnd, y);
             return;
         }
+        // The split control is drawn at the right edge of each pane's breadcrumb
+        // row, from App::pane_actions. That row had no hit test of its own, so
+        // the glyph was decoration and a click in it only focused a pane. This
+        // is checked ahead of the divider grab zone because the two overlap at a
+        // pane's edge, and a control the user can see should beat a drag.
+        if y >= self.tab_strip_bottom() && y < self.editor_top() {
+            for pane in 0..if self.split_visible { 2 } else { 1 } {
+                let (split, _) = self.pane_actions(self.pane_right(hwnd, pane));
+                if x >= split.left && x < split.right {
+                    self.focus_pane(hwnd, pane);
+                    self.toggle_split(hwnd);
+                    return;
+                }
+            }
+        }
         if self.split_visible
             && y >= self.tab_strip_bottom()
             && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)

@@ -47,22 +47,37 @@ pub fn install(id: &str, git_url: &str, tag: Option<&str>) -> Result<PathBuf, St
         std::fs::remove_dir_all(&target)
             .map_err(|error| format!("could not remove the existing install at {target:?}: {error}"))?;
     }
-    let mut command = Command::new("git");
-    command.args(["clone", "--depth", "1"]);
-    if let Some(tag) = tag {
-        command.args(["--branch", tag]);
-    }
-    command.arg(git_url).arg(&target);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let status = command
-        .status()
-        .map_err(|error| format!("could not run git: {error}"))?;
-    if !status.success() {
-        return Err(format!("git clone of {git_url} failed"));
+    let clone = |tag: Option<&str>| -> Result<bool, String> {
+        let mut command = Command::new("git");
+        command.args(["clone", "--depth", "1"]);
+        if let Some(tag) = tag {
+            command.args(["--branch", tag]);
+        }
+        command.arg(git_url).arg(&target);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("could not run git: {error}"))?;
+        Ok(status.success())
+    };
+    // Not every registry entry tags its releases as "v<version>" (the
+    // registry's own version number can just track upstream's default
+    // branch) -- confirmed against a real extension, dracula/zed, which has
+    // no git tags at all. Fall back to the default branch rather than
+    // failing the install over a naming convention the registry doesn't
+    // actually guarantee.
+    if !clone(tag)? {
+        if tag.is_none() {
+            return Err(format!("git clone of {git_url} failed"));
+        }
+        std::fs::remove_dir_all(&target).ok();
+        if !clone(None)? {
+            return Err(format!("git clone of {git_url} failed"));
+        }
     }
     Ok(target)
 }

@@ -1,5 +1,6 @@
 #[cfg(windows)]
 pub mod clipboard;
+pub mod color_theme;
 pub mod debug;
 pub mod document;
 pub mod extensions;

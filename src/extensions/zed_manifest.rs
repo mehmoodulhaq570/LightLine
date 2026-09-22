@@ -34,6 +34,14 @@ pub fn is_icon_theme(extension_dir: &Path) -> bool {
     extension_dir.join("icon_themes").is_dir()
 }
 
+/// A pure-data color-theme extension has a `themes/` directory of JSON
+/// theme files (verified against the real Dracula extension,
+/// github.com/dracula/zed) -- no compiled code, same shape of extension as
+/// an icon theme. See `lightline::color_theme` for the loader.
+pub fn is_color_theme(extension_dir: &Path) -> bool {
+    extension_dir.join("themes").is_dir()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

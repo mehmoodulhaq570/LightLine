@@ -30,6 +30,13 @@ pub(super) struct TerminalPane {
     pub(super) applied_size: Option<TerminalSize>,
 }
 
+// What a generic Zed-registry install turned out to be, resolved on the
+// worker thread so poll_workers only has to apply the result.
+pub(super) enum ExtensionInstallKind {
+    IconTheme,
+    ColorTheme(Theme),
+}
+
 pub(super) enum WorkerMessage {
     Files(PathBuf, Vec<PathBuf>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
@@ -42,13 +49,11 @@ pub(super) enum WorkerMessage {
     ExtensionInstalled(String, bool),
     // The full Zed registry id/version list, for the Extensions panel search.
     ZedRegistryList(Result<Vec<(String, String)>, String>),
-    // id, and Ok(is_icon_theme). An extension that isn't an icon theme
-    // (needs WASM execution or a color-theme system LightLine doesn't have)
-    // is uninstalled again before this fires and reported as Err(reason)
-    // instead of a silent partial success. Ok(true) doesn't necessarily mean
-    // the icon set visibly changed -- only the "material-icon-theme" id is
-    // ever actually read by IconSet; see the handler.
-    ZedExtensionInstalled(String, Result<bool, String>),
+    // id, and the outcome. An extension that's neither an icon theme nor a
+    // color theme (needs WASM execution LightLine doesn't have) is
+    // uninstalled again before this fires and reported as Err(reason)
+    // instead of a silent partial success.
+    ZedExtensionInstalled(String, Result<ExtensionInstallKind, String>),
     DebugBuild(Result<PathBuf, String>),
     CDiagnostics(PathBuf, Vec<LspDiagnostic>),
     // path, the formatter's display name, the document's change_serial() at
@@ -321,6 +326,11 @@ pub(super) struct App {
     pub(super) hero_icon: HICON,
     pub(super) icons: IconSet,
     pub(super) theme: Theme,
+    // The registry id of the color-theme extension currently applied to
+    // `theme`, if any -- lets uninstalling *that* extension revert to
+    // LightLine's default, without disturbing the theme when an unrelated
+    // extension is installed/removed.
+    pub(super) active_color_theme: Option<String>,
     pub(super) dpi: u32,
     pub(super) zoom: i32,
     pub(super) line_height: i32,
@@ -729,6 +739,7 @@ impl App {
             hero_icon,
             icons: IconSet::new(dpi, zoom),
             theme,
+            active_color_theme: None,
             dpi,
             zoom,
             line_height,
@@ -952,6 +963,11 @@ impl App {
                 if registry_id == "material-icon-theme" {
                     self.icons = IconSet::new(self.dpi, self.zoom);
                 }
+                if self.active_color_theme.as_deref() == Some(registry_id.as_str()) {
+                    self.theme = Theme::default_dark().with_overrides(&self.settings.colors);
+                    self.active_color_theme = None;
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
                 self.status = format!("{name} removed");
                 self.refresh(hwnd);
                 return;
@@ -961,6 +977,7 @@ impl App {
             self.status = format!("Resolving {name} from the Zed registry...");
             let tx = self.worker_tx.clone();
             let worker_id = id.to_string();
+            let color_overrides = self.settings.colors.clone();
             self.worker_started(hwnd);
             std::thread::spawn(move || {
                 let outcome = lightline::extensions::zed_registry::resolve(&registry_id).and_then(
@@ -970,20 +987,31 @@ impl App {
                             &resolved.git_url,
                             Some(&format!("v{}", resolved.version)),
                         )?;
-                        let is_icon_theme = lightline::extensions::zed_manifest::is_icon_theme(&dir);
-                        if !is_icon_theme {
-                            // Not something LightLine can actually use yet
-                            // (needs WASM execution, or a color-theme system
-                            // that doesn't exist) -- don't leave a dead,
-                            // silently-half-installed entry behind.
-                            let _ = lightline::extensions::installer::uninstall(&registry_id);
-                            return Err(
-                                "isn't supported yet (LightLine can only use icon-theme \
-                                 extensions right now)"
-                                    .to_string(),
-                            );
+                        if lightline::extensions::zed_manifest::is_icon_theme(&dir) {
+                            return Ok(ExtensionInstallKind::IconTheme);
                         }
-                        Ok(is_icon_theme)
+                        if lightline::extensions::zed_manifest::is_color_theme(&dir) {
+                            let Some(zed_theme) =
+                                lightline::color_theme::ZedColorTheme::load(&dir)
+                            else {
+                                let _ = lightline::extensions::installer::uninstall(&registry_id);
+                                return Err(
+                                    "its theme file could not be parsed".to_string()
+                                );
+                            };
+                            let base = Theme::default_dark().with_overrides(&color_overrides);
+                            let theme = Theme::from_zed_color_theme(&base, &zed_theme);
+                            return Ok(ExtensionInstallKind::ColorTheme(theme));
+                        }
+                        // Not something LightLine can actually use yet
+                        // (needs WASM execution) -- don't leave a dead,
+                        // silently-half-installed entry behind.
+                        let _ = lightline::extensions::installer::uninstall(&registry_id);
+                        Err(
+                            "isn't supported yet (LightLine can only use icon-theme and \
+                             color-theme extensions right now)"
+                                .to_string(),
+                        )
                     },
                 );
                 let _ = tx.send(WorkerMessage::ZedExtensionInstalled(worker_id, outcome));
@@ -1206,6 +1234,29 @@ impl App {
 
     pub(super) fn editor_left(&self) -> i32 {
         self.sidebar_right() + self.chrome_gap()
+    }
+
+    // The controls at the right end of a pane's breadcrumb row, measured here
+    // rather than in the painter so the glyph and the pixel that reacts to a
+    // click are derived from the same numbers. A control sized inside the paint
+    // code is a control that can end up drawn where clicks never land.
+    pub(super) fn pane_actions(&self, pane_right: i32) -> (RECT, RECT) {
+        let top = self.tab_strip_bottom();
+        let bottom = self.editor_top();
+        let width = self.scale(24);
+        let more = RECT {
+            left: pane_right - width - self.scale(6),
+            top,
+            right: pane_right - self.scale(6),
+            bottom,
+        };
+        let split = RECT {
+            left: more.left - width,
+            top,
+            right: more.left,
+            bottom,
+        };
+        (split, more)
     }
 
     pub(super) fn set_sidebar_visible(&mut self, hwnd: HWND, visible: bool) {

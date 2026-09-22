@@ -240,6 +240,10 @@ impl App {
             for pane in 0..if self.split_visible { 2 } else { 1 } {
                 let left = self.pane_left(hwnd, pane);
                 let right = self.pane_right(hwnd, pane);
+                // Both glyphs below are centered inside the rects the mouse
+                // handler tests, so the control a click lands on is the control
+                // actually drawn there.
+                let (split_rect, more_rect) = self.pane_actions(right);
                 let tab_index = self.tab_for_pane(pane);
                 let path_part = self.tabs[tab_index]
                     .document
@@ -262,23 +266,27 @@ impl App {
                     RECT {
                         left,
                         top: tab_strip_bottom,
-                        right: right - self.scale(50),
+                        right: split_rect.left - self.scale(6),
                         bottom: self.editor_top(),
                     },
                 );
-                Self::label(
-                    hdc,
-                    "[\u{2502}]   \u{2026}",
-                    right - self.scale(48),
-                    tab_strip_bottom + self.scale(3),
-                    self.theme.muted,
-                    RECT {
-                        left: right - self.scale(50),
-                        top: tab_strip_bottom,
-                        right,
-                        bottom: self.editor_top(),
-                    },
-                );
+                for (rect, glyph) in [(&split_rect, "[\u{2502}]"), (&more_rect, "\u{2026}")] {
+                    let glyph_x =
+                        rect.left + (rect.right - rect.left - self.text_width(hdc, glyph)) / 2;
+                    Self::label(
+                        hdc,
+                        glyph,
+                        glyph_x,
+                        tab_strip_bottom + self.scale(3),
+                        self.theme.muted,
+                        RECT {
+                            left: split_rect.left,
+                            top: tab_strip_bottom,
+                            right,
+                            bottom: self.editor_top(),
+                        },
+                    );
+                }
                 if self.split_visible && pane == self.focused_pane {
                     Self::fill(
                         hdc,

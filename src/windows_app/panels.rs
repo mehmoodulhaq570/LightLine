@@ -509,11 +509,22 @@ impl App {
                         };
                         ext.installed = result.is_ok();
                     }
-                    // IconSet only ever reads the "material-icon-theme"
-                    // folder -- reloading for any other icon-theme id would
-                    // be a no-op, since there's no active-theme selection.
-                    if result.is_ok() && registry_id == "material-icon-theme" {
-                        self.icons = IconSet::new(self.dpi, self.zoom);
+                    match result {
+                        // IconSet only ever reads the "material-icon-theme"
+                        // folder -- reloading for any other icon-theme id
+                        // would be a no-op, since there's no icon-theme
+                        // selection either.
+                        Ok(ExtensionInstallKind::IconTheme) => {
+                            if registry_id == "material-icon-theme" {
+                                self.icons = IconSet::new(self.dpi, self.zoom);
+                            }
+                        }
+                        Ok(ExtensionInstallKind::ColorTheme(theme)) => {
+                            self.theme = theme;
+                            self.active_color_theme = Some(registry_id);
+                            unsafe { InvalidateRect(hwnd, null(), 0) };
+                        }
+                        Err(_) => {}
                     }
                 }
                 WorkerMessage::DebugBuild(result) => {
