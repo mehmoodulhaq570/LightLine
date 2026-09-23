@@ -100,11 +100,10 @@ impl App {
             && self.panel_focus
             && !self.quick_open
             && self.explorer_input.is_none()
+            && let Some(path) = self.selected_explorer_path.clone()
         {
-            if let Some(path) = self.selected_explorer_path.clone() {
-                self.delete_entry(hwnd, &path);
-                return true;
-            }
+            self.delete_entry(hwnd, &path);
+            return true;
         }
         if self.quick_open {
             match key {
@@ -790,11 +789,13 @@ impl App {
             return;
         }
         if let Some(input) = &mut self.explorer_input {
-            if unit >= 32 && unit != 127 && let Some(ch) = char::from_u32(unit as u32) {
-                if !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(&ch) {
-                    input.buffer.push(ch);
-                    unsafe { InvalidateRect(hwnd, null(), 0) };
-                }
+            if unit >= 32
+                && unit != 127
+                && let Some(ch) = char::from_u32(unit as u32)
+                && !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(&ch)
+            {
+                input.buffer.push(ch);
+                unsafe { InvalidateRect(hwnd, null(), 0) };
             }
             return;
         }
@@ -1332,8 +1333,10 @@ impl App {
                 self.explorer_input = None;
                 self.refresh(hwnd);
             }
-            if y >= self.scale(40) && y < self.scale(EXPLORER_TOP) {
-                if let Some(root) = self.workspace_root.clone() {
+            if y >= self.scale(40)
+                && y < self.scale(EXPLORER_TOP)
+                && let Some(root) = self.workspace_root.clone()
+            {
                     let s = |v: i32| self.scale(v);
                     if x >= editor_left - s(26) && x <= editor_left - s(4) {
                         self.close_workspace(hwnd);
@@ -1363,7 +1366,6 @@ impl App {
                         self.refresh(hwnd);
                         return;
                     }
-                }
             }
             if y >= rect.bottom - self.scale(STATUS + 35) {
                 self.show_active_tab(hwnd);
@@ -1461,24 +1463,20 @@ impl App {
         // controls are measured from the card's right edge, not the window's.
         let card_right = rect.right - self.chrome_gap();
         if y < self.tab_strip_bottom() {
-            if Tab::is_runnable(self.doc())
-                && x >= card_right - self.scale(326)
-                && x < card_right - self.scale(296)
-            {
-                self.run_active_file(hwnd);
-                return;
-            }
-            if x >= card_right - self.scale(112) {
-                self.toggle_split(hwnd);
-                return;
-            }
-            if editor_left
-                + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
-                + self.scale(12)
-                < card_right - self.scale(285)
-                && x >= card_right - self.scale(285)
+            let command = self.command_center_rect(hwnd);
+            if x >= command.left
+                && x < command.right
+                && y >= command.top
+                && y < command.bottom
             {
                 self.show_quick_open(hwnd);
+                return;
+            }
+            if Tab::is_runnable(self.doc())
+                && x >= card_right - self.scale(82)
+                && x < card_right - self.scale(50)
+            {
+                self.run_active_file(hwnd);
                 return;
             }
             let slot = ((x - editor_left).max(0) / self.scale(TAB_WIDTH).max(1)) as usize;

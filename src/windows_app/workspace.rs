@@ -308,7 +308,7 @@ impl App {
         let mut i = 0;
         while i < self.tabs.len() {
             let tab_path = self.tabs[i].document.path.clone();
-            let should_close = tab_path.as_deref().map_or(false, |tp| {
+            let should_close = tab_path.as_deref().is_some_and(|tp| {
                 tp == path || (is_dir && tp.starts_with(path))
             });
             if should_close {
@@ -369,12 +369,11 @@ impl App {
                 for tab in &mut self.tabs {
                     if tab.document.path.as_deref() == Some(old_path) {
                         tab.document.path = Some(new_path.clone());
-                    } else if let Some(p) = &tab.document.path {
-                        if p.starts_with(old_path) {
-                            if let Ok(rel) = p.strip_prefix(old_path) {
-                                tab.document.path = Some(new_path.join(rel));
-                            }
-                        }
+                    } else if let Some(p) = &tab.document.path
+                        && p.starts_with(old_path)
+                        && let Ok(rel) = p.strip_prefix(old_path)
+                    {
+                        tab.document.path = Some(new_path.join(rel));
                     }
                 }
                 self.directory_cache.remove(parent);
@@ -437,10 +436,10 @@ impl App {
 
     pub(super) fn explorer_rows(&self) -> Vec<ExplorerRow> {
         let mut rows = Vec::new();
-        if let Some(root) = &self.workspace_root {
-            if self.expanded_dirs.contains(root) {
-                self.append_explorer_rows(root, 0, &mut rows);
-            }
+        if let Some(root) = &self.workspace_root
+            && self.expanded_dirs.contains(root)
+        {
+            self.append_explorer_rows(root, 0, &mut rows);
         }
         rows
     }

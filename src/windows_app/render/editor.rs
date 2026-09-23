@@ -72,16 +72,17 @@ impl App {
         let language_rect = unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.ui_font);
-            let file_label = self.tab_label(self.active);
-            let chip_right = self.scale(12) + self.scale(28) + self.text_width(hdc, &file_label);
             let branch = self.git_head_label();
-            let right_branch = format!("\u{2442}  {branch}");
+            let left_branch = format!("\u{2442}  {branch}");
+            let health = "⊗ 0    ⚠ 0";
+            let left_info_right = self.scale(16)
+                + self.text_width(hdc, &left_branch)
+                + self.scale(24)
+                + self.text_width(hdc, health);
             let ready_width = self.text_width(hdc, "\u{25cf}  Ready");
-            let branch_width = self.text_width(hdc, &right_branch);
             let ready_x = rect.right - ready_width - self.scale(16);
-            let branch_x = ready_x - branch_width - self.scale(20);
             let (_, _, _, language_rect) =
-                self.status_language_control(hdc, rect, editor_bottom, chip_right, branch_x);
+                self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             language_rect
@@ -385,9 +386,9 @@ impl App {
                 && editor_left
                     + self.scale(TAB_WIDTH) * self.tabs.len().saturating_sub(self.tab_first) as i32
                     + self.scale(12)
-                    < editor_card.right - self.scale(326)
+                    < editor_card.right - self.scale(92)
             {
-                let left = editor_card.right - self.scale(326);
+                let left = editor_card.right - self.scale(78);
                 let brush = CreateSolidBrush(self.theme.green);
                 let pen = CreatePen(PS_SOLID, 1, self.theme.green);
                 let old_brush = SelectObject(hdc, brush);
@@ -412,6 +413,54 @@ impl App {
                 DeleteObject(brush);
                 DeleteObject(pen);
             }
+
+            // Persistent command center: a compact, clickable Ctrl+P surface
+            // matching the approved workbench mockup.
+            let command_rect = self.command_center_rect(hwnd);
+            if command_rect.right > command_rect.left {
+                self.panel_card(
+                    hdc,
+                    command_rect,
+                    self.scale(6),
+                    rgb(43, 76, 132),
+                    rgb(12, 25, 48),
+                );
+                self.rail_icon(
+                    hdc,
+                    1,
+                    command_rect.left + self.scale(10),
+                    command_rect.top + self.scale(6),
+                    self.theme.muted,
+                );
+                Self::label(
+                    hdc,
+                    "Search files, symbols, commands...",
+                    command_rect.left + self.scale(36),
+                    command_rect.top + self.scale(5),
+                    self.theme.muted,
+                    RECT {
+                        left: command_rect.left + self.scale(36),
+                        top: command_rect.top,
+                        right: command_rect.right - self.scale(55),
+                        bottom: command_rect.bottom,
+                    },
+                );
+                let key_rect = RECT {
+                    left: command_rect.right - self.scale(48),
+                    top: command_rect.top + self.scale(4),
+                    right: command_rect.right - self.scale(7),
+                    bottom: command_rect.bottom - self.scale(4),
+                };
+                Self::rounded_fill(hdc, key_rect, self.scale(4), rgb(25, 43, 76));
+                Self::label(
+                    hdc,
+                    "Ctrl P",
+                    key_rect.left + self.scale(5),
+                    key_rect.top + self.scale(1),
+                    self.theme.text,
+                    key_rect,
+                );
+            }
             self.paint_rail(hdc, editor_bottom);
             let sidebar_state = SaveDC(hdc);
             // Clip the side panel to its card so its contents cannot spill
@@ -427,10 +476,10 @@ impl App {
                 self.paint_side_panel(hdc, self.sidebar_right(), card_bottom);
             }
             if self.sidebar_width > 0 && self.side_view == SideView::Files {
-                if let Some(root) = self.workspace_root.clone() {
-                    if !self.directory_cache.contains_key(&root) {
-                        self.load_directory(&root);
-                    }
+                if let Some(root) = self.workspace_root.clone()
+                    && !self.directory_cache.contains_key(&root)
+                {
+                    self.load_directory(&root);
                 }
                 let sidebar_clip = RECT {
                     left: self.scale(RAIL),
@@ -545,7 +594,7 @@ impl App {
                     };
                     self.draw_close_icon(hdc, rect_close, self.theme.muted);
 
-                    let input_is_new = self.explorer_input.as_ref().map_or(false, |inp| !inp.is_rename);
+                    let input_is_new = self.explorer_input.as_ref().is_some_and(|inp| !inp.is_rename);
                     if let Some(input) = &self.explorer_input && !input.is_rename {
                         let top = self.scale(EXPLORER_TOP);
                         let input_rect = RECT {
@@ -617,7 +666,7 @@ impl App {
                         if top >= editor_bottom - self.scale(38) {
                             break;
                         }
-                        let is_being_renamed = self.explorer_input.as_ref().map_or(false, |inp| {
+                        let is_being_renamed = self.explorer_input.as_ref().is_some_and(|inp| {
                             inp.is_rename && inp.old_path.as_deref() == Some(&item.entry.path)
                         });
                         let selected = self.selected_explorer_path.as_deref() == Some(&item.entry.path)
@@ -853,77 +902,50 @@ impl App {
             );
             SelectObject(hdc, self.ui_font);
 
-            // Left file chip
-            let file_label = self.tab_label(self.active);
-            let chip_w = self.scale(28) + self.text_width(hdc, &file_label);
-            let chip_rect = RECT {
-                left: self.scale(12),
-                top: editor_bottom + self.scale(4),
-                right: self.scale(12) + chip_w,
-                bottom: rect.bottom - self.scale(4),
-            };
-            Self::rounded_fill(hdc, chip_rect, self.scale(4), rgb(24, 38, 70));
-            let use_theme = self.has_extension("material-icons");
-            match self.doc().path.as_deref() {
-                Some(path) => {
-                    self.icons.draw_for_path(
-                        hdc,
-                        path,
-                        false,
-                        false,
-                        use_theme,
-                        chip_rect.left + self.scale(6),
-                        chip_rect.top + self.scale(2),
-                        self.scale(15),
-                    );
-                }
-                None => {
-                    self.icons.draw_generic(
-                        hdc,
-                        GenericIcon::File,
-                        chip_rect.left + self.scale(6),
-                        chip_rect.top + self.scale(2),
-                        self.scale(15),
-                    );
-                }
-            }
+            // Durable repository health stays on the left; editor-specific
+            // details sit on the right beside the Ready indicator.
+            let branch = self.git_head_label();
+            let left_branch = format!("\u{2442}  {branch}");
+            let left_x = self.scale(16);
             Self::label(
                 hdc,
-                &file_label,
-                chip_rect.left + self.scale(24),
-                chip_rect.top + self.scale(2),
+                &left_branch,
+                left_x,
+                editor_bottom + self.scale(5),
                 self.theme.text,
-                chip_rect,
+                rect,
             );
+            let health_x = left_x + self.text_width(hdc, &left_branch) + self.scale(24);
+            Self::label(
+                hdc,
+                "⊗ 0    ⚠ 0",
+                health_x,
+                editor_bottom + self.scale(5),
+                self.theme.muted,
+                rect,
+            );
+            let left_info_right = health_x + self.text_width(hdc, "⊗ 0    ⚠ 0");
 
-            // Right side: branch and Ready status indicator
-            let branch = self.git_head_label();
-            let right_branch = format!("\u{2442}  {branch}");
             let right_ready = "\u{25cf}  Ready";
             let ready_width = self.text_width(hdc, right_ready);
-            let branch_width = self.text_width(hdc, &right_branch);
-
             let ready_x = rect.right - ready_width - self.scale(16);
-            let branch_x = ready_x - branch_width - self.scale(20);
-
-            Self::label(hdc, &right_branch, branch_x, editor_bottom + self.scale(4), self.theme.muted, rect);
-            Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(4), rgb(52, 211, 153), rect);
-            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(4), self.theme.text, rect);
+            Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(5), rgb(52, 211, 153), rect);
+            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(5), self.theme.text, rect);
 
             // Middle info: Ln, Col, Spaces, Encoding, Language. The language
             // name is a real clickable control (see status_language_control),
             // so it's drawn in the accent color used for other clickable
             // labels instead of blending into the plain muted text.
             let (mid_x, clip_right, prefix, language_rect) =
-                self.status_language_control(hdc, rect, editor_bottom, chip_rect.right, branch_x);
+                self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
             let label_clip = RECT { left: mid_x, top: editor_bottom, right: clip_right, bottom: rect.bottom };
-            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(4), self.theme.muted, label_clip);
+            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(5), self.theme.muted, label_clip);
             let language = language_label(self.doc().path.as_deref());
             Self::label(
                 hdc,
                 &language,
                 language_rect.left,
-                editor_bottom + self.scale(4),
+                editor_bottom + self.scale(5),
                 rgb(80, 160, 220),
                 label_clip,
             );

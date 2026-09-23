@@ -59,7 +59,7 @@ impl App {
                     right: layout.output.right - self.scale(14),
                     bottom: header_bottom,
                 },
-                self.theme.blue,
+                self.theme.violet,
             );
         }
 
@@ -70,7 +70,11 @@ impl App {
                 .get(index)
                 .map(|pane| pane.title.as_str())
                 .unwrap_or("?");
-            let label = format!("\u{2022} {title}");
+            let label = if self.terminals.len() == 1 {
+                "TERMINAL".to_string()
+            } else {
+                format!("TERMINAL {title}")
+            };
             let active = self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
             Self::label(
                 hdc,
@@ -89,7 +93,7 @@ impl App {
                         right: rect.right,
                         bottom: header_bottom,
                     },
-                    self.theme.blue,
+                    self.theme.violet,
                 );
             }
         }

@@ -23,9 +23,9 @@ use lightline::color_theme::{Rgba, ZedColorTheme};
 // (much too vivid) foreground color at full strength.
 fn composite(color: Rgba, backdrop: u32) -> u32 {
     let a = u32::from(color.a);
-    let br = (backdrop & 0xff) as u32;
-    let bg = ((backdrop >> 8) & 0xff) as u32;
-    let bb = ((backdrop >> 16) & 0xff) as u32;
+    let br = backdrop & 0xff;
+    let bg = (backdrop >> 8) & 0xff;
+    let bb = (backdrop >> 16) & 0xff;
     let blend = |fg: u8, bd: u32| -> u32 { (u32::from(fg) * a + bd * (255 - a)) / 255 };
     blend(color.r, br) | (blend(color.g, bg) << 8) | (blend(color.b, bb) << 16)
 }

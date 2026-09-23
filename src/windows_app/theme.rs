@@ -70,30 +70,29 @@ pub(super) struct Theme {
 }
 
 impl Theme {
-    // Every literal below is copied unchanged from the constants/inline
-    // colors it replaces -- this function must not change LightLine's
-    // default appearance.
+    // LightLine's first-party midnight palette. Runtime theme overrides still
+    // replace individual roles without changing the layout system.
     pub(super) fn default_dark() -> Self {
         use super::rgb;
-        let text = rgb(226, 234, 248);
-        let muted = rgb(136, 156, 188);
-        let blue = rgb(56, 189, 248);
-        let violet = rgb(147, 112, 255);
+        let text = rgb(226, 232, 240);
+        let muted = rgb(126, 146, 178);
+        let blue = rgb(82, 151, 255);
+        let violet = rgb(139, 92, 246);
         let teal = rgb(45, 212, 191);
-        let green = rgb(74, 222, 128);
+        let green = rgb(52, 211, 153);
         let warning = rgb(245, 184, 95);
         Self {
-            shell_bg: rgb(8, 12, 22),
-            card_edge: rgb(32, 48, 80),
-            editor_bg: rgb(10, 16, 30),
-            rail_bg: rgb(10, 15, 28),
-            sidebar_bg: rgb(11, 18, 34),
-            tab_bg: rgb(11, 18, 34),
-            active_bg: rgb(20, 32, 60),
-            status_bg: rgb(10, 16, 28),
-            line_bg: rgb(18, 28, 50),
-            select_bg: rgb(28, 48, 96),
-            edge: rgb(28, 42, 70),
+            shell_bg: rgb(5, 10, 22),
+            card_edge: rgb(27, 48, 82),
+            editor_bg: rgb(7, 14, 29),
+            rail_bg: rgb(7, 13, 27),
+            sidebar_bg: rgb(8, 16, 32),
+            tab_bg: rgb(8, 17, 34),
+            active_bg: rgb(17, 31, 59),
+            status_bg: rgb(7, 14, 29),
+            line_bg: rgb(14, 31, 61),
+            select_bg: rgb(26, 48, 101),
+            edge: rgb(24, 47, 82),
             text,
             muted,
             blue,

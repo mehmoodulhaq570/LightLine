@@ -1236,6 +1236,22 @@ impl App {
         self.chrome_top() + self.scale(TAB_HEIGHT)
     }
 
+    // The command center is shared by painting and hit testing. Keeping it in
+    // the tab chrome makes Quick Open discoverable without spending another
+    // permanent row of vertical editor space.
+    pub(super) fn command_center_rect(&self, hwnd: HWND) -> RECT {
+        let editor_right = self.editor_right(hwnd);
+        let available = (editor_right - self.editor_left()).max(0);
+        let width = self.scale(410).min((available / 2).max(self.scale(230)));
+        let right = editor_right - self.scale(92);
+        RECT {
+            left: (right - width).max(self.editor_left() + self.scale(210)),
+            top: self.chrome_top() + self.scale(6),
+            right,
+            bottom: self.tab_strip_bottom() - self.scale(6),
+        }
+    }
+
     // Right edge of the side panel card, which is one gap left of the editor.
     pub(super) fn sidebar_right(&self) -> i32 {
         self.scale(RAIL + self.sidebar_width)
@@ -1702,7 +1718,7 @@ impl App {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".into());
         let title = format!(
-            "{}{} — LightLine",
+            "{}{} — LightLine IDE",
             file,
             if self.doc().is_dirty() { " *" } else { "" }
         );

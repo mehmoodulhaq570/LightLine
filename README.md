@@ -105,7 +105,7 @@ Open settings with **`Ctrl+,`** or run **`>Open Settings (JSON)`** from `Ctrl+P`
   "formatOnSave": false,
   "bracketMatching": true,
   "indentGuides": true,
-  "minimap": false,
+  "minimap": true,
   "smoothScrolling": false,
   "parseLimitKb": 128,
   "colors": {

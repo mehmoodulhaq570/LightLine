@@ -75,22 +75,24 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-const RAIL: i32 = 152;
-const SIDEBAR: i32 = 180;
+// Compact workbench proportions. The activity bar intentionally carries only
+// icons; the Explorer owns the readable labels and project hierarchy.
+const RAIL: i32 = 56;
+const SIDEBAR: i32 = 286;
 const GUTTER: i32 = 62;
-const TOP: i32 = 7;
-const STATUS: i32 = 27;
+const TOP: i32 = 5;
+const STATUS: i32 = 29;
 const PAD: i32 = 10;
-const TAB_HEIGHT: i32 = 38;
-const BREADCRUMB_HEIGHT: i32 = 27;
+const TAB_HEIGHT: i32 = 42;
+const BREADCRUMB_HEIGHT: i32 = 30;
 const TAB_WIDTH: i32 = 180;
-const EXPLORER_ROW: i32 = 24;
-const EXPLORER_TOP: i32 = 78;
-const RAIL_FIRST_ROW: i32 = 48;
-const RAIL_ROW: i32 = 32;
+const EXPLORER_ROW: i32 = 27;
+const EXPLORER_TOP: i32 = 82;
+const RAIL_FIRST_ROW: i32 = 58;
+const RAIL_ROW: i32 = 52;
 // Gutter between the floating side-panel / editor / terminal cards.
-const CARD_GAP: i32 = 8;
-const CARD_RADIUS: i32 = 10;
+const CARD_GAP: i32 = 1;
+const CARD_RADIUS: i32 = 4;
 const TRANSITION_MS: u128 = 150;
 fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
     ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32

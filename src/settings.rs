@@ -36,7 +36,7 @@ impl Default for Settings {
             format_on_save: false,
             bracket_matching: true,
             indent_guides: true,
-            minimap: false,
+            minimap: true,
             smooth_scrolling: false,
             parse_limit_kb: 128,
             colors: HashMap::new(),
@@ -221,8 +221,10 @@ mod tests {
 
     #[test]
     fn format_on_save_round_trips() {
-        let mut s = Settings::default();
-        s.format_on_save = true;
+        let s = Settings {
+            format_on_save: true,
+            ..Settings::default()
+        };
         let loaded = Settings::from_json(&s.to_json());
         assert!(loaded.format_on_save);
     }

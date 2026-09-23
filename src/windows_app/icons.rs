@@ -90,6 +90,7 @@ impl IconSet {
     // matching entry, that SVG is used; otherwise this draws the theme's own
     // generic file/folder icon, so toggling Material Icons off still shows
     // something rather than nothing.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn draw_for_path(
         &self,
         hdc: HDC,
@@ -185,7 +186,7 @@ impl IconSet {
             bmi.bmiHeader.biHeight = -(size as i32);
             bmi.bmiHeader.biPlanes = 1;
             bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = BI_RGB as u32;
+            bmi.bmiHeader.biCompression = BI_RGB;
             let mut bits_ptr: *mut core::ffi::c_void = null_mut();
             let color = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits_ptr, null_mut(), 0);
             if color.is_null() || bits_ptr.is_null() {

@@ -11,8 +11,8 @@ impl App {
         unsafe {
             DrawIconEx(
                 hdc,
-                self.scale(10),
-                self.scale(5),
+                self.scale(12),
+                self.scale(9),
                 self.brand_icon,
                 self.scale(32),
                 self.scale(32),
@@ -20,41 +20,19 @@ impl App {
                 null_mut(),
                 DI_NORMAL,
             );
-            SelectObject(hdc, self.brand_font);
+            SelectObject(hdc, self.ui_font);
         }
-        Self::label(hdc, "LightLine", self.scale(48), self.scale(9), self.theme.text, clip);
-        Self::rounded_fill(
-            hdc,
-            RECT {
-                left: self.scale(118),
-                top: self.scale(13),
-                right: self.scale(146),
-                bottom: self.scale(29),
-            },
-            self.scale(6),
-            rgb(61, 45, 145),
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(hdc, "IDE", self.scale(121), self.scale(12), self.theme.text, clip);
         Self::fill(
             hdc,
             RECT {
                 left: 0,
-                top: self.scale(40),
+                top: self.scale(49),
                 right: self.scale(RAIL),
-                bottom: self.scale(41),
+                bottom: self.scale(50),
             },
             self.theme.edge,
         );
 
-        let labels = [
-            "Explorer",
-            "Search",
-            "Source Control",
-            "Run & Debug",
-            "Extensions",
-            "AI Assistant",
-        ];
         let selected = match self.side_view {
             SideView::Files => self.explorer_visible.then_some(0),
             SideView::Search => self.explorer_visible.then_some(1),
@@ -62,18 +40,28 @@ impl App {
             SideView::Debug => self.explorer_visible.then_some(3),
             SideView::Extensions => self.explorer_visible.then_some(4),
         };
-        for (index, label) in labels.iter().enumerate() {
+        for index in 0..6 {
             let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
             let is_selected = selected == Some(index)
                 || (index == 5 && self.ai_assistant_visible);
             if is_selected {
                 let pill = RECT {
-                    left: self.scale(8),
+                    left: self.scale(7),
                     top,
-                    right: self.scale(RAIL - 8),
-                    bottom: top + self.scale(28),
+                    right: self.scale(RAIL - 7),
+                    bottom: top + self.scale(42),
                 };
-                self.panel_card(hdc, pill, self.scale(6), rgb(45, 78, 140), rgb(24, 40, 78));
+                self.panel_card(hdc, pill, self.scale(7), rgb(50, 84, 154), rgb(18, 35, 72));
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: 0,
+                        top: top + self.scale(5),
+                        right: self.scale(3),
+                        bottom: top + self.scale(37),
+                    },
+                    self.theme.violet,
+                );
             }
             let color = if is_selected {
                 rgb(240, 245, 255)
@@ -83,21 +71,15 @@ impl App {
             self.rail_icon(
                 hdc,
                 index,
-                self.scale(23),
-                top + self.scale(5),
+                self.scale(19),
+                top + self.scale(11),
                 if is_selected { rgb(56, 189, 248) } else { color },
             );
-            Self::label(hdc, label, self.scale(48), top + self.scale(5), color, clip);
         }
-        let name = self
-            .workspace_root
-            .as_ref()
-            .and_then(|r| r.file_name())
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_else(|| "my-project".into());
+        let name = "";
         Self::label(
             hdc,
-            "WORKSPACE",
+            "",
             self.scale(20),
             editor_bottom - self.scale(104),
             self.theme.muted,
@@ -105,16 +87,16 @@ impl App {
         );
         Self::label(
             hdc,
-            &name,
+            name,
             self.scale(20),
             editor_bottom - self.scale(82),
             self.theme.text,
             clip,
         );
-        let branch = self.git_head_label();
+        let branch = "";
         Self::label(
             hdc,
-            &format!("\u{2442}  {branch}"),
+            &format!("◎{branch}"),
             self.scale(20),
             editor_bottom - self.scale(58),
             self.theme.muted,
@@ -122,7 +104,7 @@ impl App {
         );
         Self::label(
             hdc,
-            "\u{2699}   \u{2192}",
+            "⚙",
             self.scale(20),
             editor_bottom - self.scale(32),
             self.theme.muted,
