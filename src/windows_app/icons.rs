@@ -1,3 +1,4 @@
+use super::builtin_icons::BuiltinIcon;
 use lightline::icon_theme::IconTheme;
 use resvg::{tiny_skia, usvg};
 use std::cell::RefCell;
@@ -70,6 +71,7 @@ pub(super) struct IconSet {
     // icons in a session (whatever file types/folder names they actually
     // have open), so eagerly converting the rest would be pure waste.
     svg_cache: RefCell<HashMap<PathBuf, HICON>>,
+    builtin_cache: RefCell<HashMap<BuiltinIcon, HICON>>,
 }
 
 impl IconSet {
@@ -82,14 +84,14 @@ impl IconSet {
             theme,
             size,
             svg_cache: RefCell::new(HashMap::new()),
+            builtin_cache: RefCell::new(HashMap::new()),
         }
     }
 
     // Draws the icon for `path` (or, for a folder, `is_dir`/`expanded`) at
     // (x, y). When `use_theme` is true and the installed icon theme has a
-    // matching entry, that SVG is used; otherwise this draws the theme's own
-    // generic file/folder icon, so toggling Material Icons off still shows
-    // something rather than nothing.
+    // matching entry, that SVG is used; otherwise this falls back to our
+    // bundled authentic vector SVG catalog.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn draw_for_path(
         &self,
@@ -107,31 +109,49 @@ impl IconSet {
         {
             return unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 };
         }
-        let generic = if is_dir {
-            if expanded { GenericIcon::FolderOpen } else { GenericIcon::Folder }
-        } else {
-            GenericIcon::File
-        };
-        self.draw_generic(hdc, generic, x, y, size)
+        let builtin = BuiltinIcon::resolve_for_path(path, is_dir, expanded);
+        self.draw_builtin(hdc, builtin, x, y, size)
     }
 
     // Draws a plain file/folder glyph that isn't resolved from any
     // particular name -- the welcome screen's "Open Folder" icon, the
     // explorer's workspace-root row, the Extensions panel's icon badges.
     pub(super) fn draw_generic(&self, hdc: HDC, kind: GenericIcon, x: i32, y: i32, size: i32) -> bool {
-        let Some(theme) = self.theme.as_ref() else {
-            return false;
+        if let Some(theme) = self.theme.as_ref() {
+            let svg_path = match kind {
+                GenericIcon::File => theme.generic_file_icon(),
+                GenericIcon::Folder => theme.generic_folder_icon(false),
+                GenericIcon::FolderOpen => theme.generic_folder_icon(true),
+                GenericIcon::FolderSrc => theme.resolve_directory("src", false),
+            };
+            if let Some(icon) = svg_path.and_then(|path| self.cached_icon(hdc, path)) {
+                return unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 };
+            }
+        }
+        let builtin = match kind {
+            GenericIcon::File => BuiltinIcon::File,
+            GenericIcon::Folder => BuiltinIcon::Folder,
+            GenericIcon::FolderOpen => BuiltinIcon::FolderOpen,
+            GenericIcon::FolderSrc => BuiltinIcon::FolderSrc,
         };
-        let svg_path = match kind {
-            GenericIcon::File => theme.generic_file_icon(),
-            GenericIcon::Folder => theme.generic_folder_icon(false),
-            GenericIcon::FolderOpen => theme.generic_folder_icon(true),
-            GenericIcon::FolderSrc => theme.resolve_directory("src", false),
-        };
-        let Some(icon) = svg_path.and_then(|path| self.cached_icon(hdc, path)) else {
+        self.draw_builtin(hdc, builtin, x, y, size)
+    }
+
+    pub(super) fn draw_builtin(&self, hdc: HDC, kind: BuiltinIcon, x: i32, y: i32, size: i32) -> bool {
+        let Some(icon) = self.cached_builtin(hdc, kind) else {
             return false;
         };
         unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 }
+    }
+
+    fn cached_builtin(&self, hdc: HDC, kind: BuiltinIcon) -> Option<HICON> {
+        if let Some(&icon) = self.builtin_cache.borrow().get(&kind) {
+            return Some(icon);
+        }
+        let svg = kind.svg_str();
+        let icon = Self::svg_to_hicon(hdc, svg.as_bytes(), self.size)?;
+        self.builtin_cache.borrow_mut().insert(kind, icon);
+        Some(icon)
     }
 
     fn themed_icon(&self, hdc: HDC, path: &Path, is_dir: bool, expanded: bool) -> Option<HICON> {
@@ -266,12 +286,52 @@ impl Drop for IconSet {
                 unsafe { DestroyIcon(*icon) };
             }
         }
+        for icon in self.builtin_cache.borrow().values() {
+            if !icon.is_null() {
+                unsafe { DestroyIcon(*icon) };
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod icon_tests {
     use super::*;
+
+    #[test]
+    fn all_builtin_icons_rasterize_cleanly() {
+        let hdc = unsafe { GetDC(null_mut()) };
+        let all_icons = [
+            BuiltinIcon::Folder,
+            BuiltinIcon::FolderOpen,
+            BuiltinIcon::FolderSrc,
+            BuiltinIcon::File,
+            BuiltinIcon::Rust,
+            BuiltinIcon::Python,
+            BuiltinIcon::Markdown,
+            BuiltinIcon::Toml,
+            BuiltinIcon::Json,
+            BuiltinIcon::Yaml,
+            BuiltinIcon::Git,
+            BuiltinIcon::Html,
+            BuiltinIcon::Css,
+            BuiltinIcon::JavaScript,
+            BuiltinIcon::TypeScript,
+            BuiltinIcon::Image,
+            BuiltinIcon::Script,
+            BuiltinIcon::Lock,
+            BuiltinIcon::Document,
+        ];
+        for icon_kind in all_icons {
+            let svg = icon_kind.svg_str();
+            let icon = IconSet::svg_to_hicon(hdc, svg.as_bytes(), 18);
+            assert!(icon.is_some(), "failed to rasterize builtin icon {icon_kind:?}");
+            let icon = icon.unwrap();
+            assert!(!icon.is_null());
+            unsafe { DestroyIcon(icon) };
+        }
+        unsafe { ReleaseDC(null_mut(), hdc) };
+    }
 
     #[test]
     fn lightline_app_icon_loads_at_ui_sizes() {

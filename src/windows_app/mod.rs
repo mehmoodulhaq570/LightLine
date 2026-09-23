@@ -1,5 +1,6 @@
 mod app;
 mod binary_view;
+mod builtin_icons;
 mod dialog;
 mod file_dialog;
 mod git;
@@ -88,7 +89,7 @@ const TAB_HEIGHT: i32 = 42;
 const BREADCRUMB_HEIGHT: i32 = 30;
 const TAB_WIDTH: i32 = 180;
 const EXPLORER_ROW: i32 = 27;
-const EXPLORER_TOP: i32 = 82;
+const EXPLORER_TOP: i32 = 71;
 const RAIL_FIRST_ROW: i32 = 10;
 const RAIL_ROW: i32 = 52;
 // Gutter between the floating side-panel / editor / terminal cards.

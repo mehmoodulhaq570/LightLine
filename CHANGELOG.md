@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-09-24
+
+#### Changed
+- **Professional Welcome Dashboard**: Rebuilt the Welcome screen to match the main workbench's midnight-blue visual system, with the compact LightLine title bar, centered command search, icon-only activity rail, polished quick-start cards, recent projects, Quick Actions, Getting Started, and Community panels.
+- **Responsive DPI-Aware Layout**: Rebalanced the Welcome dashboard for maximized Windows displays and 125% scaling so all launch cards, recent projects, and six Quick Actions remain visible without forcing fullscreen behavior or clipping the right column.
+- **Consistent Workbench Interaction**: The global command center and minimize, maximize/restore, and close controls now use the same geometry and behavior on both the Welcome screen and editor.
+- **Documentation Screenshot**: Updated the README Welcome image to show the implemented native interface rather than an earlier layout.
+- **Explorer Sort Order**: Removed the special case that pinned a folder named `src` above all others. Folders now sort purely alphabetically (dot-folders first), followed by files.
+- **Explorer Row Spacing**: The first item under the workspace root is now one normal row (27px) below it instead of about 38px, so the root sits closer to its children. Rendering, click handling and scrolling share the same `EXPLORER_TOP` constant, so all three moved together.
+
+#### Fixed
+- **Welcome Header Controls Ignored**: Page-specific Welcome hit testing previously intercepted clicks before the custom title bar could handle window controls or open Quick Open.
+- **GitHub Actions Clippy Failure**: Updated SVG pixel conversion for Rust 1.98's `chunks_exact_to_as_chunks` lint, which was promoted to an error by the workflow's `-D warnings` setting. The locked test suite and strict all-target Clippy check now pass locally.
+- **Extension Marketplace Preservation**: Confirmed the Welcome/workbench redesign continues to route the Extensions activity to the existing dynamic Zed registry; no marketplace, search, install, uninstall, icon-theme, or color-theme logic was removed.
+
 ### 2026-09-23
 
 #### Added

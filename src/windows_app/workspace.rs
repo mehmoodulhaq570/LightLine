@@ -23,13 +23,7 @@ impl App {
             .collect();
         entries.sort_by(|a, b| {
             let rank = |entry: &ExplorerEntry| {
-                if entry.is_dir && entry.path.file_name().is_some_and(|name| name == "src") {
-                    0
-                } else if entry.is_dir {
-                    1
-                } else {
-                    2
-                }
+                if entry.is_dir { 0 } else { 1 }
             };
             rank(a).cmp(&rank(b)).then_with(|| {
                 a.path

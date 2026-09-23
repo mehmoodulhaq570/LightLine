@@ -658,27 +658,8 @@ impl App {
                         .unwrap_or_else(|| display_path(root));
                     let root_expanded = self.expanded_dirs.contains(root);
                     self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), root_expanded);
-                    if !self.icons.draw_generic(
-                        hdc,
-                        if root_expanded {
-                            GenericIcon::FolderOpen
-                        } else {
-                            GenericIcon::Folder
-                        },
-                        self.scale(RAIL + 23),
-                        self.scale(48),
-                        self.scale(17),
-                    ) {
-                        self.draw_vector_folder(
-                            hdc,
-                            self.scale(RAIL + 23),
-                            self.scale(48),
-                            self.scale(17),
-                            root_expanded,
-                        );
-                    }
                     let root_clip = RECT {
-                        left: self.scale(RAIL + 44),
+                        left: self.scale(RAIL + 28),
                         top: self.scale(40),
                         right: editor_left - self.scale(96),
                         bottom: self.scale(70),
@@ -686,7 +667,7 @@ impl App {
                     Self::label(
                         hdc,
                         &root_name,
-                        self.scale(RAIL + 44),
+                        self.scale(RAIL + 28),
                         self.scale(49),
                         self.theme.text,
                         root_clip,
