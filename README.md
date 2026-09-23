@@ -28,7 +28,8 @@
 - 🧠 **Integrated Language Support (LSP)**: Automatic background support for **rust-analyzer** and **Pyright** (self-installing): diagnostics, hover (`F1`), go-to-definition (`F12`), find references (`Shift+F12`), autocompletion (`Ctrl+Space`), and formatting (`Shift+Alt+F`).
 - 🎨 **Real Prettier + Formatter Framework**: Formatting runs through a generic, timeout-protected `Formatter` interface — Prettier is the first implementation, with `Shift+Alt+F` Format Document and an optional Format on Save setting, and room for rustfmt/Black/clang-format next.
 - 💻 **Multi-Session Terminal**: Persistent ConPTY terminal with multiple tabs and full VT100/ANSI support, cleanly separated from the read-only build/run **Output** stream — and the Output pane now correctly takes keyboard input while your program is actually running.
-- 🗂️ **Workspaces & Project Drawer**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation.
+- 🗂️ **Workspaces & Full Explorer Operations**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation. Full file and folder management in the sidebar: create files/folders (`+`, `+Folder`), inline creation and renaming, right-click context menu (`New File`, `New Folder`, `Reveal in File Explorer`, `Copy Path`, `Rename`, `Delete`), safe deletion with dark confirmation dialog, and workspace close/discard (`>Close Workspace`).
+- 🏛️ **Workbench Header & Command Center**: Sleek top-level application bar with brand mark, centered Quick Open command center, and native window controls.
 - 🌿 **Source Control**: Stage, commit and discard from the sidebar (`Ctrl+Shift+G`). Separate Staged and Changes lists, word status labels, ahead/behind branch chip, side-by-side diff review that jumps into the file, recent commit history, and Push/Pull/Fetch handed to Git Credential Manager.
 - 🐞 **Interactive Debugger**: Built-in Debug Adapter Protocol (DAP) client communicating with `lldb-dap`. Single-key build and launch (`F5`), editor gutter breakpoints, stepping (`F10`, `F11`, `Shift+F11`), expandable variable scope trees (locals, registers, nested struct/collection values), and call stack navigation. Run/Debug now also compiles and runs **C/C++** directly, alongside Python and Rust.
 - 🧩 **Real Zed Extensions**: The Extensions panel (`Ctrl+Shift+X`) installs actual extensions from the live [Zed registry](https://github.com/zed-industries/extensions) — search any extension by name, install/uninstall for real. Material Icon Theme ships this way out of the box (1000+ real icons), and installing a Zed **color theme** (e.g. Dracula) changes LightLine's editor colors live, no restart.
@@ -85,6 +86,9 @@ cargo run --release
 | `Shift+F12` | Find all references to the symbol at cursor |
 | `Ctrl+Space` | Trigger autocompletion popup |
 | `Shift+Alt+F` | Format active document (Prettier, or the active language server) |
+| `F2` | In Explorer: Rename selected file or folder |
+| `Delete` | In Explorer: Delete selected file or folder (with confirmation) |
+| `>Close Workspace` | Command Palette: Close active workspace and return to Welcome screen |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom UI in / out / reset to 100% |
 
 ---
@@ -148,8 +152,10 @@ Any other extension type (language servers, procedural/WASM extensions) is repor
 
 ---
 
-## Project Documentation
+## Project Documentation & Contributing
 
-- [v0.1 Architecture Document](docs/ARCHITECTURE.md)
-- [Reference Visual Adaptation](design/REFERENCE_ADAPTATION.md)
+- [Architecture & System Map](ARCHITECTURE.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Version Changelog](CHANGELOG.md)
+- [Reference Visual Adaptation](design/REFERENCE_ADAPTATION.md)

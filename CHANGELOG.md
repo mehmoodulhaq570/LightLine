@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inline Tree Creation & Rename**: Creating or renaming items renders an active input capsule with cursor directly inside the tree (press `Enter` to commit, `Esc` to cancel).
 - **Safe Deletion with Dark Confirmation**: Deleting files or directories displays LightLine's custom dark confirmation dialog, automatically closes open tabs for deleted files, and updates the directory tree.
 - **Close Workspace / Discard Project**: Added `>Close Workspace` to Command Palette and Explorer header, allowing clean reset back to the Welcome screen.
+- **Workbench Header & Centered Command Center**: Dedicated top-level header bar with the brand mark, centered Quick Open command center, and native window controls.
+- **Open-Source Documentation Suite**: Added `CONTRIBUTING.md` (Win32/Rust development guide, PR requirements), `ARCHITECTURE.md` (Mermaid architectural diagram and module breakdown), and `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1).
+- **CI/CD Pipeline Streamlining**: Automated GitHub Actions testing workflow for `cargo build`, `cargo test`, and `cargo clippy`.
 
 #### Fixed
 - **Explorer Disappearing Files On Watcher Event**: Fixed directory cache eviction where `WatchEvent::DirectoryChanged` removed directories from `directory_cache` without reloading them, causing all files in the Explorer tree to vanish. Added defensive reloading in paint cycle and automatic reloading of open workspace and expanded directories.
