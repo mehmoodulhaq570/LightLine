@@ -263,6 +263,12 @@ unsafe extern "system" fn wnd_proc(
             }
             0
         }
+        WM_RBUTTONUP => {
+            let x = (lparam as u32 & 0xffff) as i16 as i32;
+            let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+            app.mouse_right_click(hwnd, x, y);
+            0
+        }
         WM_MOUSEWHEEL => {
             let delta = (wparam >> 16) as i16;
             let mut point = POINT::default();

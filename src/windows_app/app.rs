@@ -195,7 +195,7 @@ pub(super) fn is_cpp_path(path: &Path) -> bool {
 }
 
 impl Tab {
-    fn new(document: Document) -> Self {
+    pub(super) fn new(document: Document) -> Self {
         let syntax = if Self::is_rust(&document) {
             Some(Syntax::new_rust())
         } else if Self::is_python(&document) {
@@ -308,6 +308,15 @@ impl Tab {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct ExplorerInputState {
+    pub is_folder: bool,
+    pub is_rename: bool,
+    pub target_dir: PathBuf,
+    pub old_path: Option<PathBuf>,
+    pub buffer: String,
+}
+
 pub(super) struct App {
     pub(super) tabs: Vec<Tab>,
     pub(super) active: usize,
@@ -368,6 +377,8 @@ pub(super) struct App {
     pub(super) terminal_select_anchor: Option<(u16, u16)>,
     pub(super) terminal_select_end: Option<(u16, u16)>,
     pub(super) explorer_first_row: usize,
+    pub(super) explorer_input: Option<ExplorerInputState>,
+    pub(super) selected_explorer_path: Option<PathBuf>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) workspace_branch: Option<String>,
     pub(super) expanded_dirs: HashSet<PathBuf>,
@@ -769,6 +780,8 @@ impl App {
             terminal_select_anchor: None,
             terminal_select_end: None,
             explorer_first_row: 0,
+            explorer_input: None,
+            selected_explorer_path: None,
             workspace_root: None,
             workspace_branch: None,
             expanded_dirs: HashSet::new(),
@@ -1463,6 +1476,9 @@ impl App {
         self.start_transition(hwnd);
         self.tabs.remove(index);
         if self.tabs.is_empty() {
+            if self.workspace_root.is_none() {
+                self.welcome = true;
+            }
             self.tabs.push(Tab::new(Document::new()));
             self.pane_tabs = [0, 0];
         } else {
@@ -1923,6 +1939,9 @@ impl App {
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
                     self.directory_cache.remove(&dir);
+                    if self.workspace_root.as_ref() == Some(&dir) || self.expanded_dirs.contains(&dir) {
+                        self.load_directory(&dir);
+                    }
                     needs_refresh = true;
                 }
             }
@@ -2077,7 +2096,7 @@ impl App {
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
                     self.directory_cache.remove(parent);
-                    if self.expanded_dirs.contains(parent) {
+                    if self.expanded_dirs.contains(parent) || self.workspace_root.as_deref() == Some(parent) {
                         self.load_directory(parent);
                     }
                 }
@@ -2310,5 +2329,44 @@ mod split_tests {
         assert!(extensions[0].installed);
         extensions[0].installed = !extensions[0].installed;
         assert!(!extensions[0].installed);
+    }
+
+    #[test]
+    fn explorer_input_state_initialization() {
+        let state = ExplorerInputState {
+            is_folder: false,
+            is_rename: false,
+            target_dir: PathBuf::from("C:\\test\\workspace"),
+            old_path: None,
+            buffer: "hello.rs".into(),
+        };
+        assert!(!state.is_folder);
+        assert!(!state.is_rename);
+        assert_eq!(state.buffer, "hello.rs");
+        assert_eq!(state.target_dir, PathBuf::from("C:\\test\\workspace"));
+    }
+
+    #[test]
+    fn explorer_file_create_rename_delete() {
+        let temp_dir = std::env::temp_dir().join(format!("lightline_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create file
+        let file_path = temp_dir.join("test_file.txt");
+        std::fs::File::create(&file_path).unwrap();
+        assert!(file_path.exists());
+
+        // Rename file
+        let new_file_path = temp_dir.join("renamed_file.txt");
+        std::fs::rename(&file_path, &new_file_path).unwrap();
+        assert!(!file_path.exists());
+        assert!(new_file_path.exists());
+
+        // Delete file
+        std::fs::remove_file(&new_file_path).unwrap();
+        assert!(!new_file_path.exists());
+
+        // Clean up temp dir
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

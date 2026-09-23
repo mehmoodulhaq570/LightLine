@@ -63,6 +63,10 @@ impl App {
             ("Find and Replace", 18),
             ("Run C/C++ File", 19),
             ("Find All References", 20),
+            ("Close Workspace", 21),
+            ("New File in Workspace", 22),
+            ("New Folder in Workspace", 23),
+            ("Refresh Explorer", 24),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -124,6 +128,24 @@ impl App {
                     self.update_find_replace_status();
                 }
                 Some(19) => self.run_c_file(hwnd),
+                Some(21) => self.close_workspace(hwnd),
+                Some(22) => {
+                    if let Some(root) = self.workspace_root.clone() {
+                        self.start_explorer_input(root, false, false, None, hwnd);
+                    }
+                }
+                Some(23) => {
+                    if let Some(root) = self.workspace_root.clone() {
+                        self.start_explorer_input(root, true, false, None, hwnd);
+                    }
+                }
+                Some(24) => {
+                    self.directory_cache.clear();
+                    if let Some(root) = self.workspace_root.clone() {
+                        self.load_directory(&root);
+                    }
+                    self.refresh(hwnd);
+                }
                 _ => {}
             }
         } else {

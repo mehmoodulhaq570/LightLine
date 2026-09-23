@@ -62,6 +62,50 @@ impl App {
             self.show_active_tab(hwnd);
             return true;
         }
+        if let Some(input) = self.explorer_input.clone() {
+            match key {
+                x if x == VK_ESCAPE as u32 => {
+                    self.explorer_input = None;
+                    self.refresh(hwnd);
+                }
+                x if x == VK_BACK as u32 => {
+                    if let Some(input) = &mut self.explorer_input {
+                        input.buffer.pop();
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
+                x if x == VK_RETURN as u32 => {
+                    let buf = input.buffer.trim().to_string();
+                    self.explorer_input = None;
+                    if !buf.is_empty() {
+                        if input.is_rename {
+                            if let Some(old) = input.old_path {
+                                self.rename_entry(hwnd, &old, &buf);
+                            }
+                        } else if input.is_folder {
+                            self.create_folder_at(hwnd, &input.target_dir, &buf);
+                        } else {
+                            self.create_file_at(hwnd, &input.target_dir, &buf);
+                        }
+                    }
+                    self.refresh(hwnd);
+                }
+                _ => {}
+            }
+            return true;
+        }
+        if key == VK_DELETE as u32
+            && self.side_view == SideView::Files
+            && self.explorer_visible
+            && self.panel_focus
+            && !self.quick_open
+            && self.explorer_input.is_none()
+        {
+            if let Some(path) = self.selected_explorer_path.clone() {
+                self.delete_entry(hwnd, &path);
+                return true;
+            }
+        }
         if self.quick_open {
             match key {
                 x if x == VK_ESCAPE as u32 => self.quick_open = false,
@@ -745,6 +789,15 @@ impl App {
             }
             return;
         }
+        if let Some(input) = &mut self.explorer_input {
+            if unit >= 32 && unit != 127 && let Some(ch) = char::from_u32(unit as u32) {
+                if !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(&ch) {
+                    input.buffer.push(ch);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
+            }
+            return;
+        }
         if self.commit_focus && self.side_view == SideView::Review {
             // Control characters arrive through key(); only real text lands here.
             if unit >= 32 && unit != 127 && let Some(ch) = char::from_u32(unit as u32) {
@@ -1108,20 +1161,18 @@ impl App {
             if !self.explorer_visible {
                 return;
             }
-            if y < self.scale(39) && x >= editor_left - self.scale(36) {
-                self.set_sidebar_visible(hwnd, false);
-                return;
-            }
-            if self.side_view == SideView::Files
-                && y >= self.scale(15)
-                && y < self.scale(26)
-                && x >= self.scale(RAIL + 12)
-                && x < self.scale(RAIL + 23)
-            {
-                self.expanded_dirs.clear();
-                self.explorer_first_row = 0;
-                self.refresh(hwnd);
-                return;
+            if y < self.scale(39) {
+                if x >= editor_left - self.scale(26) {
+                    self.set_sidebar_visible(hwnd, false);
+                    return;
+                }
+                if self.side_view == SideView::Files
+                    && x >= editor_left - self.scale(50)
+                    && x < editor_left - self.scale(26)
+                {
+                    self.collapse_all_folders(hwnd);
+                    return;
+                }
             }
             if self.side_view == SideView::Search {
                 if y >= self.scale(47) && y < self.scale(78) {
@@ -1277,15 +1328,54 @@ impl App {
                 }
                 return;
             }
+            if self.explorer_input.is_some() {
+                self.explorer_input = None;
+                self.refresh(hwnd);
+            }
+            if y >= self.scale(40) && y < self.scale(EXPLORER_TOP) {
+                if let Some(root) = self.workspace_root.clone() {
+                    let s = |v: i32| self.scale(v);
+                    if x >= editor_left - s(26) && x <= editor_left - s(4) {
+                        self.close_workspace(hwnd);
+                        return;
+                    } else if x >= editor_left - s(48) && x < editor_left - s(26) {
+                        self.directory_cache.clear();
+                        self.load_directory(&root);
+                        self.refresh(hwnd);
+                        return;
+                    } else if x >= editor_left - s(70) && x < editor_left - s(48) {
+                        let target = self.selected_dir_or_root().unwrap_or(root);
+                        self.start_explorer_input(target, true, false, None, hwnd);
+                        return;
+                    } else if x >= editor_left - s(92) && x < editor_left - s(70) {
+                        let target = self.selected_dir_or_root().unwrap_or(root);
+                        self.start_explorer_input(target, false, false, None, hwnd);
+                        return;
+                    } else {
+                        if self.expanded_dirs.contains(&root) {
+                            self.expanded_dirs.remove(&root);
+                        } else {
+                            self.expanded_dirs.insert(root.clone());
+                            self.load_directory(&root);
+                        }
+                        self.selected_explorer_path = Some(root);
+                        self.panel_focus = true;
+                        self.refresh(hwnd);
+                        return;
+                    }
+                }
+            }
             if y >= rect.bottom - self.scale(STATUS + 35) {
                 self.show_active_tab(hwnd);
                 return;
             }
             if y >= self.scale(EXPLORER_TOP) && y < rect.bottom - self.scale(STATUS + 38) {
+                self.panel_focus = true;
                 let row = self.explorer_first_row
                     + ((y - self.scale(EXPLORER_TOP)) / self.scale(EXPLORER_ROW)) as usize;
                 if let Some(item) = self.explorer_rows().get(row) {
                     let path = item.entry.path.clone();
+                    self.selected_explorer_path = Some(path.clone());
                     if item.entry.is_dir {
                         if self.expanded_dirs.remove(&path) {
                             self.explorer_first_row = self
@@ -1453,5 +1543,163 @@ impl App {
         let pos = self.position_at(hwnd, x, y);
         self.move_cursor(pos, true);
         self.refresh(hwnd);
+    }
+
+    pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
+        let editor_left = self.editor_left();
+        let rail = self.scale(RAIL);
+        if x < rail || x >= editor_left || self.side_view != SideView::Files || !self.explorer_visible {
+            return;
+        }
+        let Some(root) = self.workspace_root.clone() else {
+            return;
+        };
+
+        let mut target_path: Option<PathBuf> = None;
+        let mut is_dir = true;
+
+        let row_top = self.scale(EXPLORER_TOP);
+        if y >= row_top {
+            let row_idx = self.explorer_first_row
+                + ((y - row_top) / self.scale(EXPLORER_ROW)) as usize;
+            if let Some(row) = self.explorer_rows().get(row_idx) {
+                target_path = Some(row.entry.path.clone());
+                is_dir = row.entry.is_dir;
+                self.selected_explorer_path = Some(row.entry.path.clone());
+            }
+        }
+
+        if target_path.is_none() {
+            target_path = Some(root.clone());
+            is_dir = true;
+            self.selected_explorer_path = Some(root.clone());
+        }
+
+        let clicked_path = target_path.unwrap();
+
+        use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            AppendMenuW, CreatePopupMenu, DestroyMenu, TrackPopupMenu, MF_SEPARATOR, MF_STRING,
+            TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        };
+
+        unsafe {
+            let menu = CreatePopupMenu();
+            if menu.is_null() {
+                return;
+            }
+
+            const CMD_NEW_FILE: usize = 1;
+            const CMD_NEW_FOLDER: usize = 2;
+            const CMD_REVEAL: usize = 3;
+            const CMD_COPY_PATH: usize = 4;
+            const CMD_COPY_REL_PATH: usize = 5;
+            const CMD_RENAME: usize = 6;
+            const CMD_DELETE: usize = 7;
+            const CMD_CLOSE_WORKSPACE: usize = 8;
+
+            AppendMenuW(menu, MF_STRING, CMD_NEW_FILE, wide("New File...").as_ptr());
+            AppendMenuW(menu, MF_STRING, CMD_NEW_FOLDER, wide("New Folder...").as_ptr());
+            AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            AppendMenuW(menu, MF_STRING, CMD_REVEAL, wide("Reveal in File Explorer").as_ptr());
+            AppendMenuW(menu, MF_STRING, CMD_COPY_PATH, wide("Copy Path").as_ptr());
+            AppendMenuW(
+                menu,
+                MF_STRING,
+                CMD_COPY_REL_PATH,
+                wide("Copy Relative Path").as_ptr(),
+            );
+
+            if clicked_path != root {
+                AppendMenuW(menu, MF_SEPARATOR, 0, null());
+                AppendMenuW(menu, MF_STRING, CMD_RENAME, wide("Rename...").as_ptr());
+                AppendMenuW(menu, MF_STRING, CMD_DELETE, wide("Delete").as_ptr());
+            } else {
+                AppendMenuW(menu, MF_SEPARATOR, 0, null());
+                AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    CMD_CLOSE_WORKSPACE,
+                    wide("Close Folder").as_ptr(),
+                );
+            }
+
+            let mut pt = POINT { x, y };
+            ClientToScreen(hwnd, &mut pt);
+
+            let cmd = TrackPopupMenu(
+                menu,
+                TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON,
+                pt.x,
+                pt.y,
+                0,
+                hwnd,
+                null(),
+            ) as usize;
+
+            DestroyMenu(menu);
+
+            let parent_dir = if is_dir {
+                clicked_path.clone()
+            } else {
+                clicked_path
+                    .parent()
+                    .unwrap_or(&root)
+                    .to_path_buf()
+            };
+
+            match cmd {
+                CMD_NEW_FILE => {
+                    self.start_explorer_input(parent_dir, false, false, None, hwnd);
+                }
+                CMD_NEW_FOLDER => {
+                    self.start_explorer_input(parent_dir, true, false, None, hwnd);
+                }
+                CMD_REVEAL => {
+                    let path_str = clicked_path.to_string_lossy().to_string();
+                    std::thread::spawn(move || {
+                        let _ = std::process::Command::new("explorer")
+                            .args(["/select,", &path_str])
+                            .spawn();
+                    });
+                }
+                CMD_COPY_PATH => {
+                    let _ = clipboard::copy(hwnd, &clicked_path.to_string_lossy());
+                    self.status = "Path copied to clipboard".into();
+                    InvalidateRect(hwnd, null(), 0);
+                }
+                CMD_COPY_REL_PATH => {
+                    let rel = clicked_path.strip_prefix(&root).unwrap_or(&clicked_path);
+                    let _ = clipboard::copy(hwnd, &rel.to_string_lossy());
+                    self.status = "Relative path copied to clipboard".into();
+                    InvalidateRect(hwnd, null(), 0);
+                }
+                CMD_RENAME => {
+                    let old_name = clicked_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    self.start_explorer_input(
+                        parent_dir,
+                        is_dir,
+                        true,
+                        Some(clicked_path),
+                        hwnd,
+                    );
+                    if let Some(input) = &mut self.explorer_input {
+                        input.buffer = old_name;
+                    }
+                    self.refresh(hwnd);
+                }
+                CMD_DELETE => {
+                    self.delete_entry(hwnd, &clicked_path);
+                }
+                CMD_CLOSE_WORKSPACE => {
+                    self.close_workspace(hwnd);
+                }
+                _ => {}
+            }
+        }
     }
 }

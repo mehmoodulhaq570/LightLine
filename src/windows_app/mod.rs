@@ -9,9 +9,9 @@ mod session;
 mod terminal;
 mod workspace;
 use app::{
-    App, EditorView, ExplorerEntry, ExplorerRow, Extension, ExtensionInstallKind, ExtensionsTab,
-    GitAction, SideView, Tab, TerminalPane, TerminalTab, WorkerMessage, is_c_family_path,
-    is_cpp_path,
+    App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
+    ExtensionInstallKind, ExtensionsTab, GitAction, SideView, Tab, TerminalPane, TerminalTab,
+    WorkerMessage, is_c_family_path, is_cpp_path,
 };
 mod debugger;
 use debugger::DEBUG_EVENT_MESSAGE;

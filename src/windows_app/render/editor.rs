@@ -427,51 +427,41 @@ impl App {
                 self.paint_side_panel(hdc, self.sidebar_right(), card_bottom);
             }
             if self.sidebar_width > 0 && self.side_view == SideView::Files {
+                if let Some(root) = self.workspace_root.clone() {
+                    if !self.directory_cache.contains_key(&root) {
+                        self.load_directory(&root);
+                    }
+                }
                 let sidebar_clip = RECT {
                     left: self.scale(RAIL),
                     top: 0,
                     right: editor_left,
                     bottom: editor_bottom,
                 };
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(RAIL + 12),
-                        top: self.scale(15),
-                        right: self.scale(RAIL + 23),
-                        bottom: self.scale(26),
-                    },
-                    self.theme.edge,
-                );
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(RAIL + 14),
-                        top: self.scale(17),
-                        right: self.scale(RAIL + 21),
-                        bottom: self.scale(24),
-                    },
-                    self.theme.sidebar_bg,
-                );
-                // Collapse-all-folders glyph: a single dash inside the button square.
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: self.scale(RAIL + 15),
-                        top: self.scale(20),
-                        right: self.scale(RAIL + 20),
-                        bottom: self.scale(21),
-                    },
-                    self.theme.muted,
-                );
                 Self::label(
                     hdc,
-                    "×",
-                    editor_left - self.scale(25),
-                    self.scale(8),
+                    "EXPLORER",
+                    self.scale(RAIL + 16),
+                    self.scale(11),
                     self.theme.muted,
                     sidebar_clip,
                 );
+                // Collapse all subfolders icon at top right
+                let collapse_all_rect = RECT {
+                    left: editor_left - self.scale(48),
+                    top: self.scale(10),
+                    right: editor_left - self.scale(28),
+                    bottom: self.scale(30),
+                };
+                self.draw_collapse_all_icon(hdc, collapse_all_rect, self.theme.muted);
+                // Collapse sidebar button at top right
+                let collapse_rect = RECT {
+                    left: editor_left - self.scale(26),
+                    top: self.scale(10),
+                    right: editor_left - self.scale(6),
+                    bottom: self.scale(30),
+                };
+                self.draw_close_icon(hdc, collapse_rect, self.theme.muted);
                 Self::fill(
                     hdc,
                     RECT {
@@ -487,22 +477,134 @@ impl App {
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| display_path(root));
-                    self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), true);
+                    let root_expanded = self.expanded_dirs.contains(root);
+                    self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), root_expanded);
                     self.icons.draw_generic(
                         hdc,
-                        GenericIcon::FolderOpen,
+                        if root_expanded {
+                            GenericIcon::FolderOpen
+                        } else {
+                            GenericIcon::Folder
+                        },
                         self.scale(RAIL + 23),
                         self.scale(48),
                         self.scale(17),
                     );
+                    let root_clip = RECT {
+                        left: self.scale(RAIL + 44),
+                        top: self.scale(40),
+                        right: editor_left - self.scale(96),
+                        bottom: self.scale(70),
+                    };
                     Self::label(
                         hdc,
                         &root_name,
-                        self.scale(RAIL + 43),
+                        self.scale(RAIL + 44),
                         self.scale(49),
                         self.theme.text,
-                        sidebar_clip,
+                        root_clip,
                     );
+                    // Toolbar action buttons on the workspace header
+                    let s = |v: i32| self.scale(v);
+                    let btn_y = s(48);
+                    let btn_h = s(20);
+
+                    // New File button
+                    let rect_file = RECT {
+                        left: editor_left - s(92),
+                        top: btn_y,
+                        right: editor_left - s(72),
+                        bottom: btn_y + btn_h,
+                    };
+                    self.draw_new_file_icon(hdc, rect_file, self.theme.muted);
+
+                    // New Folder button
+                    let rect_folder = RECT {
+                        left: editor_left - s(70),
+                        top: btn_y,
+                        right: editor_left - s(50),
+                        bottom: btn_y + btn_h,
+                    };
+                    self.draw_new_folder_icon(hdc, rect_folder, self.theme.muted);
+
+                    // Refresh button
+                    let rect_refresh = RECT {
+                        left: editor_left - s(48),
+                        top: btn_y,
+                        right: editor_left - s(28),
+                        bottom: btn_y + btn_h,
+                    };
+                    self.draw_refresh_icon(hdc, rect_refresh, self.theme.muted);
+
+                    // Close Workspace button
+                    let rect_close = RECT {
+                        left: editor_left - s(26),
+                        top: btn_y,
+                        right: editor_left - s(6),
+                        bottom: btn_y + btn_h,
+                    };
+                    self.draw_close_icon(hdc, rect_close, self.theme.muted);
+
+                    let input_is_new = self.explorer_input.as_ref().map_or(false, |inp| !inp.is_rename);
+                    if let Some(input) = &self.explorer_input && !input.is_rename {
+                        let top = self.scale(EXPLORER_TOP);
+                        let input_rect = RECT {
+                            left: self.scale(RAIL + 7),
+                            top,
+                            right: editor_left - self.scale(8),
+                            bottom: top + self.scale(EXPLORER_ROW - 2),
+                        };
+                        self.panel_card(
+                            hdc,
+                            input_rect,
+                            self.scale(4),
+                            self.theme.blue,
+                            rgb(16, 26, 48),
+                        );
+                        if input.is_folder {
+                            self.icons.draw_generic(
+                                hdc,
+                                GenericIcon::FolderOpen,
+                                self.scale(RAIL + 12),
+                                top + self.scale(2),
+                                self.scale(18),
+                            );
+                        } else {
+                            self.icons.draw_generic(
+                                hdc,
+                                GenericIcon::File,
+                                self.scale(RAIL + 12),
+                                top + self.scale(2),
+                                self.scale(18),
+                            );
+                        }
+                        let text_x = self.scale(RAIL + 36);
+                        Self::label(
+                            hdc,
+                            &input.buffer,
+                            text_x,
+                            top + self.scale(1),
+                            self.theme.text,
+                            input_rect,
+                        );
+                        let text_w = self.text_width(hdc, &input.buffer);
+                        let caret_x = text_x + text_w;
+                        if caret_x < input_rect.right - self.scale(4) {
+                            Self::fill(
+                                hdc,
+                                RECT {
+                                    left: caret_x,
+                                    top: top + self.scale(3),
+                                    right: caret_x + self.scale(2),
+                                    bottom: top + self.scale(EXPLORER_ROW - 5),
+                                },
+                                self.theme.text,
+                            );
+                        }
+                    }
+
+                    let row_offset = if input_is_new { 1 } else { 0 };
+
                     for (row, item) in self
                         .explorer_rows()
                         .iter()
@@ -510,17 +612,21 @@ impl App {
                         .skip(self.explorer_first_row)
                     {
                         let top = self.scale(
-                            EXPLORER_TOP + (row - self.explorer_first_row) as i32 * EXPLORER_ROW,
+                            EXPLORER_TOP + (row + row_offset - self.explorer_first_row) as i32 * EXPLORER_ROW,
                         );
                         if top >= editor_bottom - self.scale(38) {
                             break;
                         }
-                        let selected = self
-                            .doc()
-                            .path
-                            .as_deref()
-                            .is_some_and(|path| path == item.entry.path);
-                        if selected {
+                        let is_being_renamed = self.explorer_input.as_ref().map_or(false, |inp| {
+                            inp.is_rename && inp.old_path.as_deref() == Some(&item.entry.path)
+                        });
+                        let selected = self.selected_explorer_path.as_deref() == Some(&item.entry.path)
+                            || self
+                                .doc()
+                                .path
+                                .as_deref()
+                                .is_some_and(|path| path == item.entry.path);
+                        if selected || is_being_renamed {
                             let sel_rect = RECT {
                                 left: self.scale(RAIL + 7),
                                 top,
@@ -531,8 +637,8 @@ impl App {
                                 hdc,
                                 sel_rect,
                                 self.scale(6),
-                                rgb(48, 84, 156),
-                                rgb(26, 44, 90),
+                                if is_being_renamed { self.theme.blue } else { rgb(48, 84, 156) },
+                                if is_being_renamed { rgb(16, 26, 48) } else { rgb(26, 44, 90) },
                             );
                         }
                         let name = item
@@ -571,25 +677,58 @@ impl App {
                                 self.theme.muted,
                             );
                         }
-                        Self::label(
-                            hdc,
-                            &name,
-                            left + self.scale(36),
-                            top + self.scale(1),
-                            if selected {
-                                self.theme.text
-                            } else if item.entry.is_dir {
-                                self.theme.muted
-                            } else {
-                                rgb(185, 205, 230)
-                            },
-                            RECT {
-                                left: left + self.scale(36),
+                        if is_being_renamed {
+                            let input_buf = self.explorer_input.as_ref().map(|i| i.buffer.as_str()).unwrap_or("");
+                            let text_x = left + self.scale(36);
+                            let text_clip = RECT {
+                                left: text_x,
                                 top,
                                 right: editor_left - self.scale(10),
                                 bottom: top + self.scale(EXPLORER_ROW),
-                            },
-                        );
+                            };
+                            Self::label(
+                                hdc,
+                                input_buf,
+                                text_x,
+                                top + self.scale(1),
+                                self.theme.text,
+                                text_clip,
+                            );
+                            let text_w = self.text_width(hdc, input_buf);
+                            let caret_x = text_x + text_w;
+                            if caret_x < text_clip.right {
+                                Self::fill(
+                                    hdc,
+                                    RECT {
+                                        left: caret_x,
+                                        top: top + self.scale(3),
+                                        right: caret_x + self.scale(2),
+                                        bottom: top + self.scale(EXPLORER_ROW - 5),
+                                    },
+                                    self.theme.text,
+                                );
+                            }
+                        } else {
+                            Self::label(
+                                hdc,
+                                &name,
+                                left + self.scale(36),
+                                top + self.scale(1),
+                                if selected {
+                                    self.theme.text
+                                } else if item.entry.is_dir {
+                                    self.theme.muted
+                                } else {
+                                    rgb(185, 205, 230)
+                                },
+                                RECT {
+                                    left: left + self.scale(36),
+                                    top,
+                                    right: editor_left - self.scale(10),
+                                    bottom: top + self.scale(EXPLORER_ROW),
+                                },
+                            );
+                        }
                     }
                 } else {
                     Self::label(
@@ -839,6 +978,161 @@ impl App {
                 BitBlt(window_dc, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);
             }
             EndPaint(hwnd, &ps);
+        }
+    }
+
+    pub(in crate::windows_app) fn draw_new_file_icon(&self, hdc: HDC, rect: RECT, color: u32) {
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let s = |v: i32| self.scale(v);
+        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
+        if pen.is_null() {
+            return;
+        }
+        unsafe {
+            let old_pen = SelectObject(hdc, pen);
+            let l = cx - s(5);
+            let r = cx + s(5);
+            let t = cy - s(6);
+            let b = cy + s(6);
+            let fold = s(3);
+
+            // Document outline with folded top-right corner
+            MoveToEx(hdc, l, t, null_mut());
+            LineTo(hdc, r - fold, t);
+            LineTo(hdc, r, t + fold);
+            LineTo(hdc, r, b);
+            LineTo(hdc, l, b);
+            LineTo(hdc, l, t);
+
+            // Corner fold crease
+            MoveToEx(hdc, r - fold, t, null_mut());
+            LineTo(hdc, r - fold, t + fold);
+            LineTo(hdc, r, t + fold);
+
+            // Plus mark inside
+            let pcx = cx - s(1);
+            let pcy = cy + s(1);
+            let pr = s(2).max(2);
+            MoveToEx(hdc, pcx - pr, pcy, null_mut());
+            LineTo(hdc, pcx + pr + 1, pcy);
+            MoveToEx(hdc, pcx, pcy - pr, null_mut());
+            LineTo(hdc, pcx, pcy + pr + 1);
+
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+    }
+
+    pub(in crate::windows_app) fn draw_new_folder_icon(&self, hdc: HDC, rect: RECT, color: u32) {
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let s = |v: i32| self.scale(v);
+        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
+        if pen.is_null() {
+            return;
+        }
+        unsafe {
+            let old_pen = SelectObject(hdc, pen);
+            let l = cx - s(6);
+            let r = cx + s(6);
+            let t = cy - s(4);
+            let b = cy + s(5);
+            let tab_w = s(4);
+
+            // Folder tab outline
+            MoveToEx(hdc, l, t, null_mut());
+            LineTo(hdc, l + tab_w, t);
+            LineTo(hdc, l + tab_w + s(2), t + s(2));
+            LineTo(hdc, r, t + s(2));
+            LineTo(hdc, r, b);
+            LineTo(hdc, l, b);
+            LineTo(hdc, l, t);
+
+            // Plus mark inside folder
+            let pcx = cx;
+            let pcy = cy + s(1);
+            let pr = s(2).max(2);
+            MoveToEx(hdc, pcx - pr, pcy, null_mut());
+            LineTo(hdc, pcx + pr + 1, pcy);
+            MoveToEx(hdc, pcx, pcy - pr, null_mut());
+            LineTo(hdc, pcx, pcy + pr + 1);
+
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+    }
+
+    pub(in crate::windows_app) fn draw_refresh_icon(&self, hdc: HDC, rect: RECT, color: u32) {
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let s = |v: i32| self.scale(v);
+        let r = s(5).max(4);
+        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
+        if pen.is_null() {
+            return;
+        }
+        unsafe {
+            let old_pen = SelectObject(hdc, pen);
+            // 3/4 circular curve
+            MoveToEx(hdc, cx, cy - r, null_mut());
+            LineTo(hdc, cx + r, cy - r / 2);
+            LineTo(hdc, cx + r, cy + r / 2);
+            LineTo(hdc, cx, cy + r);
+            LineTo(hdc, cx - r, cy);
+            LineTo(hdc, cx - r / 2, cy - r / 2);
+
+            // Arrowhead at top pointing clockwise
+            MoveToEx(hdc, cx - s(3), cy - r - s(2), null_mut());
+            LineTo(hdc, cx, cy - r);
+            LineTo(hdc, cx - s(3), cy - r + s(2));
+
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+    }
+
+    pub(in crate::windows_app) fn draw_close_icon(&self, hdc: HDC, rect: RECT, color: u32) {
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let s = |v: i32| self.scale(v);
+        let r = s(4).max(3);
+        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
+        if pen.is_null() {
+            return;
+        }
+        unsafe {
+            let old_pen = SelectObject(hdc, pen);
+            MoveToEx(hdc, cx - r, cy - r, null_mut());
+            LineTo(hdc, cx + r + 1, cy + r + 1);
+            MoveToEx(hdc, cx + r, cy - r, null_mut());
+            LineTo(hdc, cx - r - 1, cy + r + 1);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+    }
+
+    pub(in crate::windows_app) fn draw_collapse_all_icon(&self, hdc: HDC, rect: RECT, color: u32) {
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let s = |v: i32| self.scale(v);
+        let r = s(4).max(3);
+        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
+        if pen.is_null() {
+            return;
+        }
+        unsafe {
+            let old_pen = SelectObject(hdc, pen);
+            // Upper chevron
+            MoveToEx(hdc, cx - r, cy - s(1), null_mut());
+            LineTo(hdc, cx, cy - s(1) - r / 2);
+            LineTo(hdc, cx + r + 1, cy - s(1));
+            // Lower chevron
+            MoveToEx(hdc, cx - r, cy + s(3), null_mut());
+            LineTo(hdc, cx, cy + s(3) - r / 2);
+            LineTo(hdc, cx + r + 1, cy + s(3));
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
         }
     }
 }

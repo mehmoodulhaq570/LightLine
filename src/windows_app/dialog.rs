@@ -88,6 +88,20 @@ pub(super) const BTN_OK: DialogButton = DialogButton {
     is_cancel: false,
 };
 
+pub(super) const BTN_CANCEL: DialogButton = DialogButton {
+    label: "Cancel",
+    id: DLG_CANCEL,
+    is_default: false,
+    is_cancel: true,
+};
+
+pub(super) const BTN_DELETE: DialogButton = DialogButton {
+    label: "Delete",
+    id: DLG_OK,
+    is_default: true,
+    is_cancel: false,
+};
+
 pub(super) fn yes_no_cancel() -> [DialogButton; 3] {
     [
         DialogButton {

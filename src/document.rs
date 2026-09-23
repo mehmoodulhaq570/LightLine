@@ -129,6 +129,10 @@ impl Document {
         self.revision != self.saved_revision
     }
 
+    pub fn mark_clean(&mut self) {
+        self.saved_revision = self.revision;
+    }
+
     pub fn breakpoints(&self) -> &BTreeSet<usize> {
         &self.breakpoints
     }
