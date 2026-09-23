@@ -1,20 +1,18 @@
 use super::super::*;
 
 // Welcome screen geometry, in logical pixels (everything goes through scale()).
-const NAV_WIDTH: i32 = 232;
-const ASIDE_WIDTH: i32 = 330;
-const GUTTER: i32 = 28;
-const MIN_CENTER: i32 = 520;
-const NAV_FIRST_ROW: i32 = 92;
-const NAV_ROW_H: i32 = 42;
-const HERO_TOP: i32 = 46;
+const ASIDE_WIDTH: i32 = 400;
+const PAGE_GUTTER: i32 = 32;
+const MIN_CENTER: i32 = 760;
+const WELCOME_RAIL_FIRST_ROW: i32 = 18;
+const WELCOME_RAIL_ROW: i32 = 52;
+const HERO_TOP: i32 = 32;
 const CARD_H: i32 = 148;
-const CARD_GAP: i32 = 14;
+const WELCOME_CARD_GAP: i32 = 16;
 const PANEL_HEADER_H: i32 = 52;
-const RECENT_ROW_H: i32 = 52;
+const RECENT_ROW_H: i32 = 58;
 const QUICK_ROW_H: i32 = 42;
-const STEP_ROW_H: i32 = 60;
-const COMMUNITY_H: i32 = 104;
+const STEP_ROW_H: i32 = 68;
 
 const CARD_BG: u32 = rgb(16, 27, 45);
 // Distinct from (and one shade lighter than) the theme's general
@@ -116,7 +114,8 @@ const STEPS: [(&str, &str, WelcomeAction); 4] = [
 // targets are always derived from the same numbers.
 pub(in crate::windows_app) struct WelcomeLayout {
     pub(in crate::windows_app) targets: Vec<(RECT, WelcomeAction)>,
-    nav_right: i32,
+    rail_right: i32,
+    content_top: i32,
     status_top: i32,
     content_left: i32,
     content_right: i32,
@@ -126,7 +125,6 @@ pub(in crate::windows_app) struct WelcomeLayout {
     recent_rows: usize,
     quick_panel: RECT,
     quick_rows: usize,
-    open_folder: RECT,
     steps_panel: Option<RECT>,
     community: Option<RECT>,
 }
@@ -136,10 +134,11 @@ impl App {
         let s = |value: i32| self.scale(value);
         let mut targets = Vec::new();
         let status_top = rect.bottom - s(STATUS);
-        let nav_right = s(NAV_WIDTH).min((rect.right / 3).max(s(64)));
-        let gutter = s(GUTTER);
+        let rail_right = s(RAIL);
+        let content_top = s(WORKBENCH_HEADER);
+        let gutter = s(PAGE_GUTTER);
 
-        let content_left = nav_right + gutter;
+        let content_left = rail_right + gutter;
         let aside_left = rect.right - gutter - s(ASIDE_WIDTH);
         // The aside only earns its space while the centre column can breathe.
         let show_aside = aside_left - gutter - content_left >= s(MIN_CENTER);
@@ -150,30 +149,24 @@ impl App {
         };
 
         for (index, (_, _, action)) in NAV_ITEMS.iter().enumerate() {
-            // Row 0 is the (already active) Welcome entry, so items start at 1.
-            let top = s(NAV_FIRST_ROW) + (index as i32 + 1) * s(NAV_ROW_H);
+            // Home occupies row zero; the six workbench destinations follow it.
+            let top = content_top
+                + s(WELCOME_RAIL_FIRST_ROW)
+                + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
             targets.push((
                 RECT {
-                    left: s(10),
+                    left: s(7),
                     top,
-                    right: nav_right - s(10),
-                    bottom: top + s(NAV_ROW_H) - s(4),
+                    right: rail_right - s(7),
+                    bottom: top + s(42),
                 },
                 *action,
             ));
         }
 
-        let open_folder = RECT {
-            left: s(18),
-            top: s(NAV_FIRST_ROW) + s(NAV_ROW_H) * 8 + s(52),
-            right: nav_right - s(18),
-            bottom: s(NAV_FIRST_ROW) + s(NAV_ROW_H) * 8 + s(92),
-        };
-        targets.push((open_folder, WelcomeAction::OpenFolder));
-
-        let hero_top = s(HERO_TOP);
+        let hero_top = content_top + s(HERO_TOP);
         let cards_top = hero_top + s(190);
-        let card_gap = s(CARD_GAP);
+        let card_gap = s(WELCOME_CARD_GAP);
         let card_width = (content_right - content_left - card_gap * 3) / 4;
         let mut cards = Vec::with_capacity(4);
         for (index, (_, _, action)) in CARDS.iter().enumerate() {
@@ -188,7 +181,7 @@ impl App {
             targets.push((bounds, *action));
         }
 
-        let panels_top = cards_top + s(CARD_H) + s(26);
+        let panels_top = cards_top + s(CARD_H) + s(18);
         let available = (status_top - s(22) - panels_top).max(s(120));
         let body = (available - s(PANEL_HEADER_H)).max(0);
         let recent_rows = self
@@ -200,8 +193,8 @@ impl App {
         let panel_height = (s(PANEL_HEADER_H)
             + (recent_rows as i32 * s(RECENT_ROW_H)).max(quick_rows as i32 * s(QUICK_ROW_H))
             + s(10))
-        .min(available);
-        let recent_width = (content_right - content_left - card_gap) * 58 / 100;
+            .min(available);
+        let recent_width = (content_right - content_left - card_gap) * 57 / 100;
         let recent_panel = RECT {
             left: content_left,
             top: panels_top,
@@ -258,26 +251,27 @@ impl App {
                     *action,
                 ));
             }
-            // Anchored to the bottom of the panel row rather than stacked
-            // directly under the steps, so the column reads as a full column
-            // instead of trailing off into dead space.
-            let community_bottom = (panels_top + panel_height)
-                .max(steps.bottom + s(16) + s(COMMUNITY_H));
+            let community_bottom = panels_top + panel_height;
             let community = RECT {
                 left: aside_left,
-                top: community_bottom - s(COMMUNITY_H),
+                top: steps.bottom + s(18),
                 right: rect.right - gutter,
                 bottom: community_bottom,
             };
-            targets.push((community, WelcomeAction::Community));
-            (Some(steps), Some(community))
+            if community.bottom > community.top + s(80) {
+                targets.push((community, WelcomeAction::Community));
+                (Some(steps), Some(community))
+            } else {
+                (Some(steps), None)
+            }
         } else {
             (None, None)
         };
 
         WelcomeLayout {
             targets,
-            nav_right,
+            rail_right,
+            content_top,
             status_top,
             content_left,
             content_right,
@@ -287,15 +281,15 @@ impl App {
             recent_rows,
             quick_panel,
             quick_rows,
-            open_folder,
             steps_panel,
             community,
         }
     }
 
-    pub(in crate::windows_app) fn paint_welcome(&self, hdc: HDC, rect: RECT) {
+    pub(in crate::windows_app) fn paint_welcome(&self, hwnd: HWND, hdc: HDC, rect: RECT) {
         let layout = self.welcome_layout(rect);
-        Self::fill(hdc, rect, self.theme.editor_bg);
+        Self::fill(hdc, rect, self.theme.shell_bg);
+        self.paint_welcome_header(hwnd, hdc, rect, &layout);
         self.paint_welcome_nav(hdc, &layout);
         self.paint_welcome_hero(hdc, &layout);
         self.paint_welcome_cards(hdc, &layout);
@@ -305,129 +299,153 @@ impl App {
         self.paint_welcome_status(hdc, rect, &layout);
     }
 
-    fn paint_welcome_nav(&self, hdc: HDC, layout: &WelcomeLayout) {
+    fn paint_welcome_header(&self, hwnd: HWND, hdc: HDC, rect: RECT, layout: &WelcomeLayout) {
         let s = |value: i32| self.scale(value);
-        let clip = RECT {
+        let header = RECT {
             left: 0,
             top: 0,
-            right: layout.nav_right,
-            bottom: layout.status_top,
+            right: rect.right,
+            bottom: layout.content_top,
         };
-        Self::fill(hdc, clip, self.theme.rail_bg);
+        Self::fill(hdc, header, self.theme.tab_bg);
         Self::fill(
             hdc,
             RECT {
-                left: layout.nav_right - s(1).max(1),
-                top: 0,
-                right: layout.nav_right,
-                bottom: layout.status_top,
+                left: 0,
+                top: layout.content_top - s(1).max(1),
+                right: rect.right,
+                bottom: layout.content_top,
             },
             self.theme.edge,
         );
         unsafe {
             DrawIconEx(
                 hdc,
-                s(20),
-                s(22),
+                s(14),
+                s(9),
                 self.brand_icon,
-                s(28),
-                s(28),
+                s(32),
+                s(32),
                 0,
                 null_mut(),
                 DI_NORMAL,
             );
             SelectObject(hdc, self.brand_font);
         }
-        Self::label(hdc, "Lightline", s(56), s(26), self.theme.text, clip);
-        let badge_left = s(56) + self.text_width(hdc, "Lightline") + s(10);
+        Self::label(
+            hdc,
+            "LightLine",
+            s(56),
+            s(12),
+            self.theme.text,
+            RECT { left: s(56), top: 0, right: s(160), bottom: layout.content_top },
+        );
         Self::rounded_fill(
             hdc,
-            RECT {
-                left: badge_left,
-                top: s(27),
-                right: badge_left + s(34),
-                bottom: s(45),
-            },
+            RECT { left: s(132), top: s(15), right: s(164), bottom: s(35) },
             s(5),
-            rgb(78, 56, 176),
+            rgb(63, 47, 150),
         );
         unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(hdc, "IDE", badge_left + s(8), s(29), self.theme.text, clip);
-
-        // "Welcome" is where we already are, so it renders active and inert.
-        let welcome_row = RECT {
-            left: s(10),
-            top: s(NAV_FIRST_ROW),
-            right: layout.nav_right - s(10),
-            bottom: s(NAV_FIRST_ROW) + s(NAV_ROW_H) - s(4),
-        };
-        Self::rounded_fill(hdc, welcome_row, s(8), rgb(40, 52, 122));
-        self.home_glyph(hdc, s(24), welcome_row.top + s(10), s(16), self.theme.text);
-        self.label_mid(
+        Self::label(
             hdc,
-            "Welcome",
-            s(56),
-            (welcome_row.top + welcome_row.bottom) / 2,
+            "IDE",
+            s(138),
+            s(15),
             self.theme.text,
-            clip,
+            RECT { left: s(132), top: 0, right: s(164), bottom: layout.content_top },
         );
 
-        for (index, (label, icon, _)) in NAV_ITEMS.iter().enumerate() {
-            let top = s(NAV_FIRST_ROW) + (index as i32 + 1) * s(NAV_ROW_H);
-            let middle = top + (s(NAV_ROW_H) - s(4)) / 2;
-            self.rail_icon(hdc, *icon, s(22), top + s(9), self.theme.muted);
-            self.label_mid(hdc, label, s(56), middle, self.theme.muted, clip);
+        let command = self.command_center_rect(hwnd);
+        if command.right > command.left {
+            self.panel_card(hdc, command, s(6), rgb(43, 76, 132), rgb(12, 25, 48));
+            self.rail_icon(
+                hdc,
+                1,
+                command.left + s(10),
+                command.top + s(6),
+                self.theme.muted,
+            );
+            Self::label(
+                hdc,
+                "Search files, symbols, commands...",
+                command.left + s(36),
+                command.top + s(5),
+                self.theme.muted,
+                RECT {
+                    left: command.left + s(36),
+                    top: command.top,
+                    right: command.right - s(55),
+                    bottom: command.bottom,
+                },
+            );
+            let key = RECT {
+                left: command.right - s(48),
+                top: command.top + s(4),
+                right: command.right - s(7),
+                bottom: command.bottom - s(4),
+            };
+            Self::rounded_fill(hdc, key, s(4), rgb(25, 43, 76));
+            Self::label(hdc, "Ctrl P", key.left + s(5), key.top + s(1), self.theme.text, key);
         }
 
-        let divider = layout.open_folder.top - s(76);
+        let button = s(46);
+        let controls_left = rect.right - button * 3;
+        let middle = layout.content_top / 2;
+        self.stroke(hdc, self.theme.muted, |hdc| unsafe {
+            MoveToEx(hdc, controls_left + s(17), middle + s(5), null_mut());
+            LineTo(hdc, controls_left + s(29), middle + s(5));
+            let max_left = controls_left + button + s(17);
+            Rectangle(hdc, max_left, middle - s(6), max_left + s(12), middle + s(6));
+            let close_left = controls_left + button * 2 + s(17);
+            MoveToEx(hdc, close_left, middle - s(6), null_mut());
+            LineTo(hdc, close_left + s(12), middle + s(6));
+            MoveToEx(hdc, close_left + s(12), middle - s(6), null_mut());
+            LineTo(hdc, close_left, middle + s(6));
+        });
+    }
+
+    fn paint_welcome_nav(&self, hdc: HDC, layout: &WelcomeLayout) {
+        let s = |value: i32| self.scale(value);
+        let clip = RECT {
+            left: 0,
+            top: layout.content_top,
+            right: layout.rail_right,
+            bottom: layout.status_top,
+        };
+        Self::fill(hdc, clip, self.theme.rail_bg);
         Self::fill(
             hdc,
             RECT {
-                left: s(18),
-                top: divider,
-                right: layout.nav_right - s(18),
-                bottom: divider + s(1).max(1),
+                left: layout.rail_right - s(1).max(1),
+                top: layout.content_top,
+                right: layout.rail_right,
+                bottom: layout.status_top,
             },
             self.theme.edge,
         );
-        Self::label(hdc, "WORKSPACE", s(18), divider + s(18), self.theme.muted, clip);
-        let workspace = match &self.workspace_root {
-            Some(root) => root.file_name().unwrap_or_default().to_string_lossy(),
-            None => "No project open".into(),
+        // Welcome is the selected activity and remains intentionally inert.
+        let first_top = layout.content_top + s(WELCOME_RAIL_FIRST_ROW);
+        let welcome_row = RECT {
+            left: s(7),
+            top: first_top,
+            right: layout.rail_right - s(7),
+            bottom: first_top + s(42),
         };
-        self.label_ellipsis(
+        self.panel_card(hdc, welcome_row, s(7), rgb(50, 84, 154), rgb(18, 35, 72));
+        Self::fill(
             hdc,
-            &workspace,
-            s(18),
-            divider + s(42),
-            if self.workspace_root.is_some() {
-                self.theme.text
-            } else {
-                self.theme.muted
-            },
-            RECT {
-                left: s(18),
-                top: divider + s(42),
-                right: layout.nav_right - s(14),
-                bottom: divider + s(66),
-            },
+            RECT { left: 0, top: welcome_row.top + s(5), right: s(3), bottom: welcome_row.bottom - s(5) },
+            self.theme.violet,
         );
-        self.panel_card(hdc, layout.open_folder, s(8), self.theme.edge, self.theme.active_bg);
-        self.icons.draw_generic(
-            hdc,
-            GenericIcon::Folder,
-            layout.open_folder.left + s(14),
-            layout.open_folder.top + s(11),
-            s(16),
-        );
-        self.label_mid(
-            hdc,
-            "Open Folder",
-            layout.open_folder.left + s(40),
-            (layout.open_folder.top + layout.open_folder.bottom) / 2,
-            self.theme.text,
-            clip,
-        );
+        self.home_glyph(hdc, s(19), welcome_row.top + s(11), s(20), rgb(240, 245, 255));
+
+        for (index, (_, icon, _)) in NAV_ITEMS.iter().enumerate() {
+            let top = first_top + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
+            self.rail_icon(hdc, *icon, s(19), top + s(11), self.theme.muted);
+        }
+        Self::label(hdc, "◎", s(19), layout.status_top - s(62), self.theme.muted, clip);
+        Self::label(hdc, "⚙", s(18), layout.status_top - s(34), self.theme.muted, clip);
     }
 
     fn paint_welcome_hero(&self, hdc: HDC, layout: &WelcomeLayout) {
@@ -464,13 +482,13 @@ impl App {
         let word_left = left + s(68);
         self.label_mid(
             hdc,
-            "Lightline",
+            "LightLine",
             word_left,
             logo_top + s(27),
             self.theme.text,
             clip,
         );
-        let badge_left = word_left + self.text_width(hdc, "Lightline") + s(16);
+        let badge_left = word_left + self.text_width(hdc, "LightLine") + s(16);
         Self::rounded_fill(
             hdc,
             RECT {
@@ -524,6 +542,18 @@ impl App {
             let (title, subtitle, _) = CARDS[index];
             let (top_color, bottom_color, badge_color) = CARD_COLORS[index];
             self.gradient_card(hdc, *bounds, s(12), top_color, bottom_color);
+            self.card_outline(hdc, *bounds, s(12), WELCOME_CARD_EDGE);
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: bounds.left + s(1),
+                    top: bounds.top + s(1),
+                    right: bounds.right - s(1),
+                    bottom: bounds.top + s(5),
+                },
+                s(4),
+                badge_color,
+            );
             let clip = RECT {
                 left: bounds.left + s(14),
                 top: bounds.top,
@@ -609,6 +639,16 @@ impl App {
             clip,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
+        let see_all = "See All  →";
+        let see_all_width = self.text_width(hdc, see_all);
+        self.label_mid(
+            hdc,
+            see_all,
+            panel.right - s(18) - see_all_width,
+            panel.top + s(26),
+            self.theme.muted,
+            clip,
+        );
         if layout.recent_rows == 0 {
             Self::label(
                 hdc,
@@ -654,6 +694,7 @@ impl App {
                 self.theme.muted,
                 row_clip,
             );
+            self.chevron(hdc, row.right - s(17), (row.top + row.bottom) / 2, false);
         }
     }
 
@@ -690,6 +731,29 @@ impl App {
             };
             Self::rounded_fill(hdc, chip, s(5), CHIP_BG);
             self.label_mid(hdc, shortcut, chip.left + s(8), middle, self.theme.muted, clip);
+            match index {
+                0 | 1 => {
+                    self.icons.draw_generic(
+                        hdc,
+                        GenericIcon::File,
+                        panel.left + s(16),
+                        middle - s(9),
+                        s(18),
+                    );
+                }
+                2 => {
+                    self.icons.draw_generic(
+                        hdc,
+                        GenericIcon::Folder,
+                        panel.left + s(16),
+                        middle - s(9),
+                        s(18),
+                    );
+                }
+                3 => Self::label(hdc, "⌘", panel.left + s(16), middle - s(11), self.theme.muted, clip),
+                4 => self.rail_icon(hdc, 1, panel.left + s(16), middle - s(9), self.theme.muted),
+                _ => self.prompt_glyph(hdc, panel.left + s(16), middle - s(9), s(18), self.theme.muted),
+            }
             self.label_mid(hdc, label, panel.left + s(42), middle, self.theme.text, clip);
         }
     }
@@ -731,6 +795,18 @@ impl App {
             unsafe { SelectObject(hdc, self.ui_font) };
             self.label_ellipsis(hdc, subtitle, panel.left + s(52), middle + s(2), self.theme.muted, row_clip);
             self.chevron(hdc, panel.right - s(20), middle, false);
+            if index + 1 < STEPS.len() {
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: panel.left + s(18),
+                        top: top + s(STEP_ROW_H) - s(1),
+                        right: panel.right - s(18),
+                        bottom: top + s(STEP_ROW_H),
+                    },
+                    self.theme.edge,
+                );
+            }
         }
 
         let Some(community) = layout.community else {
@@ -775,6 +851,26 @@ impl App {
             rgb(186, 200, 230),
             clip,
         );
+        if community.bottom - community.top >= s(150) {
+            let button = RECT {
+                left: community.left + s(18),
+                top: community.bottom - s(64),
+                right: community.right - s(18),
+                bottom: community.bottom - s(18),
+            };
+            self.panel_card(hdc, button, s(7), rgb(82, 74, 210), rgb(38, 45, 116));
+            let label = "Open Community  ↗";
+            unsafe { SelectObject(hdc, self.ui_font) };
+            let label_width = self.text_width(hdc, label);
+            self.label_mid(
+                hdc,
+                label,
+                button.left + (button.right - button.left - label_width) / 2,
+                (button.top + button.bottom) / 2,
+                self.theme.text,
+                button,
+            );
+        }
         Self::label(
             hdc,
             "and read the source.",
@@ -806,8 +902,8 @@ impl App {
             bottom: rect.bottom,
         };
         let left_text = match &self.workspace_branch {
-            Some(branch) => format!("{}  \u{2022}  {}", self.status, branch),
-            None => self.status.clone(),
+            Some(branch) => format!("Ready  \u{2022}  {branch}"),
+            None => "Ready".into(),
         };
         self.label_mid(hdc, &left_text, s(16), middle, self.theme.muted, clip);
         let hint = "Ctrl+O file  \u{2022}  Ctrl+N new  \u{2022}  Ctrl+Shift+O folder";

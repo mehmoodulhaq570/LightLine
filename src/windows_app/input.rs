@@ -1074,12 +1074,6 @@ impl App {
         unsafe {
             GetClientRect(hwnd, &mut rect);
         }
-        if self.welcome {
-            if let Some(action) = self.welcome_layout(rect).hit(x, y) {
-                self.run_welcome_action(hwnd, action);
-            }
-            return;
-        }
         if self.quick_open {
             let width = self.scale(560).min(rect.right - self.scale(30));
             let left = (rect.right - width) / 2;
@@ -1095,6 +1089,44 @@ impl App {
             {
                 self.quick_open = false;
                 unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            return;
+        }
+        // The custom title bar is shared by the editor and Welcome screen.
+        // Handle it before page-specific hit testing so the window controls
+        // and command center remain live on both surfaces.
+        if y < self.chrome_top() {
+            let title_button = self.scale(46);
+            let controls_left = rect.right - title_button * 3;
+            if x >= controls_left {
+                let button = ((x - controls_left) / title_button.max(1)).clamp(0, 2);
+                unsafe {
+                    match button {
+                        0 => ShowWindow(hwnd, SW_MINIMIZE),
+                        1 => ShowWindow(
+                            hwnd,
+                            if IsZoomed(hwnd) != 0 { SW_RESTORE } else { SW_MAXIMIZE },
+                        ),
+                        _ => PostMessageW(hwnd, WM_CLOSE, 0, 0),
+                    };
+                }
+                return;
+            }
+            let command = self.command_center_rect(hwnd);
+            if x >= command.left
+                && x < command.right
+                && y >= command.top
+                && y < command.bottom
+            {
+                self.show_quick_open(hwnd);
+            } else if x < self.scale(176) {
+                self.show_welcome(hwnd);
+            }
+            return;
+        }
+        if self.welcome {
+            if let Some(action) = self.welcome_layout(rect).hit(x, y) {
+                self.run_welcome_action(hwnd, action);
             }
             return;
         }
@@ -1117,38 +1149,6 @@ impl App {
                 }
                 return;
             }
-        }
-        if y < self.chrome_top() {
-            let title_button = self.scale(46);
-            let controls_left = rect.right - title_button * 3;
-            if x >= controls_left {
-                let button = ((x - controls_left) / title_button.max(1)).clamp(0, 2);
-                unsafe {
-                    match button {
-                        0 => {
-                            ShowWindow(hwnd, SW_MINIMIZE);
-                        }
-                        1 => {
-                            ShowWindow(hwnd, if IsZoomed(hwnd) != 0 { SW_RESTORE } else { SW_MAXIMIZE });
-                        }
-                        _ => {
-                            PostMessageW(hwnd, WM_CLOSE, 0, 0);
-                        }
-                    }
-                }
-                return;
-            }
-            let command = self.command_center_rect(hwnd);
-            if x >= command.left
-                && x < command.right
-                && y >= command.top
-                && y < command.bottom
-            {
-                self.show_quick_open(hwnd);
-            } else if x < self.scale(176) {
-                self.show_welcome(hwnd);
-            }
-            return;
         }
         if y >= rect.bottom - self.scale(STATUS) {
             self.click_status_language(hwnd, rect, x, y);

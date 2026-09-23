@@ -172,7 +172,10 @@ impl IconSet {
         // tiny-skia's pixmap is premultiplied RGBA, top-to-bottom; Windows
         // wants premultiplied BGRA for a top-down 32bpp DIB.
         let mut bgra = vec![0u8; (size * size * 4) as usize];
-        for (dst, src) in bgra.chunks_exact_mut(4).zip(pixmap.data().chunks_exact(4)) {
+        let (bgra_pixels, bgra_tail) = bgra.as_chunks_mut::<4>();
+        let (rgba_pixels, rgba_tail) = pixmap.data().as_chunks::<4>();
+        debug_assert!(bgra_tail.is_empty() && rgba_tail.is_empty());
+        for (dst, src) in bgra_pixels.iter_mut().zip(rgba_pixels) {
             dst[0] = src[2];
             dst[1] = src[1];
             dst[2] = src[0];

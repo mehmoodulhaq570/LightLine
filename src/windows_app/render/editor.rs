@@ -116,7 +116,7 @@ impl App {
             SelectObject(hdc, self.ui_font);
             SetBkMode(hdc, TRANSPARENT as i32);
             if self.welcome {
-                self.paint_welcome(hdc, rect);
+                self.paint_welcome(hwnd, hdc, rect);
                 self.paint_quick_open(hdc, rect);
                 SelectObject(hdc, old_font);
                 if hdc != window_dc {
