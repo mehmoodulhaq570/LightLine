@@ -1315,6 +1315,10 @@ impl App {
         }
         // The commit box only exists in the source control view.
         self.commit_focus = false;
+        self.terminal_focus = false;
+        if view != SideView::Extensions {
+            self.extensions_search_active = false;
+        }
         if self.side_view == view && self.explorer_visible {
             self.set_sidebar_visible(hwnd, false);
         } else {
@@ -1462,6 +1466,7 @@ impl App {
             self.side_view = SideView::Files;
             self.review_file = None;
             self.search_input = false;
+            self.extensions_search_active = false;
             self.panel_focus = false;
             self.set_active_index(index);
             self.show_active_tab(hwnd);

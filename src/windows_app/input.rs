@@ -7,7 +7,13 @@ impl App {
         self.clear_hover(hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
-        if self.terminal_focus {
+        if self.terminal_focus
+            && !self.quick_open
+            && !self.search_input
+            && !(self.side_view == SideView::Extensions && self.extensions_search_active)
+            && !(self.side_view == SideView::Review && self.commit_focus)
+            && self.explorer_input.is_none()
+        {
             let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
             // Ctrl+` hides the panel even while the shell has focus.
             if ctrl && !shift && key == VK_OEM_3 as u32 {
@@ -155,15 +161,22 @@ impl App {
         if self.side_view == SideView::Extensions && self.extensions_search_active {
             match key {
                 x if x == VK_ESCAPE as u32 => {
-                    self.extensions_query.clear();
-                    self.extensions_search_active = false;
-                    self.panel_focus = false;
+                    if !self.extensions_query.is_empty() {
+                        self.extensions_query.clear();
+                    } else {
+                        self.extensions_search_active = false;
+                        self.panel_focus = false;
+                    }
                 }
                 x if x == VK_RETURN as u32 => {
-                    self.extensions_search_active = false;
+                    self.panel_focus = true;
                 }
                 x if x == VK_BACK as u32 => {
-                    self.extensions_query.pop();
+                    if ctrl {
+                        self.extensions_query.clear();
+                    } else {
+                        self.extensions_query.pop();
+                    }
                 }
                 _ if !ctrl => return false,
                 _ => {}
@@ -764,7 +777,13 @@ impl App {
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
             return;
         }
-        if self.terminal_focus {
+        if self.terminal_focus
+            && !self.quick_open
+            && !self.search_input
+            && !(self.side_view == SideView::Extensions && self.extensions_search_active)
+            && !(self.side_view == SideView::Review && self.commit_focus)
+            && self.explorer_input.is_none()
+        {
             // Enter/Tab/Backspace/Escape and arrows arrive through key(); only
             // forward printable text (including surrogate-paired characters).
             if unit < 32 || unit == 127 {
@@ -1157,6 +1176,7 @@ impl App {
         let rail = self.scale(RAIL);
         let editor_left = self.editor_left();
         if x < rail {
+            self.terminal_focus = false;
             let y = y - self.chrome_top();
             let panel_bottom = rect.bottom - self.chrome_top();
             if y >= self.scale(RAIL_FIRST_ROW)
@@ -1191,6 +1211,7 @@ impl App {
             return;
         }
         if self.sidebar_width > 0 && x < editor_left {
+            self.terminal_focus = false;
             let y = y - self.chrome_top();
             let panel_bottom = rect.bottom - self.chrome_top();
             if !self.explorer_visible {
@@ -1298,29 +1319,38 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Extensions {
-                let s = |v: i32| self.scale(v);
-                let rail = self.scale(RAIL);
+                let (dpi, zoom) = (self.dpi, self.zoom);
+                let s = |v: i32| scaled(v, dpi, zoom);
+                let rail = s(RAIL);
                 let left = rail;
 
                 // 1. Search bar click
                 if y >= s(46) && y <= s(76) {
-                    let search_right = editor_left - s(8);
-                    // Clear button click
-                    if !self.extensions_query.is_empty() && x >= search_right - s(30) && x <= search_right {
-                        self.extensions_query.clear();
+                    let right = self.sidebar_right();
+                    let search_left = left + s(8);
+                    let search_right = right - s(8);
+                    if x >= search_left && x <= search_right {
+                        // Clear button click
+                        if !self.extensions_query.is_empty() && x >= search_right - s(30) && x <= search_right {
+                            self.extensions_query.clear();
+                            self.refresh(hwnd);
+                            return;
+                        }
+                        self.extensions_search_active = true;
+                        self.search_input = false;
+                        self.commit_focus = false;
+                        self.panel_focus = true;
+                        self.terminal_focus = false;
+                        self.ensure_zed_registry_loaded(hwnd);
                         self.refresh(hwnd);
                         return;
                     }
-                    self.extensions_search_active = true;
-                    self.search_input = false;
-                    self.panel_focus = true;
-                    self.ensure_zed_registry_loaded(hwnd);
-                    self.refresh(hwnd);
-                    return;
                 }
 
                 // 2. Subtabs click (Segmented Pill Capsule)
                 if y >= s(84) && y <= s(110) {
+                    self.extensions_search_active = false;
+                    self.terminal_focus = false;
                     let tabs_left = left + s(8);
                     let tabs_right = editor_left - s(8);
                     let half_w = (tabs_right - tabs_left) / 2;
@@ -1547,6 +1577,7 @@ impl App {
         let pos = self.position_at(hwnd, x, y);
         self.panel_focus = false;
         self.terminal_focus = false;
+        self.extensions_search_active = false;
         self.move_cursor(pos, extend);
         self.dragging = true;
         unsafe {
