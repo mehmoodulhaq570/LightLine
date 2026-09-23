@@ -712,7 +712,7 @@ impl App {
                     if let Some(input) = &self.explorer_input && !input.is_rename {
                         let top = self.scale(EXPLORER_TOP);
                         let input_rect = RECT {
-                            left: self.scale(RAIL + 7),
+                            left: self.scale(RAIL + 20),
                             top,
                             right: editor_left - self.scale(8),
                             bottom: top + self.scale(EXPLORER_ROW - 2),
@@ -728,7 +728,7 @@ impl App {
                             self.icons.draw_generic(
                                 hdc,
                                 GenericIcon::FolderOpen,
-                                self.scale(RAIL + 12),
+                                self.scale(RAIL + 25),
                                 top + self.scale(2),
                                 self.scale(18),
                             );
@@ -736,12 +736,12 @@ impl App {
                             self.icons.draw_generic(
                                 hdc,
                                 GenericIcon::File,
-                                self.scale(RAIL + 12),
+                                self.scale(RAIL + 25),
                                 top + self.scale(2),
                                 self.scale(18),
                             );
                         }
-                        let text_x = self.scale(RAIL + 36);
+                        let text_x = self.scale(RAIL + 49);
                         Self::label(
                             hdc,
                             &input.buffer,
@@ -810,7 +810,7 @@ impl App {
                             .file_name()
                             .unwrap_or_default()
                             .to_string_lossy();
-                        let left = self.scale(RAIL + 10 + item.depth.min(6) as i32 * 13);
+                        let left = self.scale(RAIL + 23 + item.depth.min(6) as i32 * 14);
                         if item.entry.is_dir {
                             self.chevron(
                                 hdc,

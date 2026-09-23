@@ -37,6 +37,24 @@ unsafe extern "system" fn wnd_proc(
     if msg == WM_NCCALCSIZE {
         return 0;
     }
+    if msg == WM_GETMINMAXINFO {
+        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+        if !monitor.is_null() {
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..unsafe { zeroed() }
+            };
+            if unsafe { GetMonitorInfoW(monitor, &mut info) } != 0 {
+                let minmax = unsafe { &mut *(lparam as *mut MINMAXINFO) };
+                minmax.ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left;
+                minmax.ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top;
+                minmax.ptMaxSize.x = info.rcWork.right - info.rcWork.left;
+                minmax.ptMaxSize.y = info.rcWork.bottom - info.rcWork.top;
+                minmax.ptMaxTrackSize = minmax.ptMaxSize;
+                return 0;
+            }
+        }
+    }
     if msg == WM_DESTROY {
         EDITOR_WINDOW.store(0, Ordering::Relaxed);
         unsafe { PostQuitMessage(0) };
