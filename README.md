@@ -10,7 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/mehmoodulhaq570/LightLine?color=blue)](https://github.com/mehmoodulhaq570/LightLine/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?logo=windows&logoColor=white)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-DEA584?logo=rust&logoColor=white)](Cargo.toml)
-[![License](https://img.shields.io/badge/license-MIT-green)](Cargo.toml)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <br>
 
@@ -44,6 +44,21 @@
 Grab the latest build from **[GitHub Releases](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**:
 - **[`lightline.exe`](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**: Direct standalone executable.
 - **[`lightline-v0.1.0-windows-x86_64.zip`](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**: Archive bundling the executable, README, and CHANGELOG.
+- **[`SHA256SUMS.txt`](https://github.com/mehmoodulhaq570/LightLine/releases/latest/download/SHA256SUMS.txt)**: SHA-256 checksums for both release downloads.
+
+#### Windows SmartScreen notice
+
+LightLine is currently distributed as an unsigned Windows application. When opening it for the first time, Microsoft Defender SmartScreen may display **“Windows protected your PC”** and identify the publisher as unknown. If you downloaded LightLine from the official GitHub release and verified its checksum, click **More info**, confirm that the listed app is `lightline.exe`, and then click **Run anyway**. Do not disable SmartScreen, and do not continue if Windows reports a malware detection rather than an unrecognized app warning.
+
+#### Verify the download
+
+Every release includes `SHA256SUMS.txt`. In PowerShell, calculate the downloaded file's SHA-256 value:
+
+```powershell
+Get-FileHash .\lightline.exe -Algorithm SHA256
+```
+
+Compare the displayed hash with the `lightline.exe` entry in `SHA256SUMS.txt`. They must match exactly. For the ZIP download, run the same command with the ZIP filename and compare it with the corresponding ZIP entry. Delete the download if the values differ.
 
 ### Build from Source
 Ensure you have the Rust toolchain installed on Windows 10/11:

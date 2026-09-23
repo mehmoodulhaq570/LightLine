@@ -1,1 +1,2 @@
 1 ICON "lightline.ico"
+#include "lightline_version.rc"

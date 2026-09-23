@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, for example 0.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-request:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, '/release '))
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Parse release version
+        id: version
+        shell: bash
+        env:
+          COMMENT: ${{ github.event.comment.body }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${COMMENT#/release }"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $version"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: release-request
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+
+      - name: Verify release tag is unused
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.release-request.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          if (git ls-remote --exit-code --tags origin "refs/tags/$tag") {
+            throw "Release tag $tag already exists."
+          }
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Build release executable
+        env:
+          LIGHTLINE_VERSION: ${{ needs.release-request.outputs.version }}
+        run: cargo build --release --locked
+
+      - name: Package release assets
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.release-request.outputs.version }}
+        run: |
+          $releaseDirectory = "release"
+          $zipPath = "lightline-v$env:VERSION-windows-x86_64.zip"
+
+          New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+          Copy-Item "target/release/lightline.exe" "$releaseDirectory/lightline.exe"
+          Copy-Item "README.md" "$releaseDirectory/README.md"
+          Copy-Item "CHANGELOG.md" "$releaseDirectory/CHANGELOG.md"
+          Compress-Archive -Path "$releaseDirectory/*" -DestinationPath $zipPath -Force
+
+          $assets = @("target/release/lightline.exe", $zipPath)
+          $checksums = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($asset))"
+          }
+          [System.IO.File]::WriteAllLines(
+            (Join-Path (Get-Location) "SHA256SUMS.txt"),
+            $checksums,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release-request.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $zipPath = "lightline-v$env:VERSION-windows-x86_64.zip"
+          gh release create $tag `
+            "target/release/lightline.exe" `
+            $zipPath `
+            "SHA256SUMS.txt" `
+            --title "LightLine v$env:VERSION" `
+            --generate-notes
