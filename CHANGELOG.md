@@ -11,7 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 2026-09-24
 
+#### Added
+- **Bundled Curated Vector SVG Suite (VS Code Style)**: LightLine now bundles an authentic, anti-aliased SVG icon suite directly into the binary (`BuiltinIcon`), rasterized on-the-fly with `resvg`/`tiny-skia`. Out of the box, it provides clean, color-accurate vector icons for Rust (`.rs`), Python (`.py`), Markdown (`.md`), TOML, JSON (`{ }`), YAML, Git (`.git*`), HTML, CSS, JS, TS, shell scripts (`>_`), media, lock files, and documents, alongside sleek two-tone slate-blue folders with distinct open/closed states. Zero network requests, 100% offline, and zero user configuration needed.
+- **Tree Indentation Guidelines**: Subtle 1px vertical hierarchy guidelines rendered down each indentation level in the Explorer tree, visually connecting parent directories to nested child items.
+
 #### Changed
+- **Instant First-Launch (Removed Synchronous Git Clone)**: Removed the silent, blocking first-launch `git clone` of Material Icons from `App::new`. LightLine now launches instantaneously in milliseconds, relying on the built-in SVG suite by default, while keeping full support for installing the 1,000+ icon Material Icon Theme on demand via the Extensions marketplace (`Ctrl+Shift+X`).
+- **Clean Workspace Header Layout**: Removed the redundant folder icon from the workspace root header row so the project name aligns cleanly right next to the expand/collapse chevron (matching modern VS Code conventions).
 - **Professional Welcome Dashboard**: Rebuilt the Welcome screen to match the main workbench's midnight-blue visual system, with the compact LightLine title bar, centered command search, icon-only activity rail, polished quick-start cards, recent projects, Quick Actions, Getting Started, and Community panels.
 - **Responsive DPI-Aware Layout**: Rebalanced the Welcome dashboard for maximized Windows displays and 125% scaling so all launch cards, recent projects, and six Quick Actions remain visible without forcing fullscreen behavior or clipping the right column.
 - **Consistent Workbench Interaction**: The global command center and minimize, maximize/restore, and close controls now use the same geometry and behavior on both the Welcome screen and editor.
@@ -20,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Explorer Row Spacing**: The first item under the workspace root is now one normal row (27px) below it instead of about 38px, so the root sits closer to its children. Rendering, click handling and scrolling share the same `EXPLORER_TOP` constant, so all three moved together.
 
 #### Fixed
+- **Explorer Tree & Activity Rail Icon Loss on Theme Removal**: Fixed issues where uninstalling an icon theme left the Activity Rail Explorer icon as a blank blue square and reduced file and folder tree items to 6×6 gray squares. The editor now seamlessly falls back to the built-in SVG catalog across the explorer tree, tab strip, welcome page, and rail.
 - **Welcome Header Controls Ignored**: Page-specific Welcome hit testing previously intercepted clicks before the custom title bar could handle window controls or open Quick Open.
 - **GitHub Actions Clippy Failure**: Updated SVG pixel conversion for Rust 1.98's `chunks_exact_to_as_chunks` lint, which was promoted to an error by the workflow's `-D warnings` setting. The locked test suite and strict all-target Clippy check now pass locally.
 - **Extension Marketplace Preservation**: Confirmed the Welcome/workbench redesign continues to route the Extensions activity to the existing dynamic Zed registry; no marketplace, search, install, uninstall, icon-theme, or color-theme logic was removed.

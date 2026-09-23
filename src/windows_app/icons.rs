@@ -58,12 +58,10 @@ pub(super) enum GenericIcon {
 }
 
 pub(super) struct IconSet {
-    // A real Zed icon-theme extension (e.g. Material Icon Theme), loaded
-    // from %APPDATA%\LightLine\extensions\material-icon-theme. Installed
-    // automatically on first run by extension_installer::
-    // ensure_material_icon_theme(); `None` only when that install couldn't
-    // happen (no git on PATH, offline on first launch, ...), in which case
-    // every draw call below simply draws nothing rather than crashing.
+    // An installed icon-theme extension (e.g. Material Icon Theme), loaded
+    // from %APPDATA%\LightLine\extensions\material-icon-theme if installed
+    // by the user via the Extensions marketplace. When not installed,
+    // IconSet automatically uses our fast built-in authentic SVG suite.
     theme: Option<IconTheme>,
     size: i32,
     // SVGs are rasterized to HICON lazily, on first use, not all ~1000 of

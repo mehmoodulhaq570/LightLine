@@ -722,7 +722,6 @@ impl App {
     }
 
     pub(super) fn new(hwnd: HWND, brand_icon: HICON, hero_icon: HICON) -> Self {
-        lightline::extensions::installer::ensure_material_icon_theme();
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let font = Self::font_for_dpi(dpi, zoom);
