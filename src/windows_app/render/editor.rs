@@ -39,8 +39,8 @@ impl App {
         branch_x: i32,
     ) -> (i32, i32, String, RECT) {
         let s = |v: i32| self.scale(v);
-        let mid_x = chip_right + s(24);
-        let clip_right = (branch_x - s(16)).max(mid_x);
+        let left_bound = chip_right + s(24);
+        let clip_right = (branch_x - s(16)).max(left_bound);
         let indent_label = if self.settings.insert_spaces { "Spaces" } else { "Tab Size" };
         let prefix = format!(
             "Ln {}, Col {}    {indent_label}: {}    UTF-8    ",
@@ -54,6 +54,7 @@ impl App {
         let prefix_width = self.text_width(hdc, &prefix);
         let language = language_label(self.doc().path.as_deref());
         let language_width = self.text_width(hdc, &language);
+        let mid_x = (clip_right - prefix_width - language_width).max(left_bound);
         let language_left = (mid_x + prefix_width).min(clip_right);
         let hit_rect = RECT {
             left: language_left,
@@ -154,6 +155,114 @@ impl App {
                 },
                 self.theme.rail_bg,
             );
+            // Dedicated workbench header: brand at left, command center in the
+            // middle, and the native window controls remain in the OS frame.
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: rect.right,
+                    bottom: chrome_top,
+                },
+                self.theme.tab_bg,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: chrome_top - self.scale(1).max(1),
+                    right: rect.right,
+                    bottom: chrome_top,
+                },
+                self.theme.edge,
+            );
+            DrawIconEx(
+                hdc,
+                self.scale(14),
+                self.scale(9),
+                self.brand_icon,
+                self.scale(32),
+                self.scale(32),
+                0,
+                null_mut(),
+                DI_NORMAL,
+            );
+            SelectObject(hdc, self.brand_font);
+            Self::label(
+                hdc,
+                "LightLine",
+                self.scale(56),
+                self.scale(12),
+                self.theme.text,
+                RECT {
+                    left: self.scale(56),
+                    top: 0,
+                    right: self.scale(160),
+                    bottom: chrome_top,
+                },
+            );
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: self.scale(132),
+                    top: self.scale(15),
+                    right: self.scale(164),
+                    bottom: self.scale(35),
+                },
+                self.scale(5),
+                rgb(63, 47, 150),
+            );
+            SelectObject(hdc, self.ui_font);
+            Self::label(
+                hdc,
+                "IDE",
+                self.scale(138),
+                self.scale(15),
+                self.theme.text,
+                RECT {
+                    left: self.scale(132),
+                    top: 0,
+                    right: self.scale(164),
+                    bottom: chrome_top,
+                },
+            );
+            let title_button = self.scale(46);
+            let controls_left = rect.right - title_button * 3;
+            let controls_mid_y = chrome_top / 2;
+            self.stroke(hdc, self.theme.muted, |hdc| {
+                // Minimize
+                MoveToEx(
+                    hdc,
+                    controls_left + self.scale(17),
+                    controls_mid_y + self.scale(5),
+                    null_mut(),
+                );
+                LineTo(
+                    hdc,
+                    controls_left + self.scale(29),
+                    controls_mid_y + self.scale(5),
+                );
+                // Maximize / restore
+                let max_left = controls_left + title_button + self.scale(17);
+                Rectangle(
+                    hdc,
+                    max_left,
+                    controls_mid_y - self.scale(6),
+                    max_left + self.scale(12),
+                    controls_mid_y + self.scale(6),
+                );
+                // Close
+                let close_left = controls_left + title_button * 2 + self.scale(17);
+                MoveToEx(hdc, close_left, controls_mid_y - self.scale(6), null_mut());
+                LineTo(
+                    hdc,
+                    close_left + self.scale(12),
+                    controls_mid_y + self.scale(6),
+                );
+                MoveToEx(hdc, close_left + self.scale(12), controls_mid_y - self.scale(6), null_mut());
+                LineTo(hdc, close_left, controls_mid_y + self.scale(6));
+            });
             if self.sidebar_width > 0 {
                 let panel = RECT {
                     left: self.scale(RAIL) + gap,
@@ -461,7 +570,10 @@ impl App {
                     key_rect,
                 );
             }
-            self.paint_rail(hdc, editor_bottom);
+            let rail_state = SaveDC(hdc);
+            SetViewportOrgEx(hdc, 0, chrome_top, null_mut());
+            self.paint_rail(hdc, editor_bottom - chrome_top);
+            RestoreDC(hdc, rail_state);
             let sidebar_state = SaveDC(hdc);
             // Clip the side panel to its card so its contents cannot spill
             // into the gap between the cards.
@@ -472,8 +584,10 @@ impl App {
                 self.sidebar_right(),
                 card_bottom,
             );
+            SetViewportOrgEx(hdc, 0, chrome_top, null_mut());
+            let sidebar_bottom = card_bottom - chrome_top;
             if self.sidebar_width > 0 && self.side_view != SideView::Files {
-                self.paint_side_panel(hdc, self.sidebar_right(), card_bottom);
+                self.paint_side_panel(hdc, self.sidebar_right(), sidebar_bottom);
             }
             if self.sidebar_width > 0 && self.side_view == SideView::Files {
                 if let Some(root) = self.workspace_root.clone()
@@ -485,7 +599,7 @@ impl App {
                     left: self.scale(RAIL),
                     top: 0,
                     right: editor_left,
-                    bottom: editor_bottom,
+                    bottom: sidebar_bottom,
                 };
                 Self::label(
                     hdc,
@@ -663,7 +777,7 @@ impl App {
                         let top = self.scale(
                             EXPLORER_TOP + (row + row_offset - self.explorer_first_row) as i32 * EXPLORER_ROW,
                         );
-                        if top >= editor_bottom - self.scale(38) {
+                        if top >= sidebar_bottom - self.scale(38) {
                             break;
                         }
                         let is_being_renamed = self.explorer_input.as_ref().is_some_and(|inp| {

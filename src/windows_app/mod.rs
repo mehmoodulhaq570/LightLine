@@ -79,6 +79,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 // icons; the Explorer owns the readable labels and project hierarchy.
 const RAIL: i32 = 56;
 const SIDEBAR: i32 = 286;
+const WORKBENCH_HEADER: i32 = 50;
 const GUTTER: i32 = 62;
 const TOP: i32 = 5;
 const STATUS: i32 = 29;
@@ -88,7 +89,7 @@ const BREADCRUMB_HEIGHT: i32 = 30;
 const TAB_WIDTH: i32 = 180;
 const EXPLORER_ROW: i32 = 27;
 const EXPLORER_TOP: i32 = 82;
-const RAIL_FIRST_ROW: i32 = 58;
+const RAIL_FIRST_ROW: i32 = 10;
 const RAIL_ROW: i32 = 52;
 // Gutter between the floating side-panel / editor / terminal cards.
 const CARD_GAP: i32 = 1;

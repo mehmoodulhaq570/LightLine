@@ -1229,7 +1229,7 @@ impl App {
     }
 
     pub(super) fn chrome_top(&self) -> i32 {
-        self.chrome_gap()
+        self.scale(WORKBENCH_HEADER)
     }
 
     pub(super) fn tab_strip_bottom(&self) -> i32 {
@@ -1240,15 +1240,20 @@ impl App {
     // the tab chrome makes Quick Open discoverable without spending another
     // permanent row of vertical editor space.
     pub(super) fn command_center_rect(&self, hwnd: HWND) -> RECT {
-        let editor_right = self.editor_right(hwnd);
-        let available = (editor_right - self.editor_left()).max(0);
-        let width = self.scale(410).min((available / 2).max(self.scale(230)));
-        let right = editor_right - self.scale(92);
+        let mut client = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let usable_left = self.scale(176);
+        let usable_right = client.right - self.scale(46 * 3 + 16);
+        let available = (usable_right - usable_left).max(0);
+        let width = self
+            .scale(520)
+            .min((available - self.scale(32)).max(self.scale(260)));
+        let left = usable_left + (available - width) / 2;
         RECT {
-            left: (right - width).max(self.editor_left() + self.scale(210)),
-            top: self.chrome_top() + self.scale(6),
-            right,
-            bottom: self.tab_strip_bottom() - self.scale(6),
+            left,
+            top: self.scale(8),
+            right: left + width,
+            bottom: self.scale(WORKBENCH_HEADER - 8),
         }
     }
 

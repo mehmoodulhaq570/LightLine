@@ -32,6 +32,11 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    // Remove the standard caption while retaining the thick resize frame.
+    // LightLine paints and hit-tests its own workbench title bar below.
+    if msg == WM_NCCALCSIZE {
+        return 0;
+    }
     if msg == WM_DESTROY {
         EDITOR_WINDOW.store(0, Ordering::Relaxed);
         unsafe { PostQuitMessage(0) };
@@ -51,6 +56,35 @@ unsafe extern "system" fn wnd_proc(
     };
     match msg {
         WM_ERASEBKGND => 1,
+        WM_NCHITTEST => {
+            let default_hit = unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+            if default_hit != HTCLIENT as LRESULT {
+                return default_hit;
+            }
+            let mut point = POINT {
+                x: (lparam as u32 & 0xffff) as i16 as i32,
+                y: ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+            };
+            unsafe { ScreenToClient(hwnd, &mut point) };
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect) };
+            let controls_left = rect.right - app.scale(46 * 3);
+            let command = app.command_center_rect(hwnd);
+            let over_command = point.x >= command.left
+                && point.x < command.right
+                && point.y >= command.top
+                && point.y < command.bottom;
+            if point.y >= 0
+                && point.y < app.chrome_top()
+                && point.x >= app.scale(176)
+                && point.x < controls_left
+                && !over_command
+            {
+                HTCAPTION as LRESULT
+            } else {
+                HTCLIENT as LRESULT
+            }
+        }
         WM_PAINT => {
             app.advance_syntax(hwnd);
             app.paint(hwnd);
@@ -296,13 +330,15 @@ unsafe extern "system" fn wnd_proc(
                     let (count, visible) = match app.side_view {
                         SideView::Search => (
                             app.search_results.len(),
-                            ((rect.bottom - app.scale(STATUS + 113)) / app.scale(48).max(1))
+                            ((rect.bottom - app.scale(STATUS + WORKBENCH_HEADER + 113))
+                                / app.scale(48).max(1))
                                 .max(1) as usize,
                         ),
                         SideView::Review => (app.git_rows().len(), app.git_visible_rows(hwnd)),
                         _ => (
                             app.changes.len(),
-                            ((rect.bottom - app.scale(STATUS + 113)) / app.scale(EXPLORER_ROW).max(1))
+                            ((rect.bottom - app.scale(STATUS + WORKBENCH_HEADER + 113))
+                                / app.scale(EXPLORER_ROW).max(1))
                                 .max(1) as usize,
                         ),
                     };
@@ -315,7 +351,8 @@ unsafe extern "system" fn wnd_proc(
                     unsafe { InvalidateRect(hwnd, null(), 0) };
                     return 0;
                 }
-                let visible = ((rect.bottom - app.scale(STATUS + EXPLORER_TOP + 38))
+                let visible = ((rect.bottom
+                    - app.scale(STATUS + WORKBENCH_HEADER + EXPLORER_TOP + 38))
                     / app.scale(EXPLORER_ROW).max(1))
                 .max(1) as usize;
                 let max_first = app.explorer_rows().len().saturating_sub(visible);
@@ -436,10 +473,10 @@ pub fn run() -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         let hwnd = CreateWindowExW(
-            0,
+            WS_EX_APPWINDOW,
             class.as_ptr(),
             wide("LightLine").as_ptr(),
-            WS_OVERLAPPEDWINDOW | WS_VSCROLL,
+            WS_THICKFRAME | WS_VSCROLL,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             1000,
@@ -476,6 +513,9 @@ pub fn run() -> io::Result<()> {
         } else {
             app.borrow_mut().restore_session(hwnd);
         }
+        // The approved workbench keeps a compact terminal dock available by
+        // default; it remains collapsible with Ctrl+` or the header close.
+        app.borrow_mut().open_terminal(hwnd);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
             TranslateMessage(&msg);

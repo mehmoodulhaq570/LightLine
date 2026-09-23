@@ -1118,6 +1118,38 @@ impl App {
                 return;
             }
         }
+        if y < self.chrome_top() {
+            let title_button = self.scale(46);
+            let controls_left = rect.right - title_button * 3;
+            if x >= controls_left {
+                let button = ((x - controls_left) / title_button.max(1)).clamp(0, 2);
+                unsafe {
+                    match button {
+                        0 => {
+                            ShowWindow(hwnd, SW_MINIMIZE);
+                        }
+                        1 => {
+                            ShowWindow(hwnd, if IsZoomed(hwnd) != 0 { SW_RESTORE } else { SW_MAXIMIZE });
+                        }
+                        _ => {
+                            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                        }
+                    }
+                }
+                return;
+            }
+            let command = self.command_center_rect(hwnd);
+            if x >= command.left
+                && x < command.right
+                && y >= command.top
+                && y < command.bottom
+            {
+                self.show_quick_open(hwnd);
+            } else if x < self.scale(176) {
+                self.show_welcome(hwnd);
+            }
+            return;
+        }
         if y >= rect.bottom - self.scale(STATUS) {
             self.click_status_language(hwnd, rect, x, y);
             return;
@@ -1125,9 +1157,9 @@ impl App {
         let rail = self.scale(RAIL);
         let editor_left = self.editor_left();
         if x < rail {
-            if y < self.scale(39) {
-                self.show_welcome(hwnd);
-            } else if y >= self.scale(RAIL_FIRST_ROW)
+            let y = y - self.chrome_top();
+            let panel_bottom = rect.bottom - self.chrome_top();
+            if y >= self.scale(RAIL_FIRST_ROW)
                 && y < self.scale(RAIL_FIRST_ROW + RAIL_ROW * 6)
             {
                 let row = (y - self.scale(RAIL_FIRST_ROW)) / self.scale(RAIL_ROW).max(1);
@@ -1143,7 +1175,7 @@ impl App {
                     }
                     _ => {}
                 }
-            } else if y >= rect.bottom - self.scale(STATUS + 40) {
+            } else if y >= panel_bottom - self.scale(STATUS + 40) {
                 self.status = "Settings are not available yet".into();
                 self.refresh(hwnd);
             }
@@ -1159,6 +1191,8 @@ impl App {
             return;
         }
         if self.sidebar_width > 0 && x < editor_left {
+            let y = y - self.chrome_top();
+            let panel_bottom = rect.bottom - self.chrome_top();
             if !self.explorer_visible {
                 return;
             }
@@ -1251,7 +1285,7 @@ impl App {
                     return;
                 }
                 if x >= rail && x < editor_left {
-                    let bottom = (rect.bottom - self.scale(STATUS)).max(0);
+                    let bottom = (panel_bottom - self.scale(STATUS)).max(0);
                     let start_y = self.debug_variables_start_y();
                     let (rows, _) = self.debug_variable_rows(start_y, bottom, self.scale(18), self.scale(16));
                     for row in &rows {
@@ -1367,11 +1401,11 @@ impl App {
                         return;
                     }
             }
-            if y >= rect.bottom - self.scale(STATUS + 35) {
+            if y >= panel_bottom - self.scale(STATUS + 35) {
                 self.show_active_tab(hwnd);
                 return;
             }
-            if y >= self.scale(EXPLORER_TOP) && y < rect.bottom - self.scale(STATUS + 38) {
+            if y >= self.scale(EXPLORER_TOP) && y < panel_bottom - self.scale(STATUS + 38) {
                 self.panel_focus = true;
                 let row = self.explorer_first_row
                     + ((y - self.scale(EXPLORER_TOP)) / self.scale(EXPLORER_ROW)) as usize;
@@ -1410,6 +1444,10 @@ impl App {
                     // The far-right close hides the panel but keeps every
                     // shell session running, exactly like dismissing a dock.
                     TerminalHeaderHit::Hide => self.close_terminal(hwnd),
+                    TerminalHeaderHit::Problems => {
+                        self.status = "No problems in the active workspace".into();
+                        self.refresh(hwnd);
+                    }
                     TerminalHeaderHit::OutputTab => {
                         self.switch_terminal_tab(hwnd, TerminalTab::Output);
                     }
@@ -1556,10 +1594,11 @@ impl App {
         let mut target_path: Option<PathBuf> = None;
         let mut is_dir = true;
 
+        let panel_y = y - self.chrome_top();
         let row_top = self.scale(EXPLORER_TOP);
-        if y >= row_top {
+        if panel_y >= row_top {
             let row_idx = self.explorer_first_row
-                + ((y - row_top) / self.scale(EXPLORER_ROW)) as usize;
+                + ((panel_y - row_top) / self.scale(EXPLORER_ROW)) as usize;
             if let Some(row) = self.explorer_rows().get(row_idx) {
                 target_path = Some(row.entry.path.clone());
                 is_dir = row.entry.is_dir;

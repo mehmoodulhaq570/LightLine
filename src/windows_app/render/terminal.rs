@@ -41,6 +41,15 @@ impl App {
         let layout = self.terminal_header_layout(left, right, top);
         let header_bottom = layout.header_bottom;
 
+        Self::label(
+            hdc,
+            "PROBLEMS  0",
+            layout.problems.left,
+            top + self.scale(9),
+            self.theme.muted,
+            layout.problems,
+        );
+
         let output_active = self.terminal_tab == TerminalTab::Output;
         Self::label(
             hdc,

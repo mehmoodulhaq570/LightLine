@@ -157,6 +157,7 @@ fn vk_to_terminal_key(vk: u32, control: bool) -> Option<TermKey> {
 // Regions of the terminal header tab strip. Painted by render/terminal.rs and
 // hit-tested by input.rs through the exact same layout, so the two never drift.
 pub(super) enum TerminalHeaderHit {
+    Problems,
     OutputTab,
     TerminalTab(usize),
     New,
@@ -167,6 +168,7 @@ pub(super) enum TerminalHeaderHit {
 
 pub(super) struct TerminalHeaderLayout {
     pub(super) header_bottom: i32,
+    pub(super) problems: RECT,
     pub(super) output: RECT,
     pub(super) terminals: Vec<RECT>,
     pub(super) plus: RECT,
@@ -485,6 +487,13 @@ impl App {
     ) -> TerminalHeaderLayout {
         let header_bottom = top + self.scale(TERMINAL_HEADER);
         let mut x = left + self.scale(16);
+        let problems = RECT {
+            left: x,
+            top,
+            right: x + self.scale(92),
+            bottom: header_bottom,
+        };
+        x += self.scale(92);
         let output = RECT {
             left: x,
             top,
@@ -492,7 +501,7 @@ impl App {
             bottom: header_bottom,
         };
         x += self.scale(78);
-        let tab_width = self.scale(60);
+        let tab_width = self.scale(92);
         let gap = self.scale(6);
         let mut terminals = Vec::with_capacity(self.terminals.len());
         for _ in 0..self.terminals.len() {
@@ -525,6 +534,7 @@ impl App {
         };
         TerminalHeaderLayout {
             header_bottom,
+            problems,
             output,
             terminals,
             plus,
@@ -538,6 +548,9 @@ impl App {
         let inside = |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
         if inside(&layout.hide) {
             return TerminalHeaderHit::Hide;
+        }
+        if inside(&layout.problems) {
+            return TerminalHeaderHit::Problems;
         }
         if inside(&layout.output) {
             return TerminalHeaderHit::OutputTab;

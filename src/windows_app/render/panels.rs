@@ -8,31 +8,6 @@ impl App {
             right: self.scale(RAIL),
             bottom: editor_bottom,
         };
-        unsafe {
-            DrawIconEx(
-                hdc,
-                self.scale(12),
-                self.scale(9),
-                self.brand_icon,
-                self.scale(32),
-                self.scale(32),
-                0,
-                null_mut(),
-                DI_NORMAL,
-            );
-            SelectObject(hdc, self.ui_font);
-        }
-        Self::fill(
-            hdc,
-            RECT {
-                left: 0,
-                top: self.scale(49),
-                right: self.scale(RAIL),
-                bottom: self.scale(50),
-            },
-            self.theme.edge,
-        );
-
         let selected = match self.side_view {
             SideView::Files => self.explorer_visible.then_some(0),
             SideView::Search => self.explorer_visible.then_some(1),
