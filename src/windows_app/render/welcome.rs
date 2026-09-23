@@ -569,22 +569,38 @@ impl App {
             Self::rounded_fill(hdc, badge, s(9), badge_color);
             match index {
                 0 => {
-                    self.icons.draw_generic(
+                    if !self.icons.draw_generic(
                         hdc,
                         GenericIcon::FolderOpen,
                         badge.left + s(11),
                         badge.top + s(11),
                         s(18),
-                    );
+                    ) {
+                        self.draw_vector_folder(
+                            hdc,
+                            badge.left + s(11),
+                            badge.top + s(11),
+                            s(18),
+                            true,
+                        );
+                    }
                 }
                 1 => {
-                    self.icons.draw_generic(
+                    if !self.icons.draw_generic(
                         hdc,
                         GenericIcon::File,
                         badge.left + s(11),
                         badge.top + s(11),
                         s(18),
-                    );
+                    ) {
+                        self.draw_vector_file(
+                            hdc,
+                            std::path::Path::new("untitled"),
+                            badge.left + s(11),
+                            badge.top + s(11),
+                            s(18),
+                        );
+                    }
                 }
                 2 => self.rail_icon(hdc, 3, badge.left + s(11), badge.top + s(11), self.theme.text),
                 _ => self.prompt_glyph(hdc, badge.left + s(10), badge.top + s(10), s(20), self.theme.text),
@@ -669,8 +685,9 @@ impl App {
                 bottom: top + s(RECENT_ROW_H) - s(4),
             };
             Self::rounded_fill(hdc, row, s(8), self.theme.active_bg);
-            self.icons
-                .draw_generic(hdc, GenericIcon::Folder, row.left + s(12), top + s(15), s(17));
+            if !self.icons.draw_generic(hdc, GenericIcon::Folder, row.left + s(12), top + s(15), s(17)) {
+                self.draw_vector_folder(hdc, row.left + s(12), top + s(15), s(17), false);
+            }
             let text_left = row.left + s(40);
             let row_clip = RECT {
                 left: text_left,
@@ -733,22 +750,38 @@ impl App {
             self.label_mid(hdc, shortcut, chip.left + s(8), middle, self.theme.muted, clip);
             match index {
                 0 | 1 => {
-                    self.icons.draw_generic(
+                    if !self.icons.draw_generic(
                         hdc,
                         GenericIcon::File,
                         panel.left + s(16),
                         middle - s(9),
                         s(18),
-                    );
+                    ) {
+                        self.draw_vector_file(
+                            hdc,
+                            std::path::Path::new("untitled"),
+                            panel.left + s(16),
+                            middle - s(9),
+                            s(18),
+                        );
+                    }
                 }
                 2 => {
-                    self.icons.draw_generic(
+                    if !self.icons.draw_generic(
                         hdc,
                         GenericIcon::Folder,
                         panel.left + s(16),
                         middle - s(9),
                         s(18),
-                    );
+                    ) {
+                        self.draw_vector_folder(
+                            hdc,
+                            panel.left + s(16),
+                            middle - s(9),
+                            s(18),
+                            false,
+                        );
+                    }
                 }
                 3 => Self::label(hdc, "⌘", panel.left + s(16), middle - s(11), self.theme.muted, clip),
                 4 => self.rail_icon(hdc, 1, panel.left + s(16), middle - s(9), self.theme.muted),

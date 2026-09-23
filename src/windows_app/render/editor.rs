@@ -442,7 +442,7 @@ impl App {
                 let use_theme = self.has_extension("material-icons");
                 match self.tabs[index].document.path.as_deref() {
                     Some(path) => {
-                        self.icons.draw_for_path(
+                        if !self.icons.draw_for_path(
                             hdc,
                             path,
                             false,
@@ -451,16 +451,32 @@ impl App {
                             left + self.scale(11),
                             chrome_top + self.scale(9),
                             self.scale(18),
-                        );
+                        ) {
+                            self.draw_vector_file(
+                                hdc,
+                                path,
+                                left + self.scale(11),
+                                chrome_top + self.scale(9),
+                                self.scale(18),
+                            );
+                        }
                     }
                     None => {
-                        self.icons.draw_generic(
+                        if !self.icons.draw_generic(
                             hdc,
                             GenericIcon::File,
                             left + self.scale(11),
                             chrome_top + self.scale(9),
                             self.scale(18),
-                        );
+                        ) {
+                            self.draw_vector_file(
+                                hdc,
+                                std::path::Path::new("untitled"),
+                                left + self.scale(11),
+                                chrome_top + self.scale(9),
+                                self.scale(18),
+                            );
+                        }
                     }
                 }
                 let label = self.tab_label(index);
@@ -642,7 +658,7 @@ impl App {
                         .unwrap_or_else(|| display_path(root));
                     let root_expanded = self.expanded_dirs.contains(root);
                     self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), root_expanded);
-                    self.icons.draw_generic(
+                    if !self.icons.draw_generic(
                         hdc,
                         if root_expanded {
                             GenericIcon::FolderOpen
@@ -652,7 +668,15 @@ impl App {
                         self.scale(RAIL + 23),
                         self.scale(48),
                         self.scale(17),
-                    );
+                    ) {
+                        self.draw_vector_folder(
+                            hdc,
+                            self.scale(RAIL + 23),
+                            self.scale(48),
+                            self.scale(17),
+                            root_expanded,
+                        );
+                    }
                     let root_clip = RECT {
                         left: self.scale(RAIL + 44),
                         top: self.scale(40),
@@ -725,21 +749,37 @@ impl App {
                             rgb(16, 26, 48),
                         );
                         if input.is_folder {
-                            self.icons.draw_generic(
+                            if !self.icons.draw_generic(
                                 hdc,
                                 GenericIcon::FolderOpen,
                                 self.scale(RAIL + 25),
                                 top + self.scale(2),
                                 self.scale(18),
-                            );
+                            ) {
+                                self.draw_vector_folder(
+                                    hdc,
+                                    self.scale(RAIL + 25),
+                                    top + self.scale(2),
+                                    self.scale(18),
+                                    true,
+                                );
+                            }
                         } else {
-                            self.icons.draw_generic(
+                            if !self.icons.draw_generic(
                                 hdc,
                                 GenericIcon::File,
                                 self.scale(RAIL + 25),
                                 top + self.scale(2),
                                 self.scale(18),
-                            );
+                            ) {
+                                self.draw_vector_file(
+                                    hdc,
+                                    std::path::Path::new(&input.buffer),
+                                    self.scale(RAIL + 25),
+                                    top + self.scale(2),
+                                    self.scale(18),
+                                );
+                            }
                         }
                         let text_x = self.scale(RAIL + 49);
                         Self::label(
@@ -810,6 +850,21 @@ impl App {
                             .file_name()
                             .unwrap_or_default()
                             .to_string_lossy();
+                        // Draw subtle vertical indent guidelines for nested levels
+                        for d in 0..item.depth.min(6) {
+                            let guide_x = self.scale(RAIL + 23 + d as i32 * 14 + 5);
+                            Self::fill(
+                                hdc,
+                                RECT {
+                                    left: guide_x,
+                                    top,
+                                    right: guide_x + 1.max(self.scale(1)),
+                                    bottom: top + self.scale(EXPLORER_ROW),
+                                },
+                                rgb(38, 52, 78),
+                            );
+                        }
+
                         let left = self.scale(RAIL + 23 + item.depth.min(6) as i32 * 14);
                         if item.entry.is_dir {
                             self.chevron(
@@ -829,16 +884,23 @@ impl App {
                             top + self.scale(2),
                             self.scale(18),
                         ) {
-                            Self::fill(
-                                hdc,
-                                RECT {
-                                    left: left + self.scale(16),
-                                    top: top + self.scale(8),
-                                    right: left + self.scale(22),
-                                    bottom: top + self.scale(14),
-                                },
-                                self.theme.muted,
-                            );
+                            if item.entry.is_dir {
+                                self.draw_vector_folder(
+                                    hdc,
+                                    left + self.scale(12),
+                                    top + self.scale(2),
+                                    self.scale(18),
+                                    item.expanded,
+                                );
+                            } else {
+                                self.draw_vector_file(
+                                    hdc,
+                                    &item.entry.path,
+                                    left + self.scale(12),
+                                    top + self.scale(2),
+                                    self.scale(18),
+                                );
+                            }
                         }
                         if is_being_renamed {
                             let input_buf = self.explorer_input.as_ref().map(|i| i.buffer.as_str()).unwrap_or("");
