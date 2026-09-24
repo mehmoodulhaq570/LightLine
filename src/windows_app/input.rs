@@ -508,6 +508,10 @@ impl App {
                 0x53 => {
                     self.save(hwnd, shift);
                 }
+                0x57 if shift => {
+                    self.close_workspace(hwnd);
+                    return true;
+                }
                 0x57 => {
                     self.close_tab(hwnd, self.active);
                     return true;
