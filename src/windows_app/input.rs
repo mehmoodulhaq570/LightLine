@@ -33,7 +33,7 @@ impl App {
             // Reserved application chords fall through to the handlers below.
             let reserved_chord = ctrl
                 && match key {
-                    0x50 | 0x52 | 0x42 => shift, // Ctrl+Shift+P/R/B
+                    0x50 | 0x52 | 0x42 | 0x57 => shift, // Ctrl+Shift+P/R/B/W
                     v if v == VK_TAB as u32 => true,
                     v if v == VK_PRIOR as u32 || v == VK_NEXT as u32 => true,
                     _ => false,
