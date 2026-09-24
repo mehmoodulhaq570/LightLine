@@ -143,7 +143,6 @@ impl App {
                     self.set_sidebar_visible(hwnd, false);
                 }
                 x if x == VK_RETURN as u32 => {
-                    self.search_input = false;
                     self.search_project(hwnd);
                 }
                 x if x == VK_BACK as u32 => {
@@ -612,6 +611,7 @@ impl App {
                     return true;
                 }
                 x if x == VK_RETURN as u32 || x == VK_TAB as u32 => {
+                    self.search_input = false;
                     self.accept_completion(hwnd);
                     return true;
                 }
@@ -842,6 +842,9 @@ impl App {
                 }
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
+            return;
+        }
+        if self.panel_focus {
             return;
         }
         if self.side_view == SideView::Review && self.review_file.is_some() {
@@ -1233,6 +1236,8 @@ impl App {
             if self.side_view == SideView::Search {
                 if y >= self.scale(47) && y < self.scale(78) {
                     self.search_input = true;
+                    self.panel_focus = true;
+                    self.refresh(hwnd);
                     return;
                 }
                 if y >= self.scale(113) {
@@ -1578,6 +1583,7 @@ impl App {
         self.panel_focus = false;
         self.terminal_focus = false;
         self.extensions_search_active = false;
+        self.search_input = false;
         self.move_cursor(pos, extend);
         self.dragging = true;
         unsafe {
