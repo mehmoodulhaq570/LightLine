@@ -730,8 +730,16 @@ impl App {
                 None => false,
             },
             TerminalTab::Output => {
-                self.run_session
-                    .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
+                // Raw pipes don't understand structured TermKey events.
+                // We must translate Enter and Backspace into raw bytes for stdin.
+                if key == TermKey::Enter {
+                    self.run_session.is_some_and(|id| self.terminal.input(id, b"\r").is_ok())
+                } else if key == TermKey::Backspace {
+                    self.run_session.is_some_and(|id| self.terminal.input(id, b"\x08").is_ok())
+                } else {
+                    self.run_session
+                        .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
+                }
             }
         };
         if delivered {

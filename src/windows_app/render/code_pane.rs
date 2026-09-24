@@ -412,26 +412,32 @@ impl App {
                 }
                 DeleteObject(match_brush);
             }
-            if self.focused && self.caret_on && !self.terminal_focus && pane == self.focused_pane {
-                let line = doc.line(view.cursor.line);
-                let x = code_left + self.text_width(hdc, safe_slice_prefix(line, view.cursor.byte));
-                let y = self.editor_top()
-                    + (view.cursor.line as i64 - view.first_line as i64) as i32 * self.line_height;
-                if y >= self.editor_top() && y < bottom && x < right {
-                    let caret = CreateSolidBrush(self.theme.cursor);
-                    FillRect(
-                        hdc,
-                        &RECT {
-                            left: x,
-                            top: y,
-                            right: x + self.scale(2).max(2),
-                            bottom: (y + self.line_height).min(bottom),
-                        },
-                        caret,
-                    );
-                    DeleteObject(caret);
+           if self.focused 
+                    && self.caret_on 
+                    && !self.terminal_focus 
+                    && !self.search_input 
+                    && !self.panel_focus 
+                    && pane == self.focused_pane 
+                {
+                    let line = doc.line(view.cursor.line);
+                    let x = code_left + self.text_width(hdc, safe_slice_prefix(line, view.cursor.byte));
+                    let y = self.editor_top()
+                        + (view.cursor.line as i64 - view.first_line as i64) as i32 * self.line_height;
+                    if y >= self.editor_top() && y < bottom && x < right {
+                        let caret = CreateSolidBrush(self.theme.cursor);
+                        FillRect(
+                            hdc,
+                            &RECT {
+                                left: x,
+                                top: y,
+                                right: x + self.scale(2).max(2),
+                                bottom: (y + self.line_height).min(bottom),
+                            },
+                            caret,
+                        );
+                        DeleteObject(caret);
+                    }
                 }
-            }
             RestoreDC(hdc, saved);
         }
     }
