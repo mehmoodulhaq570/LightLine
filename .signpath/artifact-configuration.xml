@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for LightLine.
+  Paste this into the SignPath project (Artifact configurations). The release
+  workflow uploads target/release/lightline.exe, which GitHub wraps in a ZIP,
+  hence the zip-file root element.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="lightline.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

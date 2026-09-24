@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SmartScreen Guidance**: Documented the expected unsigned-app warning and the safe `More info` → `Run anyway` path, explicitly limited to downloads from the official release whose checksum matches.
 - **Release SHA-256 Checksums**: The release workflow now generates and uploads `SHA256SUMS.txt` containing checksums for both `lightline.exe` and the versioned Windows ZIP.
 
+#### Added (release & signing preparation)
+- **MIT `LICENSE` File**: Added the license text and `license = "MIT"` in `Cargo.toml`; the README license badge now links to it.
+- **Executable Version Metadata**: `lightline.exe` now embeds product name, file description, copyright, and file/product version (visible in Properties > Details), generated in `build.rs`. Release builds take the version from the release request through `LIGHTLINE_VERSION`.
+- **Code Signing Policy**: README section listing team roles, the SignPath Foundation attribution, and a privacy statement, as required to apply for free open-source code signing.
+- **Disabled SignPath Signing Steps**: `release.yml` contains opt-in signing steps (gated on the `SIGNPATH_ENABLED` repository variable) plus `.signpath/artifact-configuration.xml`. Nothing changes for releases until signing is enabled.
+
 #### Changed
 - **Instant First-Launch (Removed Synchronous Git Clone)**: Removed the silent, blocking first-launch `git clone` of Material Icons from `App::new`. LightLine now launches instantaneously in milliseconds, relying on the built-in SVG suite by default, while keeping full support for installing the 1,000+ icon Material Icon Theme on demand via the Extensions marketplace (`Ctrl+Shift+X`).
 - **Clean Workspace Header Layout**: Removed the redundant folder icon from the workspace root header row so the project name aligns cleanly right next to the expand/collapse chevron (matching modern VS Code conventions).

@@ -81,6 +81,42 @@ jobs:
           LIGHTLINE_VERSION: ${{ needs.release-request.outputs.version }}
         run: cargo build --release --locked
 
+      # Code signing via SignPath. Disabled until SignPath approves the project:
+      # once it does, set the repository variable SIGNPATH_ENABLED to "true" and
+      # SIGNPATH_ORGANIZATION_ID, and add the SIGNPATH_API_TOKEN secret.
+      - name: Upload unsigned executable
+        if: vars.SIGNPATH_ENABLED == 'true'
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: lightline-unsigned
+          path: target/release/lightline.exe
+
+      - name: Sign executable with SignPath
+        if: vars.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: lightline
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Use signed executable
+        if: vars.SIGNPATH_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "signed/lightline.exe")) {
+            throw "SignPath did not return signed/lightline.exe."
+          }
+          $signature = Get-AuthenticodeSignature "signed/lightline.exe"
+          if ($signature.Status -ne "Valid") {
+            throw "Signed executable has signature status $($signature.Status)."
+          }
+          Copy-Item "signed/lightline.exe" "target/release/lightline.exe" -Force
+
       - name: Package release assets
         shell: pwsh
         env:

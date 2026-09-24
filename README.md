@@ -169,6 +169,26 @@ The Welcome and workbench redesign does not replace or bypass this extension sys
 
 ---
 
+## Code Signing Policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+Release builds of `lightline.exe` are built from this repository by the GitHub Actions [release workflow](.github/workflows/release.yml) and submitted for signing from there. Only binaries built from this repository's source are signed.
+
+**Team roles**
+
+| Role | Member |
+| --- | --- |
+| Author (trusted to modify code) | [Mehmood-Ul-Haq](https://github.com/mehmoodulhaq570) |
+| Reviewer (reviews external contributions) | [Mehmood-Ul-Haq](https://github.com/mehmoodulhaq570) |
+| Approver (approves release signing) | [Mehmood-Ul-Haq](https://github.com/mehmoodulhaq570) |
+
+**Privacy policy**
+
+LightLine does not collect or send usage data. It only uses the network when you ask it to: searching and installing extensions (reads the public Zed extension registry and clones the extension's git repository), and downloading language tooling such as Pyright. LightLine writes only inside its own folder at `%APPDATA%\LightLine` plus the files and folders you open, create, or edit. LightLine can be removed by deleting `lightline.exe` and, optionally, the `%APPDATA%\LightLine` folder.
+
+---
+
 ## Project Documentation & Contributing
 
 - [Architecture & System Map](ARCHITECTURE.md)
