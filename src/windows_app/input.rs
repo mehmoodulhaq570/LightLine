@@ -371,6 +371,19 @@ impl App {
                 _ => {}
             }
         }
+        let editor_ctrl_key = matches!(
+            key,
+            0x41 | 0x43 | 0x58 | 0x56 | 0x5a | 0x59
+        ) || key == VK_HOME as u32
+            || key == VK_END as u32
+            || key == VK_LEFT as u32
+            || key == VK_RIGHT as u32
+            || key == VK_SPACE as u32
+            || key == VK_BACK as u32
+            || key == VK_DELETE as u32;
+        if ctrl && self.panel_focus && editor_ctrl_key {
+            return true;
+        }
         if ctrl {
             let cursor = self.view().cursor;
             match key {
@@ -1248,6 +1261,7 @@ impl App {
                     let index =
                         self.panel_first + ((y - self.scale(113)) / self.scale(48).max(1)) as usize;
                     if let Some(hit) = self.search_results.get(index).cloned() {
+                        self.search_input = false;
                         self.panel_focus = false;
                         self.open(hwnd, Some(hit.path));
                         self.move_cursor(

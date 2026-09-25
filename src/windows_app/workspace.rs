@@ -98,7 +98,9 @@ impl App {
         self.quick_files.clear();
         self.quick_loading = false;
         self.cancel_search();
+        self.search_input = false;
         self.search_results.clear();
+        self.panel_focus = false;
         self.changes.clear();
         self.review_loading = false;
         // Everything below belongs to the previous repository, including the
@@ -168,7 +170,9 @@ impl App {
         self.quick_files.clear();
         self.quick_loading = false;
         self.cancel_search();
+        self.search_input = false;
         self.search_results.clear();
+        self.panel_focus = false;
         self.changes.clear();
         self.review_loading = false;
         self.git_root = None;
