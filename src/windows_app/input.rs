@@ -600,6 +600,7 @@ impl App {
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
                         self.sync_lsp_edit();
+                        self.recompute_gutter_diff();
                     }
                 }
                 0x59 => {
@@ -609,6 +610,7 @@ impl App {
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
                         self.sync_lsp_edit();
+                        self.recompute_gutter_diff();
                     }
                 }
                 x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
@@ -1031,15 +1033,31 @@ impl App {
         }
     }
 
-    // Clicking the gutter toggles a breakpoint on that line instead of moving
+    // Clicking the gutter toggles a breakpoint or code fold on that line instead of moving
     // the caret; debugging is keyed off document state, not editor selection.
     fn toggle_breakpoint_at(&mut self, hwnd: HWND, pane: usize, y: i32) {
         let tab_index = self.tab_for_pane(pane);
-        let view = self.view_for_pane(pane);
+        let first_line = self.view_for_pane(pane).first_line;
         let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
-        let line = (view.first_line + row).min(self.tabs[tab_index].document.line_count() - 1);
+        let line = self.tabs[tab_index]
+            .document
+            .visual_row_to_doc_line(first_line, row)
+            .unwrap_or_else(|| self.tabs[tab_index].document.line_count().saturating_sub(1));
         self.tabs[tab_index].document.toggle_breakpoint(line);
         self.refresh(hwnd);
+    }
+
+    fn toggle_fold_at(&mut self, hwnd: HWND, pane: usize, y: i32) {
+        let tab_index = self.tab_for_pane(pane);
+        let first_line = self.view_for_pane(pane).first_line;
+        let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
+        let doc = &mut self.tabs[tab_index].document;
+        let line = doc
+            .visual_row_to_doc_line(first_line, row)
+            .unwrap_or_else(|| doc.line_count().saturating_sub(1));
+        if doc.toggle_fold(line) {
+            self.refresh(hwnd);
+        }
     }
 
     pub(super) fn position_at(&self, hwnd: HWND, x: i32, y: i32) -> Pos {
@@ -1050,7 +1068,10 @@ impl App {
         let tab = &self.tabs[self.tab_for_pane(pane)];
         let view = self.view_for_pane(pane);
         let row = ((y - self.editor_top()) / self.line_height).max(0) as usize;
-        let line = (view.first_line + row).min(tab.document.line_count() - 1);
+        let line = tab
+            .document
+            .visual_row_to_doc_line(view.first_line, row)
+            .unwrap_or_else(|| tab.document.line_count().saturating_sub(1));
         let target = (x - self.pane_left(hwnd, pane) - self.scale(GUTTER + PAD)).max(0);
         unsafe {
             let hdc = GetDC(hwnd);
@@ -1628,8 +1649,13 @@ impl App {
             self.focus_pane(hwnd, pane);
         }
         let pane = self.focused_pane;
-        if x < self.pane_left(hwnd, pane) + self.scale(GUTTER) {
-            self.toggle_breakpoint_at(hwnd, pane, y);
+        let pane_left = self.pane_left(hwnd, pane);
+        if x < pane_left + self.scale(GUTTER) {
+            if x < pane_left + self.scale(24) {
+                self.toggle_breakpoint_at(hwnd, pane, y);
+            } else {
+                self.toggle_fold_at(hwnd, pane, y);
+            }
             return;
         }
         let pos = self.position_at(hwnd, x, y);

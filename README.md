@@ -26,7 +26,8 @@
 - 📦 **Zero-Dependency Portable Binary**: Single ~5.2 MB executable. Download and double-click — no installers, extra runtimes, or admin privileges needed.
 - 🌲 **Tree-sitter Syntax Coloring**: High-speed, background-worker semantic highlighting for Rust and Python with smart incremental re-parsing.
 - 🧠 **Integrated Language Support (LSP)**: Automatic background support for **rust-analyzer** and **Pyright** (self-installing): diagnostics, hover (`F1`), go-to-definition (`F12`), find references (`Shift+F12`), autocompletion (`Ctrl+Space`), and formatting (`Shift+Alt+F`).
-- 🎨 **Real Prettier + Formatter Framework**: Formatting runs through a generic, timeout-protected `Formatter` interface — Prettier is the first implementation, with `Shift+Alt+F` Format Document and an optional Format on Save setting, and room for rustfmt/Black/clang-format next.
+- 🎨 **Offline Native Formatters & Formatter Framework**: Pure Rust formatting engines (`serde_json` and `toml`) deliver instant, 100% offline, zero-setup formatting for `.json` and `.toml` files (`Shift+Alt+F` / `formatOnSave`) without requiring Node.js, npm, or external packages. Web files format via a generic, timeout-protected `Formatter` interface with Prettier, with room for rustfmt/Black/clang-format next.
+- 🌿 **Real-time Git Gutter & Code Folding**: The editor gutter features live git diff indicators (green vertical bar for added, blue bar for modified, red triangular marker for deleted lines) computed asynchronously against git HEAD in memory on every keystroke. Syntactic code folding detects bracket `{ ... }`, `[ ... ]`, `( ... )` blocks and indentation suites with gutter chevrons (`⌄`/`›`), collapsing code into compact `...` pills with visual row mapping.
 - 💻 **Multi-Session Terminal & Shell Picker**: Persistent ConPTY terminal with multiple tabs, full VT100/ANSI support, and interactive shell selection (**PowerShell**, **Command Prompt**, **Git Bash**, and **WSL**). Features a dedicated dropdown picker (`⌄`) and right-click menu to launch any installed shell or configure your default profile, with tabs clearly labeled by shell type (`PWSH`, `CMD`, `BASH`, `WSL`). Cleanly separated from the read-only build/run **Output** stream, which seamlessly takes keyboard input while your program runs.
 - 🗂️ **Workspaces & Full Explorer Operations**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation with subtle hierarchy indentation guides and alphabetical sorting. Features a **built-in curated vector SVG icon suite** (Rust, Python, Markdown, JSON, TOML, Git, web formats, and two-tone folders) working 100% offline out-of-the-box. Full file/folder management: create files/folders (`+`, `+Folder`), inline creation and renaming, right-click context menu (`New File`, `New Folder`, `Reveal in File Explorer`, `Copy Path`, `Rename`, `Delete`), safe deletion with dark confirmation dialog, and workspace close/discard (`>Close Workspace`).
 - 🏛️ **Unified Workbench & Welcome Dashboard**: A compact branded title bar, centered Quick Open command center, native window controls, and icon-only activity rail now carry consistently across the editor and Welcome screen. The responsive Welcome dashboard provides quick-start cards, recent projects, keyboard-driven actions, onboarding links, and community access without taking over the desktop.
@@ -85,26 +86,31 @@ cargo run --release
 | `Ctrl+Shift+D` | Toggle **Run & Debug** panel |
 | `Ctrl+Shift+X` | Toggle **Extensions** panel |
 | `Ctrl+F` | Find in current file (`F3` / `Shift+F3` next / previous) |
-| `Ctrl+Shift+F` | Search across workspace files |
+| `Ctrl+Shift+F` | Search across workspace files; press `Enter` to move focus to the results |
+| `Up` / `Down` / `Enter` / `Esc` | In search results: move selection, open the selected match, or leave search |
 | `Ctrl+Shift+G` | **Source Control**: stage, commit, diff review |
 | `↑` / `↓` / `Enter` / `Space` | In the source control list: move, open diff, stage or unstage |
 | `F5` / `Shift+F5` | Debug: Start & Continue / Stop session |
 | `F10` | Debug: Step Over |
 | `F11` / `Shift+F11` | Debug: Step Into / Step Out |
-| Gutter Click | Toggle line breakpoint (red gutter dot) |
+| Gutter Margin Click | Toggle line breakpoint (red gutter dot) |
+| Gutter Chevron Click | Toggle code folding (`⌄` / `›`) |
 | `Ctrl+Shift+R` | Run the active file (Python, C/C++, or Rust — detected automatically) |
 | `Ctrl+Shift+B` | Run Rust tests (`cargo test`) |
+| `Ctrl+Shift+W` | Close the active workspace and return to the Welcome screen |
 | `Ctrl+\`` | Toggle terminal panel |
 | `Ctrl+Shift+\`` | Open a new terminal tab |
 | `F1` | Show hover documentation at cursor |
 | `F12` | Go to symbol definition |
 | `Shift+F12` | Find all references to the symbol at cursor |
 | `Ctrl+Space` | Trigger autocompletion popup |
-| `Shift+Alt+F` | Format active document (Prettier, or the active language server) |
+| `Shift+Alt+F` | Format active document (Native JSON/TOML, Prettier, or active language server) |
 | `F2` | In Explorer: Rename selected file or folder |
 | `Delete` | In Explorer: Delete selected file or folder (with confirmation) |
 | `>Close Workspace` | Command Palette: Close active workspace and return to Welcome screen |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom UI in / out / reset to 100% |
+
+Keyboard focus follows the active surface. Search results and other sidebar lists keep navigation and deletion keys away from the hidden editor, while global commands such as Extensions (`Ctrl+Shift+X`) and debugger controls (`F5`, `F10`, `F11`) remain available. Opening or closing a workspace, opening a search result, or pressing `Esc` clears stale sidebar/search focus. When a running program owns the Output pane, `Enter` and modified `Backspace` are encoded correctly for its standard input.
 
 ---
 

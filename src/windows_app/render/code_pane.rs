@@ -49,9 +49,12 @@ impl App {
             let guide_brush = CreateSolidBrush(self.theme.edge);
             let git_added_brush = CreateSolidBrush(self.theme.green);
             let git_mod_brush = CreateSolidBrush(self.theme.blue);
+            let git_del_brush = CreateSolidBrush(self.theme.error);
             let git_diff = doc.path.as_ref().and_then(|p| self.git_diff_cache.get(p));
             for row in 0..visible {
-                let index = view.first_line + row;
+                let Some(index) = doc.visual_row_to_doc_line(view.first_line, row) else {
+                    break;
+                };
                 if index >= doc.line_count() {
                     break;
                 }
@@ -100,7 +103,7 @@ impl App {
                 let number_clip = RECT {
                     left,
                     top: y,
-                    right: left + self.scale(GUTTER),
+                    right: left + self.scale(GUTTER) - self.scale(16),
                     bottom,
                 };
                 ExtTextOutW(
@@ -113,9 +116,40 @@ impl App {
                     num.len() as u32,
                     null(),
                 );
-                if let Some((added, modified)) = git_diff {
+                // Code folding chevron in gutter column
+                let is_folded = doc.is_folded_start(index).is_some();
+                let is_foldable = is_folded || doc.foldable_range(index).is_some();
+                if is_foldable {
+                    let chevron = if is_folded { "›" } else { "⌄" };
+                    let chev_u16: Vec<u16> = chevron.encode_utf16().collect();
+                    SetTextColor(
+                        hdc,
+                        if is_folded {
+                            self.theme.line_number_active
+                        } else {
+                            self.theme.line_number
+                        },
+                    );
+                    let chev_clip = RECT {
+                        left: left + self.scale(GUTTER) - self.scale(16),
+                        top: y,
+                        right: left + self.scale(GUTTER) - self.scale(3),
+                        bottom,
+                    };
+                    ExtTextOutW(
+                        hdc,
+                        left + self.scale(GUTTER) - self.scale(15),
+                        y,
+                        ETO_CLIPPED,
+                        &chev_clip,
+                        chev_u16.as_ptr(),
+                        chev_u16.len() as u32,
+                        null(),
+                    );
+                }
+                if let Some(diff) = git_diff {
                     let gutter_edge = left + self.scale(GUTTER) - self.scale(3);
-                    if added.contains(&index) {
+                    if diff.added.contains(&index) {
                         FillRect(
                             hdc,
                             &RECT {
@@ -126,7 +160,7 @@ impl App {
                             },
                             git_added_brush,
                         );
-                    } else if modified.contains(&index) {
+                    } else if diff.modified.contains(&index) {
                         FillRect(
                             hdc,
                             &RECT {
@@ -137,6 +171,18 @@ impl App {
                             },
                             git_mod_brush,
                         );
+                    }
+                    if diff.deleted.contains(&index) {
+                        let pts = [
+                            POINT { x: gutter_edge, y },
+                            POINT { x: gutter_edge + self.scale(3), y: y + self.scale(3) },
+                            POINT { x: gutter_edge, y: y + self.scale(6) },
+                        ];
+                        let old_brush = SelectObject(hdc, git_del_brush);
+                        let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                        Polygon(hdc, pts.as_ptr(), 3);
+                        SelectObject(hdc, old_pen);
+                        SelectObject(hdc, old_brush);
                     }
                 }
                 let source = doc.line(index);
@@ -210,6 +256,37 @@ impl App {
                     chars.len() as u32,
                     null(),
                 );
+                if doc.is_folded_start(index).is_some() {
+                    let text_w = self.text_width(hdc, &line);
+                    let pill_x = code_left + text_w + self.scale(6);
+                    let pill_w = self.scale(22);
+                    let pill_h = self.scale(13);
+                    let pill_y = y + (self.line_height - pill_h) / 2;
+                    let pill_bg = CreateSolidBrush(self.theme.active_bg);
+                    FillRect(
+                        hdc,
+                        &RECT {
+                            left: pill_x,
+                            top: pill_y,
+                            right: pill_x + pill_w,
+                            bottom: pill_y + pill_h,
+                        },
+                        pill_bg,
+                    );
+                    DeleteObject(pill_bg);
+                    SetTextColor(hdc, self.theme.line_number_active);
+                    let dots: Vec<u16> = "...".encode_utf16().collect();
+                    ExtTextOutW(
+                        hdc,
+                        pill_x + self.scale(3),
+                        pill_y - self.scale(1),
+                        0,
+                        null(),
+                        dots.as_ptr(),
+                        dots.len() as u32,
+                        null(),
+                    );
+                }
                 if source.len() <= 16_384
                     && let Some(syntax) = &tab.syntax
                 {
@@ -293,6 +370,7 @@ impl App {
             DeleteObject(guide_brush);
             DeleteObject(git_added_brush);
             DeleteObject(git_mod_brush);
+            DeleteObject(git_del_brush);
             // Bracket matching: highlight the matching bracket pair.
             if pane == self.focused_pane && !self.terminal_focus {
                 let match_brush = CreateSolidBrush(rgb(60, 80, 120));

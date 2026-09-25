@@ -44,6 +44,9 @@ pub struct Document {
     last_change: Option<TextChange>,
     // Zero-based line numbers with a breakpoint set from the gutter.
     breakpoints: BTreeSet<usize>,
+    // Collapsed line ranges: (start_line, end_line), inclusive.
+    // Lines (start_line + 1)..=end_line are hidden from view.
+    pub folded_ranges: BTreeSet<(usize, usize)>,
 }
 
 impl Default for Document {
@@ -68,6 +71,7 @@ impl Document {
             change_serial: 0,
             last_change: None,
             breakpoints: BTreeSet::new(),
+            folded_ranges: BTreeSet::new(),
         }
     }
 
@@ -94,6 +98,7 @@ impl Document {
             change_serial: 0,
             last_change: None,
             breakpoints: BTreeSet::new(),
+            folded_ranges: BTreeSet::new(),
         })
     }
 
@@ -106,6 +111,9 @@ impl Document {
 
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+    pub fn lines(&self) -> &[String] {
+        &self.lines
     }
     pub fn line(&self, index: usize) -> &str {
         &self.lines[index]
@@ -152,6 +160,169 @@ impl Document {
         } else {
             true
         }
+    }
+
+    /// Checks if a line is the start of a foldable block and returns the end line (inclusive).
+    pub fn foldable_range(&self, line: usize) -> Option<usize> {
+        let total_lines = self.lines.len();
+        if line >= total_lines {
+            return None;
+        }
+        let line_text = &self.lines[line];
+        let trimmed = line_text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        // 1. Bracket-based folding: Count open vs close braces { [ (
+        let mut brace_depth: i32 = 0;
+        for ch in line_text.chars() {
+            match ch {
+                '{' | '[' | '(' => brace_depth += 1,
+                '}' | ']' | ')' => brace_depth -= 1,
+                _ => {}
+            }
+        }
+
+        if brace_depth > 0 {
+            let mut depth = brace_depth;
+            for next in (line + 1)..total_lines {
+                for ch in self.lines[next].chars() {
+                    match ch {
+                        '{' | '[' | '(' => depth += 1,
+                        '}' | ']' | ')' => {
+                            depth -= 1;
+                            if depth <= 0 {
+                                return Some(next);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // 2. Indentation-based folding (Python, YAML, and general multi-line blocks):
+        let get_indent = |s: &str| -> usize {
+            let mut indent = 0;
+            for ch in s.chars() {
+                if ch == ' ' {
+                    indent += 1;
+                } else if ch == '\t' {
+                    indent += 4;
+                } else {
+                    break;
+                }
+            }
+            indent
+        };
+
+        let base_indent = get_indent(line_text);
+        let mut last_indented_line = None;
+        for next in (line + 1)..total_lines {
+            let next_text = &self.lines[next];
+            if next_text.trim().is_empty() {
+                continue;
+            }
+            let next_indent = get_indent(next_text);
+            if next_indent > base_indent {
+                last_indented_line = Some(next);
+            } else {
+                break;
+            }
+        }
+
+        if let Some(end) = last_indented_line {
+            if end > line {
+                return Some(end);
+            }
+        }
+
+        None
+    }
+
+    /// Returns the end line if `line` is currently the start of a folded range.
+    pub fn is_folded_start(&self, line: usize) -> Option<usize> {
+        self.folded_ranges
+            .iter()
+            .find(|(start, _)| *start == line)
+            .map(|(_, end)| *end)
+    }
+
+    /// Checks if a line is hidden inside any currently folded range.
+    pub fn is_line_hidden(&self, line: usize) -> bool {
+        self.folded_ranges
+            .iter()
+            .any(|(start, end)| line > *start && line <= *end)
+    }
+
+    /// Toggles the fold state for `line`.
+    /// Returns true if toggled.
+    pub fn toggle_fold(&mut self, line: usize) -> bool {
+        if let Some(range) = self.folded_ranges.iter().copied().find(|(s, _)| *s == line) {
+            self.folded_ranges.remove(&range);
+            return true;
+        }
+        if let Some(end) = self.foldable_range(line) {
+            if end > line {
+                self.folded_ranges.insert((line, end));
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Skips past any folded ranges to the next visible line after `line`.
+    pub fn next_visible_line(&self, line: usize) -> usize {
+        let count = self.line_count();
+        if count == 0 {
+            return 0;
+        }
+        let mut cur = if let Some(end) = self.is_folded_start(line) {
+            end.saturating_add(1)
+        } else {
+            line.saturating_add(1)
+        };
+        while cur < count && self.is_line_hidden(cur) {
+            cur = cur.saturating_add(1);
+        }
+        cur.min(count.saturating_sub(1))
+    }
+
+    /// Skips backward past any folded ranges to the previous visible line before `line`.
+    pub fn prev_visible_line(&self, line: usize) -> usize {
+        let mut cur = line.saturating_sub(1);
+        while cur > 0 && self.is_line_hidden(cur) {
+            cur = cur.saturating_sub(1);
+        }
+        cur
+    }
+
+    /// Maps a visual row offset (from `first_line`) to the actual document line index,
+    /// skipping collapsed lines. Returns None if row goes past the document end.
+    pub fn visual_row_to_doc_line(&self, first_line: usize, row: usize) -> Option<usize> {
+        let count = self.line_count();
+        if count == 0 || first_line >= count {
+            return None;
+        }
+        let mut current = first_line;
+        for (s, e) in &self.folded_ranges {
+            if current > *s && current <= *e {
+                current = *s;
+                break;
+            }
+        }
+        for _ in 0..row {
+            if let Some(end) = self.is_folded_start(current) {
+                current = end + 1;
+            } else {
+                current += 1;
+            }
+            if current >= count {
+                return None;
+            }
+        }
+        Some(current)
     }
 
     pub fn change_serial(&self) -> u64 {
@@ -629,5 +800,41 @@ mod tests {
             Some(Pos { line: 1, byte: 7 })
         );
         assert_eq!(doc.find_forward(Pos::default(), "ABC"), None);
+    }
+
+    #[test]
+    fn test_code_folding_bracket_and_indentation() {
+        let mut doc = Document::new();
+        let code = "fn main() {\n    let x = 1;\n    let y = 2;\n}\n\ndef python_func():\n    a = 10\n    b = 20\n\nlet single = 5;\n";
+        doc.replace(Pos::default(), Pos::default(), code);
+
+        // 1. Rust function bracket block
+        assert_eq!(doc.foldable_range(0), Some(3));
+        assert!(doc.toggle_fold(0));
+        assert!(doc.is_folded_start(0).is_some());
+        assert!(doc.is_line_hidden(1));
+        assert!(doc.is_line_hidden(2));
+        assert!(doc.is_line_hidden(3));
+        assert!(!doc.is_line_hidden(0));
+        assert!(!doc.is_line_hidden(4));
+
+        // Visual mapping: row 0 is line 0, row 1 is line 4 (lines 1..3 hidden)
+        assert_eq!(doc.visual_row_to_doc_line(0, 0), Some(0));
+        assert_eq!(doc.visual_row_to_doc_line(0, 1), Some(4));
+
+        // Navigation
+        assert_eq!(doc.next_visible_line(0), 4);
+        assert_eq!(doc.prev_visible_line(4), 0);
+
+        // Toggle back to unfold
+        assert!(doc.toggle_fold(0));
+        assert!(doc.is_folded_start(0).is_none());
+        assert!(!doc.is_line_hidden(1));
+
+        // 2. Python indentation block
+        assert_eq!(doc.foldable_range(5), Some(7));
+
+        // 3. Single line statement (no fold)
+        assert_eq!(doc.foldable_range(9), None);
     }
 }

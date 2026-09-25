@@ -16,7 +16,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added a dropdown button (`⌄`) right next to the terminal `+` button, and right-click support on the `+` button, opening a native popup menu to select and launch any installed shell.
   - Added "Select Default Profile" menu and `terminalDefaultProfile` configuration in `%APPDATA%\LightLine\settings.json`.
   - Terminal tab headers now display the active shell profile (e.g. `PWSH 1`, `CMD 2`, `BASH 3`, `WSL 4`).
-  - Added Command Palette quick-commands for launching specific shells and switching default profiles.
+- **Offline Native JSON & TOML Formatters**: Pure Rust formatting engines (`NativeJsonFormatter` using `serde_json` and `NativeTomlFormatter` using `toml`).
+  - 100% offline, zero npm, zero Node.js, and zero setup time.
+  - Integrated directly into `formatter_for` with priority over external Prettier for `.json` and `.toml` files.
+  - Triggers via `Shift+Alt+F` (Format Document) and automatic `formatOnSave`.
+- **Inline Git Gutter Indicators**: Real-time git status indicators rendered directly in the editor gutter margin without writing buffer modifications to disk.
+  - Asynchronous background diff against git `HEAD` using an in-memory Myers/LCS algorithm with common prefix/suffix optimization.
+  - 🟢 **Green vertical bar**: Added lines.
+  - 🔵 **Blue vertical bar**: Modified lines.
+  - 🔴 **Red triangular marker**: Deleted lines.
+  - Real-time reactive updates on keystrokes, undo (`Ctrl+Z`), and redo (`Ctrl+Y`).
+- **Code Folding**: Syntactic block boundary detection via brackets (`{ ... }`, `[ ... ]`, `( ... )`) and indentation (e.g. Python `def`/`class` blocks).
+  - Gutter column displays fold chevrons: `⌄` for foldable blocks and `›` for collapsed blocks.
+  - Clicking the chevron column collapses blocks into a compact `...` capsule pill at the line end.
+  - Gutter click partition distinguishes between breakpoint toggling (left 24px) and code folding (chevron column).
+  - Visual line mapping ensures caret navigation, scroll offsets, and selection smoothly skip collapsed regions.
+
+#### Fixed
+- **Workspace Search Keyboard Navigation**: Submitting a project-wide search now transfers focus from the query field to the results list, where `Up`/`Down` change the selection and `Enter` opens it. Mouse and keyboard result activation both return input to the editor cleanly.
+- **Stale Sidebar and Search Focus**: Opening or closing a workspace now clears obsolete search/list focus. `Esc` also exits focused sidebar lists, closes Search when appropriate, and prevents an invisible focus state from trapping later input.
+- **Hidden Editor Mutations**: Navigation, Tab, Backspace, and Delete are consumed by the focused sidebar instead of changing the editor behind it. Editor control chords are likewise guarded while list focus is active.
+- **Global Shortcuts While Panels Are Focused**: `Ctrl+Shift+X` continues to open Extensions, debugger commands (`F5`, `Shift+F5`, `F10`, `F11`, `Shift+F11`) still reach their handlers, and `Ctrl+Shift+W` closes the workspace even when the terminal has focus.
+- **Output Pane Program Input**: `Enter` now sends the pipe-appropriate CRLF sequence to a running program, while Backspace uses modifier-aware terminal encoding (`DEL` normally and `BS` with Control).
+- **Editor Caret Rendering Consistency**: Normalized the caret visibility condition so it remains suppressed whenever terminal, search, sidebar, or another split pane owns focus.
 
 ### 2026-09-24
 

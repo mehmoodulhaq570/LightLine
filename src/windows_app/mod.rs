@@ -47,7 +47,7 @@ use lightline::terminal::{
     Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, ShellKind, Snapshot,
     TerminalService, TerminalSize,
 };
-pub use lightline::workflow::{self, Change, CommitEntry, DiffRow, DiffScope, RepoState, SearchHit};
+pub use lightline::workflow::{self, Change, CommitEntry, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;

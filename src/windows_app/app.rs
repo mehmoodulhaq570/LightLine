@@ -45,7 +45,7 @@ pub(super) enum WorkerMessage {
     // because refreshes fire on activation, save and every completed action.
     Repo(u64, Result<RepoState, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
-    GutterDiff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
+    GutterDiff(PathBuf, PathBuf, Option<String>, Result<Vec<DiffRow>, String>),
     GitWrite(GitAction, Result<(), String>),
     ExtensionInstalled(String, bool),
     // The full Zed registry id/version list, for the Extensions panel search.
@@ -462,7 +462,8 @@ pub(super) struct App {
     pub(super) restoring: bool,
     pub(super) watcher: Option<lightline::watcher::FileWatcher>,
     pub(super) settings: lightline::settings::Settings,
-    pub(super) git_diff_cache: HashMap<PathBuf, (HashSet<usize>, HashSet<usize>)>,
+    pub(super) git_diff_cache: HashMap<PathBuf, GutterDiff>,
+    pub(super) git_head_cache: HashMap<PathBuf, String>,
     pub(super) extensions: Vec<Extension>,
     pub(super) extensions_tab: ExtensionsTab,
     pub(super) extensions_query: String,
@@ -858,6 +859,7 @@ impl App {
             watcher: Some(lightline::watcher::FileWatcher::start()),
             settings,
             git_diff_cache: HashMap::new(),
+            git_head_cache: HashMap::new(),
             extensions: vec![
                 Extension {
                     id: "prettier".into(),
@@ -1784,6 +1786,9 @@ impl App {
             return;
         }
         let cursor = self.doc_mut().replace(start, end, text);
+        let line_count = self.doc().line_count();
+        self.doc_mut().folded_ranges.retain(|(s, e)| *s < line_count && *e < line_count && *s < *e);
+        self.recompute_gutter_diff();
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
         self.revalidate_other_view(Some((start, end, cursor)));
@@ -2008,32 +2013,63 @@ impl App {
         let tx = self.worker_tx.clone();
         self.worker_started(hwnd);
         std::thread::spawn(move || {
+            let head_text = workflow::git_head_text(&root, &relative).ok();
             let result = workflow::git_diff(&root, &relative, DiffScope::Head);
-            let _ = tx.send(WorkerMessage::GutterDiff(path, relative, result));
+            let _ = tx.send(WorkerMessage::GutterDiff(path, relative, head_text, result));
         });
     }
 
-    pub(super) fn gutter_diff_finished(&mut self, path: &Path, result: Result<Vec<DiffRow>, String>) {
+    pub(super) fn gutter_diff_finished(
+        &mut self,
+        path: &Path,
+        head_text: Option<String>,
+        result: Result<Vec<DiffRow>, String>,
+    ) {
         if self.gutter_request.as_deref() != Some(path) {
             return;
         }
         self.gutter_request = None;
         self.gutter_done = Some(path.to_path_buf());
-        let Ok(rows) = result else {
-            return;
-        };
-        let mut added = HashSet::new();
-        let mut modified = HashSet::new();
-        for row in rows {
-            if row.changed && let Some(line) = row.after_number {
-                if row.before_number.is_none() {
-                    added.insert(line.saturating_sub(1));
-                } else {
-                    modified.insert(line.saturating_sub(1));
+        if let Some(text) = head_text {
+            self.git_head_cache.insert(path.to_path_buf(), text);
+        }
+        self.recompute_gutter_diff();
+        if !self.git_diff_cache.contains_key(path) && let Ok(rows) = result {
+            let mut added = HashSet::new();
+            let mut modified = HashSet::new();
+            let mut deleted = HashSet::new();
+            for row in rows {
+                if row.changed {
+                    if let Some(line) = row.after_number {
+                        if row.before_number.is_none() {
+                            added.insert(line.saturating_sub(1));
+                        } else {
+                            modified.insert(line.saturating_sub(1));
+                        }
+                    } else if let Some(del_line) = row.deleted_at {
+                        deleted.insert(del_line.saturating_sub(1));
+                    }
                 }
             }
+            self.git_diff_cache.insert(path.to_path_buf(), GutterDiff { added, modified, deleted });
         }
-        self.git_diff_cache.insert(path.to_path_buf(), (added, modified));
+    }
+
+    pub(super) fn recompute_gutter_diff(&mut self) {
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        if let Some(head_text) = self.git_head_cache.get(&path) {
+            let diff = workflow::compute_gutter_diff(head_text, self.doc().lines());
+            self.git_diff_cache.insert(path, diff);
+        } else if self.git_root.is_some() || self.workspace_root.is_some() {
+            let added: HashSet<usize> = (0..self.doc().line_count()).collect();
+            self.git_diff_cache.insert(path, GutterDiff {
+                added,
+                modified: HashSet::new(),
+                deleted: HashSet::new(),
+            });
+        }
     }
 
     pub(super) fn error(&mut self, hwnd: HWND, error: &impl std::fmt::Display) {

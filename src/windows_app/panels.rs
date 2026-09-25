@@ -479,8 +479,8 @@ impl App {
                 WorkerMessage::GitWrite(action, result) => {
                     self.git_write_finished(hwnd, &action, result);
                 }
-                WorkerMessage::GutterDiff(_root, path, result) => {
-                    self.gutter_diff_finished(&path, result);
+                WorkerMessage::GutterDiff(path, _relative, head_text, result) => {
+                    self.gutter_diff_finished(&path, head_text, result);
                 }
                 WorkerMessage::Diff(root, path, result)
                     if self.git_root.as_ref() == Some(&root)

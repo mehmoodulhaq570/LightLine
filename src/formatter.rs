@@ -191,10 +191,82 @@ impl Formatter for PrettierFormatter {
     }
 }
 
+/// Built-in native JSON formatter powered by `serde_json`.
+/// 100% offline, zero npm, zero Node, 0ms setup, formats in microseconds.
+pub struct NativeJsonFormatter;
+
+impl Formatter for NativeJsonFormatter {
+    fn name(&self) -> &'static str {
+        "JSON (built-in)"
+    }
+
+    fn supports(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(false)
+    }
+
+    fn command(&self, _path: &Path) -> Command {
+        Command::new("internal")
+    }
+
+    fn format(&self, source: &str, _path: &Path) -> Result<String, FormatError> {
+        let value: serde_json::Value = serde_json::from_str(source)
+            .map_err(|e| FormatError::Failed(format!("Invalid JSON: {e}")))?;
+        let mut formatted = serde_json::to_string_pretty(&value)
+            .map_err(|e| FormatError::Failed(format!("Failed to format JSON: {e}")))?;
+        if !formatted.ends_with('\n') {
+            formatted.push('\n');
+        }
+        Ok(formatted)
+    }
+}
+
+/// Built-in native TOML formatter powered by `toml`.
+/// 100% offline, zero npm, zero Node, 0ms setup, formats in microseconds.
+pub struct NativeTomlFormatter;
+
+impl Formatter for NativeTomlFormatter {
+    fn name(&self) -> &'static str {
+        "TOML (built-in)"
+    }
+
+    fn supports(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("toml"))
+            .unwrap_or(false)
+    }
+
+    fn command(&self, _path: &Path) -> Command {
+        Command::new("internal")
+    }
+
+    fn format(&self, source: &str, _path: &Path) -> Result<String, FormatError> {
+        let value: toml::Value = toml::from_str(source)
+            .map_err(|e| FormatError::Failed(format!("Invalid TOML: {e}")))?;
+        let mut formatted = toml::to_string_pretty(&value)
+            .map_err(|e| FormatError::Failed(format!("Failed to format TOML: {e}")))?;
+        if !formatted.ends_with('\n') {
+            formatted.push('\n');
+        }
+        Ok(formatted)
+    }
+}
+
 /// Picks the formatter for `path`, if any is both known and supports it.
-/// The one place a second formatter (rustfmt, black, clang-format, ...)
-/// gets added later.
+/// Native zero-dependency formatters (JSON, TOML) take priority over
+/// external tools like Prettier.
 pub fn formatter_for(path: &Path) -> Option<Box<dyn Formatter>> {
+    let json = NativeJsonFormatter;
+    if json.supports(path) {
+        return Some(Box::new(json));
+    }
+    let toml = NativeTomlFormatter;
+    if toml.supports(path) {
+        return Some(Box::new(toml));
+    }
     let prettier = PrettierFormatter;
     if prettier.supports(path) {
         return Some(Box::new(prettier));
@@ -217,9 +289,33 @@ mod tests {
     }
 
     #[test]
-    fn formatter_for_returns_prettier_for_supported_files_and_none_otherwise() {
-        assert!(formatter_for(Path::new("index.ts")).is_some());
+    fn formatter_for_returns_expected_formatters() {
+        assert_eq!(formatter_for(Path::new("data.json")).unwrap().name(), "JSON (built-in)");
+        assert_eq!(formatter_for(Path::new("config.toml")).unwrap().name(), "TOML (built-in)");
+        assert_eq!(formatter_for(Path::new("index.ts")).unwrap().name(), "Prettier");
         assert!(formatter_for(Path::new("main.rs")).is_none());
+    }
+
+    #[test]
+    fn native_json_formatter_formats_messy_json_instantly() {
+        let formatter = NativeJsonFormatter;
+        let messy = r#"{"b":2,"a":1,"nested":{"c":[1,2,3]}}"#;
+        let formatted = formatter.format(messy, Path::new("test.json")).unwrap();
+        assert!(formatted.contains('\n'));
+        assert!(formatted.contains("  \"a\": 1"));
+        assert!(formatted.contains("  \"nested\": {"));
+        assert!(formatted.ends_with('\n'));
+    }
+
+    #[test]
+    fn native_toml_formatter_formats_messy_toml_instantly() {
+        let formatter = NativeTomlFormatter;
+        let messy = "title=\"TOML Example\"\n[owner]\nname=\"Tom\"\n";
+        let formatted = formatter.format(messy, Path::new("Cargo.toml")).unwrap();
+        assert!(formatted.contains("title = \"TOML Example\""));
+        assert!(formatted.contains("[owner]"));
+        assert!(formatted.contains("name = \"Tom\""));
+        assert!(formatted.ends_with('\n'));
     }
 
     #[test]

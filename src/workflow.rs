@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -304,6 +305,13 @@ impl RepoState {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GutterDiff {
+    pub added: HashSet<usize>,
+    pub modified: HashSet<usize>,
+    pub deleted: HashSet<usize>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DiffRow {
     pub changed: bool,
@@ -311,6 +319,7 @@ pub struct DiffRow {
     pub before: String,
     pub after_number: Option<usize>,
     pub after: String,
+    pub deleted_at: Option<usize>,
 }
 
 pub fn workspace_files(root: &Path) -> Vec<PathBuf> {
@@ -984,6 +993,7 @@ pub fn git_diff(root: &Path, path: &Path, scope: DiffScope) -> Result<Vec<DiffRo
                 before: String::new(),
                 after_number: Some(index + 1),
                 after: line.to_owned(),
+                deleted_at: None,
             })
             .collect());
     }
@@ -1017,12 +1027,14 @@ fn parse_diff(text: &str) -> Vec<DiffRow> {
                  new_number: &mut usize| {
         let count = removed.len().max(added.len());
         for index in 0..count {
+            let is_del = removed.get(index).is_some() && added.is_empty();
             rows.push(DiffRow {
                 changed: true,
                 before_number: removed.get(index).map(|_| *old_number + index),
                 before: removed.get(index).cloned().unwrap_or_default(),
                 after_number: added.get(index).map(|_| *new_number + index),
                 after: added.get(index).cloned().unwrap_or_default(),
+                deleted_at: if is_del { Some(*new_number) } else { None },
             });
         }
         *old_number += removed.len();
@@ -1072,6 +1084,7 @@ fn parse_diff(text: &str) -> Vec<DiffRow> {
                 before: value.to_owned(),
                 after_number: Some(new_number),
                 after: value.to_owned(),
+                deleted_at: None,
             });
             old_number += 1;
             new_number += 1;
@@ -1089,6 +1102,112 @@ fn parse_diff(text: &str) -> Vec<DiffRow> {
     );
     rows.truncate(2_000);
     rows
+}
+
+/// Reads the HEAD content of `path` from git in `root`.
+pub fn git_head_text(root: &Path, path: &Path) -> Result<String, String> {
+    let spec = format!("HEAD:{}", path.to_string_lossy().replace('\\', "/"));
+    let output = git_command(root, &["show", &spec])
+        .output()
+        .map_err(|error| format!("Could not start Git: {error}"))?;
+    if !output.status.success() {
+        return Err("File not found in HEAD".into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Computes inline gutter diff (added, modified, deleted) comparing active buffer lines against HEAD text.
+pub fn compute_gutter_diff(head_text: &str, buf_lines: &[String]) -> GutterDiff {
+    let head_lines: Vec<&str> = head_text.lines().collect();
+    let n = head_lines.len();
+    let m = buf_lines.len();
+
+    let mut added = HashSet::new();
+    let mut modified = HashSet::new();
+    let mut deleted = HashSet::new();
+
+    // Fast-path: Identical texts
+    if n == m && head_lines.iter().zip(buf_lines.iter()).all(|(a, b)| *a == b.as_str()) {
+        return GutterDiff { added, modified, deleted };
+    }
+
+    // 1. Common prefix trimming
+    let mut prefix = 0;
+    while prefix < n && prefix < m && head_lines[prefix] == buf_lines[prefix].as_str() {
+        prefix += 1;
+    }
+
+    // 2. Common suffix trimming
+    let mut suffix = 0;
+    while suffix < (n - prefix) && suffix < (m - prefix)
+        && head_lines[n - 1 - suffix] == buf_lines[m - 1 - suffix].as_str()
+    {
+        suffix += 1;
+    }
+
+    let head_slice = &head_lines[prefix..(n - suffix)];
+    let buf_slice = &buf_lines[prefix..(m - suffix)];
+
+    if head_slice.is_empty() && !buf_slice.is_empty() {
+        for idx in 0..buf_slice.len() {
+            added.insert(prefix + idx);
+        }
+    } else if !head_slice.is_empty() && buf_slice.is_empty() {
+        deleted.insert(prefix.min(m.saturating_sub(1)));
+    } else if head_slice.len() == buf_slice.len() {
+        for idx in 0..buf_slice.len() {
+            modified.insert(prefix + idx);
+        }
+    } else {
+        let sn = head_slice.len();
+        let sm = buf_slice.len();
+        if sn * sm <= 4_000_000 {
+            let mut dp = vec![vec![0u32; sm + 1]; sn + 1];
+            for i in 0..sn {
+                for j in 0..sm {
+                    if head_slice[i] == buf_slice[j].as_str() {
+                        dp[i + 1][j + 1] = dp[i][j] + 1;
+                    } else {
+                        dp[i + 1][j + 1] = dp[i][j].max(dp[i][j + 1]);
+                    }
+                }
+            }
+            let mut i = sn;
+            let mut j = sm;
+            let mut changed_buf_lines = Vec::new();
+            let mut has_deletions = false;
+            while i > 0 || j > 0 {
+                if i > 0 && j > 0 && head_slice[i - 1] == buf_slice[j - 1].as_str() {
+                    i -= 1;
+                    j -= 1;
+                } else if j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) {
+                    changed_buf_lines.push(prefix + j - 1);
+                    j -= 1;
+                } else {
+                    has_deletions = true;
+                    if j > 0 {
+                        deleted.insert(prefix + j - 1);
+                    } else {
+                        deleted.insert(prefix.min(m.saturating_sub(1)));
+                    }
+                    i -= 1;
+                }
+            }
+            for line in changed_buf_lines {
+                if has_deletions && sn > 0 {
+                    modified.insert(line);
+                } else {
+                    added.insert(line);
+                }
+            }
+        } else {
+            for idx in 0..buf_slice.len() {
+                modified.insert(prefix + idx);
+            }
+        }
+    }
+
+    GutterDiff { added, modified, deleted }
 }
 
 #[cfg(test)]
@@ -1565,5 +1684,34 @@ mod tests {
         assert_eq!(rows[0].author, "Ada");
         assert_eq!(rows[1].subject, "Fix: a bug, then another");
         assert!(parse_log("").is_empty());
+    }
+
+    #[test]
+    fn test_compute_gutter_diff_added_modified_deleted() {
+        let head = "line1\nline2\nline3\nline4\nline5\n";
+
+        // 1. Identical: no diff
+        let buf: Vec<String> = vec!["line1".into(), "line2".into(), "line3".into(), "line4".into(), "line5".into()];
+        let diff = compute_gutter_diff(head, &buf);
+        assert!(diff.added.is_empty());
+        assert!(diff.modified.is_empty());
+        assert!(diff.deleted.is_empty());
+
+        // 2. Added line
+        let buf_added: Vec<String> = vec!["line1".into(), "line2".into(), "new line".into(), "line3".into(), "line4".into(), "line5".into()];
+        let diff_added = compute_gutter_diff(head, &buf_added);
+        assert!(diff_added.added.contains(&2));
+        assert!(diff_added.modified.is_empty());
+
+        // 3. Modified line
+        let buf_mod: Vec<String> = vec!["line1".into(), "line2 modified".into(), "line3".into(), "line4".into(), "line5".into()];
+        let diff_mod = compute_gutter_diff(head, &buf_mod);
+        assert!(diff_mod.modified.contains(&1));
+        assert!(diff_mod.added.is_empty());
+
+        // 4. Deleted line
+        let buf_del: Vec<String> = vec!["line1".into(), "line3".into(), "line4".into(), "line5".into()];
+        let diff_del = compute_gutter_diff(head, &buf_del);
+        assert!(diff_del.deleted.contains(&1));
     }
 }
