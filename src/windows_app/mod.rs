@@ -44,8 +44,8 @@ use lightline::lsp::{
 use lightline::syntax::{Color, Syntax};
 use lightline::terminal::{
     Cell, Color as TermColor, Key as TermKey, LaunchRequest, MAX_DRAIN_EVENTS,
-    Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, Snapshot, TerminalService,
-    TerminalSize,
+    Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, ShellKind, Snapshot,
+    TerminalService, TerminalSize,
 };
 pub use lightline::workflow::{self, Change, CommitEntry, DiffRow, DiffScope, RepoState, SearchHit};
 use std::cell::RefCell;

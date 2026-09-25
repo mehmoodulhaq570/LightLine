@@ -1,5 +1,5 @@
 use super::git::GitHit;
-use super::terminal::TerminalHeaderHit;
+use super::terminal::{TERMINAL_HEADER, TerminalHeaderHit};
 use super::*;
 
 fn is_editor_ctrl_key(key: u32, shift: bool) -> bool {
@@ -1540,6 +1540,7 @@ impl App {
                     }
                     TerminalHeaderHit::TerminalTab(index) => self.select_terminal(hwnd, index),
                     TerminalHeaderHit::New => self.new_terminal(hwnd, false),
+                    TerminalHeaderHit::ShellPicker => self.show_shell_picker_menu(hwnd, x, y),
                     TerminalHeaderHit::Kill => self.close_active_terminal(hwnd),
                     TerminalHeaderHit::Body => {
                         self.focus_terminal(hwnd);
@@ -1671,6 +1672,21 @@ impl App {
     }
 
     pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.terminal_visible {
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect) };
+            let left = self.editor_left();
+            let top = self.terminal_top(hwnd);
+            let right = rect.right;
+            if x >= left && x < right && y >= top && y < top + self.scale(TERMINAL_HEADER) {
+                let hit = self.terminal_header_hit(left, right, top, x, y);
+                if matches!(hit, TerminalHeaderHit::New | TerminalHeaderHit::ShellPicker) {
+                    self.show_shell_picker_menu(hwnd, x, y);
+                    return;
+                }
+            }
+        }
+
         let editor_left = self.editor_left();
         let rail = self.scale(RAIL);
         if x < rail || x >= editor_left || self.side_view != SideView::Files || !self.explorer_visible {

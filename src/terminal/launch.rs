@@ -1,10 +1,62 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ShellKind {
+    #[default]
+    PowerShell,
+    CommandPrompt,
+    GitBash,
+    Wsl,
+}
+
+impl ShellKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::PowerShell => "PowerShell",
+            Self::CommandPrompt => "Command Prompt",
+            Self::GitBash => "Git Bash",
+            Self::Wsl => "WSL",
+        }
+    }
+
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::PowerShell => "pwsh",
+            Self::CommandPrompt => "cmd",
+            Self::GitBash => "bash",
+            Self::Wsl => "wsl",
+        }
+    }
+
+    pub fn all() -> &'static [ShellKind] {
+        &[
+            ShellKind::PowerShell,
+            ShellKind::CommandPrompt,
+            ShellKind::GitBash,
+            ShellKind::Wsl,
+        ]
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.resolve().is_ok()
+    }
+
+    pub fn resolve(&self) -> Result<PathBuf, String> {
+        match self {
+            Self::PowerShell => resolve_powershell(),
+            Self::CommandPrompt => resolve_cmd(),
+            Self::GitBash => resolve_git_bash(),
+            Self::Wsl => resolve_wsl(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LaunchRequest {
     Shell {
         cwd: PathBuf,
+        shell_kind: ShellKind,
         no_profile: bool,
     },
     Python {
@@ -19,6 +71,15 @@ impl LaunchRequest {
     pub fn shell(cwd: PathBuf) -> Self {
         Self::Shell {
             cwd,
+            shell_kind: ShellKind::PowerShell,
+            no_profile: false,
+        }
+    }
+
+    pub fn with_shell(cwd: PathBuf, shell_kind: ShellKind) -> Self {
+        Self::Shell {
+            cwd,
+            shell_kind,
             no_profile: false,
         }
     }
@@ -104,14 +165,108 @@ pub fn resolve_powershell() -> Result<PathBuf, String> {
     Err("PowerShell was not found in PATH, installed PowerShell directories, or System32".into())
 }
 
-pub fn prepare_launch(request: &LaunchRequest) -> Result<LaunchSpec, String> {
-    let executable = resolve_powershell()?;
-    prepare_with_shell(request, executable)
+pub fn resolve_cmd() -> Result<PathBuf, String> {
+    let root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("WINDIR"))
+        .unwrap_or_else(|| "C:\\Windows".into());
+    let path = PathBuf::from(root).join("System32").join("cmd.exe");
+    if is_real_executable(&path) {
+        return Ok(path);
+    }
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    for directory in std::env::split_paths(&paths) {
+        if directory.is_absolute() {
+            let candidate = directory.join("cmd.exe");
+            if is_real_executable(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err("Command Prompt (cmd.exe) was not found in System32 or PATH".into())
 }
 
-fn prepare_with_shell(request: &LaunchRequest, executable: PathBuf) -> Result<LaunchSpec, String> {
+pub fn resolve_git_bash() -> Result<PathBuf, String> {
+    for root_var in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(root_var) {
+            let candidate = PathBuf::from(&root).join("Git").join("bin").join("bash.exe");
+            if is_real_executable(&candidate) {
+                return Ok(candidate);
+            }
+            let candidate_usr = PathBuf::from(&root).join("Git").join("usr").join("bin").join("bash.exe");
+            if is_real_executable(&candidate_usr) {
+                return Ok(candidate_usr);
+            }
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let candidate = PathBuf::from(&local).join("Programs").join("Git").join("bin").join("bash.exe");
+        if is_real_executable(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    for directory in std::env::split_paths(&paths) {
+        if directory.is_absolute() {
+            if directory.join("git.exe").is_file()
+                && let Some(parent) = directory.parent()
+            {
+                let candidate = parent.join("bin").join("bash.exe");
+                if is_real_executable(&candidate) {
+                    return Ok(candidate);
+                }
+                let candidate_usr = parent.join("usr").join("bin").join("bash.exe");
+                if is_real_executable(&candidate_usr) {
+                    return Ok(candidate_usr);
+                }
+            }
+            let candidate = directory.join("bash.exe");
+            if is_real_executable(&candidate) {
+                let lower = candidate.to_string_lossy().to_ascii_lowercase();
+                if !lower.contains("system32") {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+    Err("Git Bash was not found in standard installation paths or PATH".into())
+}
+
+pub fn resolve_wsl() -> Result<PathBuf, String> {
+    let root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("WINDIR"))
+        .unwrap_or_else(|| "C:\\Windows".into());
+    let path = PathBuf::from(root).join("System32").join("wsl.exe");
+    if is_real_executable(&path) {
+        return Ok(path);
+    }
+    let paths = std::env::var_os("PATH").unwrap_or_default();
+    for directory in std::env::split_paths(&paths) {
+        if directory.is_absolute() {
+            let candidate = directory.join("wsl.exe");
+            if is_real_executable(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err("WSL (wsl.exe) was not found in System32 or PATH".into())
+}
+
+pub fn prepare_launch(request: &LaunchRequest) -> Result<LaunchSpec, String> {
+    let shell_kind = match request {
+        LaunchRequest::Shell { shell_kind, .. } => *shell_kind,
+        LaunchRequest::Python { .. } => ShellKind::PowerShell,
+    };
+    let executable = shell_kind.resolve()?;
+    prepare_with_shell(request, executable, shell_kind)
+}
+
+fn prepare_with_shell(
+    request: &LaunchRequest,
+    executable: PathBuf,
+    shell_kind: ShellKind,
+) -> Result<LaunchSpec, String> {
     let (cwd, no_profile) = match request {
-        LaunchRequest::Shell { cwd, no_profile }
+        LaunchRequest::Shell { cwd, no_profile, .. }
         | LaunchRequest::Python {
             cwd, no_profile, ..
         } => (cwd, *no_profile),
@@ -119,11 +274,16 @@ fn prepare_with_shell(request: &LaunchRequest, executable: PathBuf) -> Result<La
     let cwd = absolute_existing(cwd, true)?;
     let mut spec = LaunchSpec {
         executable,
-        arguments: vec![OsString::from("-NoLogo")],
+        arguments: match shell_kind {
+            ShellKind::PowerShell => vec![OsString::from("-NoLogo")],
+            ShellKind::CommandPrompt => Vec::new(),
+            ShellKind::GitBash => vec![OsString::from("--login"), OsString::from("-i")],
+            ShellKind::Wsl => Vec::new(),
+        },
         cwd,
         environment: Vec::new(),
     };
-    if no_profile {
+    if no_profile && shell_kind == ShellKind::PowerShell {
         spec.arguments.push(OsString::from("-NoProfile"));
     }
     if let LaunchRequest::Python {

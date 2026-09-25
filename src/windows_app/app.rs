@@ -28,6 +28,7 @@ pub(super) struct TerminalPane {
     pub(super) id: SessionId,
     pub(super) snapshot: Option<Arc<Snapshot>>,
     pub(super) applied_size: Option<TerminalSize>,
+    pub(super) shell_kind: ShellKind,
 }
 
 // What a generic Zed-registry install turned out to be, resolved on the
