@@ -14,6 +14,20 @@ fn is_editor_ctrl_key(key: u32, shift: bool) -> bool {
         || key == VK_DELETE as u32
 }
 
+fn is_editor_navigation_or_edit_key(key: u32) -> bool {
+    key == VK_LEFT as u32
+        || key == VK_RIGHT as u32
+        || key == VK_UP as u32
+        || key == VK_DOWN as u32
+        || key == VK_PRIOR as u32
+        || key == VK_NEXT as u32
+        || key == VK_HOME as u32
+        || key == VK_END as u32
+        || key == VK_TAB as u32
+        || key == VK_BACK as u32
+        || key == VK_DELETE as u32
+}
+
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
         self.clear_hover(hwnd);
@@ -317,9 +331,11 @@ impl App {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return true;
             }
-            // While a sidebar list owns focus, no unhandled key may fall
-            // through to editor navigation or deletion handlers below.
-            return true;
+            // Keep editor navigation and deletion away from the hidden caret,
+            // but let application commands such as F5/F10/F11 continue below.
+            if is_editor_navigation_or_edit_key(key) {
+                return true;
+            }
         }
         if self.side_view == SideView::Review
             && self.review_file.is_some()
@@ -1823,5 +1839,10 @@ mod shortcut_tests {
         assert!(is_editor_ctrl_key(0x58, false));
         assert!(!is_editor_ctrl_key(0x58, true));
         assert!(is_editor_ctrl_key(0x5a, true));
+        assert!(is_editor_navigation_or_edit_key(VK_BACK as u32));
+        assert!(is_editor_navigation_or_edit_key(VK_DELETE as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F5 as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F10 as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F11 as u32));
     }
 }
