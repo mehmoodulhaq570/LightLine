@@ -2,6 +2,18 @@ use super::git::GitHit;
 use super::terminal::TerminalHeaderHit;
 use super::*;
 
+fn is_editor_ctrl_key(key: u32, shift: bool) -> bool {
+    matches!(key, 0x41 | 0x43 | 0x56 | 0x5a | 0x59)
+        || (key == 0x58 && !shift)
+        || key == VK_HOME as u32
+        || key == VK_END as u32
+        || key == VK_LEFT as u32
+        || key == VK_RIGHT as u32
+        || key == VK_SPACE as u32
+        || key == VK_BACK as u32
+        || key == VK_DELETE as u32
+}
+
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
         self.clear_hover(hwnd);
@@ -249,6 +261,19 @@ impl App {
                 self.changes.len()
             };
             match key {
+                x if x == VK_ESCAPE as u32 => {
+                    self.panel_focus = false;
+                    if self.side_view == SideView::Search {
+                        self.cancel_search();
+                        self.side_view = SideView::Files;
+                        self.set_sidebar_visible(hwnd, false);
+                        self.review_file = None;
+                        self.keep_cursor_visible(hwnd);
+                    } else {
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                    return true;
+                }
                 x if x == VK_UP as u32 => {
                     self.panel_selected = self.panel_selected.saturating_sub(1)
                 }
@@ -292,6 +317,9 @@ impl App {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return true;
             }
+            // While a sidebar list owns focus, no unhandled key may fall
+            // through to editor navigation or deletion handlers below.
+            return true;
         }
         if self.side_view == SideView::Review
             && self.review_file.is_some()
@@ -371,17 +399,7 @@ impl App {
                 _ => {}
             }
         }
-        let editor_ctrl_key = matches!(
-            key,
-            0x41 | 0x43 | 0x58 | 0x56 | 0x5a | 0x59
-        ) || key == VK_HOME as u32
-            || key == VK_END as u32
-            || key == VK_LEFT as u32
-            || key == VK_RIGHT as u32
-            || key == VK_SPACE as u32
-            || key == VK_BACK as u32
-            || key == VK_DELETE as u32;
-        if ctrl && self.panel_focus && editor_ctrl_key {
+        if ctrl && self.panel_focus && is_editor_ctrl_key(key, shift) {
             return true;
         }
         if ctrl {
@@ -1793,5 +1811,17 @@ impl App {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_guard_allows_extensions_shortcut() {
+        assert!(is_editor_ctrl_key(0x58, false));
+        assert!(!is_editor_ctrl_key(0x58, true));
+        assert!(is_editor_ctrl_key(0x5a, true));
     }
 }
