@@ -482,6 +482,9 @@ impl App {
                 WorkerMessage::GutterDiff(path, _relative, head_text, result) => {
                     self.gutter_diff_finished(&path, head_text, result);
                 }
+                WorkerMessage::GutterComputed(generation, path, diff) => {
+                    self.gutter_diff_computed(generation, path, diff);
+                }
                 WorkerMessage::Diff(root, path, result)
                     if self.git_root.as_ref() == Some(&root)
                         && self.review_file.as_ref() == Some(&path) =>

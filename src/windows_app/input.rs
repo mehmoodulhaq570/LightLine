@@ -600,7 +600,7 @@ impl App {
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
                         self.sync_lsp_edit();
-                        self.recompute_gutter_diff();
+                        self.schedule_gutter_diff();
                     }
                 }
                 0x59 => {
@@ -610,7 +610,7 @@ impl App {
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
                         self.sync_lsp_edit();
-                        self.recompute_gutter_diff();
+                        self.schedule_gutter_diff();
                     }
                 }
                 x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
@@ -1059,6 +1059,20 @@ impl App {
             .visual_row_to_doc_line(first_line, row)
             .unwrap_or_else(|| doc.line_count().saturating_sub(1));
         if doc.toggle_fold(line) {
+            // A caret inside the block just folded moves to the fold's first
+            // line; otherwise keep_cursor_visible would reveal it again and
+            // the fold would reopen immediately.
+            let tab = &mut self.tabs[tab_index];
+            for view in &mut tab.views {
+                if tab.document.is_line_hidden(view.cursor.line) {
+                    let byte = view.cursor.byte;
+                    view.cursor = tab.document.clamp(Pos { line, byte });
+                    view.selection_anchor = None;
+                }
+                if view.selection_anchor.is_some_and(|anchor| tab.document.is_line_hidden(anchor.line)) {
+                    view.selection_anchor = None;
+                }
+            }
             self.refresh(hwnd);
         }
     }

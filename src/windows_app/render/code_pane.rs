@@ -120,31 +120,14 @@ impl App {
                 let is_folded = doc.is_folded_start(index).is_some();
                 let is_foldable = is_folded || doc.foldable_range(index).is_some();
                 if is_foldable {
-                    let chevron = if is_folded { "›" } else { "⌄" };
-                    let chev_u16: Vec<u16> = chevron.encode_utf16().collect();
-                    SetTextColor(
+                    // Drawn as vector strokes, like the Explorer's chevrons:
+                    // the editor font may have no glyph for ⌄ or ›, which
+                    // rendered as an empty box.
+                    self.chevron(
                         hdc,
-                        if is_folded {
-                            self.theme.line_number_active
-                        } else {
-                            self.theme.line_number
-                        },
-                    );
-                    let chev_clip = RECT {
-                        left: left + self.scale(GUTTER) - self.scale(16),
-                        top: y,
-                        right: left + self.scale(GUTTER) - self.scale(3),
-                        bottom,
-                    };
-                    ExtTextOutW(
-                        hdc,
-                        left + self.scale(GUTTER) - self.scale(15),
-                        y,
-                        ETO_CLIPPED,
-                        &chev_clip,
-                        chev_u16.as_ptr(),
-                        chev_u16.len() as u32,
-                        null(),
+                        left + self.scale(GUTTER) - self.scale(10),
+                        y + self.line_height / 2,
+                        !is_folded,
                     );
                 }
                 if let Some(diff) = git_diff {

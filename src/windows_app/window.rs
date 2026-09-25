@@ -1,6 +1,8 @@
 use super::*;
 
 static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
+// Whether the last WM_SYSKEYDOWN was consumed by LightLine (see WM_SYSCHAR).
+static SYSKEY_HANDLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn console_control(event: u32) -> i32 {
     if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
@@ -191,6 +193,10 @@ unsafe extern "system" fn wnd_proc(
             app.poll_watcher(hwnd);
             0
         }
+        WM_TIMER if wparam == GUTTER_DIFF_TIMER => {
+            app.start_gutter_diff();
+            0
+        }
         LSP_EVENT_MESSAGE => {
             app.poll_lsp(hwnd);
             0
@@ -267,6 +273,31 @@ unsafe extern "system" fn wnd_proc(
                 unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
             }
         }
+        // Alt chords and F10 arrive as WM_SYSKEYDOWN instead of WM_KEYDOWN,
+        // so without this Shift+Alt+F (Format Document), F10 (Step Over) and
+        // Alt keys in the terminal never reached the key handler. Everything
+        // else -- Alt+F4, Alt+Space -- keeps Windows' default behavior.
+        WM_SYSKEYDOWN => {
+            let key = wparam as u32;
+            let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
+            let routed = key == VK_F10 as u32
+                || (shift && key == 0x46)
+                || (app.terminal_focus
+                    && key != VK_F4 as u32
+                    && key != VK_SPACE as u32
+                    && key != VK_MENU as u32);
+            let handled = routed && app.key(hwnd, key);
+            SYSKEY_HANDLED.store(handled, Ordering::Relaxed);
+            if handled {
+                0
+            } else {
+                drop(app);
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+            }
+        }
+        // The WM_SYSCHAR that follows a handled Alt chord would otherwise
+        // make Windows play its "no such menu" error sound.
+        WM_SYSCHAR if SYSKEY_HANDLED.swap(false, Ordering::Relaxed) => 0,
         WM_CHAR => {
             app.character(hwnd, wparam as u16);
             0

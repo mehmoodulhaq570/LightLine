@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Both formatters only change layout. JSON keeps key order, number spelling and `//`/`/* */` comments (JSONC such as `tsconfig.json`); TOML keeps comments, key order and multi-line strings.
   - The TOML result is re-parsed and compared with the original, and formatting is refused if the document would change.
 - **Inline Git Gutter Indicators**: Change markers in the editor gutter comparing the unsaved buffer against Git `HEAD`.
-  - Line diff uses Myers' algorithm after trimming the common prefix and suffix, with a work budget per recompute so typing stays responsive on large files (live marks are skipped above 50,000 lines).
+  - Line diff uses Myers' algorithm after trimming the common prefix and suffix. It runs on a background thread once typing pauses, with a work budget per recompute (live marks are skipped above 50,000 lines), so typing never waits on it.
   - Each changed region is classified on its own: 🟢 green bar for added lines, 🔵 blue bar for modified lines, 🔴 red marker below a deletion. Unchanged lines between edits stay unmarked.
   - Updates on keystrokes, undo (`Ctrl+Z`) and redo (`Ctrl+Y`), and refreshes when `HEAD` moves (a commit or checkout from LightLine or a terminal).
   - Only files inside a Git repository get markers; new files not yet in `HEAD` are shown as added.
@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gutter column displays fold chevrons: `⌄` for foldable blocks and `›` for collapsed blocks; a collapsed block shows a `...` pill at the line end.
   - Gutter click partition distinguishes between breakpoint toggling (left 24px) and code folding (chevron column).
   - Arrow keys, Page Up/Down, mouse wheel and scrollbar move by visible lines, and the caret is drawn on its visual row.
-  - Folds move with edits above them; an edit inside a folded block, or a cursor landing in one (search, go to definition, undo), unfolds it.
+  - Folds move with edits above them; an edit inside a folded block, or a cursor landing in one (search, go to definition, undo), unfolds it. Folding the block the caret is in moves the caret to the fold's first line.
+  - Chevrons are drawn as vector strokes, so they render even when the editor font lacks the `⌄`/`›` glyphs.
 
 #### Fixed
 - **Workspace Search Keyboard Navigation**: Submitting a project-wide search now transfers focus from the query field to the results list, where `Up`/`Down` change the selection and `Enter` opens it. Mouse and keyboard result activation both return input to the editor cleanly.
@@ -38,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hidden Editor Mutations**: Navigation, Tab, Backspace, and Delete are consumed by the focused sidebar instead of changing the editor behind it. Editor control chords are likewise guarded while list focus is active.
 - **Global Shortcuts While Panels Are Focused**: `Ctrl+Shift+X` continues to open Extensions, debugger commands (`F5`, `Shift+F5`, `F10`, `F11`, `Shift+F11`) still reach their handlers, and `Ctrl+Shift+W` closes the workspace even when the terminal has focus.
 - **Output Pane Program Input**: `Enter` now sends the pipe-appropriate CRLF sequence to a running program, while Backspace uses modifier-aware terminal encoding (`DEL` normally and `BS` with Control).
+- **Shift+Alt+F, F10 and Alt Keys Never Reached LightLine**: Windows delivers Alt chords and F10 as `WM_SYSKEYDOWN`, which the window ignored, so Format Document (`Shift+Alt+F`), Step Over (`F10`) and Alt keys in the terminal did nothing. They are now routed to the key handler; `Alt+F4` and other system keys keep their default behavior.
+- **Minimize Scrolled the Editor**: Minimizing and restoring the window no longer leaves the editor scrolled to the caret line.
 - **Editor Caret Rendering Consistency**: Normalized the caret visibility condition so it remains suppressed whenever terminal, search, sidebar, or another split pane owns focus.
 
 ### 2026-09-24

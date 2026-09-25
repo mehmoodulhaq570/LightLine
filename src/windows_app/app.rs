@@ -46,6 +46,8 @@ pub(super) enum WorkerMessage {
     Repo(u64, Result<RepoState, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
     GutterDiff(PathBuf, PathBuf, Option<String>, Result<Vec<DiffRow>, String>),
+    // A live gutter recompute: (request generation, file, marks).
+    GutterComputed(u64, PathBuf, GutterDiff),
     GitWrite(GitAction, Result<(), String>),
     ExtensionInstalled(String, bool),
     // The full Zed registry id/version list, for the Extensions panel search.
@@ -463,7 +465,13 @@ pub(super) struct App {
     pub(super) watcher: Option<lightline::watcher::FileWatcher>,
     pub(super) settings: lightline::settings::Settings,
     pub(super) git_diff_cache: HashMap<PathBuf, GutterDiff>,
-    pub(super) git_head_cache: HashMap<PathBuf, String>,
+    // HEAD's text per file, shared with gutter diff workers without copying.
+    pub(super) git_head_cache: HashMap<PathBuf, Arc<str>>,
+    // Bumped per gutter diff request; only the latest request's result is kept.
+    pub(super) gutter_generation: u64,
+    // The main window, for timers started from code paths without an HWND
+    // parameter (edits funnel through replace_range, which has none).
+    pub(super) hwnd: HWND,
     // Files that are new relative to HEAD, whose every line is marked added.
     pub(super) git_untracked: HashSet<PathBuf>,
     pub(super) extensions: Vec<Extension>,
@@ -862,6 +870,8 @@ impl App {
             settings,
             git_diff_cache: HashMap::new(),
             git_head_cache: HashMap::new(),
+            gutter_generation: 0,
+            hwnd,
             git_untracked: HashSet::new(),
             extensions: vec![
                 Extension {
@@ -1705,6 +1715,11 @@ impl App {
     }
 
     pub(super) fn keep_cursor_visible(&mut self, hwnd: HWND) {
+        // A minimized window has no rows; scrolling the caret into that view
+        // would leave the editor scrolled to the caret line after restoring.
+        if unsafe { IsIconic(hwnd) } != 0 {
+            return;
+        }
         let visible = self.visible_lines(hwnd);
         let line = self.view().cursor.line;
         // The caret must never sit inside collapsed text, whatever moved it
@@ -1800,7 +1815,7 @@ impl App {
             return;
         }
         let cursor = self.doc_mut().replace(start, end, text);
-        self.recompute_gutter_diff();
+        self.schedule_gutter_diff();
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
         self.revalidate_other_view(Some((start, end, cursor)));
@@ -1992,7 +2007,7 @@ impl App {
         if needs_refresh {
             // A reload (e.g. after Discard) replaces the buffer without going
             // through replace_range, so the gutter has to be recomputed here.
-            self.recompute_gutter_diff();
+            self.schedule_gutter_diff();
             self.backbuffer = None;
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
@@ -2010,7 +2025,7 @@ impl App {
         let Some(root) = self.git_root.clone() else {
             return;
         };
-        let Some(relative) = path.strip_prefix(&root).ok().map(Path::to_path_buf) else {
+        let Some(relative) = repo_relative(&path, &root) else {
             return;
         };
         // Gutter marks compare the file on disk with HEAD, so unsaved edits do
@@ -2045,7 +2060,7 @@ impl App {
         self.gutter_done = Some(path.to_path_buf());
         if let Some(text) = head_text {
             self.git_untracked.remove(path);
-            self.git_head_cache.insert(path.to_path_buf(), text);
+            self.git_head_cache.insert(path.to_path_buf(), text.into());
         } else {
             self.git_head_cache.remove(path);
             // Not in HEAD. `git diff` lists a new (untracked or newly staged)
@@ -2057,28 +2072,51 @@ impl App {
                 self.git_untracked.remove(path);
             }
         }
-        self.git_diff_cache.remove(path);
-        self.recompute_gutter_diff();
+        self.start_gutter_diff();
+    }
+
+    /// Asks for the active buffer's gutter marks to be recomputed once typing
+    /// pauses. Called after every edit: restarting the timer coalesces a burst
+    /// of keystrokes into a single diff.
+    pub(super) fn schedule_gutter_diff(&mut self) {
+        unsafe { SetTimer(self.hwnd, GUTTER_DIFF_TIMER, 120, None) };
     }
 
     /// Recomputes the active buffer's gutter marks against its cached HEAD
-    /// text. Runs after every edit, so it's bounded: huge files get no live
-    /// marks, and the diff itself caps its work (see compute_gutter_diff).
-    pub(super) fn recompute_gutter_diff(&mut self) {
+    /// text. The diff runs on a worker thread against a snapshot of the
+    /// buffer; `gutter_generation` discards a result that a newer request has
+    /// already superseded.
+    pub(super) fn start_gutter_diff(&mut self) {
         const LIVE_GUTTER_LINE_LIMIT: usize = 50_000;
+        unsafe { KillTimer(self.hwnd, GUTTER_DIFF_TIMER) };
         let Some(path) = self.doc().path.clone() else {
             return;
         };
+        self.gutter_generation += 1;
         if self.doc().line_count() > LIVE_GUTTER_LINE_LIMIT {
             self.git_diff_cache.remove(&path);
-        } else if let Some(head_text) = self.git_head_cache.get(&path) {
-            let diff = workflow::compute_gutter_diff(head_text, self.doc().lines());
-            self.git_diff_cache.insert(path, diff);
+        } else if let Some(head_text) = self.git_head_cache.get(&path).cloned() {
+            let lines = self.doc().lines().to_vec();
+            let generation = self.gutter_generation;
+            let tx = self.worker_tx.clone();
+            self.worker_started(self.hwnd);
+            std::thread::spawn(move || {
+                let diff = workflow::compute_gutter_diff(&head_text, &lines);
+                let _ = tx.send(WorkerMessage::GutterComputed(generation, path, diff));
+            });
+            return;
         } else if self.git_untracked.contains(&path) {
             let added = (0..self.doc().line_count()).collect();
             self.git_diff_cache.insert(path, GutterDiff { added, ..GutterDiff::default() });
         } else {
             self.git_diff_cache.remove(&path);
+        }
+        unsafe { InvalidateRect(self.hwnd, null(), 0) };
+    }
+
+    pub(super) fn gutter_diff_computed(&mut self, generation: u64, path: PathBuf, diff: GutterDiff) {
+        if generation == self.gutter_generation {
+            self.git_diff_cache.insert(path, diff);
         }
     }
 
@@ -2440,5 +2478,22 @@ mod split_tests {
 
         // Clean up temp dir
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn repo_relative_matches_canonical_paths_against_git_roots() {
+        // An opened file (canonicalize() form) against Git's own root form.
+        assert_eq!(
+            repo_relative(Path::new(r"\\?\C:\Work\repo\src\main.rs"), Path::new("C:/Work/repo")),
+            Some(PathBuf::from(r"src\main.rs"))
+        );
+        // Case differences, as Windows paths are case-insensitive.
+        assert_eq!(
+            repo_relative(Path::new(r"\\?\C:\work\Repo\a.rs"), Path::new("C:/Work/repo")),
+            Some(PathBuf::from("a.rs"))
+        );
+        // A file outside the repository has no repo-relative path.
+        assert_eq!(repo_relative(Path::new(r"\\?\C:\Other\a.rs"), Path::new("C:/Work/repo")), None);
+        assert_eq!(repo_relative(Path::new(r"C:\Work\repository\a.rs"), Path::new("C:/Work/repo")), None);
     }
 }
