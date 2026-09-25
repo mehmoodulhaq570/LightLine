@@ -98,6 +98,8 @@ const CARD_RADIUS: i32 = 4;
 const TRANSITION_MS: u128 = 150;
 // WM_TIMER id for the debounced gutter diff (see schedule_gutter_diff).
 const GUTTER_DIFF_TIMER: usize = 8;
+// WM_TIMER id that repaints once a status message expires (see fresh_status).
+const STATUS_TIMER: usize = 9;
 fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
     ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
 }

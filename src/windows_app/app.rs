@@ -469,11 +469,16 @@ pub(super) struct App {
     pub(super) git_head_cache: HashMap<PathBuf, Arc<str>>,
     // Bumped per gutter diff request; only the latest request's result is kept.
     pub(super) gutter_generation: u64,
+    // The status text last painted and when it first appeared (see fresh_status).
+    pub(super) status_seen: RefCell<(String, Instant)>,
     // The main window, for timers started from code paths without an HWND
     // parameter (edits funnel through replace_range, which has none).
     pub(super) hwnd: HWND,
     // Files that are new relative to HEAD, whose every line is marked added.
     pub(super) git_untracked: HashSet<PathBuf>,
+    // The repository's .git/index and .git/HEAD, watched so a commit, stage
+    // or checkout run in a terminal refreshes the Git panel and gutter.
+    pub(super) git_watch_files: Vec<PathBuf>,
     pub(super) extensions: Vec<Extension>,
     pub(super) extensions_tab: ExtensionsTab,
     pub(super) extensions_query: String,
@@ -594,6 +599,25 @@ fn family_available(name: &str) -> bool {
         ReleaseDC(null_mut(), hdc);
         found
     }
+}
+
+// Gutter mark lines after an edit that replaced lines `start..=old_end` and
+// changed the line count by `delta`: marks above stay, marks below move by
+// `delta`, and marks on lines the edit removed are dropped.
+fn shifted_mark_lines(lines: &HashSet<usize>, start: usize, old_end: usize, delta: isize) -> HashSet<usize> {
+    let new_end = old_end as isize + delta;
+    lines
+        .iter()
+        .filter_map(|&line| {
+            if line <= start {
+                Some(line)
+            } else if line > old_end {
+                usize::try_from(line as isize + delta).ok()
+            } else {
+                (line as isize <= new_end).then_some(line)
+            }
+        })
+        .collect()
 }
 
 impl App {
@@ -871,8 +895,10 @@ impl App {
             git_diff_cache: HashMap::new(),
             git_head_cache: HashMap::new(),
             gutter_generation: 0,
+            status_seen: RefCell::new((String::new(), Instant::now())),
             hwnd,
             git_untracked: HashSet::new(),
+            git_watch_files: Vec::new(),
             extensions: vec![
                 Extension {
                     id: "prettier".into(),
@@ -1696,17 +1722,16 @@ impl App {
             return;
         }
         let visible = self.visible_lines(hwnd);
+        // The scrollbar counts screen rows, so folded lines don't inflate
+        // the range or push the thumb down.
+        let doc = self.doc();
         let info = SCROLLINFO {
             cbSize: size_of::<SCROLLINFO>() as u32,
             fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
             nMin: 0,
-            nMax: self
-                .doc()
-                .line_count()
-                .saturating_sub(1)
-                .min(i32::MAX as usize) as i32,
+            nMax: doc.visible_line_count().saturating_sub(1).min(i32::MAX as usize) as i32,
             nPage: visible as u32,
-            nPos: self.view().first_line.min(i32::MAX as usize) as i32,
+            nPos: doc.visual_index(self.view().first_line).min(i32::MAX as usize) as i32,
             nTrackPos: 0,
         };
         unsafe {
@@ -1814,7 +1839,10 @@ impl App {
         if self.tab().read_only() {
             return;
         }
+        let lines_before = self.doc().line_count();
         let cursor = self.doc_mut().replace(start, end, text);
+        let delta = self.doc().line_count() as isize - lines_before as isize;
+        self.shift_gutter_marks(start.line, end.line, delta);
         self.schedule_gutter_diff();
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
@@ -1963,8 +1991,14 @@ impl App {
         let events = watcher.poll();
         if events.is_empty() { return; }
         let mut needs_refresh = false;
+        let mut git_changed = false;
         for event in events {
             match event {
+                lightline::watcher::WatchEvent::FileChanged(path)
+                    if self.git_watch_files.contains(&path) =>
+                {
+                    git_changed = true;
+                }
                 lightline::watcher::WatchEvent::FileChanged(path) => {
                     for tab in &mut self.tabs {
                         if tab
@@ -2010,6 +2044,12 @@ impl App {
             self.schedule_gutter_diff();
             self.backbuffer = None;
             unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+        // Something outside LightLine's own Git actions (which refresh when
+        // they finish) staged, committed or checked out -- e.g. in the
+        // built-in terminal, where the window never loses focus.
+        if git_changed && !self.git_busy {
+            self.refresh_git(hwnd);
         }
     }
 
@@ -2078,8 +2118,42 @@ impl App {
     /// Asks for the active buffer's gutter marks to be recomputed once typing
     /// pauses. Called after every edit: restarting the timer coalesces a burst
     /// of keystrokes into a single diff.
+    /// The status message while it's fresh: shown for a few seconds after it
+    /// changes, so a stale "Saved x" doesn't sit in the status bar forever.
+    /// Paint calls this, so the change is tracked through a RefCell.
+    pub(super) fn fresh_status(&self) -> Option<&str> {
+        const VISIBLE: std::time::Duration = std::time::Duration::from_secs(5);
+        let mut seen = self.status_seen.borrow_mut();
+        if seen.0 != self.status {
+            *seen = (self.status.clone(), Instant::now());
+            if !self.status.is_empty() {
+                // Repaint once it expires so the message goes away on time.
+                unsafe { SetTimer(self.hwnd, STATUS_TIMER, VISIBLE.as_millis() as u32 + 50, None) };
+            }
+        }
+        (!self.status.is_empty() && seen.1.elapsed() < VISIBLE).then_some(self.status.as_str())
+    }
+
     pub(super) fn schedule_gutter_diff(&mut self) {
         unsafe { SetTimer(self.hwnd, GUTTER_DIFF_TIMER, 120, None) };
+    }
+
+    /// Moves the active buffer's gutter marks with an edit that replaced
+    /// lines `start..=old_end` and changed the line count by `delta`, so
+    /// they stay on their lines until the debounced recompute lands.
+    pub(super) fn shift_gutter_marks(&mut self, start: usize, old_end: usize, delta: isize) {
+        if delta == 0 {
+            return;
+        }
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        let Some(diff) = self.git_diff_cache.get_mut(&path) else {
+            return;
+        };
+        for lines in [&mut diff.added, &mut diff.modified, &mut diff.deleted] {
+            *lines = shifted_mark_lines(lines, start, old_end, delta);
+        }
     }
 
     /// Recomputes the active buffer's gutter marks against its cached HEAD
@@ -2478,6 +2552,23 @@ mod split_tests {
 
         // Clean up temp dir
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn gutter_marks_move_with_inserted_and_deleted_lines() {
+        let marks: HashSet<usize> = [1, 5, 9].into_iter().collect();
+        let sorted = |set: HashSet<usize>| {
+            let mut lines: Vec<usize> = set.into_iter().collect();
+            lines.sort_unstable();
+            lines
+        };
+        // Enter on line 3: one line inserted after it; marks below move down.
+        assert_eq!(sorted(shifted_mark_lines(&marks, 3, 3, 1)), vec![1, 6, 10]);
+        // Lines 4..=6 joined into line 4 (two lines removed): the mark on
+        // removed line 5 goes, the one below moves up.
+        assert_eq!(sorted(shifted_mark_lines(&marks, 4, 6, -2)), vec![1, 7]);
+        // Undo of that: two lines re-inserted after line 4.
+        assert_eq!(sorted(shifted_mark_lines(&[1, 7].into_iter().collect(), 4, 4, 2)), vec![1, 9]);
     }
 
     #[test]

@@ -593,23 +593,23 @@ impl App {
                         self.sync_lsp_edit();
                     }
                 }
-                0x5a => {
+                0x5a | 0x59 => {
                     self.view_mut().selection_anchor = None;
-                    if let Some((cursor, line)) = self.doc_mut().undo() {
+                    let lines_before = self.doc().line_count();
+                    let applied = if key == 0x5a {
+                        self.doc_mut().undo()
+                    } else {
+                        self.doc_mut().redo()
+                    };
+                    if let Some((cursor, line)) = applied {
                         self.view_mut().cursor = cursor;
                         self.syntax_changed(line);
                         self.revalidate_other_view(None);
                         self.sync_lsp_edit();
-                        self.schedule_gutter_diff();
-                    }
-                }
-                0x59 => {
-                    self.view_mut().selection_anchor = None;
-                    if let Some((cursor, line)) = self.doc_mut().redo() {
-                        self.view_mut().cursor = cursor;
-                        self.syntax_changed(line);
-                        self.revalidate_other_view(None);
-                        self.sync_lsp_edit();
+                        // Undo/redo report only the first changed line; a
+                        // removal spanned `-delta` lines below it.
+                        let delta = self.doc().line_count() as isize - lines_before as isize;
+                        self.shift_gutter_marks(line, line + (-delta).max(0) as usize, delta);
                         self.schedule_gutter_diff();
                     }
                 }

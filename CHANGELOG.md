@@ -16,20 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added a dropdown button (`⌄`) right next to the terminal `+` button, and right-click support on the `+` button, opening a native popup menu to select and launch any installed shell.
   - Added "Select Default Profile" menu and `terminalDefaultProfile` configuration in `%APPDATA%\LightLine\settings.json`.
   - Terminal tab headers show the shell profile (e.g. `PWSH`, `CMD`, `BASH`, `WSL`), numbered (`PWSH 1`, `CMD 2`) when more than one terminal is open.
-  - WSL is offered only when a Linux distribution is installed, not merely when `wsl.exe` exists.
+  - WSL is offered only when a Linux distribution is installed, not merely when `wsl.exe` exists; Docker Desktop's internal `docker-desktop` distributions don't count.
+  - Choosing an unavailable shell (e.g. from the command palette) shows why in the status bar instead of opening a dead tab, and a default profile that has become unavailable falls back to PowerShell.
 - **Built-in JSON & TOML Formatters**: `.json` and `.toml` files are formatted without Prettier or any other tool installed, via `Shift+Alt+F` (Format Document) and `formatOnSave`.
   - Both formatters only change layout. JSON keeps key order, number spelling and `//`/`/* */` comments (JSONC such as `tsconfig.json`); TOML keeps comments, key order and multi-line strings.
   - The TOML result is re-parsed and compared with the original, and formatting is refused if the document would change.
 - **Inline Git Gutter Indicators**: Change markers in the editor gutter comparing the unsaved buffer against Git `HEAD`.
   - Line diff uses Myers' algorithm after trimming the common prefix and suffix. It runs on a background thread once typing pauses, with a work budget per recompute (live marks are skipped above 50,000 lines), so typing never waits on it.
   - Each changed region is classified on its own: 🟢 green bar for added lines, 🔵 blue bar for modified lines, 🔴 red marker below a deletion. Unchanged lines between edits stay unmarked.
-  - Updates on keystrokes, undo (`Ctrl+Z`) and redo (`Ctrl+Y`), and refreshes when `HEAD` moves (a commit or checkout from LightLine or a terminal).
+  - Updates on keystrokes, undo (`Ctrl+Z`) and redo (`Ctrl+Y`); existing marks move with inserted or deleted lines immediately, before the recompute lands.
+  - Refreshes when `HEAD` moves: a commit or checkout from LightLine, from an outside tool, or from the built-in terminal (LightLine watches `.git/index` and `.git/HEAD`; its own Git reads run with `GIT_OPTIONAL_LOCKS=0` so they never trigger that watch).
   - Only files inside a Git repository get markers; new files not yet in `HEAD` are shown as added.
-- **Code Folding**: Fold blocks by brackets (`{ }`, `[ ]`, `( )`) or indentation (e.g. Python `def`/`class` blocks).
+- **Code Folding**: Fold blocks by brackets (`{ }`, `[ ]`, `( )`) or indentation (e.g. Python `def`/`class` blocks). Indentation folding applies only outside bracket languages, so a wrapped line in JSON or Rust isn't offered as a fold.
   - Bracket matching ignores brackets inside strings and comments, and requires matching bracket types.
   - Gutter column displays fold chevrons: `⌄` for foldable blocks and `›` for collapsed blocks; a collapsed block shows a `...` pill at the line end.
   - Gutter click partition distinguishes between breakpoint toggling (left 24px) and code folding (chevron column).
-  - Arrow keys, Page Up/Down, mouse wheel and scrollbar move by visible lines, and the caret is drawn on its visual row.
+  - Arrow keys, Page Up/Down, mouse wheel and scrollbar move by visible lines, and the caret is drawn on its visual row. The scrollbar's range and thumb count visible rows, so folded lines don't distort it.
   - Folds move with edits above them; an edit inside a folded block, or a cursor landing in one (search, go to definition, undo), unfolds it. Folding the block the caret is in moves the caret to the fold's first line.
   - Chevrons are drawn as vector strokes, so they render even when the editor font lacks the `⌄`/`›` glyphs.
 
@@ -41,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Output Pane Program Input**: `Enter` now sends the pipe-appropriate CRLF sequence to a running program, while Backspace uses modifier-aware terminal encoding (`DEL` normally and `BS` with Control).
 - **Shift+Alt+F, F10 and Alt Keys Never Reached LightLine**: Windows delivers Alt chords and F10 as `WM_SYSKEYDOWN`, which the window ignored, so Format Document (`Shift+Alt+F`), Step Over (`F10`) and Alt keys in the terminal did nothing. They are now routed to the key handler; `Alt+F4` and other system keys keep their default behavior.
 - **Minimize Scrolled the Editor**: Minimizing and restoring the window no longer leaves the editor scrolled to the caret line.
+- **Status Messages Were Never Shown**: The editor's status bar always displayed a fixed "Ready", so every message LightLine reported (format results and errors, "Committed", unavailable shells, ...) was invisible. The latest message now appears in the status bar for five seconds, in red when something failed.
+- **Enter in the Command Palette Also Typed a Newline**: When Enter ran a palette command, accepted a completion or confirmed an Explorer rename, the character Windows generates for the same key press still reached the editor and inserted a blank line (a Tab accepting a completion likewise inserted a tab). Those characters are now dropped.
 - **Editor Caret Rendering Consistency**: Normalized the caret visibility condition so it remains suppressed whenever terminal, search, sidebar, or another split pane owns focus.
 
 ### 2026-09-24

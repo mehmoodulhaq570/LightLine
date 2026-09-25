@@ -99,6 +99,14 @@ impl App {
         });
     }
 
+    pub(super) fn unwatch_git_files(&mut self) {
+        if let Some(watcher) = &self.watcher {
+            for path in self.git_watch_files.drain(..) {
+                watcher.unwatch_file(path);
+            }
+        }
+    }
+
     pub(super) fn apply_repo_state(&mut self, hwnd: HWND, state: RepoState) {
         // A commit, checkout or reset -- from LightLine or a terminal -- moves
         // HEAD, and the gutter compares against HEAD's text, so drop the
@@ -110,6 +118,22 @@ impl App {
             self.git_diff_cache.clear();
             self.git_untracked.clear();
             self.gutter_done = None;
+        }
+        let watch: Vec<PathBuf> = state
+            .git_dir
+            .iter()
+            .flat_map(|dir| [dir.join("index"), dir.join("HEAD")])
+            .collect();
+        if watch != self.git_watch_files
+            && let Some(watcher) = &self.watcher
+        {
+            for path in &self.git_watch_files {
+                watcher.unwatch_file(path.clone());
+            }
+            for path in &watch {
+                watcher.watch_file(path.clone());
+            }
+            self.git_watch_files = watch;
         }
         self.git_root = Some(state.root.clone());
         self.workspace_branch = Some(state.head_label());

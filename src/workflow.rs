@@ -280,6 +280,8 @@ pub struct RepoState {
     pub conflicted: bool,
     /// Recent commits, newest first.
     pub history: Vec<CommitEntry>,
+    /// The absolute Git directory (`.git`, or a worktree's own directory).
+    pub git_dir: Option<PathBuf>,
 }
 
 impl RepoState {
@@ -707,9 +709,13 @@ pub fn git_output(root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+// GIT_OPTIONAL_LOCKS=0 stops read-only commands such as `git status` from
+// rewriting .git/index to refresh its stat cache. LightLine watches that file
+// to notice commits made in a terminal, so its own reads must not touch it.
 fn git_command(root: &Path, args: &[&str]) -> Command {
     let mut command = background_command("git");
     command
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(root)
         .args(["--no-pager", "-c", "core.quotePath=false"])
@@ -771,6 +777,9 @@ pub fn repo_state(root: &Path) -> Result<RepoState, String> {
     let mut state = parse_porcelain_v2(&text);
     state.root = repo_root(root).unwrap_or_else(|| root.to_path_buf());
     state.history = log(root, 30).unwrap_or_default();
+    state.git_dir = git_output(root, &["rev-parse", "--absolute-git-dir"])
+        .ok()
+        .and_then(|text| text.lines().next().map(PathBuf::from));
     Ok(state)
 }
 

@@ -117,6 +117,7 @@ impl App {
         self.git_diff_cache.clear();
         self.git_head_cache.clear();
         self.git_untracked.clear();
+        self.unwatch_git_files();
         self.gutter_done = None;
         self.review_file = None;
         self.reset_terminal_sessions(hwnd);
@@ -187,6 +188,7 @@ impl App {
         self.git_diff_cache.clear();
         self.git_head_cache.clear();
         self.git_untracked.clear();
+        self.unwatch_git_files();
         self.gutter_done = None;
         self.review_file = None;
         self.reset_terminal_sessions(hwnd);

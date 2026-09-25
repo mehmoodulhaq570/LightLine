@@ -256,7 +256,14 @@ impl App {
     // Add a new shell session using the default profile, reveal the panel on it,
     // and take keyboard focus with the block cursor shown immediately.
     pub(super) fn new_terminal(&mut self, hwnd: HWND, no_profile: bool) {
-        self.new_terminal_with_shell(hwnd, self.settings.default_terminal_profile, no_profile);
+        let mut shell_kind = self.settings.default_terminal_profile;
+        // A default profile that has since become unavailable (WSL
+        // uninstalled, Git Bash removed) falls back to PowerShell rather
+        // than leaving the panel without a working shell.
+        if shell_kind != ShellKind::PowerShell && !shell_kind.is_available() {
+            shell_kind = ShellKind::PowerShell;
+        }
+        self.new_terminal_with_shell(hwnd, shell_kind, no_profile);
     }
 
     pub(super) fn new_terminal_with_shell(
@@ -265,6 +272,14 @@ impl App {
         shell_kind: ShellKind,
         no_profile: bool,
     ) {
+        // The session starts asynchronously, so a shell that can't launch
+        // would otherwise become a dead tab showing only an error. The shell
+        // menu already disables these; the command palette reaches here too.
+        if let Err(error) = shell_kind.resolve() {
+            self.status = format!("{} is not available: {error}", shell_kind.name());
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;

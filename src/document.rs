@@ -168,9 +168,30 @@ impl Document {
         if line >= self.lines.len() || self.lines[line].trim().is_empty() {
             return None;
         }
-        self.bracket_fold_end(line)
-            .or_else(|| self.indent_fold_end(line))
-            .filter(|end| *end > line)
+        let bracket = self.bracket_fold_end(line);
+        // In bracket languages blocks are delimited by brackets; indentation
+        // there is layout (a wrapped argument list, a JSON value), so only
+        // indentation-structured files fall back to indentation folding.
+        if bracket.is_some() || self.is_bracket_language() {
+            return bracket.filter(|end| *end > line);
+        }
+        self.indent_fold_end(line).filter(|end| *end > line)
+    }
+
+    fn is_bracket_language(&self) -> bool {
+        let extension = self
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        matches!(
+            extension.as_str(),
+            "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" | "cs" | "java" | "kt"
+                | "kts" | "go" | "swift" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts"
+                | "tsx" | "json" | "jsonc" | "css" | "scss" | "less" | "php" | "dart" | "scala"
+        )
     }
 
     // Comment syntax is picked from the file extension, so a `#` in CSS or a
@@ -319,6 +340,53 @@ impl Document {
 
     pub fn has_folds(&self) -> bool {
         !self.folded_ranges.is_empty()
+    }
+
+    // The hidden line runs of all folds, merged so nested and overlapping
+    // folds count each hidden line once: (first hidden, last hidden).
+    fn hidden_runs(&self) -> Vec<(usize, usize)> {
+        let mut runs: Vec<(usize, usize)> = Vec::new();
+        for &(start, end) in &self.folded_ranges {
+            let (first, last) = (start + 1, end);
+            match runs.last_mut() {
+                Some(run) if first <= run.1 + 1 => run.1 = run.1.max(last),
+                _ => runs.push((first, last)),
+            }
+        }
+        runs
+    }
+
+    /// Number of rows the document takes on screen: lines minus hidden ones.
+    pub fn visible_line_count(&self) -> usize {
+        let hidden: usize = self.hidden_runs().iter().map(|(first, last)| last + 1 - first).sum();
+        self.lines.len() - hidden.min(self.lines.len())
+    }
+
+    /// The screen row of `line` counted from the top of the document, for
+    /// the scrollbar. A hidden line reports its fold's row.
+    pub fn visual_index(&self, line: usize) -> usize {
+        let line = self.visible_line_for(line);
+        let hidden_before: usize = self
+            .hidden_runs()
+            .iter()
+            .filter(|(first, _)| *first <= line)
+            .map(|(first, last)| (*last).min(line) + 1 - first)
+            .sum();
+        line - hidden_before
+    }
+
+    /// The document line shown on screen row `row` (counted from the top of
+    /// the document); the inverse of `visual_index`.
+    pub fn line_at_visual_index(&self, row: usize) -> usize {
+        let mut line = row;
+        for (first, last) in self.hidden_runs() {
+            if first <= line {
+                line += last + 1 - first;
+            } else {
+                break;
+            }
+        }
+        line.min(self.lines.len().saturating_sub(1))
     }
 
     /// Toggles the fold state for `line`.
@@ -1006,6 +1074,29 @@ mod tests {
     }
 
     #[test]
+    fn nested_folds_count_hidden_lines_once() {
+        let mut doc = doc_with("a.rs", "a {\n  b {\n    1\n  }\n}\nz\n");
+        assert!(doc.toggle_fold(1));
+        assert!(doc.toggle_fold(0));
+        assert_eq!(doc.visible_line_count(), 3); // "a {", "z", ""
+        assert_eq!(doc.visual_index(5), 1);
+        assert_eq!(doc.line_at_visual_index(1), 5);
+    }
+
+    #[test]
+    fn indentation_folds_only_outside_bracket_languages() {
+        // JSON: an indented continuation is layout, not a block.
+        let json = doc_with("a.json", "{\"a\": 1,\n\"b\": [1, 2],\n  \"c\": 3\n}\n");
+        assert_eq!(json.foldable_range(1), None);
+        assert_eq!(json.foldable_range(0), Some(3));
+        // YAML and Python fold by indentation.
+        let yaml = doc_with("a.yml", "key:\n  child: 1\n  other: 2\nnext: 3\n");
+        assert_eq!(yaml.foldable_range(0), Some(2));
+        let python = doc_with("a.py", "def f():\n    return 1\n");
+        assert_eq!(python.foldable_range(0), Some(1));
+    }
+
+    #[test]
     fn folds_move_with_edits_above_and_drop_when_edited_inside() {
         let mut doc = doc_with("a.rs", "fn a() {\n    1\n}\nfn b() {\n    2\n}\n");
         assert!(doc.toggle_fold(3));
@@ -1040,6 +1131,16 @@ mod tests {
         assert_eq!(doc.step_visible_lines(0, 2), 5);
         assert_eq!(doc.step_visible_lines(8, -2), 4);
         assert_eq!(doc.step_visible_lines(0, -5), 0);
+        // Scrollbar math: 10 lines, 3 + 2 hidden.
+        assert_eq!(doc.visible_line_count(), 5);
+        assert_eq!(doc.visual_index(0), 0);
+        assert_eq!(doc.visual_index(4), 1);
+        assert_eq!(doc.visual_index(8), 3);
+        assert_eq!(doc.visual_index(2), 0);
+        for row in 0..doc.visible_line_count() {
+            assert_eq!(doc.visual_index(doc.line_at_visual_index(row)), row);
+        }
+        assert_eq!(doc.line_at_visual_index(3), 8);
         // Revealing a hidden line opens only the fold around it.
         assert!(doc.unfold_to_reveal(6));
         assert!(doc.is_folded_start(0).is_some());

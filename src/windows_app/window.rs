@@ -3,6 +3,8 @@ use super::*;
 static EDITOR_WINDOW: AtomicIsize = AtomicIsize::new(0);
 // Whether the last WM_SYSKEYDOWN was consumed by LightLine (see WM_SYSCHAR).
 static SYSKEY_HANDLED: AtomicBool = AtomicBool::new(false);
+// The WM_CHAR code (13 or 9) of an Enter/Tab the key handler consumed.
+static CONSUMED_CHAR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 unsafe extern "system" fn console_control(event: u32) -> i32 {
     if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
@@ -197,6 +199,13 @@ unsafe extern "system" fn wnd_proc(
             app.start_gutter_diff();
             0
         }
+        WM_TIMER if wparam == STATUS_TIMER => {
+            unsafe {
+                KillTimer(hwnd, STATUS_TIMER);
+                InvalidateRect(hwnd, null(), 0);
+            }
+            0
+        }
         LSP_EVENT_MESSAGE => {
             app.poll_lsp(hwnd);
             0
@@ -266,9 +275,24 @@ unsafe extern "system" fn wnd_proc(
             1
         }
         WM_KEYDOWN => {
-            if app.key(hwnd, wparam as u32) {
+            let key = wparam as u32;
+            if app.key(hwnd, key) {
+                // The editor inserts newlines and tabs from WM_CHAR. When a
+                // handler consumed Enter or Tab instead (running a palette
+                // command, accepting a completion, confirming an Explorer
+                // rename), the WM_CHAR TranslateMessage generates for it must
+                // not reach the editor as an extra newline or tab.
+                let consumed = if key == VK_RETURN as u32 {
+                    13
+                } else if key == VK_TAB as u32 {
+                    9
+                } else {
+                    0
+                };
+                CONSUMED_CHAR.store(consumed, Ordering::Relaxed);
                 0
             } else {
+                CONSUMED_CHAR.store(0, Ordering::Relaxed);
                 drop(app);
                 unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
             }
@@ -299,7 +323,10 @@ unsafe extern "system" fn wnd_proc(
         // make Windows play its "no such menu" error sound.
         WM_SYSCHAR if SYSKEY_HANDLED.swap(false, Ordering::Relaxed) => 0,
         WM_CHAR => {
-            app.character(hwnd, wparam as u16);
+            let consumed = CONSUMED_CHAR.swap(0, Ordering::Relaxed);
+            if consumed == 0 || consumed != wparam as u32 {
+                app.character(hwnd, wparam as u16);
+            }
             0
         }
         WM_LBUTTONDOWN => {
@@ -469,7 +496,8 @@ unsafe extern "system" fn wnd_proc(
                     unsafe {
                         GetScrollInfo(hwnd, SB_VERT, &mut info);
                     }
-                    app.doc().visible_line_for((info.nTrackPos.max(0) as usize).min(max))
+                    // The track position is a screen row (see update_scrollbar).
+                    app.doc().line_at_visual_index(info.nTrackPos.max(0) as usize).min(max)
                 }
                 _ => app.view().first_line,
             };

@@ -251,51 +251,84 @@ pub fn resolve_wsl() -> Result<PathBuf, String> {
     // wsl.exe ships with Windows even when WSL has never been set up; without
     // an installed distribution it only prints install instructions.
     if !wsl_has_distribution() {
-        return Err("WSL has no Linux distribution installed (run `wsl --install`)".into());
+        // Docker Desktop's internal distributions don't count (see
+        // is_user_distribution).
+        return Err("no Linux distribution installed; run `wsl --install`".into());
     }
     Ok(path)
 }
 
-// Installed distributions are registered as subkeys of this key. Reading
-// the registry is instant, unlike running `wsl -l`, which matters because
-// availability is checked every time the shell menu opens.
-#[cfg(windows)]
 fn wsl_has_distribution() -> bool {
+    wsl_distribution_names().iter().any(|name| is_user_distribution(name))
+}
+
+// Docker Desktop registers its own internal distributions (docker-desktop,
+// docker-desktop-data). A shell there is Docker's minimal VM, not a Linux
+// environment the user installed, so it doesn't make WSL "available".
+fn is_user_distribution(name: &str) -> bool {
+    !name.to_ascii_lowercase().starts_with("docker-desktop")
+}
+
+// Installed distributions are registered as subkeys of this key, each with
+// a DistributionName value. Reading the registry is instant, unlike running
+// `wsl -l`, which matters because availability is checked every time the
+// shell menu opens.
+#[cfg(windows)]
+fn wsl_distribution_names() -> Vec<String> {
     use windows_sys::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryInfoKeyW,
+        HKEY, HKEY_CURRENT_USER, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW,
+        RegGetValueW, RegOpenKeyExW,
     };
-    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Lxss"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let root = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss");
+    let value = wide("DistributionName");
+    let mut names = Vec::new();
     let mut key: HKEY = std::ptr::null_mut();
     unsafe {
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key) != 0 {
-            return false;
+        if RegOpenKeyExW(HKEY_CURRENT_USER, root.as_ptr(), 0, KEY_READ, &mut key) != 0 {
+            return names;
         }
-        let mut subkeys = 0u32;
-        let status = RegQueryInfoKeyW(
-            key,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            &mut subkeys,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        );
+        for index in 0u32.. {
+            let mut subkey = [0u16; 256];
+            let mut subkey_len = subkey.len() as u32;
+            let status = RegEnumKeyExW(
+                key,
+                index,
+                subkey.as_mut_ptr(),
+                &mut subkey_len,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            if status != 0 {
+                break;
+            }
+            let mut name = [0u16; 256];
+            let mut size = std::mem::size_of_val(&name) as u32;
+            if RegGetValueW(
+                key,
+                subkey.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                name.as_mut_ptr().cast(),
+                &mut size,
+            ) == 0
+            {
+                // `size` is in bytes and includes the terminating NUL.
+                let len = (size as usize / 2).saturating_sub(1);
+                names.push(String::from_utf16_lossy(&name[..len]));
+            }
+        }
         RegCloseKey(key);
-        status == 0 && subkeys > 0
     }
+    names
 }
 
 #[cfg(not(windows))]
-fn wsl_has_distribution() -> bool {
-    false
+fn wsl_distribution_names() -> Vec<String> {
+    Vec::new()
 }
 
 pub fn prepare_launch(request: &LaunchRequest) -> Result<LaunchSpec, String> {
@@ -521,6 +554,25 @@ pub fn quote_windows_argument(argument: &OsStr) -> Result<Vec<u16>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_desktop_distributions_do_not_count_as_wsl() {
+        assert!(!is_user_distribution("docker-desktop"));
+        assert!(!is_user_distribution("docker-desktop-data"));
+        assert!(!is_user_distribution("Docker-Desktop"));
+        assert!(is_user_distribution("Ubuntu"));
+        assert!(is_user_distribution("Ubuntu-22.04"));
+        assert!(is_user_distribution("dockerized-dev"));
+    }
+
+    #[test]
+    fn wsl_availability_matches_the_registered_distributions() {
+        // Machine-dependent: whatever is installed here, the availability
+        // answer must agree with the names read from the registry.
+        let names = wsl_distribution_names();
+        eprintln!("registered WSL distributions: {names:?}");
+        assert_eq!(wsl_has_distribution(), names.iter().any(|name| is_user_distribution(name)));
+    }
 
     fn decode(encoded: &str) -> String {
         let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

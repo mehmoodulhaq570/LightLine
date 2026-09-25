@@ -547,9 +547,9 @@ fn format_toml(source: &str) -> Result<String, String> {
     formatted.push('\n');
 
     let reparsed: toml::Value = toml::from_str(&formatted)
-        .map_err(|_| "TOML formatting was skipped because it could not be done safely".to_string())?;
+        .map_err(|_| "could not be done safely; file left unchanged".to_string())?;
     if reparsed != original {
-        return Err("TOML formatting was skipped because it would change the document".into());
+        return Err("would change the document's values; file left unchanged".into());
     }
     Ok(formatted)
 }

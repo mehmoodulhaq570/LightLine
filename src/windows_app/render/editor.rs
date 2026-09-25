@@ -1106,6 +1106,27 @@ impl App {
                 rgb(80, 160, 220),
                 label_clip,
             );
+            // What the last action reported ("Formatted with ...", "WSL is not
+            // available ..."), shown for a few seconds in the free space
+            // between the problem counts and the cursor info.
+            if let Some(message) = self.fresh_status() {
+                let left = left_info_right + self.scale(24);
+                let right = mid_x - self.scale(16);
+                if right > left + self.scale(40) {
+                    let lower = message.to_ascii_lowercase();
+                    let failed = ["fail", "error", "not available", "could not", "skipped", "invalid"]
+                        .iter()
+                        .any(|word| lower.contains(word));
+                    Self::label(
+                        hdc,
+                        message,
+                        left,
+                        editor_bottom + self.scale(5),
+                        if failed { self.theme.error } else { self.theme.muted },
+                        RECT { left, top: editor_bottom, right, bottom: rect.bottom },
+                    );
+                }
+            }
             DeleteObject(bg);
             DeleteObject(gutter_bg);
             DeleteObject(status_bg);
