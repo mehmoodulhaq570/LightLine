@@ -464,6 +464,8 @@ pub(super) struct App {
     pub(super) settings: lightline::settings::Settings,
     pub(super) git_diff_cache: HashMap<PathBuf, GutterDiff>,
     pub(super) git_head_cache: HashMap<PathBuf, String>,
+    // Files that are new relative to HEAD, whose every line is marked added.
+    pub(super) git_untracked: HashSet<PathBuf>,
     pub(super) extensions: Vec<Extension>,
     pub(super) extensions_tab: ExtensionsTab,
     pub(super) extensions_query: String,
@@ -860,6 +862,7 @@ impl App {
             settings,
             git_diff_cache: HashMap::new(),
             git_head_cache: HashMap::new(),
+            git_untracked: HashSet::new(),
             extensions: vec![
                 Extension {
                     id: "prettier".into(),
@@ -1704,11 +1707,22 @@ impl App {
     pub(super) fn keep_cursor_visible(&mut self, hwnd: HWND) {
         let visible = self.visible_lines(hwnd);
         let line = self.view().cursor.line;
-        if line < self.view().first_line {
-            self.view_mut().first_line = line;
+        // The caret must never sit inside collapsed text, whatever moved it
+        // there (search, go to definition, undo): open the folds around it.
+        let anchor = self.view().selection_anchor;
+        let doc = self.doc_mut();
+        doc.unfold_to_reveal(line);
+        if let Some(anchor) = anchor {
+            doc.unfold_to_reveal(anchor.line);
         }
-        if line >= self.view().first_line + visible {
-            self.view_mut().first_line = line + 1 - visible;
+        let first = self.doc().visible_line_for(self.view().first_line);
+        self.view_mut().first_line = first;
+        if line < first {
+            self.view_mut().first_line = line;
+        } else if self.doc().visual_row_of(first, line, visible - 1).is_none() {
+            // Scroll so the caret is on the last row: `visible - 1` visible
+            // lines above it, skipping folded ones.
+            self.view_mut().first_line = self.doc().step_visible_lines(line, 1 - visible as isize);
         }
         self.update_scrollbar(hwnd);
         self.caret_on = true;
@@ -1786,8 +1800,6 @@ impl App {
             return;
         }
         let cursor = self.doc_mut().replace(start, end, text);
-        let line_count = self.doc().line_count();
-        self.doc_mut().folded_ranges.retain(|(s, e)| *s < line_count && *e < line_count && *s < *e);
         self.recompute_gutter_diff();
         self.syntax_changed(start.line);
         self.view_mut().cursor = cursor;
@@ -1978,6 +1990,9 @@ impl App {
             }
         }
         if needs_refresh {
+            // A reload (e.g. after Discard) replaces the buffer without going
+            // through replace_range, so the gutter has to be recomputed here.
+            self.recompute_gutter_diff();
             self.backbuffer = None;
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
@@ -1990,14 +2005,12 @@ impl App {
         let Some(path) = self.doc().path.clone() else {
             return;
         };
-        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
+        // Only files inside a Git repository get change marks; a plain folder
+        // (or a file outside the repo) has nothing to compare against.
+        let Some(root) = self.git_root.clone() else {
             return;
         };
-        let Some(relative) = path.strip_prefix(&root).ok().map(Path::to_path_buf).or_else(|| {
-            self.workspace_root
-                .as_ref()
-                .and_then(|folder| path.strip_prefix(folder).ok().map(|rest| rest.to_path_buf()))
-        }) else {
+        let Some(relative) = path.strip_prefix(&root).ok().map(Path::to_path_buf) else {
             return;
         };
         // Gutter marks compare the file on disk with HEAD, so unsaved edits do
@@ -2031,44 +2044,41 @@ impl App {
         self.gutter_request = None;
         self.gutter_done = Some(path.to_path_buf());
         if let Some(text) = head_text {
+            self.git_untracked.remove(path);
             self.git_head_cache.insert(path.to_path_buf(), text);
-        }
-        self.recompute_gutter_diff();
-        if !self.git_diff_cache.contains_key(path) && let Ok(rows) = result {
-            let mut added = HashSet::new();
-            let mut modified = HashSet::new();
-            let mut deleted = HashSet::new();
-            for row in rows {
-                if row.changed {
-                    if let Some(line) = row.after_number {
-                        if row.before_number.is_none() {
-                            added.insert(line.saturating_sub(1));
-                        } else {
-                            modified.insert(line.saturating_sub(1));
-                        }
-                    } else if let Some(del_line) = row.deleted_at {
-                        deleted.insert(del_line.saturating_sub(1));
-                    }
-                }
+        } else {
+            self.git_head_cache.remove(path);
+            // Not in HEAD. `git diff` lists a new (untracked or newly staged)
+            // file as all-added rows; anything else is an error, which shows
+            // no marks rather than a misleading all-green gutter.
+            if matches!(&result, Ok(rows) if rows.iter().all(|row| row.before_number.is_none())) {
+                self.git_untracked.insert(path.to_path_buf());
+            } else {
+                self.git_untracked.remove(path);
             }
-            self.git_diff_cache.insert(path.to_path_buf(), GutterDiff { added, modified, deleted });
         }
+        self.git_diff_cache.remove(path);
+        self.recompute_gutter_diff();
     }
 
+    /// Recomputes the active buffer's gutter marks against its cached HEAD
+    /// text. Runs after every edit, so it's bounded: huge files get no live
+    /// marks, and the diff itself caps its work (see compute_gutter_diff).
     pub(super) fn recompute_gutter_diff(&mut self) {
+        const LIVE_GUTTER_LINE_LIMIT: usize = 50_000;
         let Some(path) = self.doc().path.clone() else {
             return;
         };
-        if let Some(head_text) = self.git_head_cache.get(&path) {
+        if self.doc().line_count() > LIVE_GUTTER_LINE_LIMIT {
+            self.git_diff_cache.remove(&path);
+        } else if let Some(head_text) = self.git_head_cache.get(&path) {
             let diff = workflow::compute_gutter_diff(head_text, self.doc().lines());
             self.git_diff_cache.insert(path, diff);
-        } else if self.git_root.is_some() || self.workspace_root.is_some() {
-            let added: HashSet<usize> = (0..self.doc().line_count()).collect();
-            self.git_diff_cache.insert(path, GutterDiff {
-                added,
-                modified: HashSet::new(),
-                deleted: HashSet::new(),
-            });
+        } else if self.git_untracked.contains(&path) {
+            let added = (0..self.doc().line_count()).collect();
+            self.git_diff_cache.insert(path, GutterDiff { added, ..GutterDiff::default() });
+        } else {
+            self.git_diff_cache.remove(&path);
         }
     }
 

@@ -459,8 +459,8 @@ impl App {
                     }
                     // Draw the highlight rectangles for both brackets.
                     let draw_bracket_bg = |line_idx: usize, b: usize| {
-                        if line_idx < view.first_line { return; }
-                        let row = line_idx - view.first_line;
+                        if doc.is_line_hidden(line_idx) { return; }
+                        let Some(row) = doc.visual_row_of(view.first_line, line_idx, visible) else { return; };
                         let y = self.editor_top() + row as i32 * self.line_height;
                         if y >= bottom { return; }
                         let text = doc.line(line_idx);
@@ -500,9 +500,13 @@ impl App {
                 let line = doc.line(view.cursor.line);
                 let x =
                     code_left + self.text_width(hdc, safe_slice_prefix(line, view.cursor.byte));
-                let y = self.editor_top()
-                    + (view.cursor.line as i64 - view.first_line as i64) as i32 * self.line_height;
-                if y >= self.editor_top() && y < bottom && x < right {
+                // Visual row, not document line: folded blocks above the
+                // caret take one row each.
+                let row = (!doc.is_line_hidden(view.cursor.line))
+                    .then(|| doc.visual_row_of(view.first_line, view.cursor.line, visible))
+                    .flatten();
+                let y = row.map_or(bottom, |row| self.editor_top() + row as i32 * self.line_height);
+                if y < bottom && x < right {
                     let caret = CreateSolidBrush(self.theme.cursor);
                     FillRect(
                         hdc,

@@ -100,6 +100,17 @@ impl App {
     }
 
     pub(super) fn apply_repo_state(&mut self, hwnd: HWND, state: RepoState) {
+        // A commit, checkout or reset -- from LightLine or a terminal -- moves
+        // HEAD, and the gutter compares against HEAD's text, so drop the
+        // cached copy and read it again.
+        let head_moved = self.git_root.as_ref() != Some(&state.root)
+            || self.history.first().map(|c| &c.oid) != state.history.first().map(|c| &c.oid);
+        if head_moved {
+            self.git_head_cache.clear();
+            self.git_diff_cache.clear();
+            self.git_untracked.clear();
+            self.gutter_done = None;
+        }
         self.git_root = Some(state.root.clone());
         self.workspace_branch = Some(state.head_label());
         self.git_ahead = state.ahead;
@@ -113,6 +124,9 @@ impl App {
         let rows = self.git_rows().len();
         self.panel_selected = self.panel_selected.min(rows.saturating_sub(1));
         self.git_scroll_into_view(hwnd);
+        if head_moved {
+            self.refresh_active_git_diff(hwnd);
+        }
         // The status line belongs to whatever the user last asked for, so the
         // counts here stay in the section headers instead of overwriting it.
         self.refresh(hwnd);

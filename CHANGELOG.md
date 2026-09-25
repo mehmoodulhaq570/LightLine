@@ -15,22 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Terminal Shell Picker & Multi-Profile Support**: Built-in support for launching multiple interactive shells: **PowerShell** (`pwsh`/`powershell`), **Command Prompt** (`cmd.exe`), **Git Bash** (`bash.exe`), and **WSL** (`wsl.exe`).
   - Added a dropdown button (`⌄`) right next to the terminal `+` button, and right-click support on the `+` button, opening a native popup menu to select and launch any installed shell.
   - Added "Select Default Profile" menu and `terminalDefaultProfile` configuration in `%APPDATA%\LightLine\settings.json`.
-  - Terminal tab headers now display the active shell profile (e.g. `PWSH 1`, `CMD 2`, `BASH 3`, `WSL 4`).
-- **Offline Native JSON & TOML Formatters**: Pure Rust formatting engines (`NativeJsonFormatter` using `serde_json` and `NativeTomlFormatter` using `toml`).
-  - 100% offline, zero npm, zero Node.js, and zero setup time.
-  - Integrated directly into `formatter_for` with priority over external Prettier for `.json` and `.toml` files.
-  - Triggers via `Shift+Alt+F` (Format Document) and automatic `formatOnSave`.
-- **Inline Git Gutter Indicators**: Real-time git status indicators rendered directly in the editor gutter margin without writing buffer modifications to disk.
-  - Asynchronous background diff against git `HEAD` using an in-memory Myers/LCS algorithm with common prefix/suffix optimization.
-  - 🟢 **Green vertical bar**: Added lines.
-  - 🔵 **Blue vertical bar**: Modified lines.
-  - 🔴 **Red triangular marker**: Deleted lines.
-  - Real-time reactive updates on keystrokes, undo (`Ctrl+Z`), and redo (`Ctrl+Y`).
-- **Code Folding**: Syntactic block boundary detection via brackets (`{ ... }`, `[ ... ]`, `( ... )`) and indentation (e.g. Python `def`/`class` blocks).
-  - Gutter column displays fold chevrons: `⌄` for foldable blocks and `›` for collapsed blocks.
-  - Clicking the chevron column collapses blocks into a compact `...` capsule pill at the line end.
+  - Terminal tab headers show the shell profile (e.g. `PWSH`, `CMD`, `BASH`, `WSL`), numbered (`PWSH 1`, `CMD 2`) when more than one terminal is open.
+  - WSL is offered only when a Linux distribution is installed, not merely when `wsl.exe` exists.
+- **Built-in JSON & TOML Formatters**: `.json` and `.toml` files are formatted without Prettier or any other tool installed, via `Shift+Alt+F` (Format Document) and `formatOnSave`.
+  - Both formatters only change layout. JSON keeps key order, number spelling and `//`/`/* */` comments (JSONC such as `tsconfig.json`); TOML keeps comments, key order and multi-line strings.
+  - The TOML result is re-parsed and compared with the original, and formatting is refused if the document would change.
+- **Inline Git Gutter Indicators**: Change markers in the editor gutter comparing the unsaved buffer against Git `HEAD`.
+  - Line diff uses Myers' algorithm after trimming the common prefix and suffix, with a work budget per recompute so typing stays responsive on large files (live marks are skipped above 50,000 lines).
+  - Each changed region is classified on its own: 🟢 green bar for added lines, 🔵 blue bar for modified lines, 🔴 red marker below a deletion. Unchanged lines between edits stay unmarked.
+  - Updates on keystrokes, undo (`Ctrl+Z`) and redo (`Ctrl+Y`), and refreshes when `HEAD` moves (a commit or checkout from LightLine or a terminal).
+  - Only files inside a Git repository get markers; new files not yet in `HEAD` are shown as added.
+- **Code Folding**: Fold blocks by brackets (`{ }`, `[ ]`, `( )`) or indentation (e.g. Python `def`/`class` blocks).
+  - Bracket matching ignores brackets inside strings and comments, and requires matching bracket types.
+  - Gutter column displays fold chevrons: `⌄` for foldable blocks and `›` for collapsed blocks; a collapsed block shows a `...` pill at the line end.
   - Gutter click partition distinguishes between breakpoint toggling (left 24px) and code folding (chevron column).
-  - Visual line mapping ensures caret navigation, scroll offsets, and selection smoothly skip collapsed regions.
+  - Arrow keys, Page Up/Down, mouse wheel and scrollbar move by visible lines, and the caret is drawn on its visual row.
+  - Folds move with edits above them; an edit inside a folded block, or a cursor landing in one (search, go to definition, undo), unfolds it.
 
 #### Fixed
 - **Workspace Search Keyboard Navigation**: Submitting a project-wide search now transfers focus from the query field to the results list, where `Up`/`Down` change the selection and `Enter` opens it. Mouse and keyboard result activation both return input to the editor cleanly.

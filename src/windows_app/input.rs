@@ -728,10 +728,12 @@ impl App {
                 .unwrap_or_else(|| self.doc().next(cursor));
                 self.move_cursor(target, shift);
             }
+            // Vertical movement counts visible lines, stepping over folded
+            // blocks instead of into them.
             x if x == VK_UP as u32 => {
                 self.move_cursor(
                     Pos {
-                        line: cursor.line.saturating_sub(1),
+                        line: self.doc().step_visible_lines(cursor.line, -1),
                         byte: cursor.byte,
                     },
                     shift,
@@ -740,26 +742,27 @@ impl App {
             x if x == VK_DOWN as u32 => {
                 self.move_cursor(
                     Pos {
-                        line: (cursor.line + 1).min(self.doc().line_count() - 1),
+                        line: self.doc().step_visible_lines(cursor.line, 1),
                         byte: cursor.byte,
                     },
                     shift,
                 );
             }
             x if x == VK_PRIOR as u32 => {
+                let page = self.visible_lines(hwnd) as isize;
                 self.move_cursor(
                     Pos {
-                        line: cursor.line.saturating_sub(self.visible_lines(hwnd)),
+                        line: self.doc().step_visible_lines(cursor.line, -page),
                         byte: cursor.byte,
                     },
                     shift,
                 );
             }
             x if x == VK_NEXT as u32 => {
+                let page = self.visible_lines(hwnd) as isize;
                 self.move_cursor(
                     Pos {
-                        line: (cursor.line + self.visible_lines(hwnd))
-                            .min(self.doc().line_count() - 1),
+                        line: self.doc().step_visible_lines(cursor.line, page),
                         byte: cursor.byte,
                     },
                     shift,

@@ -841,12 +841,15 @@ impl App {
     // than hanging it; a failure here doesn't block the save; the file just
     // saves unformatted, same as if the setting were off.
     pub(super) fn apply_format_on_save(&mut self, path: &Path) {
-        if !self.settings.format_on_save || !self.has_extension("prettier") {
+        if !self.settings.format_on_save {
             return;
         }
         let Some(formatter) = lightline::formatter::formatter_for(path) else {
             return;
         };
+        if !formatter.is_builtin() && !self.has_extension("prettier") {
+            return;
+        }
         let code = self.doc().text();
         if code.trim().is_empty() {
             return;
@@ -879,9 +882,11 @@ impl App {
         // (rustfmt, black, clang-format) is picked up automatically, with
         // nothing to keep in sync in this file.
         if let Some(path) = path.as_deref()
-            && lightline::formatter::formatter_for(path).is_some()
+            && let Some(formatter) = lightline::formatter::formatter_for(path)
         {
-            if self.has_extension("prettier") {
+            // Built-in formatters (JSON, TOML) need nothing installed; only
+            // the external ones depend on the Prettier extension.
+            if formatter.is_builtin() || self.has_extension("prettier") {
                 self.format_with_external_formatter(hwnd);
             } else {
                 self.status = "Install Prettier extension to format this file (Ctrl+Shift+X)".into();

@@ -404,11 +404,10 @@ unsafe extern "system" fn wnd_proc(
                 let pane = usize::from(point.x >= app.pane_divider(hwnd));
                 app.focus_pane(hwnd, pane);
             }
-            if delta > 0 {
-                app.view_mut().first_line = app.view().first_line.saturating_sub(3);
-            } else if delta < 0 {
-                app.view_mut().first_line =
-                    (app.view().first_line + 3).min(app.doc().line_count().saturating_sub(1));
+            // Scroll by visible lines, so a folded block counts as one row.
+            if delta != 0 {
+                let rows = if delta > 0 { -3 } else { 3 };
+                app.view_mut().first_line = app.doc().step_visible_lines(app.view().first_line, rows);
             }
             app.update_scrollbar(hwnd);
             unsafe {
@@ -420,13 +419,16 @@ unsafe extern "system" fn wnd_proc(
             let code = (wparam & 0xffff) as i32;
             let max = app.doc().line_count().saturating_sub(1);
             app.view_mut().first_line = match code {
-                SB_LINEUP => app.view().first_line.saturating_sub(1),
-                SB_LINEDOWN => (app.view().first_line + 1).min(max),
-                SB_PAGEUP => app
-                    .view()
-                    .first_line
-                    .saturating_sub(app.visible_lines(hwnd)),
-                SB_PAGEDOWN => (app.view().first_line + app.visible_lines(hwnd)).min(max),
+                SB_LINEUP => app.doc().step_visible_lines(app.view().first_line, -1),
+                SB_LINEDOWN => app.doc().step_visible_lines(app.view().first_line, 1),
+                SB_PAGEUP => {
+                    let page = app.visible_lines(hwnd) as isize;
+                    app.doc().step_visible_lines(app.view().first_line, -page)
+                }
+                SB_PAGEDOWN => {
+                    let page = app.visible_lines(hwnd) as isize;
+                    app.doc().step_visible_lines(app.view().first_line, page)
+                }
                 SB_THUMBPOSITION | SB_THUMBTRACK => {
                     let mut info = SCROLLINFO {
                         cbSize: size_of::<SCROLLINFO>() as u32,
@@ -436,7 +438,7 @@ unsafe extern "system" fn wnd_proc(
                     unsafe {
                         GetScrollInfo(hwnd, SB_VERT, &mut info);
                     }
-                    (info.nTrackPos.max(0) as usize).min(max)
+                    app.doc().visible_line_for((info.nTrackPos.max(0) as usize).min(max))
                 }
                 _ => app.view().first_line,
             };

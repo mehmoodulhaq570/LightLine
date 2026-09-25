@@ -164,9 +164,12 @@ impl App {
             let x = self.code_left(hwnd) + self.text_width(hdc, cursor_prefix);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
-            let y = self.editor_top()
-                + (self.view().cursor.line as i64 - self.view().first_line as i64) as i32
-                    * self.line_height;
+            let doc = self.doc();
+            let cursor_line = self.view().cursor.line;
+            let row = doc
+                .visual_row_of(self.view().first_line, cursor_line, self.visible_lines(hwnd) + 1)
+                .map_or(-1, |row| row as i32);
+            let y = self.editor_top() + row * self.line_height;
             RECT {
                 left: x,
                 top: y,

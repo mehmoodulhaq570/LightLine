@@ -1116,98 +1116,156 @@ pub fn git_head_text(root: &Path, path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Computes inline gutter diff (added, modified, deleted) comparing active buffer lines against HEAD text.
-pub fn compute_gutter_diff(head_text: &str, buf_lines: &[String]) -> GutterDiff {
-    let head_lines: Vec<&str> = head_text.lines().collect();
-    let n = head_lines.len();
-    let m = buf_lines.len();
+/// Upper bound on Myers diff work per call (edit distance x trimmed lines),
+/// so a live recompute after a keystroke stays within a few milliseconds
+/// even on a large file. Past it, the changed region is marked as a whole.
+const GUTTER_DIFF_BUDGET: usize = 2_000_000;
 
-    let mut added = HashSet::new();
-    let mut modified = HashSet::new();
-    let mut deleted = HashSet::new();
+#[derive(Clone, Copy, PartialEq)]
+enum LineOp {
+    Equal,
+    Delete,
+    Insert,
+}
 
-    // Fast-path: Identical texts
-    if n == m && head_lines.iter().zip(buf_lines.iter()).all(|(a, b)| *a == b.as_str()) {
-        return GutterDiff { added, modified, deleted };
+// Myers' O((N+M)D) shortest edit script. Returns None when the edit
+// distance exceeds `max_d`.
+fn myers_line_ops(a: &[&str], b: &[&str], max_d: usize) -> Option<Vec<LineOp>> {
+    let n = a.len() as isize;
+    let m = b.len() as isize;
+    let max = (n + m) as usize;
+    let offset = max as isize + 1;
+    let mut v = vec![0isize; 2 * max + 3];
+    // trace[d] holds V for diagonals -d..=d after step d.
+    let mut trace: Vec<Vec<isize>> = Vec::new();
+    let mut end_d = None;
+    'search: for d in 0..=max.min(max_d) as isize {
+        let mut k = -d;
+        while k <= d {
+            let index = (offset + k) as usize;
+            let mut x = if k == -d || (k != d && v[index - 1] < v[index + 1]) {
+                v[index + 1]
+            } else {
+                v[index - 1] + 1
+            };
+            let mut y = x - k;
+            while x < n && y < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            v[index] = x;
+            if x >= n && y >= m {
+                trace.push(v[(offset - d) as usize..=(offset + d) as usize].to_vec());
+                end_d = Some(d);
+                break 'search;
+            }
+            k += 2;
+        }
+        trace.push(v[(offset - d) as usize..=(offset + d) as usize].to_vec());
     }
+    let end_d = end_d?;
 
-    // 1. Common prefix trimming
+    let mut ops = Vec::with_capacity((n + m) as usize);
+    let (mut x, mut y) = (n, m);
+    for d in (1..=end_d).rev() {
+        let previous = &trace[(d - 1) as usize];
+        let at = |k: isize| previous[(k + d - 1) as usize];
+        let k = x - y;
+        let prev_k = if k == -d || (k != d && at(k - 1) < at(k + 1)) { k + 1 } else { k - 1 };
+        let prev_x = at(prev_k);
+        let prev_y = prev_x - prev_k;
+        while x > prev_x && y > prev_y {
+            ops.push(LineOp::Equal);
+            x -= 1;
+            y -= 1;
+        }
+        ops.push(if x == prev_x { LineOp::Insert } else { LineOp::Delete });
+        x = prev_x;
+        y = prev_y;
+    }
+    while x > 0 && y > 0 {
+        ops.push(LineOp::Equal);
+        x -= 1;
+        y -= 1;
+    }
+    ops.reverse();
+    Some(ops)
+}
+
+// Marks one changed region: `inserted` buffer lines starting at buffer line
+// `at`, replacing `removed` HEAD lines. Pure insertions are added, pure
+// removals leave a deletion marker on the following line, and anything
+// mixed is modified.
+fn mark_gutter_hunk(diff: &mut GutterDiff, at: usize, removed: usize, inserted: usize, buffer_len: usize) {
+    if inserted == 0 {
+        if removed > 0 && buffer_len > 0 {
+            diff.deleted.insert(at.min(buffer_len - 1));
+        }
+        return;
+    }
+    let target = if removed == 0 { &mut diff.added } else { &mut diff.modified };
+    target.extend(at..at + inserted);
+}
+
+/// Compares the buffer against its HEAD text for the editor gutter: lines
+/// added, lines modified, and lines that follow a deletion. Each changed
+/// region is classified on its own, so unchanged lines between two edits are
+/// never marked.
+pub fn compute_gutter_diff(head_text: &str, buf_lines: &[String]) -> GutterDiff {
+    // Split exactly the way Document does ("a\n" is two lines, "a" and ""),
+    // so a file's final newline never reads as an added line.
+    let head_lines: Vec<&str> = head_text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
+    let buf: Vec<&str> = buf_lines.iter().map(String::as_str).collect();
+    let (n, m) = (head_lines.len(), buf.len());
+    let mut diff = GutterDiff::default();
+
     let mut prefix = 0;
-    while prefix < n && prefix < m && head_lines[prefix] == buf_lines[prefix].as_str() {
+    while prefix < n && prefix < m && head_lines[prefix] == buf[prefix] {
         prefix += 1;
     }
-
-    // 2. Common suffix trimming
     let mut suffix = 0;
-    while suffix < (n - prefix) && suffix < (m - prefix)
-        && head_lines[n - 1 - suffix] == buf_lines[m - 1 - suffix].as_str()
-    {
+    while suffix < n - prefix && suffix < m - prefix && head_lines[n - 1 - suffix] == buf[m - 1 - suffix] {
         suffix += 1;
     }
+    let old = &head_lines[prefix..n - suffix];
+    let new = &buf[prefix..m - suffix];
+    if old.is_empty() && new.is_empty() {
+        return diff;
+    }
 
-    let head_slice = &head_lines[prefix..(n - suffix)];
-    let buf_slice = &buf_lines[prefix..(m - suffix)];
+    let max_d = (GUTTER_DIFF_BUDGET / (old.len() + new.len()).max(1)).max(8);
+    let Some(ops) = myers_line_ops(old, new, max_d) else {
+        mark_gutter_hunk(&mut diff, prefix, old.len(), new.len(), m);
+        return diff;
+    };
 
-    if head_slice.is_empty() && !buf_slice.is_empty() {
-        for idx in 0..buf_slice.len() {
-            added.insert(prefix + idx);
-        }
-    } else if !head_slice.is_empty() && buf_slice.is_empty() {
-        deleted.insert(prefix.min(m.saturating_sub(1)));
-    } else if head_slice.len() == buf_slice.len() {
-        for idx in 0..buf_slice.len() {
-            modified.insert(prefix + idx);
-        }
-    } else {
-        let sn = head_slice.len();
-        let sm = buf_slice.len();
-        if sn * sm <= 4_000_000 {
-            let mut dp = vec![vec![0u32; sm + 1]; sn + 1];
-            for i in 0..sn {
-                for j in 0..sm {
-                    if head_slice[i] == buf_slice[j].as_str() {
-                        dp[i + 1][j + 1] = dp[i][j] + 1;
-                    } else {
-                        dp[i + 1][j + 1] = dp[i][j].max(dp[i][j + 1]);
-                    }
+    let mut line = prefix;
+    let (mut removed, mut inserted, mut hunk_start) = (0, 0, prefix);
+    for op in ops {
+        match op {
+            LineOp::Equal => {
+                if removed + inserted > 0 {
+                    mark_gutter_hunk(&mut diff, hunk_start, removed, inserted, m);
+                    removed = 0;
+                    inserted = 0;
                 }
+                line += 1;
+                hunk_start = line;
             }
-            let mut i = sn;
-            let mut j = sm;
-            let mut changed_buf_lines = Vec::new();
-            let mut has_deletions = false;
-            while i > 0 || j > 0 {
-                if i > 0 && j > 0 && head_slice[i - 1] == buf_slice[j - 1].as_str() {
-                    i -= 1;
-                    j -= 1;
-                } else if j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) {
-                    changed_buf_lines.push(prefix + j - 1);
-                    j -= 1;
-                } else {
-                    has_deletions = true;
-                    if j > 0 {
-                        deleted.insert(prefix + j - 1);
-                    } else {
-                        deleted.insert(prefix.min(m.saturating_sub(1)));
-                    }
-                    i -= 1;
-                }
-            }
-            for line in changed_buf_lines {
-                if has_deletions && sn > 0 {
-                    modified.insert(line);
-                } else {
-                    added.insert(line);
-                }
-            }
-        } else {
-            for idx in 0..buf_slice.len() {
-                modified.insert(prefix + idx);
+            LineOp::Delete => removed += 1,
+            LineOp::Insert => {
+                inserted += 1;
+                line += 1;
             }
         }
     }
-
-    GutterDiff { added, modified, deleted }
+    if removed + inserted > 0 {
+        mark_gutter_hunk(&mut diff, hunk_start, removed, inserted, m);
+    }
+    diff
 }
 
 #[cfg(test)]
@@ -1686,32 +1744,62 @@ mod tests {
         assert!(parse_log("").is_empty());
     }
 
+    fn buffer(text: &str) -> Vec<String> {
+        text.split('\n').map(str::to_owned).collect()
+    }
+
+    fn sorted(set: &HashSet<usize>) -> Vec<usize> {
+        let mut lines: Vec<usize> = set.iter().copied().collect();
+        lines.sort_unstable();
+        lines
+    }
+
     #[test]
     fn test_compute_gutter_diff_added_modified_deleted() {
         let head = "line1\nline2\nline3\nline4\nline5\n";
 
-        // 1. Identical: no diff
-        let buf: Vec<String> = vec!["line1".into(), "line2".into(), "line3".into(), "line4".into(), "line5".into()];
-        let diff = compute_gutter_diff(head, &buf);
-        assert!(diff.added.is_empty());
+        // Identical, including the final newline: no marks at all.
+        assert_eq!(compute_gutter_diff(head, &buffer(head)), GutterDiff::default());
+
+        let added = compute_gutter_diff(head, &buffer("line1\nline2\nnew line\nline3\nline4\nline5\n"));
+        assert_eq!(sorted(&added.added), vec![2]);
+        assert!(added.modified.is_empty() && added.deleted.is_empty());
+
+        let modified = compute_gutter_diff(head, &buffer("line1\nline2 modified\nline3\nline4\nline5\n"));
+        assert_eq!(sorted(&modified.modified), vec![1]);
+        assert!(modified.added.is_empty() && modified.deleted.is_empty());
+
+        let deleted = compute_gutter_diff(head, &buffer("line1\nline3\nline4\nline5\n"));
+        assert_eq!(sorted(&deleted.deleted), vec![1]);
+        assert!(deleted.added.is_empty() && deleted.modified.is_empty());
+    }
+
+    #[test]
+    fn gutter_diff_leaves_unchanged_lines_between_edits_unmarked() {
+        let head = "a\nb\nc\nd\ne\n";
+        // Two separate one-line edits with equal line counts.
+        let diff = compute_gutter_diff(head, &buffer("A\nb\nc\nd\nE\n"));
+        assert_eq!(sorted(&diff.modified), vec![0, 4]);
+        assert!(diff.added.is_empty() && diff.deleted.is_empty());
+    }
+
+    #[test]
+    fn gutter_diff_classifies_each_hunk_separately() {
+        let head = "a\nb\nc\nd\ne\nf\n";
+        // Delete "b" near the top, insert a new line near the bottom.
+        let diff = compute_gutter_diff(head, &buffer("a\nc\nd\ne\nnew\nf\n"));
+        assert_eq!(sorted(&diff.deleted), vec![1]);
+        assert_eq!(sorted(&diff.added), vec![4]);
         assert!(diff.modified.is_empty());
-        assert!(diff.deleted.is_empty());
+    }
 
-        // 2. Added line
-        let buf_added: Vec<String> = vec!["line1".into(), "line2".into(), "new line".into(), "line3".into(), "line4".into(), "line5".into()];
-        let diff_added = compute_gutter_diff(head, &buf_added);
-        assert!(diff_added.added.contains(&2));
-        assert!(diff_added.modified.is_empty());
-
-        // 3. Modified line
-        let buf_mod: Vec<String> = vec!["line1".into(), "line2 modified".into(), "line3".into(), "line4".into(), "line5".into()];
-        let diff_mod = compute_gutter_diff(head, &buf_mod);
-        assert!(diff_mod.modified.contains(&1));
-        assert!(diff_mod.added.is_empty());
-
-        // 4. Deleted line
-        let buf_del: Vec<String> = vec!["line1".into(), "line3".into(), "line4".into(), "line5".into()];
-        let diff_del = compute_gutter_diff(head, &buf_del);
-        assert!(diff_del.deleted.contains(&1));
+    #[test]
+    fn gutter_diff_handles_empty_sides_and_large_rewrites() {
+        assert_eq!(sorted(&compute_gutter_diff("a\n", &buffer("a\nx\ny\n")).added), vec![1, 2]);
+        assert_eq!(sorted(&compute_gutter_diff("x\ny\n", &buffer("")).deleted), vec![0]);
+        let head: String = (0..5000).map(|i| format!("old {i}\n")).collect();
+        let new: String = (0..5000).map(|i| format!("new {i}\n")).collect();
+        let diff = compute_gutter_diff(&head, &buffer(&new));
+        assert_eq!(diff.modified.len(), 5000);
     }
 }

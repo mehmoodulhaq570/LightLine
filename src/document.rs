@@ -46,7 +46,7 @@ pub struct Document {
     breakpoints: BTreeSet<usize>,
     // Collapsed line ranges: (start_line, end_line), inclusive.
     // Lines (start_line + 1)..=end_line are hidden from view.
-    pub folded_ranges: BTreeSet<(usize, usize)>,
+    folded_ranges: BTreeSet<(usize, usize)>,
 }
 
 impl Default for Document {
@@ -162,90 +162,140 @@ impl Document {
         }
     }
 
-    /// Checks if a line is the start of a foldable block and returns the end line (inclusive).
+    /// If `line` opens a foldable block, returns the block's last line
+    /// (inclusive). Brackets are tried first, then indentation.
     pub fn foldable_range(&self, line: usize) -> Option<usize> {
-        let total_lines = self.lines.len();
-        if line >= total_lines {
+        if line >= self.lines.len() || self.lines[line].trim().is_empty() {
             return None;
         }
-        let line_text = &self.lines[line];
-        let trimmed = line_text.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
+        self.bracket_fold_end(line)
+            .or_else(|| self.indent_fold_end(line))
+            .filter(|end| *end > line)
+    }
 
-        // 1. Bracket-based folding: Count open vs close braces { [ (
-        let mut brace_depth: i32 = 0;
-        for ch in line_text.chars() {
-            match ch {
-                '{' | '[' | '(' => brace_depth += 1,
-                '}' | ']' | ')' => brace_depth -= 1,
-                _ => {}
-            }
-        }
+    // Comment syntax is picked from the file extension, so a `#` in CSS or a
+    // `//` (floor division) in Python isn't mistaken for a comment.
+    fn comment_style(&self) -> (bool, bool) {
+        let extension = self
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let hash = matches!(
+            extension.as_str(),
+            "py" | "pyw" | "toml" | "yaml" | "yml" | "sh" | "bash" | "rb" | "ps1" | "r" | "pl"
+        );
+        (!hash, hash)
+    }
 
-        if brace_depth > 0 {
-            let mut depth = brace_depth;
-            for next in (line + 1)..total_lines {
-                for ch in self.lines[next].chars() {
-                    match ch {
-                        '{' | '[' | '(' => depth += 1,
-                        '}' | ']' | ')' => {
-                            depth -= 1;
-                            if depth <= 0 {
-                                return Some(next);
-                            }
-                        }
-                        _ => {}
+    // Follows the outermost bracket left open on `line` to the line that
+    // closes it. Brackets inside strings and comments are ignored, and a
+    // closer of the wrong type (a sign of broken code) gives up instead of
+    // guessing a range.
+    fn bracket_fold_end(&self, line: usize) -> Option<usize> {
+        const MAX_SCAN_LINES: usize = 5_000;
+        let (slash_comments, hash_comments) = self.comment_style();
+        // Rust lifetimes ('a) would open a never-closed "string".
+        let rust = self
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"));
+        let mut stack: Vec<u8> = Vec::new();
+        let mut in_block_comment = false;
+        let last = self.lines.len().min(line + MAX_SCAN_LINES);
+        for (index, text) in self.lines[line..last].iter().enumerate() {
+            let current = line + index;
+            let bytes = text.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                if in_block_comment {
+                    if bytes[i..].starts_with(b"*/") {
+                        in_block_comment = false;
+                        i += 2;
+                    } else {
+                        i += 1;
                     }
+                    continue;
                 }
+                match bytes[i] {
+                    b'/' if slash_comments && bytes.get(i + 1) == Some(&b'/') => break,
+                    b'/' if slash_comments && bytes.get(i + 1) == Some(&b'*') => {
+                        in_block_comment = true;
+                        i += 2;
+                        continue;
+                    }
+                    b'#' if hash_comments => break,
+                    quote @ (b'"' | b'`' | b'\'') if quote != b'\'' || !rust => {
+                        i += 1;
+                        while i < bytes.len() && bytes[i] != quote {
+                            if bytes[i] == b'\\' {
+                                i += 1;
+                            }
+                            i += 1;
+                        }
+                    }
+                    open @ (b'{' | b'[' | b'(') => stack.push(open),
+                    close @ (b'}' | b']' | b')') => {
+                        let open = match close {
+                            b'}' => b'{',
+                            b']' => b'[',
+                            _ => b'(',
+                        };
+                        match stack.last() {
+                            // A closer on the first line with nothing open
+                            // belongs to an earlier block (`} else {`).
+                            None if current == line => {}
+                            Some(top) if *top == open => {
+                                stack.pop();
+                                if stack.is_empty() && current > line {
+                                    return Some(current);
+                                }
+                            }
+                            _ => return None,
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if current == line && stack.is_empty() {
+                return None;
             }
         }
+        None
+    }
 
-        // 2. Indentation-based folding (Python, YAML, and general multi-line blocks):
-        let get_indent = |s: &str| -> usize {
-            let mut indent = 0;
-            for ch in s.chars() {
-                if ch == ' ' {
-                    indent += 1;
-                } else if ch == '\t' {
-                    indent += 4;
-                } else {
-                    break;
-                }
-            }
-            indent
+    // Python/YAML-style blocks: the run of following lines indented deeper
+    // than `line` (blank lines inside the run are included).
+    fn indent_fold_end(&self, line: usize) -> Option<usize> {
+        let indent = |s: &str| -> usize {
+            s.chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .map(|c| if c == '\t' { 4 } else { 1 })
+                .sum()
         };
-
-        let base_indent = get_indent(line_text);
-        let mut last_indented_line = None;
-        for next in (line + 1)..total_lines {
-            let next_text = &self.lines[next];
-            if next_text.trim().is_empty() {
+        let base = indent(&self.lines[line]);
+        let mut end = None;
+        for (offset, text) in self.lines[line + 1..].iter().enumerate() {
+            if text.trim().is_empty() {
                 continue;
             }
-            let next_indent = get_indent(next_text);
-            if next_indent > base_indent {
-                last_indented_line = Some(next);
-            } else {
+            if indent(text) <= base {
                 break;
             }
+            end = Some(line + 1 + offset);
         }
-
-        if let Some(end) = last_indented_line {
-            if end > line {
-                return Some(end);
-            }
-        }
-
-        None
+        end
     }
 
     /// Returns the end line if `line` is currently the start of a folded range.
     pub fn is_folded_start(&self, line: usize) -> Option<usize> {
         self.folded_ranges
-            .iter()
-            .find(|(start, _)| *start == line)
+            .range((line, 0)..=(line, usize::MAX))
+            .next()
             .map(|(_, end)| *end)
     }
 
@@ -256,20 +306,66 @@ impl Document {
             .any(|(start, end)| line > *start && line <= *end)
     }
 
+    /// The line that is shown in place of `line`: `line` itself if visible,
+    /// otherwise the start line of the outermost fold hiding it.
+    pub fn visible_line_for(&self, line: usize) -> usize {
+        self.folded_ranges
+            .iter()
+            .filter(|(start, end)| line > *start && line <= *end)
+            .map(|(start, _)| *start)
+            .min()
+            .unwrap_or(line)
+    }
+
+    pub fn has_folds(&self) -> bool {
+        !self.folded_ranges.is_empty()
+    }
+
     /// Toggles the fold state for `line`.
     /// Returns true if toggled.
     pub fn toggle_fold(&mut self, line: usize) -> bool {
-        if let Some(range) = self.folded_ranges.iter().copied().find(|(s, _)| *s == line) {
-            self.folded_ranges.remove(&range);
+        if let Some(end) = self.is_folded_start(line) {
+            self.folded_ranges.remove(&(line, end));
             return true;
         }
         if let Some(end) = self.foldable_range(line) {
-            if end > line {
-                self.folded_ranges.insert((line, end));
-                return true;
-            }
+            self.folded_ranges.insert((line, end));
+            return true;
         }
         false
+    }
+
+    /// Unfolds every fold that hides `line`, so a cursor that lands there
+    /// (search, go to definition, undo) is never inside collapsed text.
+    /// Returns true if anything was unfolded.
+    pub fn unfold_to_reveal(&mut self, line: usize) -> bool {
+        let before = self.folded_ranges.len();
+        self.folded_ranges.retain(|(start, end)| !(line > *start && line <= *end));
+        self.folded_ranges.len() != before
+    }
+
+    // Keeps folds attached to their text across an edit that replaced lines
+    // `start..=old_end` with lines `start..=new_end`: folds after the edit
+    // move with it, folds before it stay, and a fold the edit reached into
+    // is dropped rather than left covering the wrong lines. Typing on a
+    // fold's own (visible) first line keeps the fold.
+    fn shift_folds(&mut self, start: usize, old_end: usize, new_end: usize) {
+        if self.folded_ranges.is_empty() {
+            return;
+        }
+        let single_line_edit = start == old_end && old_end == new_end;
+        self.folded_ranges = std::mem::take(&mut self.folded_ranges)
+            .into_iter()
+            .filter_map(|(s, e)| {
+                if e < start || (single_line_edit && s == start) {
+                    Some((s, e))
+                } else if s > old_end {
+                    Some((s - old_end + new_end, e - old_end + new_end))
+                } else {
+                    None
+                }
+            })
+            .collect();
     }
 
     /// Skips past any folded ranges to the next visible line after `line`.
@@ -278,24 +374,65 @@ impl Document {
         if count == 0 {
             return 0;
         }
-        let mut cur = if let Some(end) = self.is_folded_start(line) {
-            end.saturating_add(1)
-        } else {
-            line.saturating_add(1)
+        let line = self.visible_line_for(line);
+        let mut cur = match self.is_folded_start(line) {
+            Some(end) => end + 1,
+            None => line + 1,
         };
         while cur < count && self.is_line_hidden(cur) {
-            cur = cur.saturating_add(1);
+            cur += 1;
         }
-        cur.min(count.saturating_sub(1))
+        if cur >= count { line } else { cur }
     }
 
     /// Skips backward past any folded ranges to the previous visible line before `line`.
     pub fn prev_visible_line(&self, line: usize) -> usize {
-        let mut cur = line.saturating_sub(1);
-        while cur > 0 && self.is_line_hidden(cur) {
-            cur = cur.saturating_sub(1);
+        let line = self.visible_line_for(line);
+        self.visible_line_for(line.saturating_sub(1))
+    }
+
+    /// Moves `rows` visible lines down (positive) or up (negative) from
+    /// `line`, stopping at the first or last line.
+    pub fn step_visible_lines(&self, line: usize, rows: isize) -> usize {
+        let mut current = self.visible_line_for(line);
+        for _ in 0..rows.unsigned_abs() {
+            let next = if rows > 0 {
+                self.next_visible_line(current)
+            } else {
+                self.prev_visible_line(current)
+            };
+            if next == current {
+                break;
+            }
+            current = next;
         }
-        cur
+        current
+    }
+
+    /// The screen row of `line` when the view starts at `first_line`, or
+    /// None if it is above the view or more than `max_rows` rows below it.
+    /// A hidden line reports the row of the fold that hides it.
+    pub fn visual_row_of(&self, first_line: usize, line: usize, max_rows: usize) -> Option<usize> {
+        let first = self.visible_line_for(first_line);
+        let target = self.visible_line_for(line);
+        if target < first {
+            return None;
+        }
+        if !self.has_folds() {
+            return (target - first <= max_rows).then_some(target - first);
+        }
+        let mut current = first;
+        for row in 0..=max_rows {
+            if current == target {
+                return Some(row);
+            }
+            let next = self.next_visible_line(current);
+            if next == current {
+                break;
+            }
+            current = next;
+        }
+        None
     }
 
     /// Maps a visual row offset (from `first_line`) to the actual document line index,
@@ -305,22 +442,16 @@ impl Document {
         if count == 0 || first_line >= count {
             return None;
         }
-        let mut current = first_line;
-        for (s, e) in &self.folded_ranges {
-            if current > *s && current <= *e {
-                current = *s;
-                break;
-            }
+        if !self.has_folds() {
+            return (first_line + row < count).then_some(first_line + row);
         }
+        let mut current = self.visible_line_for(first_line);
         for _ in 0..row {
-            if let Some(end) = self.is_folded_start(current) {
-                current = end + 1;
-            } else {
-                current += 1;
-            }
-            if current >= count {
+            let next = self.next_visible_line(current);
+            if next == current {
                 return None;
             }
+            current = next;
         }
         Some(current)
     }
@@ -536,7 +667,9 @@ impl Document {
         let mut new_lines: Vec<String> = parts.iter().map(|s| (*s).to_owned()).collect();
         new_lines[0].insert_str(0, &prefix);
         new_lines.last_mut().unwrap().push_str(&suffix);
+        let new_end = start.line + new_lines.len() - 1;
         self.lines.splice(start.line..=end.line, new_lines);
+        self.shift_folds(start.line, end.line, new_end);
         cursor
     }
 
@@ -836,5 +969,80 @@ mod tests {
 
         // 3. Single line statement (no fold)
         assert_eq!(doc.foldable_range(9), None);
+    }
+
+    fn doc_with(path: &str, text: &str) -> Document {
+        let mut doc = Document::new();
+        doc.path = Some(PathBuf::from(path));
+        doc.replace(Pos::default(), Pos::default(), text);
+        doc
+    }
+
+    #[test]
+    fn folding_ignores_brackets_in_strings_and_comments_and_matches_types() {
+        let doc = doc_with(
+            "main.js",
+            "function f() {\n  const s = \"}\";\n  // } not a close\n  /* ) */ call(')');\n}\nafter();\n",
+        );
+        assert_eq!(doc.foldable_range(0), Some(4));
+
+        // Rust lifetimes are not strings.
+        let rust = doc_with("lib.rs", "fn get<'a>(x: &'a str) -> &'a str {\n    x\n}\n");
+        assert_eq!(rust.foldable_range(0), Some(2));
+
+        // `} else {` folds the else block, and a wrong-type closer gives up.
+        let branches = doc_with("a.c", "if (a) {\n  x();\n} else {\n  y();\n}\n");
+        assert_eq!(branches.foldable_range(2), Some(4));
+        let broken = doc_with("a.c", "f({\n  x\n)}\n");
+        assert_eq!(broken.bracket_fold_end(0), None);
+
+        // In Python `#` starts a comment, so its bracket doesn't count.
+        let python = doc_with("a.py", "x = 1  # {\ny = 2\n");
+        assert_eq!(python.foldable_range(0), None);
+
+        // Non-ASCII text inside comments and strings must not panic.
+        let unicode = doc_with("a.js", "f({ /* ü ñ */ s: \"é\",\n  /* ß\n ö */ x: 1\n})\n");
+        assert_eq!(unicode.foldable_range(0), Some(3));
+    }
+
+    #[test]
+    fn folds_move_with_edits_above_and_drop_when_edited_inside() {
+        let mut doc = doc_with("a.rs", "fn a() {\n    1\n}\nfn b() {\n    2\n}\n");
+        assert!(doc.toggle_fold(3));
+        // Insert two lines at the top: the fold moves down with its text.
+        doc.replace(Pos::default(), Pos::default(), "// x\n// y\n");
+        assert_eq!(doc.is_folded_start(5), Some(7));
+        assert!(doc.is_line_hidden(6));
+        // Typing on the fold's own first line keeps it.
+        doc.replace(Pos { line: 5, byte: 0 }, Pos { line: 5, byte: 0 }, "pub ");
+        assert_eq!(doc.is_folded_start(5), Some(7));
+        // Undo the typing and the two inserted lines: the fold follows back.
+        doc.undo();
+        doc.undo();
+        assert_eq!(doc.is_folded_start(3), Some(5));
+        // An edit that reaches into the folded block drops the fold.
+        doc.replace(Pos { line: 2, byte: 0 }, Pos { line: 4, byte: 0 }, "");
+        assert!(!doc.has_folds());
+    }
+
+    #[test]
+    fn visual_rows_skip_folded_lines() {
+        let mut doc = doc_with("a.rs", "a {\n1\n2\n}\nb\nc {\n3\n}\nd\n");
+        assert!(doc.toggle_fold(0));
+        assert!(doc.toggle_fold(5));
+        // Rows: a{ b c{ d ""
+        assert_eq!(doc.visual_row_of(0, 4, 50), Some(1));
+        assert_eq!(doc.visual_row_of(0, 8, 50), Some(3));
+        assert_eq!(doc.visual_row_of(0, 8, 2), None);
+        assert_eq!(doc.visual_row_to_doc_line(0, 2), Some(5));
+        // A hidden line reports its fold's row, and scrolling to it snaps.
+        assert_eq!(doc.visible_line_for(2), 0);
+        assert_eq!(doc.step_visible_lines(0, 2), 5);
+        assert_eq!(doc.step_visible_lines(8, -2), 4);
+        assert_eq!(doc.step_visible_lines(0, -5), 0);
+        // Revealing a hidden line opens only the fold around it.
+        assert!(doc.unfold_to_reveal(6));
+        assert!(doc.is_folded_start(0).is_some());
+        assert!(doc.is_folded_start(5).is_none());
     }
 }

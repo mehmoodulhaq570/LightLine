@@ -116,6 +116,7 @@ impl App {
         self.commit_focus = false;
         self.git_diff_cache.clear();
         self.git_head_cache.clear();
+        self.git_untracked.clear();
         self.gutter_done = None;
         self.review_file = None;
         self.reset_terminal_sessions(hwnd);
@@ -185,6 +186,7 @@ impl App {
         self.commit_message.clear();
         self.git_diff_cache.clear();
         self.git_head_cache.clear();
+        self.git_untracked.clear();
         self.gutter_done = None;
         self.review_file = None;
         self.reset_terminal_sessions(hwnd);

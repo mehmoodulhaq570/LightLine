@@ -236,19 +236,66 @@ pub fn resolve_wsl() -> Result<PathBuf, String> {
         .or_else(|| std::env::var_os("WINDIR"))
         .unwrap_or_else(|| "C:\\Windows".into());
     let path = PathBuf::from(root).join("System32").join("wsl.exe");
-    if is_real_executable(&path) {
-        return Ok(path);
+    let found = if is_real_executable(&path) {
+        Some(path)
+    } else {
+        let paths = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&paths)
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join("wsl.exe"))
+            .find(|candidate| is_real_executable(candidate))
+    };
+    let Some(path) = found else {
+        return Err("WSL (wsl.exe) was not found in System32 or PATH".into());
+    };
+    // wsl.exe ships with Windows even when WSL has never been set up; without
+    // an installed distribution it only prints install instructions.
+    if !wsl_has_distribution() {
+        return Err("WSL has no Linux distribution installed (run `wsl --install`)".into());
     }
-    let paths = std::env::var_os("PATH").unwrap_or_default();
-    for directory in std::env::split_paths(&paths) {
-        if directory.is_absolute() {
-            let candidate = directory.join("wsl.exe");
-            if is_real_executable(&candidate) {
-                return Ok(candidate);
-            }
+    Ok(path)
+}
+
+// Installed distributions are registered as subkeys of this key. Reading
+// the registry is instant, unlike running `wsl -l`, which matters because
+// availability is checked every time the shell menu opens.
+#[cfg(windows)]
+fn wsl_has_distribution() -> bool {
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryInfoKeyW,
+    };
+    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Lxss"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut key: HKEY = std::ptr::null_mut();
+    unsafe {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key) != 0 {
+            return false;
         }
+        let mut subkeys = 0u32;
+        let status = RegQueryInfoKeyW(
+            key,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &mut subkeys,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        RegCloseKey(key);
+        status == 0 && subkeys > 0
     }
-    Err("WSL (wsl.exe) was not found in System32 or PATH".into())
+}
+
+#[cfg(not(windows))]
+fn wsl_has_distribution() -> bool {
+    false
 }
 
 pub fn prepare_launch(request: &LaunchRequest) -> Result<LaunchSpec, String> {
