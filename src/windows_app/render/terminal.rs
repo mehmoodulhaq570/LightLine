@@ -74,15 +74,15 @@ impl App {
 
         // One tab per interactive shell session, marked with a leading bullet.
         for (index, rect) in layout.terminals.iter().enumerate() {
-            let title = self
-                .terminals
-                .get(index)
-                .map(|pane| pane.title.as_str())
-                .unwrap_or("?");
+            let pane = self.terminals.get(index);
+            let shell_tag = pane
+                .map(|p| p.shell_kind.tag().to_uppercase())
+                .unwrap_or_else(|| "TERMINAL".into());
+            let title = pane.map(|p| p.title.as_str()).unwrap_or("?");
             let label = if self.terminals.len() == 1 {
-                "TERMINAL".to_string()
+                shell_tag
             } else {
-                format!("TERMINAL {title}")
+                format!("{shell_tag} {title}")
             };
             let active = self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
             Self::label(
@@ -112,10 +112,18 @@ impl App {
         Self::label(
             hdc,
             "+",
-            layout.plus.left + self.scale(8),
+            layout.plus.left + self.scale(6),
             top + self.scale(8),
             self.theme.muted,
             layout.plus,
+        );
+        Self::label(
+            hdc,
+            "\u{25be}",
+            layout.chevron.left + self.scale(3),
+            top + self.scale(8),
+            self.theme.muted,
+            layout.chevron,
         );
         Self::label(
             hdc,

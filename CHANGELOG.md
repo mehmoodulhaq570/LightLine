@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-09-25
+
+#### Added
+- **Terminal Shell Picker & Multi-Profile Support**: Built-in support for launching multiple interactive shells: **PowerShell** (`pwsh`/`powershell`), **Command Prompt** (`cmd.exe`), **Git Bash** (`bash.exe`), and **WSL** (`wsl.exe`).
+  - Added a dropdown button (`⌄`) right next to the terminal `+` button, and right-click support on the `+` button, opening a native popup menu to select and launch any installed shell.
+  - Added "Select Default Profile" menu and `terminalDefaultProfile` configuration in `%APPDATA%\LightLine\settings.json`.
+  - Terminal tab headers now display the active shell profile (e.g. `PWSH 1`, `CMD 2`, `BASH 3`, `WSL 4`).
+  - Added Command Palette quick-commands for launching specific shells and switching default profiles.
+
 ### 2026-09-24
 
 #### Added

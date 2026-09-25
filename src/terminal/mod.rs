@@ -6,8 +6,9 @@ mod platform;
 
 pub use input::{InputModes, Key, Modifiers, encode_key, encode_paste};
 pub use launch::{
-    LaunchRequest, LaunchSpec, encode_powershell_command, powershell_path_expression,
-    prepare_launch, python_command, quote_windows_argument, resolve_powershell,
+    LaunchRequest, LaunchSpec, ShellKind, encode_powershell_command, powershell_path_expression,
+    prepare_launch, python_command, quote_windows_argument, resolve_cmd, resolve_git_bash,
+    resolve_powershell, resolve_wsl,
 };
 pub use model::{Cell, Color, Cursor, Row, SCROLLBACK_LINES, Snapshot, TerminalModel};
 

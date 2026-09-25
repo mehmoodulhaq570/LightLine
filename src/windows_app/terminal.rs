@@ -6,8 +6,8 @@ pub(super) const TERMINAL_EVENT_MESSAGE: u32 = WM_APP + 8;
 // Bottom panel geometry (logical pixels, scaled through App::scale). The
 // panel's height is user-resizable (App::terminal_height); this is only its
 // fixed header row.
-const TERMINAL_HEADER: i32 = 34;
-const TERMINAL_PAD: i32 = 8;
+pub(super) const TERMINAL_HEADER: i32 = 34;
+pub(super) const TERMINAL_PAD: i32 = 8;
 
 // A 16-entry ANSI palette tuned for the dark self.theme.editor_bg / self.theme.sidebar_bg surface.
 const ANSI_PALETTE: [u32; 16] = [
@@ -173,6 +173,7 @@ pub(super) enum TerminalHeaderHit {
     OutputTab,
     TerminalTab(usize),
     New,
+    ShellPicker,
     Kill,
     Hide,
     Body,
@@ -184,6 +185,7 @@ pub(super) struct TerminalHeaderLayout {
     pub(super) output: RECT,
     pub(super) terminals: Vec<RECT>,
     pub(super) plus: RECT,
+    pub(super) chevron: RECT,
     pub(super) kill: RECT,
     pub(super) hide: RECT,
 }
@@ -197,15 +199,15 @@ impl App {
         matches!(tab, TerminalTab::Output)
     }
 
-    fn terminal_launch_request(&self, no_profile: bool) -> LaunchRequest {
+    fn terminal_launch_request(&self, shell_kind: ShellKind, no_profile: bool) -> LaunchRequest {
         let cwd = self
             .workspace_root
             .clone()
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
-        // Strip canonicalize()'s \\?\ prefix so PowerShell's own prompt shows
+        // Strip canonicalize()'s \\?\ prefix so the shell prompt shows
         // an ordinary path instead of the extended form.
-        let mut request = LaunchRequest::shell(PathBuf::from(display_path(&cwd)));
+        let mut request = LaunchRequest::with_shell(PathBuf::from(display_path(&cwd)), shell_kind);
         if no_profile {
             request = request.without_profile();
         }
@@ -214,8 +216,8 @@ impl App {
 
     // Create a fresh interactive shell pane, spawn its session, and make it
     // the active tab. Returns the new pane's index, or None on spawn failure.
-    fn spawn_terminal_pane(&mut self, hwnd: HWND, no_profile: bool) -> Option<usize> {
-        let request = self.terminal_launch_request(no_profile);
+    fn spawn_terminal_pane(&mut self, hwnd: HWND, shell_kind: ShellKind, no_profile: bool) -> Option<usize> {
+        let request = self.terminal_launch_request(shell_kind, no_profile);
         let size = self.terminal_size_for(hwnd);
         let hwnd_value = hwnd as isize;
         let mut service = TerminalService::new(move || unsafe {
@@ -231,6 +233,7 @@ impl App {
                     id,
                     snapshot: None,
                     applied_size: Some(size),
+                    shell_kind,
                 });
                 self.terminal_active = self.terminals.len() - 1;
                 Some(self.terminal_active)
@@ -250,13 +253,22 @@ impl App {
         }
     }
 
-    // Add a new shell session, reveal the panel on it, and take keyboard
-    // focus with the block cursor shown immediately.
+    // Add a new shell session using the default profile, reveal the panel on it,
+    // and take keyboard focus with the block cursor shown immediately.
     pub(super) fn new_terminal(&mut self, hwnd: HWND, no_profile: bool) {
+        self.new_terminal_with_shell(hwnd, self.settings.default_terminal_profile, no_profile);
+    }
+
+    pub(super) fn new_terminal_with_shell(
+        &mut self,
+        hwnd: HWND,
+        shell_kind: ShellKind,
+        no_profile: bool,
+    ) {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
-        if self.spawn_terminal_pane(hwnd, no_profile).is_some() {
+        if self.spawn_terminal_pane(hwnd, shell_kind, no_profile).is_some() {
             self.focus_active_shell(hwnd);
         }
         self.update_title(hwnd);
@@ -323,11 +335,12 @@ impl App {
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
         let old = self.terminal_active.min(self.terminals.len() - 1);
-        if self.spawn_terminal_pane(hwnd, no_profile).is_some() {
+        let shell_kind = self.terminals[old].shell_kind;
+        if self.spawn_terminal_pane(hwnd, shell_kind, no_profile).is_some() {
             self.terminals.remove(old);
             self.terminal_active = self.terminals.len() - 1;
             self.focus_active_shell(hwnd);
-            self.status = "Restarted terminal\u{2026}".into();
+            self.status = format!("Restarted {} terminal\u{2026}", shell_kind.name());
         }
         self.update_title(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -427,7 +440,7 @@ impl App {
             self.focus_run_session(hwnd);
             return Some(id);
         }
-        let request = self.terminal_launch_request(true);
+        let request = self.terminal_launch_request(ShellKind::PowerShell, true);
         let size = self.terminal_size_for(hwnd);
         let started = self
             .terminal
@@ -528,10 +541,17 @@ impl App {
         let plus = RECT {
             left: x + gap,
             top,
-            right: x + gap + self.scale(28),
+            right: x + gap + self.scale(22),
             bottom: header_bottom,
         };
-        x += gap + self.scale(34);
+        x += gap + self.scale(22);
+        let chevron = RECT {
+            left: x,
+            top,
+            right: x + self.scale(18),
+            bottom: header_bottom,
+        };
+        x += self.scale(22);
         let kill = RECT {
             left: x,
             top,
@@ -550,6 +570,7 @@ impl App {
             output,
             terminals,
             plus,
+            chevron,
             kill,
             hide,
         }
@@ -575,10 +596,127 @@ impl App {
         if inside(&layout.plus) {
             return TerminalHeaderHit::New;
         }
+        if inside(&layout.chevron) {
+            return TerminalHeaderHit::ShellPicker;
+        }
         if inside(&layout.kill) {
             return TerminalHeaderHit::Kill;
         }
         TerminalHeaderHit::Body
+    }
+
+    pub(super) fn set_default_terminal_profile(&mut self, hwnd: HWND, shell: ShellKind) {
+        self.settings.default_terminal_profile = shell;
+        if let Err(e) = self.settings.save() {
+            self.status = format!("Failed to save settings: {e}");
+        } else {
+            self.status = format!("Default terminal profile set to {}", shell.name());
+        }
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn show_shell_picker_menu(&mut self, hwnd: HWND, x: i32, y: i32) {
+        use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            AppendMenuW, CreatePopupMenu, DestroyMenu, TrackPopupMenu, MF_CHECKED, MF_DISABLED,
+            MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, TPM_LEFTALIGN,
+            TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        };
+
+        let menu = unsafe { CreatePopupMenu() };
+        if menu.is_null() {
+            return;
+        }
+
+        const CMD_POWERSHELL: usize = 1;
+        const CMD_CMD: usize = 2;
+        const CMD_GIT_BASH: usize = 3;
+        const CMD_WSL: usize = 4;
+        const CMD_SET_DEFAULT_POWERSHELL: usize = 11;
+        const CMD_SET_DEFAULT_CMD: usize = 12;
+        const CMD_SET_DEFAULT_GIT_BASH: usize = 13;
+        const CMD_SET_DEFAULT_WSL: usize = 14;
+
+        let default_shell = self.settings.default_terminal_profile;
+
+        let pwsh_avail = ShellKind::PowerShell.is_available();
+        let cmd_avail = ShellKind::CommandPrompt.is_available();
+        let bash_avail = ShellKind::GitBash.is_available();
+        let wsl_avail = ShellKind::Wsl.is_available();
+
+        let add_shell_item = |parent_menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, cmd: usize, kind: ShellKind, avail: bool, is_default: bool| {
+            let mut flags = MF_STRING;
+            if is_default {
+                flags |= MF_CHECKED;
+            } else {
+                flags |= MF_UNCHECKED;
+            }
+            if !avail {
+                flags |= MF_DISABLED | MF_GRAYED;
+            }
+            let text = if avail {
+                if is_default {
+                    format!("{} (Default)", kind.name())
+                } else {
+                    kind.name().to_string()
+                }
+            } else {
+                format!("{} (Not Installed)", kind.name())
+            };
+            unsafe { AppendMenuW(parent_menu, flags, cmd, wide(&text).as_ptr()) };
+        };
+
+        add_shell_item(menu, CMD_POWERSHELL, ShellKind::PowerShell, pwsh_avail, default_shell == ShellKind::PowerShell);
+        add_shell_item(menu, CMD_CMD, ShellKind::CommandPrompt, cmd_avail, default_shell == ShellKind::CommandPrompt);
+        add_shell_item(menu, CMD_GIT_BASH, ShellKind::GitBash, bash_avail, default_shell == ShellKind::GitBash);
+        add_shell_item(menu, CMD_WSL, ShellKind::Wsl, wsl_avail, default_shell == ShellKind::Wsl);
+
+        unsafe {
+            AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            let default_submenu = CreatePopupMenu();
+            if !default_submenu.is_null() {
+                add_shell_item(default_submenu, CMD_SET_DEFAULT_POWERSHELL, ShellKind::PowerShell, pwsh_avail, default_shell == ShellKind::PowerShell);
+                add_shell_item(default_submenu, CMD_SET_DEFAULT_CMD, ShellKind::CommandPrompt, cmd_avail, default_shell == ShellKind::CommandPrompt);
+                add_shell_item(default_submenu, CMD_SET_DEFAULT_GIT_BASH, ShellKind::GitBash, bash_avail, default_shell == ShellKind::GitBash);
+                add_shell_item(default_submenu, CMD_SET_DEFAULT_WSL, ShellKind::Wsl, wsl_avail, default_shell == ShellKind::Wsl);
+
+                AppendMenuW(
+                    menu,
+                    MF_POPUP,
+                    default_submenu as usize,
+                    wide("Select Default Profile").as_ptr(),
+                );
+            }
+        }
+
+        let mut pt = POINT { x, y };
+        unsafe { ClientToScreen(hwnd, &mut pt) };
+
+        let selected = unsafe {
+            TrackPopupMenu(
+                menu,
+                TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON,
+                pt.x,
+                pt.y,
+                0,
+                hwnd,
+                null(),
+            ) as usize
+        };
+
+        unsafe { DestroyMenu(menu) };
+
+        match selected {
+            CMD_POWERSHELL => self.new_terminal_with_shell(hwnd, ShellKind::PowerShell, false),
+            CMD_CMD => self.new_terminal_with_shell(hwnd, ShellKind::CommandPrompt, false),
+            CMD_GIT_BASH => self.new_terminal_with_shell(hwnd, ShellKind::GitBash, false),
+            CMD_WSL => self.new_terminal_with_shell(hwnd, ShellKind::Wsl, false),
+            CMD_SET_DEFAULT_POWERSHELL => self.set_default_terminal_profile(hwnd, ShellKind::PowerShell),
+            CMD_SET_DEFAULT_CMD => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
+            CMD_SET_DEFAULT_GIT_BASH => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
+            CMD_SET_DEFAULT_WSL => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
+            _ => {}
+        }
     }
 
     pub(super) fn terminal_top(&self, hwnd: HWND) -> i32 {

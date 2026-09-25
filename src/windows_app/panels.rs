@@ -51,7 +51,15 @@ impl App {
                 },
                 7,
             ),
-            ("New Terminal", 9),
+            ("New Terminal (Default)", 9),
+            ("New Terminal: PowerShell", 25),
+            ("New Terminal: Command Prompt", 26),
+            ("New Terminal: Git Bash", 27),
+            ("New Terminal: WSL", 28),
+            ("Terminal: Set Default to PowerShell", 29),
+            ("Terminal: Set Default to Command Prompt", 30),
+            ("Terminal: Set Default to Git Bash", 31),
+            ("Terminal: Set Default to WSL", 32),
             ("Kill Active Terminal", 15),
             ("Restart Terminal", 10),
             ("Restart Terminal (No Profile)", 11),
@@ -146,6 +154,14 @@ impl App {
                     }
                     self.refresh(hwnd);
                 }
+                Some(25) => self.new_terminal_with_shell(hwnd, ShellKind::PowerShell, false),
+                Some(26) => self.new_terminal_with_shell(hwnd, ShellKind::CommandPrompt, false),
+                Some(27) => self.new_terminal_with_shell(hwnd, ShellKind::GitBash, false),
+                Some(28) => self.new_terminal_with_shell(hwnd, ShellKind::Wsl, false),
+                Some(29) => self.set_default_terminal_profile(hwnd, ShellKind::PowerShell),
+                Some(30) => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
+                Some(31) => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
+                Some(32) => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
                 _ => {}
             }
         } else {

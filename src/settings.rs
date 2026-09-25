@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::terminal::ShellKind;
+
 /// User-configurable settings loaded from `%APPDATA%\LightLine\settings.json`.
 /// All fields have sensible defaults matching the current hardcoded values so
 /// an absent or partial file still produces a usable editor.
@@ -19,6 +21,7 @@ pub struct Settings {
     pub minimap: bool,
     pub smooth_scrolling: bool,
     pub parse_limit_kb: usize,
+    pub default_terminal_profile: ShellKind,
     // Colors can be overridden; values are 0xRRGGBB.
     pub colors: HashMap<String, u32>,
 }
@@ -39,6 +42,7 @@ impl Default for Settings {
             minimap: true,
             smooth_scrolling: false,
             parse_limit_kb: 128,
+            default_terminal_profile: ShellKind::PowerShell,
             colors: HashMap::new(),
         }
     }
@@ -119,6 +123,19 @@ impl Settings {
         if let Some(n) = value.get("parseLimitKb").and_then(|v| v.as_u64()) {
             settings.parse_limit_kb = (n as usize).clamp(32, 4096);
         }
+        if let Some(s) = value
+            .get("terminalDefaultProfile")
+            .or_else(|| value.get("terminalShell"))
+            .and_then(|v| v.as_str())
+        {
+            let lower = s.trim().to_ascii_lowercase();
+            settings.default_terminal_profile = match lower.as_str() {
+                "cmd" | "command prompt" | "commandprompt" => ShellKind::CommandPrompt,
+                "bash" | "gitbash" | "git bash" => ShellKind::GitBash,
+                "wsl" => ShellKind::Wsl,
+                _ => ShellKind::PowerShell,
+            };
+        }
         if let Some(obj) = value.get("colors").and_then(|v| v.as_object()) {
             for (key, val) in obj {
                 if let Some(hex) = val.as_str()
@@ -187,6 +204,10 @@ impl Settings {
             "parseLimitKb".into(),
             serde_json::Value::Number(self.parse_limit_kb.into()),
         );
+        obj.insert(
+            "terminalDefaultProfile".into(),
+            serde_json::Value::String(self.default_terminal_profile.name().to_string()),
+        );
         serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap_or_default()
     }
 }
@@ -217,6 +238,7 @@ mod tests {
         assert!(s.auto_indent);
         assert!(s.bracket_matching);
         assert!(!s.format_on_save);
+        assert_eq!(s.default_terminal_profile, ShellKind::PowerShell);
     }
 
     #[test]
@@ -227,6 +249,16 @@ mod tests {
         };
         let loaded = Settings::from_json(&s.to_json());
         assert!(loaded.format_on_save);
+    }
+
+    #[test]
+    fn terminal_profile_round_trips() {
+        let s = Settings {
+            default_terminal_profile: ShellKind::GitBash,
+            ..Settings::default()
+        };
+        let loaded = Settings::from_json(&s.to_json());
+        assert_eq!(loaded.default_terminal_profile, ShellKind::GitBash);
     }
 
     #[test]
