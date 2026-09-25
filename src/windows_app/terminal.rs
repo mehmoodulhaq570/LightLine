@@ -154,6 +154,18 @@ fn vk_to_terminal_key(vk: u32, control: bool) -> Option<TermKey> {
     Some(key)
 }
 
+fn output_control_bytes(key: TermKey, modifiers: TermModifiers) -> Option<Vec<u8>> {
+    match key {
+        TermKey::Enter => Some(b"\r\n".to_vec()),
+        TermKey::Backspace => Some(lightline::terminal::encode_key(
+            key,
+            modifiers,
+            lightline::terminal::InputModes::default(),
+        )),
+        _ => None,
+    }
+}
+
 // Regions of the terminal header tab strip. Painted by render/terminal.rs and
 // hit-tested by input.rs through the exact same layout, so the two never drift.
 pub(super) enum TerminalHeaderHit {
@@ -730,12 +742,9 @@ impl App {
                 None => false,
             },
             TerminalTab::Output => {
-                // Raw pipes don't understand structured TermKey events.
-                // We must translate Enter and Backspace into raw bytes for stdin.
-                if key == TermKey::Enter {
-                    self.run_session.is_some_and(|id| self.terminal.input(id, b"\r").is_ok())
-                } else if key == TermKey::Backspace {
-                    self.run_session.is_some_and(|id| self.terminal.input(id, b"\x08").is_ok())
+                if let Some(bytes) = output_control_bytes(key, modifiers) {
+                    self.run_session
+                        .is_some_and(|id| self.terminal.input(id, &bytes).is_ok())
                 } else {
                     self.run_session
                         .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
@@ -898,5 +907,23 @@ impl App {
             ReleaseDC(hwnd, hdc);
             width.max(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn output_enter_and_backspace_use_pipe_appropriate_bytes() {
+        let plain = TermModifiers::default();
+        let control = TermModifiers {
+            control: true,
+            ..TermModifiers::default()
+        };
+
+        assert_eq!(output_control_bytes(TermKey::Enter, plain), Some(b"\r\n".to_vec()));
+        assert_eq!(output_control_bytes(TermKey::Backspace, plain), Some(vec![127]));
+        assert_eq!(output_control_bytes(TermKey::Backspace, control), Some(vec![8]));
     }
 }

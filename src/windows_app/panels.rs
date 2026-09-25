@@ -215,6 +215,10 @@ impl App {
             self.search_results.clear();
             return;
         }
+        // Submitting the query hands keyboard control to the results list so
+        // Up/Down can move the selection and Enter can open the active hit.
+        self.search_input = false;
+        self.panel_focus = true;
         self.cancel_search();
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(cancel.clone());

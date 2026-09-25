@@ -2,6 +2,32 @@ use super::git::GitHit;
 use super::terminal::TerminalHeaderHit;
 use super::*;
 
+fn is_editor_ctrl_key(key: u32, shift: bool) -> bool {
+    matches!(key, 0x41 | 0x43 | 0x56 | 0x5a | 0x59)
+        || (key == 0x58 && !shift)
+        || key == VK_HOME as u32
+        || key == VK_END as u32
+        || key == VK_LEFT as u32
+        || key == VK_RIGHT as u32
+        || key == VK_SPACE as u32
+        || key == VK_BACK as u32
+        || key == VK_DELETE as u32
+}
+
+fn is_editor_navigation_or_edit_key(key: u32) -> bool {
+    key == VK_LEFT as u32
+        || key == VK_RIGHT as u32
+        || key == VK_UP as u32
+        || key == VK_DOWN as u32
+        || key == VK_PRIOR as u32
+        || key == VK_NEXT as u32
+        || key == VK_HOME as u32
+        || key == VK_END as u32
+        || key == VK_TAB as u32
+        || key == VK_BACK as u32
+        || key == VK_DELETE as u32
+}
+
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
         self.clear_hover(hwnd);
@@ -33,7 +59,7 @@ impl App {
             // Reserved application chords fall through to the handlers below.
             let reserved_chord = ctrl
                 && match key {
-                    0x50 | 0x52 | 0x42 => shift, // Ctrl+Shift+P/R/B
+                    0x50 | 0x52 | 0x42 | 0x57 => shift, // Ctrl+Shift+P/R/B/W
                     v if v == VK_TAB as u32 => true,
                     v if v == VK_PRIOR as u32 || v == VK_NEXT as u32 => true,
                     _ => false,
@@ -249,6 +275,19 @@ impl App {
                 self.changes.len()
             };
             match key {
+                x if x == VK_ESCAPE as u32 => {
+                    self.panel_focus = false;
+                    if self.side_view == SideView::Search {
+                        self.cancel_search();
+                        self.side_view = SideView::Files;
+                        self.set_sidebar_visible(hwnd, false);
+                        self.review_file = None;
+                        self.keep_cursor_visible(hwnd);
+                    } else {
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                    return true;
+                }
                 x if x == VK_UP as u32 => {
                     self.panel_selected = self.panel_selected.saturating_sub(1)
                 }
@@ -290,6 +329,11 @@ impl App {
                     self.panel_first = self.panel_selected + 1 - visible;
                 }
                 unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+            }
+            // Keep editor navigation and deletion away from the hidden caret,
+            // but let application commands such as F5/F10/F11 continue below.
+            if is_editor_navigation_or_edit_key(key) {
                 return true;
             }
         }
@@ -370,6 +414,9 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        if ctrl && self.panel_focus && is_editor_ctrl_key(key, shift) {
+            return true;
         }
         if ctrl {
             let cursor = self.view().cursor;
@@ -1248,6 +1295,7 @@ impl App {
                     let index =
                         self.panel_first + ((y - self.scale(113)) / self.scale(48).max(1)) as usize;
                     if let Some(hit) = self.search_results.get(index).cloned() {
+                        self.search_input = false;
                         self.panel_focus = false;
                         self.open(hwnd, Some(hit.path));
                         self.move_cursor(
@@ -1779,5 +1827,22 @@ impl App {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_guard_allows_extensions_shortcut() {
+        assert!(is_editor_ctrl_key(0x58, false));
+        assert!(!is_editor_ctrl_key(0x58, true));
+        assert!(is_editor_ctrl_key(0x5a, true));
+        assert!(is_editor_navigation_or_edit_key(VK_BACK as u32));
+        assert!(is_editor_navigation_or_edit_key(VK_DELETE as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F5 as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F10 as u32));
+        assert!(!is_editor_navigation_or_edit_key(VK_F11 as u32));
     }
 }
