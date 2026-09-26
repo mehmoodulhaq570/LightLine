@@ -3,14 +3,16 @@ use super::*;
 // Source control sidebar geometry, in logical pixels below the panel header.
 // The commit message box and button stay pinned while the change list scrolls,
 // so their rectangles come from the same layout as the rows.
-const COMMIT_TOP: i32 = 42;
-const COMMIT_HEIGHT: i32 = 44;
-const COMMIT_BUTTON_HEIGHT: i32 = 26;
+const COMMIT_TOP: i32 = 50;
+const COMMIT_HEIGHT: i32 = 54;
+const COMMIT_BUTTON_HEIGHT: i32 = 34;
 // Push, pull and fetch sit in a row of their own below the commit button.
-const SYNC_HEIGHT: i32 = 24;
-pub(super) const ROW_HEADER: i32 = 26;
+const SYNC_HEIGHT: i32 = 34;
+const BRANCH_HEIGHT: i32 = 38;
+pub(super) const ROW_HEADER: i32 = 34;
 pub(super) const ROW_CHANGE: i32 = EXPLORER_ROW;
-pub(super) const ROW_COMMIT: i32 = 34;
+pub(super) const ROW_COMMIT: i32 = 48;
+pub(super) const ROW_CLEAN: i32 = 82;
 // Row action buttons are square and right aligned, like the rest of the panel.
 pub(super) const ROW_BUTTON: i32 = 22;
 
@@ -27,6 +29,7 @@ pub(super) enum GitRow {
         staged: bool,
     },
     Commit(CommitEntry),
+    Clean,
     Note(&'static str),
 }
 
@@ -43,6 +46,7 @@ impl GitRow {
             Self::Header { .. } => ROW_HEADER,
             Self::Change { .. } | Self::Note(_) => ROW_CHANGE,
             Self::Commit(_) => ROW_COMMIT,
+            Self::Clean => ROW_CLEAN,
         }
     }
 
@@ -72,6 +76,7 @@ pub(super) struct GitLayout {
     pub commit_box: RECT,
     pub commit_button: RECT,
     pub sync: [RECT; 3],
+    pub branch: RECT,
     pub refresh: RECT,
     pub list_top: i32,
 }
@@ -165,7 +170,8 @@ impl App {
         }
         let staged: Vec<&Change> = self.changes.iter().filter(|change| change.staged).collect();
         let unstaged: Vec<&Change> = self.changes.iter().filter(|change| change.unstaged).collect();
-        if !staged.is_empty() {
+        let has_staged = !staged.is_empty();
+        if has_staged {
             rows.push(GitRow::Header {
                 title: "STAGED",
                 count: staged.len(),
@@ -181,8 +187,10 @@ impl App {
             count: unstaged.len(),
             section: GitSection::Changes,
         });
-        if unstaged.is_empty() {
-            rows.push(GitRow::Note("No changes in the working tree."));
+        if !has_staged && unstaged.is_empty() {
+            rows.push(GitRow::Clean);
+        } else if unstaged.is_empty() {
+            rows.push(GitRow::Note("No unstaged changes."));
         } else {
             rows.extend(unstaged.into_iter().map(|change| GitRow::Change {
                 change: change.clone(),
@@ -209,6 +217,8 @@ impl App {
         let button_bottom = button_top + self.scale(COMMIT_BUTTON_HEIGHT);
         let sync_top = button_bottom + self.scale(8);
         let sync_bottom = sync_top + self.scale(SYNC_HEIGHT);
+        let branch_top = sync_bottom + self.scale(10);
+        let branch_bottom = branch_top + self.scale(BRANCH_HEIGHT);
         let gap = self.scale(6);
         let third = ((box_right - box_left - gap * 2) / 3).max(1);
         GitLayout {
@@ -235,13 +245,19 @@ impl App {
                     bottom: sync_bottom,
                 }
             }),
+            branch: RECT {
+                left: box_left,
+                top: branch_top,
+                right: box_right,
+                bottom: branch_bottom,
+            },
             refresh: RECT {
                 left: right - self.scale(34),
                 top: self.scale(12),
                 right: right - self.scale(10),
                 bottom: self.scale(34),
             },
-            list_top: sync_bottom + self.scale(12),
+            list_top: branch_bottom + self.scale(8),
         }
     }
 
@@ -350,7 +366,7 @@ impl App {
                     GitSection::History => {}
                 },
                 GitRow::Commit(_) => return GitHit::Row(index),
-                GitRow::Note(_) => {}
+                GitRow::Clean | GitRow::Note(_) => {}
             }
             return GitHit::Nothing;
         }

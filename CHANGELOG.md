@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Folds move with edits above them; an edit inside a folded block, or a cursor landing in one (search, go to definition, undo), unfolds it. Folding the block the caret is in moves the caret to the fold's first line.
   - Chevrons are drawn as vector strokes, so they render even when the editor font lacks the `⌄`/`›` glyphs.
 
+#### Changed
+- **Source Control Panel Redesign**: Reworked the native Git sidebar around a clearer commit composer, larger Commit and sync controls, a dedicated branch/ahead-behind status strip, count badges, a polished clean-worktree state, timeline-style history cards, and an internal history scrollbar. Rendering and hit-testing continue to share the same geometry, so all existing stage, unstage, discard, commit, Push, Pull, Fetch, keyboard navigation, and diff actions remain aligned with the new layout.
+
 #### Fixed
 - **Workspace Search Keyboard Navigation**: Submitting a project-wide search now transfers focus from the query field to the results list, where `Up`/`Down` change the selection and `Enter` opens it. Mouse and keyboard result activation both return input to the editor cleanly.
 - **Stale Sidebar and Search Focus**: Opening or closing a workspace now clears obsolete search/list focus. `Esc` also exits focused sidebar lists, closes Search when appropriate, and prevents an invisible focus state from trapping later input.
