@@ -32,8 +32,9 @@
 - 🗂️ **Workspaces & Full Explorer Operations**: Quick Open (`Ctrl+P`), project-wide content search (`Ctrl+Shift+F`), and folder tree navigation with subtle hierarchy indentation guides and alphabetical sorting. Features a **built-in curated vector SVG icon suite** (Rust, Python, Markdown, JSON, TOML, Git, web formats, and two-tone folders) working 100% offline out-of-the-box. Full file/folder management: create files/folders (`+`, `+Folder`), inline creation and renaming, right-click context menu (`New File`, `New Folder`, `Reveal in File Explorer`, `Copy Path`, `Rename`, `Delete`), safe deletion with dark confirmation dialog, and workspace close/discard (`>Close Workspace`).
 - 🏛️ **Unified Workbench & Welcome Dashboard**: A compact branded title bar, centered Quick Open command center, native window controls, and icon-only activity rail now carry consistently across the editor and Welcome screen. The responsive Welcome dashboard provides quick-start cards, recent projects, keyboard-driven actions, onboarding links, and community access without taking over the desktop.
 - 🌿 **Source Control**: Stage, commit and discard from the sidebar (`Ctrl+Shift+G`). A focused commit composer, Push/Pull/Fetch controls, branch and sync status, polished clean-worktree state, collapsible Staged/Changes/History sections, timeline commit history, and side-by-side diff review keep the complete Git workflow inside LightLine.
-- 🐞 **Interactive Debugger**: Built-in Debug Adapter Protocol (DAP) client communicating with `lldb-dap`. Single-key build and launch (`F5`), editor gutter breakpoints, stepping (`F10`, `F11`, `Shift+F11`), expandable variable scope trees (locals, registers, nested struct/collection values), and call stack navigation. Run/Debug now also compiles and runs **C/C++** directly, alongside Python and Rust.
-- 🧩 **Real Zed Extensions & Icon Themes**: The Extensions panel (`Ctrl+Shift+X`) installs actual extensions from the live [Zed registry](https://github.com/zed-industries/extensions) — search any extension by name, install/uninstall on demand. Installing a Zed **color theme** (e.g. Dracula) or the 1,000+ icon **Material Icon Theme** updates the editor live with no restart, while seamlessly falling back to our fast built-in vector icons when themes are uninstalled.
+- 🐞 **Interactive Debugger (Rust & Python)**: Built-in Debug Adapter Protocol (DAP) client for **Rust: Current Workspace** (built with Cargo, debugged with `lldb-dap`) and **Python: Current File** (debugged with `debugpy`). The configuration follows the active file, or can be pinned from the Run & Debug dropdown. It provides `F5` start/continue, gutter or `F9` breakpoints, Pause/Continue, Step Over/In/Out, Restart, Stop, expandable variable trees, call-stack inspection, breakpoint counts, and collapsible Variables/Call Stack/Breakpoints sections. Python programs run in the Output pane, so `input()` works while debugging, and an uncaught exception pauses where it was raised. Session controls appear only while a real debug session exists.
+- ▶️ **Multi-Language File Runner**: `Ctrl+Shift+R` runs the active Python, C/C++, or Rust file and streams its output into the Output pane. C/C++ files can be run but not yet debugged.
+- 🧩 **Real Zed Extensions & Icon Themes**: The redesigned Extensions panel (`Ctrl+Shift+X`) provides Marketplace/Installed tabs, live search, Featured/Popular/Recently Updated views, detailed extension cards, verified/version metadata, and truthful active-capability status. It installs actual extensions from the live [Zed registry](https://github.com/zed-industries/extensions); installing a Zed **color theme** (e.g. Dracula) or the 1,000+ icon **Material Icon Theme** updates the editor immediately, with automatic fallback to the built-in vector icons when themes are removed.
 - ⚙️ **User Configuration**: JSON-backed settings at `%APPDATA%\LightLine\settings.json` (`Ctrl+,`) for fonts, indentation, colors, and behavior — including tab size, auto-indent, and format-on-save, all of which actually take effect.
 - 💾 **Session Restore**: Automatically reopens your last workspace, tabs, cursor positions, and scroll offsets on launch.
 
@@ -90,10 +91,10 @@ cargo run --release
 | `Up` / `Down` / `Enter` / `Esc` | In search results: move selection, open the selected match, or leave search |
 | `Ctrl+Shift+G` | **Source Control**: stage, commit, diff review |
 | `↑` / `↓` / `Enter` / `Space` | In the source control list: move, open diff, stage or unstage |
-| `F5` / `Shift+F5` | Debug: Start & Continue / Stop session |
+| `F5` / `Shift+F5` | Debug (Rust or Python): Start & Continue / Stop session |
 | `F10` | Debug: Step Over |
 | `F11` / `Shift+F11` | Debug: Step Into / Step Out |
-| Gutter Margin Click | Toggle line breakpoint (red gutter dot) |
+| `F9` / Gutter Margin Click | Toggle line breakpoint (red gutter dot) |
 | Gutter Chevron Click | Toggle code folding (`⌄` / `›`) |
 | `Ctrl+Shift+R` | Run the active file (Python, C/C++, or Rust — detected automatically) |
 | `Ctrl+Shift+B` | Run Rust tests (`cargo test`) |
@@ -154,8 +155,9 @@ Open settings with **`Ctrl+,`** or run **`>Open Settings (JSON)`** from `Ctrl+P`
   ```powershell
   rustup component add rust-analyzer rust-src
   ```
-- **Debugger (LLDB)**: For native Rust debugging via DAP (`F5`), ensure `lldb-dap` (bundled with LLVM or Visual Studio C++ Build Tools) is present on your system `PATH`.
-- **Python**: For Python diagnostics and hover, install Node.js once (e.g. `winget install OpenJS.NodeJS.LTS`). LightLine automatically downloads and manages Pyright into `%APPDATA%\LightLine\pyright`.
+- **Rust debugger (LLDB)**: For native Rust debugging via DAP (`F5`), ensure `lldb-dap` (bundled with LLVM or Visual Studio C++ Build Tools) is present on your system `PATH`.
+- **Python debugger (debugpy)**: Python debugging uses the same interpreter as `Ctrl+Shift+R` (the selected one, a nearby `.venv`, or `python` on `PATH`), which needs `debugpy`: `python -m pip install debugpy`, or run **Python: Install debugpy** from the command palette. C/C++ files can be run but not yet debugged.
+- **Python**: For Python diagnostics and hover, install Node.js once (e.g. `winget install OpenJS.NodeJS.LTS`). LightLine automatically downloads and manages Pyright into `%APPDATA%\LightLine\pyright`. Run Python files with `Ctrl+Shift+R`, or debug them with `F5`.
 - **Prettier** (JS/TS/JSON/CSS/HTML/Markdown/YAML formatting): install `prettier` globally (`npm install -g prettier`) or have it available via `npx`. LightLine only detects it — it never installs or modifies anything outside its own extensions folder on your behalf.
 
 ---

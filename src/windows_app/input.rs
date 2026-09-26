@@ -66,7 +66,12 @@ impl App {
                     v if v == VK_PRIOR as u32 || v == VK_NEXT as u32 => true,
                     _ => false,
                 };
-            if !reserved_chord {
+            // A program being debugged runs in the Output tab; its debugger
+            // keys still drive the session instead of reaching the program.
+            let debugger_key = !ctrl
+                && self.debug.is_some()
+                && [VK_F5, VK_F10, VK_F11].iter().any(|&vk| key == vk as u32);
+            if !reserved_chord && !debugger_key {
                 return if ctrl && key == 0x56 {
                     // Ordinary Ctrl+V and Ctrl+Shift+V both paste into the shell.
                     self.paste_into_terminal(hwnd);
@@ -400,6 +405,12 @@ impl App {
                 }
                 x if x == VK_F5 as u32 => {
                     self.debug_continue(hwnd);
+                    return true;
+                }
+                x if x == VK_F9 as u32 => {
+                    let line = self.view().cursor.line;
+                    self.doc_mut().toggle_breakpoint(line);
+                    self.refresh(hwnd);
                     return true;
                 }
                 x if x == VK_F10 as u32 => {
@@ -1316,6 +1327,17 @@ impl App {
                 return;
             }
             if y < self.scale(39) {
+                if self.side_view == SideView::Extensions
+                    && x >= editor_left - self.scale(44)
+                    && x < editor_left - self.scale(18)
+                {
+                    if !self.zed_registry_loading {
+                        self.zed_registry_loaded = false;
+                        self.status = "Refreshing extension registry...".into();
+                        self.ensure_zed_registry_loaded(hwnd);
+                    }
+                    return;
+                }
                 if self.side_view == SideView::Debug {
                     if x >= editor_left - self.scale(38) {
                         self.show_quick_open(hwnd);
@@ -1405,6 +1427,11 @@ impl App {
             }
             if self.side_view == SideView::Debug {
                 let rail = self.scale(RAIL);
+                let config = self.debug_config_rect(rail, editor_left);
+                if x >= config.left && x < config.right && y >= config.top && y < config.bottom {
+                    self.show_debug_config_menu(hwnd, config.left, config.bottom);
+                    return;
+                }
                 let start = self.debug_start_button(editor_left);
                 if x >= start.left && x < start.right && y >= start.top && y < start.bottom {
                     if self.debug.is_none() {
@@ -1418,7 +1445,7 @@ impl App {
                         if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
                             let enabled = match index {
                                 0 => self.debug.is_some(),
-                                1..=3 => self.debug.is_some() && !self.debug_state.running,
+                                1..=3 => self.debug_paused(),
                                 _ => self.debug.is_some(),
                             };
                             if !enabled {
@@ -1468,7 +1495,7 @@ impl App {
                 let left = rail;
 
                 // 1. Search bar click
-                if y >= s(46) && y <= s(76) {
+                if y >= s(48) && y <= s(84) {
                     let right = self.sidebar_right();
                     let search_left = left + s(8);
                     let search_right = right - s(8);
@@ -1491,7 +1518,7 @@ impl App {
                 }
 
                 // 2. Subtabs click (Segmented Pill Capsule)
-                if y >= s(84) && y <= s(110) {
+                if y >= s(92) && y <= s(122) {
                     self.extensions_search_active = false;
                     self.terminal_focus = false;
                     let tabs_left = left + s(8);
@@ -1509,25 +1536,50 @@ impl App {
                     }
                 }
 
-                // 3. Card action button click
-                let card_h = s(86);
+                // 3. Marketplace sorting/filter pills.
+                if self.extensions_tab == ExtensionsTab::Marketplace
+                    && y >= s(132)
+                    && y <= s(160)
+                {
+                    let mut filter_x = left + s(8);
+                    for (filter, width) in [
+                        (ExtensionsFilter::Featured, 69),
+                        (ExtensionsFilter::Popular, 57),
+                        (ExtensionsFilter::Recent, 112),
+                    ] {
+                        if x >= filter_x && x < filter_x + s(width) {
+                            self.extensions_filter = filter;
+                            self.refresh(hwnd);
+                            return;
+                        }
+                        filter_x += s(width + 4);
+                    }
+                }
+
+                // 4. Card action button click
+                let card_h = s(116);
                 let card_step = card_h + s(8);
-                let start_y = s(136);
+                let start_y = s(194);
                 let visible = self.filtered_extensions();
                 if y >= start_y {
                     let row = ((y - start_y) / card_step.max(1)) as usize;
-                    if row < visible.len() {
+                    if row < visible.len().min(3) {
                         let ey = start_y + row as i32 * card_step;
                         let card_right = editor_left - s(8);
-                        let btn_w = s(76);
-                        let btn_h = s(22);
-                        let btn_left = card_right - btn_w - s(8);
-                        let btn_right = card_right - s(8);
-                        let btn_top = ey + s(51);
+                        let btn_w = s(72);
+                        let btn_h = s(26);
+                        let btn_left = card_right - btn_w - s(10);
+                        let btn_right = card_right - s(10);
+                        let btn_top = ey + s(80);
                         let btn_bottom = btn_top + btn_h;
 
                         // Generous hit box around the button
-                        if x >= btn_left - s(8) && x <= btn_right + s(8) && y >= btn_top - s(6) && y <= btn_bottom + s(8) {
+                        if y < ey + card_h
+                            && x >= btn_left - s(8)
+                            && x <= btn_right + s(8)
+                            && y >= btn_top - s(6)
+                            && y <= btn_bottom + s(8)
+                        {
                             let id = visible[row].id.to_string();
                             self.toggle_extension(hwnd, &id);
                             return;

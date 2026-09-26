@@ -11,11 +11,11 @@ mod terminal;
 mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
-    ExtensionInstallKind, ExtensionsTab, GitAction, SideView, Tab, TerminalPane, TerminalTab,
+    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, GitAction, SideView, Tab, TerminalPane, TerminalTab,
     WorkerMessage, is_c_family_path, is_cpp_path,
 };
 mod debugger;
-use debugger::DEBUG_EVENT_MESSAGE;
+use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
 mod input;
 mod language;
 use language::LSP_EVENT_MESSAGE;
@@ -30,7 +30,7 @@ mod icons;
 mod theme;
 use theme::Theme;
 
-use icons::{AppIcons, GenericIcon, IconSet};
+use icons::{AppIcons, DebugGlyph, GenericIcon, IconSet};
 use lightline::clipboard;
 use lightline::debug::{
     Command as DebugCommand, DebugClient, Event as DebugEvent, Scope as DebugScope,

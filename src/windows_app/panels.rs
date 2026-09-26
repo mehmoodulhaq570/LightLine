@@ -76,6 +76,9 @@ impl App {
             ("New File in Workspace", 22),
             ("New Folder in Workspace", 23),
             ("Refresh Explorer", 24),
+            ("Debug: Start Debugging", 33),
+            ("Debug: Select Configuration", 34),
+            ("Python: Install debugpy (for debugging)", 35),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -188,6 +191,16 @@ impl App {
                 Some(30) => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
                 Some(31) => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
                 Some(32) => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
+                Some(33) => self.start_debug_session(hwnd),
+                Some(34) => {
+                    // Open the panel and drop the menu down from its selector.
+                    if !(self.side_view == SideView::Debug && self.explorer_visible) {
+                        self.toggle_side_view(hwnd, SideView::Debug);
+                    }
+                    let config = self.debug_config_rect(self.scale(RAIL), self.editor_left());
+                    self.show_debug_config_menu(hwnd, config.left, config.bottom);
+                }
+                Some(35) => self.install_debugpy(hwnd),
                 _ => {}
             }
         } else {
@@ -395,22 +408,11 @@ impl App {
             return;
         };
         let root = workflow::python_project_root(&file, self.workspace_root.as_deref());
-        let interpreter = match self.python_interpreter.clone() {
-            Some(interpreter) => interpreter,
-            None => match workflow::detect_python_interpreter(Some(&root)) {
-                Some(detected) => {
-                    self.python_interpreter = Some(detected.clone());
-                    self.status =
-                        format!("Using Python interpreter {}", detected.to_string_lossy());
-                    detected
-                }
-                None => {
-                    self.status =
-                        "Select a Python interpreter or virtual environment before running".into();
-                    unsafe { InvalidateRect(hwnd, null(), 0) };
-                    return;
-                }
-            },
+        let Some(interpreter) = self.resolve_python_interpreter(&root) else {
+            self.status =
+                "Select a Python interpreter or virtual environment before running".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
         };
         // PowerShell only executes a quoted-string command when it's prefixed
         // with the call operator; without it "'...exe' -u '...'" parses as a
@@ -421,6 +423,41 @@ impl App {
             "& {} -u {}",
             terminal::powershell_quoted(&interpreter),
             terminal::powershell_quoted(Path::new(&display_path(&file)))
+        );
+        self.run_in_terminal(hwnd, &command);
+    }
+
+    // The interpreter Run Python File and Python debugging use: the one the
+    // user selected, else a .venv near `root` or python on PATH, remembered
+    // once found.
+    pub(super) fn resolve_python_interpreter(&mut self, root: &Path) -> Option<PathBuf> {
+        if let Some(interpreter) = self.python_interpreter.clone() {
+            return Some(interpreter);
+        }
+        let detected = workflow::detect_python_interpreter(Some(root))?;
+        self.python_interpreter = Some(detected.clone());
+        self.status = format!("Using Python interpreter {}", detected.to_string_lossy());
+        Some(detected)
+    }
+
+    // Installs debugpy into the interpreter Python debugging uses, in the
+    // Output tab so pip's progress and any error stay visible.
+    pub(super) fn install_debugpy(&mut self, hwnd: HWND) {
+        let root = match self.doc().path.clone() {
+            Some(file) => workflow::python_project_root(&file, self.workspace_root.as_deref()),
+            None => self
+                .workspace_root
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(".")),
+        };
+        let Some(interpreter) = self.resolve_python_interpreter(&root) else {
+            self.status = "Select a Python interpreter before installing debugpy".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+        let command = format!(
+            "& {} -m pip install debugpy",
+            terminal::powershell_quoted(Path::new(&display_path(&interpreter)))
         );
         self.run_in_terminal(hwnd, &command);
     }
@@ -564,7 +601,8 @@ impl App {
                         Ok(entries) => {
                             self.zed_registry_loaded = true;
                             for (id, version) in entries {
-                                if self.extensions.iter().any(|ext| ext.id == id) {
+                                if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
+                                    ext.version = version;
                                     continue;
                                 }
                                 self.extensions.push(Extension {

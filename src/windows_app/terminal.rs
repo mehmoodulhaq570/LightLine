@@ -99,12 +99,18 @@ fn dim_color(color: u32) -> u32 {
 // Quote a path as a PowerShell literal string (single quotes, doubled to escape)
 // so it can be typed safely into the interactive shell.
 pub(super) fn powershell_quoted(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    let mut out = String::with_capacity(raw.len() + 2);
+    powershell_literal(&path.to_string_lossy())
+}
+
+// Quote text as a PowerShell single-quoted literal. PowerShell also ends such
+// a string at the typographic quotes ‘ ’ ‚ ‛, so those are
+// doubled too.
+pub(super) fn powershell_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
     out.push('\'');
-    for ch in raw.chars() {
-        if ch == '\'' {
-            out.push('\'');
+    for ch in text.chars() {
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            out.push(ch);
         }
         out.push(ch);
     }

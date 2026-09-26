@@ -123,6 +123,13 @@ pub(super) enum ExtensionsTab {
     Installed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ExtensionsFilter {
+    Featured,
+    Popular,
+    Recent,
+}
+
 // Owned strings (not &'static str) because entries can now come from the
 // live Zed registry at runtime, not just the two extensions LightLine ships
 // knowledge of.
@@ -486,6 +493,7 @@ pub(super) struct App {
     pub(super) git_watch_files: Vec<PathBuf>,
     pub(super) extensions: Vec<Extension>,
     pub(super) extensions_tab: ExtensionsTab,
+    pub(super) extensions_filter: ExtensionsFilter,
     pub(super) extensions_query: String,
     pub(super) extensions_search_active: bool,
     pub(super) zed_registry_loaded: bool,
@@ -497,6 +505,9 @@ pub(super) struct App {
     pub(super) debug_pending_root: Option<PathBuf>,
     pub(super) debug_pending_breakpoints: Vec<(PathBuf, Vec<u32>)>,
     pub(super) debug_sections_expanded: [bool; 3],
+    // The configuration picked in the Run & Debug dropdown; None follows the
+    // active file (see App::auto_debug_config).
+    pub(super) debug_config: Option<DebugConfig>,
 }
 
 // Everything the Debug side panel paints, kept separate from the live
@@ -505,6 +516,8 @@ pub(super) struct App {
 #[derive(Default)]
 pub(super) struct DebugState {
     pub(super) status: String,
+    // What the current (or last) session launched; None before the first.
+    pub(super) config: Option<DebugConfig>,
     pub(super) running: bool,
     pub(super) thread_id: i64,
     pub(super) frames: Vec<DebugFrame>,
@@ -932,8 +945,20 @@ impl App {
                     installed: lightline::extensions::installer::is_installed("material-icon-theme"),
                     installing: false,
                 },
+                Extension {
+                    id: "dracula".into(),
+                    name: "Dracula Theme".into(),
+                    publisher: "Dracula Team".into(),
+                    version: "Zed Registry".into(),
+                    description: "A dark color theme with vivid, accessible syntax colors".into(),
+                    downloads: "860K".into(),
+                    rating: "\u{2605} 4.8".into(),
+                    installed: lightline::extensions::installer::is_installed("dracula"),
+                    installing: false,
+                },
             ],
             extensions_tab: ExtensionsTab::Marketplace,
+            extensions_filter: ExtensionsFilter::Featured,
             extensions_query: String::new(),
             zed_registry_loaded: false,
             zed_registry_loading: false,
@@ -947,6 +972,7 @@ impl App {
             debug_pending_root: None,
             debug_pending_breakpoints: Vec::new(),
             debug_sections_expanded: [true; 3],
+            debug_config: None,
             extensions_search_active: false,
         }
     }
@@ -969,7 +995,7 @@ impl App {
 
     pub(super) fn filtered_extensions(&self) -> Vec<&Extension> {
         let q = self.extensions_query.trim().to_lowercase();
-        self.extensions
+        let mut visible: Vec<&Extension> = self.extensions
             .iter()
             .filter(|ext| {
                 if self.extensions_tab == ExtensionsTab::Installed {
@@ -980,14 +1006,26 @@ impl App {
                     // entries LightLine ships knowledge of, not every id in
                     // the Zed registry the moment it's loaded -- the search
                     // box is what reveals the rest.
-                    return ext.id == "prettier" || ext.id == "material-icons";
+                    return matches!(ext.id.as_str(), "prettier" | "material-icons" | "dracula");
                 }
                 ext.id.to_lowercase().contains(&q)
                     || ext.name.to_lowercase().contains(&q)
                     || ext.description.to_lowercase().contains(&q)
                     || ext.publisher.to_lowercase().contains(&q)
             })
-            .collect()
+            .collect();
+        if q.is_empty() && self.extensions_tab == ExtensionsTab::Marketplace {
+            match self.extensions_filter {
+                ExtensionsFilter::Featured => {}
+                ExtensionsFilter::Popular => visible.sort_by_key(|ext| match ext.id.as_str() {
+                    "prettier" => 0,
+                    "material-icons" => 1,
+                    _ => 2,
+                }),
+                ExtensionsFilter::Recent => visible.reverse(),
+            }
+        }
+        visible
     }
 
     // Kicks off a one-time fetch of every id/version in the Zed registry, so
@@ -1377,6 +1415,9 @@ impl App {
             self.side_view = view;
             self.panel_focus = false;
             self.set_sidebar_visible(hwnd, true);
+            if view == SideView::Extensions {
+                self.ensure_zed_registry_loaded(hwnd);
+            }
         }
         self.show_active_tab(hwnd);
     }
