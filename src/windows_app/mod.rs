@@ -100,6 +100,8 @@ const TRANSITION_MS: u128 = 150;
 const GUTTER_DIFF_TIMER: usize = 8;
 // WM_TIMER id that repaints once a status message expires (see fresh_status).
 const STATUS_TIMER: usize = 9;
+// Rows the Quick Open list shows at once; longer lists scroll.
+const QUICK_ROWS: usize = 7;
 fn scaled(pixels: i32, dpi: u32, zoom: i32) -> i32 {
     ((pixels as i64 * dpi as i64 * zoom as i64 + 4800) / 9600) as i32
 }

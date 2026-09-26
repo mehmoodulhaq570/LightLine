@@ -392,6 +392,8 @@ pub(super) struct App {
     pub(super) quick_open: bool,
     pub(super) quick_query: String,
     pub(super) quick_selected: usize,
+    // First Quick Open row on screen; moves to keep the selection visible.
+    pub(super) quick_first: usize,
     pub(super) quick_files: Vec<PathBuf>,
     pub(super) quick_loading: bool,
     pub(super) search_input: bool,
@@ -768,7 +770,10 @@ impl App {
         let (worker_tx, worker_rx) = mpsc::channel();
         let (lsp_tx, lsp_rx) = mpsc::channel();
         let (debug_tx, debug_rx) = mpsc::channel();
-        let settings = lightline::settings::Settings::load();
+        let (settings, settings_error) = match lightline::settings::Settings::try_load() {
+            Ok(settings) => (settings, None),
+            Err(error) => (lightline::settings::Settings::default(), Some(error)),
+        };
         let theme = Theme::default_dark().with_overrides(&settings.colors);
         Self {
             tabs: vec![Tab::new(Document::new())],
@@ -795,7 +800,7 @@ impl App {
             backbuffer: None,
             scrollbar_visible: None,
             transition: None,
-            status: "Ready".into(),
+            status: settings_error.unwrap_or_else(|| "Ready".into()),
             focused: false,
             caret_on: true,
             dragging: false,
@@ -830,6 +835,7 @@ impl App {
             quick_open: false,
             quick_query: String::new(),
             quick_selected: 0,
+            quick_first: 0,
             quick_files: Vec::new(),
             quick_loading: false,
             search_input: false,
@@ -2294,6 +2300,12 @@ impl App {
                     "Saved {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 );
+                if lightline::settings::Settings::settings_path()
+                    .is_some_and(|settings| Self::same_path(&settings, &path))
+                    && self.reload_settings()
+                {
+                    self.status = "Settings saved and applied".into();
+                }
                 self.gutter_done = None;
                 self.refresh_active_git_diff(hwnd);
                 // A save is the moment a change appears or disappears, so the

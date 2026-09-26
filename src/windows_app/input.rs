@@ -59,7 +59,8 @@ impl App {
             // Reserved application chords fall through to the handlers below.
             let reserved_chord = ctrl
                 && match key {
-                    0x50 | 0x52 | 0x42 | 0x57 => shift, // Ctrl+Shift+P/R/B/W
+                    0x50 => true,                // Ctrl+P and Ctrl+Shift+P
+                    0x52 | 0x42 | 0x57 => shift, // Ctrl+Shift+R/B/W
                     v if v == VK_TAB as u32 => true,
                     v if v == VK_PRIOR as u32 || v == VK_NEXT as u32 => true,
                     _ => false,
@@ -140,16 +141,16 @@ impl App {
         if self.quick_open {
             match key {
                 x if x == VK_ESCAPE as u32 => self.quick_open = false,
-                x if x == VK_UP as u32 => {
-                    self.quick_selected = self.quick_selected.saturating_sub(1)
+                x if x == VK_UP as u32 => self.quick_select(self.quick_selected.saturating_sub(1)),
+                x if x == VK_DOWN as u32 => self.quick_select(self.quick_selected + 1),
+                x if x == VK_PRIOR as u32 => {
+                    self.quick_select(self.quick_selected.saturating_sub(QUICK_ROWS))
                 }
-                x if x == VK_DOWN as u32 => {
-                    self.quick_selected =
-                        (self.quick_selected + 1).min(self.quick_count().saturating_sub(1))
-                }
+                x if x == VK_NEXT as u32 => self.quick_select(self.quick_selected + QUICK_ROWS),
                 x if x == VK_BACK as u32 => {
                     self.quick_query.pop();
                     self.quick_selected = 0;
+                    self.quick_first = 0;
                 }
                 x if x == VK_RETURN as u32 => {
                     self.activate_quick_item(hwnd, self.quick_selected);
@@ -890,6 +891,7 @@ impl App {
                 if self.quick_open {
                     self.quick_query.push(ch);
                     self.quick_selected = 0;
+                    self.quick_first = 0;
                 } else if self.search_input {
                     self.project_query.push(ch);
                     self.search_results.clear();
@@ -1194,8 +1196,11 @@ impl App {
                 && y >= top + self.scale(68)
                 && y < top + self.scale(70 + 8 * 34)
             {
-                let index = ((y - top - self.scale(68)) / self.scale(34).max(1)) as usize;
-                self.activate_quick_item(hwnd, index);
+                // The hint line below the rows isn't an item.
+                let row = ((y - top - self.scale(68)) / self.scale(34).max(1)) as usize;
+                if row < QUICK_ROWS {
+                    self.activate_quick_item(hwnd, self.quick_first + row);
+                }
             } else if x < left || x >= left + width || y < top || y >= top + self.scale(70 + 8 * 34)
             {
                 self.quick_open = false;

@@ -12,6 +12,7 @@ impl App {
         self.terminal_focus = false;
         self.quick_query.clear();
         self.quick_selected = 0;
+        self.quick_first = 0;
         self.quick_loading = false;
         if let Some(root) = self.workspace_root.clone() {
             self.quick_files.clear();
@@ -81,13 +82,38 @@ impl App {
         .collect()
     }
 
-    // Matches the 7-row render cap in paint_quick_open, so keyboard navigation
-    // never selects a row that isn't actually visible.
     pub(super) fn quick_count(&self) -> usize {
         if self.quick_query.starts_with('>') {
-            self.quick_commands().len().min(7)
+            self.quick_commands().len()
         } else {
-            self.quick_matches().len().min(7)
+            self.quick_matches().len()
+        }
+    }
+
+    // Selects a Quick Open row, scrolling the list just enough to show it.
+    pub(super) fn quick_select(&mut self, index: usize) {
+        self.quick_selected = index.min(self.quick_count().saturating_sub(1));
+        if self.quick_selected < self.quick_first {
+            self.quick_first = self.quick_selected;
+        } else if self.quick_selected >= self.quick_first + QUICK_ROWS {
+            self.quick_first = self.quick_selected + 1 - QUICK_ROWS;
+        }
+    }
+
+    // Mouse wheel over Quick Open scrolls its list, not the editor behind it.
+    pub(super) fn scroll_quick_open(&mut self, hwnd: HWND, delta: i32) {
+        let max_first = self.quick_count().saturating_sub(QUICK_ROWS);
+        let first = if delta > 0 {
+            self.quick_first.saturating_sub(3)
+        } else {
+            (self.quick_first + 3).min(max_first)
+        };
+        if first != self.quick_first {
+            self.quick_first = first;
+            // Keep the selection on screen so Enter never runs a hidden row.
+            let last = first + QUICK_ROWS - 1;
+            self.quick_selected = self.quick_selected.clamp(first, last);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 
@@ -180,8 +206,29 @@ impl App {
             if !path.exists() {
                 let _ = lightline::settings::Settings::default().save();
             }
-            self.settings = lightline::settings::Settings::load();
+            self.reload_settings();
             self.open(hwnd, Some(path));
+        }
+    }
+
+    // Re-reads settings.json and applies it, so an edit takes effect as soon
+    // as the file is saved rather than on the next launch. A file that can't
+    // be used keeps the current settings and says why in the status bar.
+    pub(super) fn reload_settings(&mut self) -> bool {
+        match lightline::settings::Settings::try_load() {
+            Ok(settings) => {
+                self.settings = settings;
+                // An installed color theme already folded the old overrides
+                // in; it keeps them until it is reinstalled or removed.
+                if self.active_color_theme.is_none() {
+                    self.theme = Theme::default_dark().with_overrides(&self.settings.colors);
+                }
+                true
+            }
+            Err(error) => {
+                self.status = error;
+                false
+            }
         }
     }
 
@@ -215,7 +262,7 @@ impl App {
                     .to_ascii_lowercase()
                     .contains(&query)
             })
-            .take(8)
+            .take(50)
             .cloned()
             .collect()
     }

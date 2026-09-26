@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-09-26
+
+#### Fixed
+- **Settings Needed a Restart**: `settings.json` was read only at startup, so saving a change such as `"formatOnSave": true` from inside LightLine did nothing until the next launch. Saving the file now re-reads and applies it immediately ("Settings saved and applied").
+- **Broken `settings.json` Was Silently Ignored**: A syntax error (e.g. a trailing comma) made LightLine quietly fall back to every default. The error is now shown in red in the status bar, on startup and on save, and the settings already in effect are kept.
+- **Command Palette Showed Only 7 Commands**: The Quick Open list was cut off at seven rows, so commands further down, like `Open Settings (JSON)`, could not be reached without typing a filter. The list now scrolls with `Up`/`Down`, `Page Up`/`Page Down` and the mouse wheel, shows a position hint such as `8–14 of 33`, and file results go up to 50 instead of 8. Clicking the hint line no longer opens a hidden eighth result.
+- **Ctrl+P Went to the Shell**: With the terminal focused, `Ctrl+P` was sent to the shell instead of opening Quick Open. It is now kept for LightLine, like `Ctrl+Shift+P`.
+
 ### 2026-09-25
 
 #### Added

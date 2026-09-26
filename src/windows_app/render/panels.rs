@@ -549,18 +549,16 @@ impl App {
                 bottom,
             },
         );
-        // Capped at 7 (not the 8 rows the box has room for) so a full list never
-        // shares its last row with the "Type > for commands" hint below it.
+        // QUICK_ROWS rows are shown (not the 8 the box has room for) so the list
+        // never shares its last row with the hint line below it.
         let items: Vec<String> = if self.quick_query.starts_with('>') {
             self.quick_commands()
                 .iter()
-                .take(7)
                 .map(|(name, _)| format!(">  {name}"))
                 .collect()
         } else {
             self.quick_matches()
                 .iter()
-                .take(7)
                 .map(|path| {
                     path.strip_prefix(self.workspace_root.as_deref().unwrap_or(Path::new("")))
                         .unwrap_or(path)
@@ -569,8 +567,13 @@ impl App {
                 })
                 .collect()
         };
-        for (index, label) in items.iter().enumerate() {
-            let y = top + self.scale(68 + index as i32 * 34);
+        let shown = items
+            .iter()
+            .enumerate()
+            .skip(self.quick_first)
+            .take(QUICK_ROWS);
+        for (row, (index, label)) in shown.enumerate() {
+            let y = top + self.scale(68 + row as i32 * 34);
             if index == self.quick_selected {
                 Self::fill(
                     hdc,
@@ -618,10 +621,23 @@ impl App {
                 },
             );
         }
+        let mut hints = Vec::new();
         if !self.quick_query.starts_with('>') {
+            hints.push("Type > for commands".to_string());
+        }
+        if items.len() > QUICK_ROWS {
+            let last = (self.quick_first + QUICK_ROWS).min(items.len());
+            hints.push(format!(
+                "{}–{} of {}  ·  scroll for more",
+                self.quick_first + 1,
+                last,
+                items.len()
+            ));
+        }
+        if !hints.is_empty() {
             Self::label(
                 hdc,
-                "Type > for commands",
+                &hints.join("  ·  "),
                 left + self.scale(18),
                 bottom - self.scale(28),
                 self.theme.muted,

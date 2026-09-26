@@ -386,6 +386,10 @@ unsafe extern "system" fn wnd_proc(
                 GetCursorPos(&mut point);
                 ScreenToClient(hwnd, &mut point);
             }
+            if app.quick_open {
+                app.scroll_quick_open(hwnd, delta as i32);
+                return 0;
+            }
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
             if app.terminal_visible
