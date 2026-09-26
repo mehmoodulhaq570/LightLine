@@ -25,13 +25,6 @@ pub enum Adapter {
 }
 
 impl Adapter {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Adapter::Lldb => "LLDB",
-            Adapter::Debugpy { .. } => "debugpy",
-        }
-    }
-
     fn id(&self) -> &'static str {
         match self {
             Adapter::Lldb => "lldb-dap",
@@ -200,10 +193,14 @@ enum PendingKind {
     Threads,
     StackTrace,
     Scopes,
-    Variables { scope_name: String },
+    Variables {
+        scope_name: String,
+    },
     /// A user-initiated expand-on-click fetch, not part of the stop flow;
     /// answered directly with `Event::Variables` instead of feeding `StopFlow`.
-    VariablesOnDemand { reference: i64 },
+    VariablesOnDemand {
+        reference: i64,
+    },
     Other,
 }
 
@@ -637,7 +634,10 @@ fn run_adapter(
                                 .map(|vars| vars.iter().filter_map(parse_variable).collect())
                                 .unwrap_or_default();
                             emit(
-                                Event::Variables { reference, variables },
+                                Event::Variables {
+                                    reference,
+                                    variables,
+                                },
                                 &events,
                                 &wake,
                             );
@@ -650,10 +650,8 @@ fn run_adapter(
                     match event_name {
                         "initialized" => {
                             for (path, lines) in &request.breakpoints {
-                                let breakpoints: Vec<Value> = lines
-                                    .iter()
-                                    .map(|line| json!({"line": line + 1}))
-                                    .collect();
+                                let breakpoints: Vec<Value> =
+                                    lines.iter().map(|line| json!({"line": line + 1})).collect();
                                 if send_request(
                                     &mut stdin,
                                     &mut seq,
@@ -782,9 +780,13 @@ fn run_adapter(
             .unwrap_or(current_thread);
         let sent = match commands.recv_timeout(Duration::from_millis(30)) {
             Ok(Command::Disconnect) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Ok(Command::Continue) => {
-                send_thread_command(&mut stdin, &mut seq, &mut pending, "continue", active_thread)
-            }
+            Ok(Command::Continue) => send_thread_command(
+                &mut stdin,
+                &mut seq,
+                &mut pending,
+                "continue",
+                active_thread,
+            ),
             Ok(Command::Next) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "next", active_thread)
             }
@@ -859,6 +861,10 @@ fn launch_arguments(request: &LaunchRequest) -> Value {
             "console": "integratedTerminal",
             "justMyCode": true,
             "stopOnEntry": false,
+            // debugpy otherwise injects itself into Python child processes,
+            // which then wait for the IDE to attach to them; LightLine
+            // doesn't, so a program that starts one would hang.
+            "subProcess": false,
         }),
     }
 }
@@ -943,7 +949,10 @@ fn read_packet(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
             length = value.trim().parse::<usize>().ok();
         }
         if line.len() > 8192 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "DAP header too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "DAP header too large",
+            ));
         }
     }
     let length = length
@@ -1060,7 +1069,10 @@ mod tests {
         assert_eq!(reason, "breakpoint");
         assert_eq!(frames[0].name, "add");
         assert_eq!(frames[0].line, 2);
-        let path = frames[0].path.clone().expect("the frame should have a source path");
+        let path = frames[0]
+            .path
+            .clone()
+            .expect("the frame should have a source path");
         assert!(path.ends_with("target.py"));
         assert_eq!(local(&scopes, "a").as_deref(), Some("2"));
         assert_eq!(local(&scopes, "b").as_deref(), Some("3"));
@@ -1071,6 +1083,51 @@ mod tests {
         assert_eq!(local(&scopes, "total").as_deref(), Some("5"));
 
         client.send(Command::Continue);
+        assert!(matches!(next_event(&rx), Event::Terminated));
+        drop(client);
+        let _ = program.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn debugpy_session_runs_a_program_that_starts_a_python_subprocess() {
+        let Some(python) = python_with_debugpy() else {
+            eprintln!("skipped: no Python interpreter with debugpy installed");
+            return;
+        };
+        let dir =
+            std::env::temp_dir().join(format!("lightline-debugpy-sub-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("parent.py");
+        std::fs::write(
+            &script,
+            "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'pass'], timeout=20)\n",
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let client = DebugClient::start(
+            LaunchRequest {
+                adapter: Adapter::Debugpy {
+                    interpreter: python,
+                },
+                program: script,
+                args: Vec::new(),
+                cwd: dir.clone(),
+                breakpoints: Vec::new(),
+            },
+            tx,
+            Arc::new(|| {}),
+        );
+        let Event::RunInTerminal { args, cwd, .. } = next_event(&rx) else {
+            panic!("debugpy should ask to run the program in a terminal");
+        };
+        let mut program = ProcessCommand::new(&args[0]);
+        program.args(&args[1..]).stdout(Stdio::null());
+        if let Some(cwd) = cwd {
+            program.current_dir(cwd);
+        }
+        let mut program = program.spawn().unwrap();
+        // With debugpy following child processes this never arrives.
         assert!(matches!(next_event(&rx), Event::Terminated));
         drop(client);
         let _ = program.wait();

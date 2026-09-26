@@ -30,22 +30,28 @@ pub fn ensure_material_icon_theme() {
     if target_exists {
         return;
     }
-    let _ = install("material-icon-theme", MATERIAL_ICON_THEME_URL, Some(MATERIAL_ICON_THEME_TAG));
+    let _ = install(
+        "material-icon-theme",
+        MATERIAL_ICON_THEME_URL,
+        Some(MATERIAL_ICON_THEME_TAG),
+    );
 }
 
 /// Clones `git_url` (optionally at `tag`) into
 /// `<extensions_dir>/<id>`, replacing anything already there. Returns the
 /// installed extension's directory on success.
 pub fn install(id: &str, git_url: &str, tag: Option<&str>) -> Result<PathBuf, String> {
-    let dir = crate::workflow::extensions_dir().ok_or("could not determine the extensions directory")?;
+    let dir =
+        crate::workflow::extensions_dir().ok_or("could not determine the extensions directory")?;
     let target = dir.join(id);
     if !crate::workflow::command_available("git") {
         return Err("git was not found on PATH".into());
     }
     std::fs::create_dir_all(&dir).map_err(|error| format!("could not create {dir:?}: {error}"))?;
     if target.exists() {
-        std::fs::remove_dir_all(&target)
-            .map_err(|error| format!("could not remove the existing install at {target:?}: {error}"))?;
+        std::fs::remove_dir_all(&target).map_err(|error| {
+            format!("could not remove the existing install at {target:?}: {error}")
+        })?;
     }
     let clone = |tag: Option<&str>| -> Result<bool, String> {
         let mut command = Command::new("git");
@@ -92,7 +98,8 @@ pub fn uninstall(id: &str) -> Result<(), String> {
     if !target.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(&target).map_err(|error| format!("could not remove {target:?}: {error}"))
+    std::fs::remove_dir_all(&target)
+        .map_err(|error| format!("could not remove {target:?}: {error}"))
 }
 
 /// True when `id` has already been installed locally (regardless of type).

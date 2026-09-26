@@ -200,9 +200,35 @@ impl Document {
             .to_ascii_lowercase();
         matches!(
             extension.as_str(),
-            "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" | "cs" | "java" | "kt"
-                | "kts" | "go" | "swift" | "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts"
-                | "tsx" | "json" | "jsonc" | "css" | "scss" | "less" | "php" | "dart" | "scala"
+            "rs" | "c"
+                | "h"
+                | "cc"
+                | "cpp"
+                | "cxx"
+                | "hpp"
+                | "hh"
+                | "cs"
+                | "java"
+                | "kt"
+                | "kts"
+                | "go"
+                | "swift"
+                | "js"
+                | "mjs"
+                | "cjs"
+                | "jsx"
+                | "ts"
+                | "mts"
+                | "cts"
+                | "tsx"
+                | "json"
+                | "jsonc"
+                | "css"
+                | "scss"
+                | "less"
+                | "php"
+                | "dart"
+                | "scala"
         )
     }
 
@@ -370,7 +396,11 @@ impl Document {
 
     /// Number of rows the document takes on screen: lines minus hidden ones.
     pub fn visible_line_count(&self) -> usize {
-        let hidden: usize = self.hidden_runs().iter().map(|(first, last)| last + 1 - first).sum();
+        let hidden: usize = self
+            .hidden_runs()
+            .iter()
+            .map(|(first, last)| last + 1 - first)
+            .sum();
         self.lines.len() - hidden.min(self.lines.len())
     }
 
@@ -420,7 +450,8 @@ impl Document {
     /// Returns true if anything was unfolded.
     pub fn unfold_to_reveal(&mut self, line: usize) -> bool {
         let before = self.folded_ranges.len();
-        self.folded_ranges.retain(|(start, end)| !(line > *start && line <= *end));
+        self.folded_ranges
+            .retain(|(start, end)| !(line > *start && line <= *end));
         self.folded_ranges.len() != before
     }
 

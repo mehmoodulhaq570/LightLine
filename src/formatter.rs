@@ -189,7 +189,9 @@ impl Formatter for PrettierFormatter {
         match run_formatter(self.command(path), source) {
             Err(FormatError::NotAvailable) => {
                 let mut fallback = Command::new("npx");
-                fallback.args(["--yes", "prettier", "--stdin-filepath"]).arg(path);
+                fallback
+                    .args(["--yes", "prettier", "--stdin-filepath"])
+                    .arg(path);
                 run_formatter(fallback, source)
             }
             other => other,
@@ -277,7 +279,9 @@ fn tokenize_json(source: &str) -> Result<Vec<(usize, JsonToken<'_>)>, String> {
                 i += 1;
                 loop {
                     match bytes.get(i) {
-                        None | Some(b'\n') => return Err("Invalid JSON: unterminated string".into()),
+                        None | Some(b'\n') => {
+                            return Err("Invalid JSON: unterminated string".into());
+                        }
                         Some(b'\\') => i += 2,
                         Some(b'"') => {
                             i += 1;
@@ -305,14 +309,25 @@ fn tokenize_json(source: &str) -> Result<Vec<(usize, JsonToken<'_>)>, String> {
                 while i < bytes.len()
                     && !matches!(
                         bytes[i],
-                        b' ' | b'\t' | b'\r' | b'\n' | b'{' | b'}' | b'[' | b']' | b',' | b':'
-                            | b'"' | b'/'
+                        b' ' | b'\t'
+                            | b'\r'
+                            | b'\n'
+                            | b'{'
+                            | b'}'
+                            | b'['
+                            | b']'
+                            | b','
+                            | b':'
+                            | b'"'
+                            | b'/'
                     )
                 {
                     i += 1;
                 }
                 if i == start {
-                    return Err(format!("Invalid JSON: unexpected character at byte {start}"));
+                    return Err(format!(
+                        "Invalid JSON: unexpected character at byte {start}"
+                    ));
                 }
                 JsonToken::Value(&source[start..i])
             }
@@ -325,11 +340,14 @@ fn tokenize_json(source: &str) -> Result<Vec<(usize, JsonToken<'_>)>, String> {
 
 fn format_json(source: &str) -> Result<String, String> {
     let tokens = tokenize_json(source)?;
-    let has_comments = tokens.iter().any(|(_, t)| matches!(t, JsonToken::Comment(_)));
+    let has_comments = tokens
+        .iter()
+        .any(|(_, t)| matches!(t, JsonToken::Comment(_)));
     // Plain JSON gets a full syntax check; JSONC can't go through serde_json,
     // so for it the bracket check below is the safety net.
     if !has_comments {
-        serde_json::from_str::<serde_json::Value>(source).map_err(|e| format!("Invalid JSON: {e}"))?;
+        serde_json::from_str::<serde_json::Value>(source)
+            .map_err(|e| format!("Invalid JSON: {e}"))?;
     }
 
     let mut out = String::with_capacity(source.len() + source.len() / 4);
@@ -514,7 +532,11 @@ fn format_toml(source: &str) -> Result<String, String> {
             continue;
         }
         let ends_in_string = ml != TomlString::None;
-        let mut line = if ends_in_string { raw.to_string() } else { raw.trim_end().to_string() };
+        let mut line = if ends_in_string {
+            raw.to_string()
+        } else {
+            raw.trim_end().to_string()
+        };
         if start_depth > 0 {
             // A continuation line of a multi-line array or inline table: keep
             // its indentation, which is the author's layout choice.
@@ -535,7 +557,11 @@ fn format_toml(source: &str) -> Result<String, String> {
             continue;
         }
         let is_header = line.starts_with('[');
-        if is_header && out.last().is_some_and(|last| !last.is_empty() && !last.starts_with('#')) {
+        if is_header
+            && out
+                .last()
+                .is_some_and(|last| !last.is_empty() && !last.starts_with('#'))
+        {
             out.push(String::new());
         }
         out.push(line);
@@ -614,9 +640,18 @@ mod tests {
 
     #[test]
     fn formatter_for_returns_expected_formatters() {
-        assert_eq!(formatter_for(Path::new("data.json")).unwrap().name(), "JSON (built-in)");
-        assert_eq!(formatter_for(Path::new("config.toml")).unwrap().name(), "TOML (built-in)");
-        assert_eq!(formatter_for(Path::new("index.ts")).unwrap().name(), "Prettier");
+        assert_eq!(
+            formatter_for(Path::new("data.json")).unwrap().name(),
+            "JSON (built-in)"
+        );
+        assert_eq!(
+            formatter_for(Path::new("config.toml")).unwrap().name(),
+            "TOML (built-in)"
+        );
+        assert_eq!(
+            formatter_for(Path::new("index.ts")).unwrap().name(),
+            "Prettier"
+        );
         assert!(formatter_for(Path::new("main.rs")).is_none());
     }
 
@@ -646,21 +681,36 @@ mod tests {
     fn native_json_formatter_keeps_key_order_numbers_and_comments() {
         let formatter = NativeJsonFormatter;
         let source = "{\"z\":1.50,\"a\":[],\"m\":{}, // trailing\n\n// own line\n\"big\":12345678901234567890}";
-        let formatted = formatter.format(source, Path::new("tsconfig.json")).unwrap();
+        let formatted = formatter
+            .format(source, Path::new("tsconfig.json"))
+            .unwrap();
         assert_eq!(
             formatted,
             "{\n  \"z\": 1.50,\n  \"a\": [],\n  \"m\": {}, // trailing\n\n  // own line\n  \"big\": 12345678901234567890\n}\n"
         );
         // Formatting is stable.
-        assert_eq!(formatter.format(&formatted, Path::new("tsconfig.json")).unwrap(), formatted);
+        assert_eq!(
+            formatter
+                .format(&formatted, Path::new("tsconfig.json"))
+                .unwrap(),
+            formatted
+        );
     }
 
     #[test]
     fn native_json_formatter_rejects_broken_input() {
         let formatter = NativeJsonFormatter;
         assert!(formatter.format("{\"a\": 1", Path::new("x.json")).is_err());
-        assert!(formatter.format("{\"a\": [1}", Path::new("x.json")).is_err());
-        assert!(formatter.format("// c\n{\"a\": \"open}", Path::new("x.json")).is_err());
+        assert!(
+            formatter
+                .format("{\"a\": [1}", Path::new("x.json"))
+                .is_err()
+        );
+        assert!(
+            formatter
+                .format("// c\n{\"a\": \"open}", Path::new("x.json"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -672,7 +722,12 @@ mod tests {
             formatted,
             "# top comment\nname = \"demo\"\nversion = \"0.1.0\" # inline\n\n[dependencies]\n# why serde\nserde = { version = \"1\", features = [\"derive\"] }\nlist = [\n    \"a\",  # first\n    \"b\",\n]\ntext = \"\"\"\nkeep   \n  this = spacing\n\"\"\"\n\n[dev-dependencies]\n"
         );
-        assert_eq!(formatter.format(&formatted, Path::new("Cargo.toml")).unwrap(), formatted);
+        assert_eq!(
+            formatter
+                .format(&formatted, Path::new("Cargo.toml"))
+                .unwrap(),
+            formatted
+        );
     }
 
     #[test]
@@ -680,7 +735,10 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         let source = std::fs::read_to_string(&path).unwrap();
         let formatted = NativeTomlFormatter.format(&source, &path).unwrap();
-        for comment in source.lines().filter_map(|l| l.find('#').map(|i| l[i..].trim_end())) {
+        for comment in source
+            .lines()
+            .filter_map(|l| l.find('#').map(|i| l[i..].trim_end()))
+        {
             assert!(formatted.contains(comment), "lost comment: {comment}");
         }
     }
@@ -689,12 +747,16 @@ mod tests {
     fn builtin_formatters_handle_non_ascii_text() {
         let toml = "a=\"\"\"héllo ü\n wörld\"\"\"\nb='ß' # ñ\n";
         assert_eq!(
-            NativeTomlFormatter.format(toml, Path::new("x.toml")).unwrap(),
+            NativeTomlFormatter
+                .format(toml, Path::new("x.toml"))
+                .unwrap(),
             "a = \"\"\"héllo ü\n wörld\"\"\"\nb = 'ß' # ñ\n"
         );
         let json = "{\"ключ\":\"значение\" /* ü */}";
         assert_eq!(
-            NativeJsonFormatter.format(json, Path::new("x.json")).unwrap(),
+            NativeJsonFormatter
+                .format(json, Path::new("x.json"))
+                .unwrap(),
             "{\n  \"ключ\": \"значение\" /* ü */\n}\n"
         );
     }
@@ -719,7 +781,10 @@ mod tests {
         let prettier = PrettierFormatter;
         match prettier.format("{\"a\":1,\"b\":2}", Path::new("test.json")) {
             Ok(formatted) => {
-                assert!(formatted.contains('\n'), "prettier should pretty-print, got: {formatted:?}");
+                assert!(
+                    formatted.contains('\n'),
+                    "prettier should pretty-print, got: {formatted:?}"
+                );
             }
             Err(FormatError::NotAvailable) => {
                 eprintln!("skipped: prettier/npx not found on PATH");
@@ -745,12 +810,20 @@ mod tests {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command.spawn().expect("should spawn a long-running process");
+        let mut child = command
+            .spawn()
+            .expect("should spawn a long-running process");
         let start = std::time::Instant::now();
         let result = child.wait_timeout(Duration::from_millis(300));
-        assert!(matches!(result, Ok(None)), "expected the process to still be running");
+        assert!(
+            matches!(result, Ok(None)),
+            "expected the process to still be running"
+        );
         let _ = child.kill();
         let _ = child.wait();
-        assert!(start.elapsed() < Duration::from_secs(5), "wait_timeout should not block past its duration");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "wait_timeout should not block past its duration"
+        );
     }
 }

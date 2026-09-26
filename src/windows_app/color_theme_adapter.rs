@@ -128,13 +128,23 @@ mod tests {
 
     #[test]
     fn opaque_color_ignores_backdrop() {
-        let color = Rgba { r: 0x28, g: 0x2a, b: 0x36, a: 0xff };
+        let color = Rgba {
+            r: 0x28,
+            g: 0x2a,
+            b: 0x36,
+            a: 0xff,
+        };
         assert_eq!(composite(color, 0x00ffffff), 0x00362a28); // COLORREF: r|g<<8|b<<16
     }
 
     #[test]
     fn fully_transparent_color_keeps_backdrop_unchanged() {
-        let color = Rgba { r: 0xff, g: 0, b: 0, a: 0x00 };
+        let color = Rgba {
+            r: 0xff,
+            g: 0,
+            b: 0,
+            a: 0x00,
+        };
         let backdrop = 0x00362a28;
         assert_eq!(composite(color, backdrop), backdrop);
     }
@@ -142,7 +152,10 @@ mod tests {
     #[test]
     fn real_dracula_theme_maps_onto_a_theme_without_touching_unmapped_accents() {
         let Some(dir) = std::env::var_os("APPDATA").map(|appdata| {
-            std::path::PathBuf::from(appdata).join("LightLine").join("extensions").join("dracula")
+            std::path::PathBuf::from(appdata)
+                .join("LightLine")
+                .join("extensions")
+                .join("dracula")
         }) else {
             return;
         };

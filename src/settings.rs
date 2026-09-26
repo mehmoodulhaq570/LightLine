@@ -175,10 +175,7 @@ impl Settings {
             "insertSpaces".into(),
             serde_json::Value::Bool(self.insert_spaces),
         );
-        obj.insert(
-            "wordWrap".into(),
-            serde_json::Value::Bool(self.word_wrap),
-        );
+        obj.insert("wordWrap".into(), serde_json::Value::Bool(self.word_wrap));
         obj.insert(
             "autoClosePairs".into(),
             serde_json::Value::Bool(self.auto_close_pairs),
@@ -199,10 +196,7 @@ impl Settings {
             "indentGuides".into(),
             serde_json::Value::Bool(self.indent_guides),
         );
-        obj.insert(
-            "minimap".into(),
-            serde_json::Value::Bool(self.minimap),
-        );
+        obj.insert("minimap".into(), serde_json::Value::Bool(self.minimap));
         obj.insert(
             "smoothScrolling".into(),
             serde_json::Value::Bool(self.smooth_scrolling),

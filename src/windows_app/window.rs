@@ -412,14 +412,14 @@ unsafe extern "system" fn wnd_proc(
                             app.search_results.len(),
                             ((rect.bottom - app.scale(STATUS + WORKBENCH_HEADER + 113))
                                 / app.scale(48).max(1))
-                                .max(1) as usize,
+                            .max(1) as usize,
                         ),
                         SideView::Review => (app.git_rows().len(), app.git_visible_rows(hwnd)),
                         _ => (
                             app.changes.len(),
                             ((rect.bottom - app.scale(STATUS + WORKBENCH_HEADER + 113))
                                 / app.scale(EXPLORER_ROW).max(1))
-                                .max(1) as usize,
+                            .max(1) as usize,
                         ),
                     };
                     let max = count.saturating_sub(visible);
@@ -469,7 +469,8 @@ unsafe extern "system" fn wnd_proc(
             // Scroll by visible lines, so a folded block counts as one row.
             if delta != 0 {
                 let rows = if delta > 0 { -3 } else { 3 };
-                app.view_mut().first_line = app.doc().step_visible_lines(app.view().first_line, rows);
+                app.view_mut().first_line =
+                    app.doc().step_visible_lines(app.view().first_line, rows);
             }
             app.update_scrollbar(hwnd);
             unsafe {
@@ -501,7 +502,9 @@ unsafe extern "system" fn wnd_proc(
                         GetScrollInfo(hwnd, SB_VERT, &mut info);
                     }
                     // The track position is a screen row (see update_scrollbar).
-                    app.doc().line_at_visual_index(info.nTrackPos.max(0) as usize).min(max)
+                    app.doc()
+                        .line_at_visual_index(info.nTrackPos.max(0) as usize)
+                        .min(max)
                 }
                 _ => app.view().first_line,
             };
@@ -579,7 +582,11 @@ pub fn run() -> io::Result<()> {
             &dark_titlebar as *const i32 as *const std::ffi::c_void,
             size_of::<i32>() as u32,
         );
-        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.large, app_icons.hero)));
+        let mut app = Box::new(RefCell::new(App::new(
+            hwnd,
+            app_icons.large,
+            app_icons.hero,
+        )));
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,

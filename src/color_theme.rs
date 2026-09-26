@@ -143,16 +143,43 @@ mod tests {
 
     fn real_theme() -> Option<ZedColorTheme> {
         let dir = std::env::var_os("APPDATA").map(|appdata| {
-            std::path::PathBuf::from(appdata).join("LightLine").join("extensions").join("dracula")
+            std::path::PathBuf::from(appdata)
+                .join("LightLine")
+                .join("extensions")
+                .join("dracula")
         })?;
         ZedColorTheme::load(&dir)
     }
 
     #[test]
     fn parses_8_and_6_digit_hex_colors() {
-        assert_eq!(parse_rgba("#282a36ff"), Some(Rgba { r: 0x28, g: 0x2a, b: 0x36, a: 0xff }));
-        assert_eq!(parse_rgba("#C9A8F933"), Some(Rgba { r: 0xC9, g: 0xA8, b: 0xF9, a: 0x33 }));
-        assert_eq!(parse_rgba("282a36"), Some(Rgba { r: 0x28, g: 0x2a, b: 0x36, a: 0xff }));
+        assert_eq!(
+            parse_rgba("#282a36ff"),
+            Some(Rgba {
+                r: 0x28,
+                g: 0x2a,
+                b: 0x36,
+                a: 0xff
+            })
+        );
+        assert_eq!(
+            parse_rgba("#C9A8F933"),
+            Some(Rgba {
+                r: 0xC9,
+                g: 0xA8,
+                b: 0xF9,
+                a: 0x33
+            })
+        );
+        assert_eq!(
+            parse_rgba("282a36"),
+            Some(Rgba {
+                r: 0x28,
+                g: 0x2a,
+                b: 0x36,
+                a: 0xff
+            })
+        );
         assert!(parse_rgba("nope").is_none());
     }
 
@@ -167,14 +194,58 @@ mod tests {
         };
         // Verified against the actual theme JSON fetched from
         // github.com/dracula/zed during development.
-        assert_eq!(theme.style_color("editor.background"), Some(Rgba { r: 0x28, g: 0x2a, b: 0x36, a: 0xff }));
-        assert_eq!(theme.style_color("text"), Some(Rgba { r: 0xf8, g: 0xf8, b: 0xf2, a: 0xff }));
-        assert_eq!(theme.syntax_color("keyword"), Some(Rgba { r: 0xff, g: 0x79, b: 0xc6, a: 0xff }));
-        assert_eq!(theme.syntax_color("string"), Some(Rgba { r: 0xf1, g: 0xfa, b: 0x8c, a: 0xff }));
-        assert_eq!(theme.syntax_color("comment"), Some(Rgba { r: 0x62, g: 0x72, b: 0xa4, a: 0xff }));
+        assert_eq!(
+            theme.style_color("editor.background"),
+            Some(Rgba {
+                r: 0x28,
+                g: 0x2a,
+                b: 0x36,
+                a: 0xff
+            })
+        );
+        assert_eq!(
+            theme.style_color("text"),
+            Some(Rgba {
+                r: 0xf8,
+                g: 0xf8,
+                b: 0xf2,
+                a: 0xff
+            })
+        );
+        assert_eq!(
+            theme.syntax_color("keyword"),
+            Some(Rgba {
+                r: 0xff,
+                g: 0x79,
+                b: 0xc6,
+                a: 0xff
+            })
+        );
+        assert_eq!(
+            theme.syntax_color("string"),
+            Some(Rgba {
+                r: 0xf1,
+                g: 0xfa,
+                b: 0x8c,
+                a: 0xff
+            })
+        );
+        assert_eq!(
+            theme.syntax_color("comment"),
+            Some(Rgba {
+                r: 0x62,
+                g: 0x72,
+                b: 0xa4,
+                a: 0xff
+            })
+        );
         // A genuinely translucent value, confirming alpha is preserved
         // rather than silently dropped.
         let active_line = theme.style_color("editor.active_line.background").unwrap();
-        assert!(active_line.a < 0xff, "expected a translucent color, got alpha {}", active_line.a);
+        assert!(
+            active_line.a < 0xff,
+            "expected a translucent color, got alpha {}",
+            active_line.a
+        );
     }
 }

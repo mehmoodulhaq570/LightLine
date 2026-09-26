@@ -17,8 +17,7 @@ impl App {
         };
         for index in 0..6 {
             let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
-            let is_selected = selected == Some(index)
-                || (index == 5 && self.ai_assistant_visible);
+            let is_selected = selected == Some(index) || (index == 5 && self.ai_assistant_visible);
             if is_selected {
                 let pill = RECT {
                     left: self.scale(7),
@@ -48,7 +47,11 @@ impl App {
                 index,
                 self.scale(19),
                 top + self.scale(11),
-                if is_selected { rgb(56, 189, 248) } else { color },
+                if is_selected {
+                    rgb(56, 189, 248)
+                } else {
+                    color
+                },
             );
         }
         let name = "";
@@ -94,7 +97,6 @@ impl App {
             clip,
         );
     }
-
 
     pub(in crate::windows_app) fn paint_side_panel(
         &self,
@@ -761,7 +763,16 @@ impl App {
             let rect = self.debug_toolbar_button(left, right, index as i32);
             let active_color = if *enabled { *color } else { disabled };
             self.panel_card(hdc, rect, s(5), active_color, rgb(16, 24, 44));
-            self.debug_icon(hdc, rect, *icon, if *enabled { rgb(255, 255, 255) } else { disabled });
+            self.debug_icon(
+                hdc,
+                rect,
+                *icon,
+                if *enabled {
+                    rgb(255, 255, 255)
+                } else {
+                    disabled
+                },
+            );
         }
 
         let mut y = s(88);
@@ -792,13 +803,34 @@ impl App {
             left + s(20),
             y,
             status_color,
-            RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
+            RECT {
+                left,
+                top: clip.top,
+                right: right - s(8),
+                bottom: clip.bottom,
+            },
         );
         y += s(24);
 
         // 1. VARIABLES
-        Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
-        Self::label(hdc, "▼ VARIABLES", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+        Self::fill(
+            hdc,
+            RECT {
+                left,
+                top: y,
+                right,
+                bottom: y + s(22),
+            },
+            self.theme.active_bg,
+        );
+        Self::label(
+            hdc,
+            "▼ VARIABLES",
+            left + s(8),
+            y + s(3),
+            rgb(80, 160, 220),
+            clip,
+        );
         y += s(24);
 
         if state.scopes.is_empty() {
@@ -813,7 +845,14 @@ impl App {
                     continue;
                 }
                 if row.loading {
-                    Self::label(hdc, &row.name, left + s(20) + indent, row.y, self.theme.muted, clip);
+                    Self::label(
+                        hdc,
+                        &row.name,
+                        left + s(20) + indent,
+                        row.y,
+                        self.theme.muted,
+                        clip,
+                    );
                     continue;
                 }
                 // Only an expandable variable gets an arrow; a plain value
@@ -826,14 +865,26 @@ impl App {
                 } else {
                     "\u{25b8}"
                 };
-                Self::label(hdc, glyph, left + s(8) + indent, row.y, self.theme.muted, clip);
+                Self::label(
+                    hdc,
+                    glyph,
+                    left + s(8) + indent,
+                    row.y,
+                    self.theme.muted,
+                    clip,
+                );
                 self.label_ellipsis(
                     hdc,
                     &row.name,
                     left + s(20) + indent,
                     row.y,
                     rgb(205, 220, 245),
-                    RECT { left, top: clip.top, right: right - s(96), bottom: clip.bottom },
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(96),
+                        bottom: clip.bottom,
+                    },
                 );
                 self.label_ellipsis(
                     hdc,
@@ -841,7 +892,12 @@ impl App {
                     right - s(92),
                     row.y,
                     rgb(130, 150, 180),
-                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(8),
+                        bottom: clip.bottom,
+                    },
                 );
             }
             y = next_y;
@@ -850,8 +906,24 @@ impl App {
         y += s(6);
         // 2. CALL STACK
         if y + s(28) <= bottom {
-            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
-            Self::label(hdc, "▼ CALL STACK", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top: y,
+                    right,
+                    bottom: y + s(22),
+                },
+                self.theme.active_bg,
+            );
+            Self::label(
+                hdc,
+                "▼ CALL STACK",
+                left + s(8),
+                y + s(3),
+                rgb(80, 160, 220),
+                clip,
+            );
             y += s(24);
             if state.frames.is_empty() {
                 Self::label(hdc, "Not stopped", left + s(8), y, self.theme.muted, clip);
@@ -873,7 +945,12 @@ impl App {
                     left + s(8),
                     y,
                     self.theme.text,
-                    RECT { left, top: clip.top, right: right - s(94), bottom: clip.bottom },
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(94),
+                        bottom: clip.bottom,
+                    },
                 );
                 Self::label(hdc, &location, right - s(90), y, self.theme.muted, clip);
                 y += s(18);
@@ -883,20 +960,49 @@ impl App {
         y += s(6);
         // 3. BREAKPOINTS
         if y + s(28) <= bottom {
-            Self::fill(hdc, RECT { left, top: y, right, bottom: y + s(22) }, self.theme.active_bg);
-            Self::label(hdc, "▼ BREAKPOINTS", left + s(8), y + s(3), rgb(80, 160, 220), clip);
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top: y,
+                    right,
+                    bottom: y + s(22),
+                },
+                self.theme.active_bg,
+            );
+            Self::label(
+                hdc,
+                "▼ BREAKPOINTS",
+                left + s(8),
+                y + s(3),
+                rgb(80, 160, 220),
+                clip,
+            );
             y += s(24);
             let breakpoints: Vec<(String, usize)> = self
                 .tabs
                 .iter()
                 .filter_map(|tab| {
-                    let name = tab.document.path.as_ref()?.file_name()?.to_string_lossy().into_owned();
+                    let name = tab
+                        .document
+                        .path
+                        .as_ref()?
+                        .file_name()?
+                        .to_string_lossy()
+                        .into_owned();
                     Some((name, tab.document.breakpoints()))
                 })
                 .flat_map(|(name, lines)| lines.iter().map(move |line| (name.clone(), line + 1)))
                 .collect();
             if breakpoints.is_empty() {
-                Self::label(hdc, "Click a line's gutter to add one", left + s(8), y, self.theme.muted, clip);
+                Self::label(
+                    hdc,
+                    "Click a line's gutter to add one",
+                    left + s(8),
+                    y,
+                    self.theme.muted,
+                    clip,
+                );
             }
             for (name, line) in &breakpoints {
                 if y + s(18) > bottom {
@@ -917,7 +1023,12 @@ impl App {
                     left + s(24),
                     y,
                     self.theme.text,
-                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(8),
+                        bottom: clip.bottom,
+                    },
                 );
                 y += s(18);
             }
@@ -964,15 +1075,45 @@ impl App {
             config.left + s(12),
             s(56),
             config_color,
-            RECT { left: config.left, top: clip.top, right: config.right - s(28), bottom: clip.bottom },
+            RECT {
+                left: config.left,
+                top: clip.top,
+                right: config.right - s(28),
+                bottom: clip.bottom,
+            },
         );
-        self.chevron(hdc, config.right - s(14), (config.top + config.bottom) / 2, false);
+        self.chevron(
+            hdc,
+            config.right - s(14),
+            (config.top + config.bottom) / 2,
+            false,
+        );
         let start = self.debug_start_button(right);
-        self.panel_card(hdc, start, s(5),
-            if has_session { rgb(38, 55, 79) } else { rgb(34, 197, 94) },
-            if has_session { rgb(16, 25, 43) } else { rgb(13, 57, 46) });
-        self.debug_icon(hdc, start, 0,
-            if has_session { rgb(66, 82, 110) } else { rgb(245, 255, 250) });
+        self.panel_card(
+            hdc,
+            start,
+            s(5),
+            if has_session {
+                rgb(38, 55, 79)
+            } else {
+                rgb(34, 197, 94)
+            },
+            if has_session {
+                rgb(16, 25, 43)
+            } else {
+                rgb(13, 57, 46)
+            },
+        );
+        self.debug_icon(
+            hdc,
+            start,
+            0,
+            if has_session {
+                rgb(66, 82, 110)
+            } else {
+                rgb(245, 255, 250)
+            },
+        );
 
         if has_session {
             for index in 0..6 {
@@ -982,17 +1123,35 @@ impl App {
                     _ => true,
                 };
                 let rect = self.debug_toolbar_button(left, right, index as i32);
-                self.panel_card(hdc, rect, s(5),
-                    if enabled { rgb(48, 78, 126) } else { rgb(31, 43, 67) }, rgb(15, 24, 43));
-                let color = if !enabled { rgb(66, 82, 110) }
-                    else if index == 5 { rgb(245, 92, 92) }
-                    else { rgb(170, 202, 250) };
+                self.panel_card(
+                    hdc,
+                    rect,
+                    s(5),
+                    if enabled {
+                        rgb(48, 78, 126)
+                    } else {
+                        rgb(31, 43, 67)
+                    },
+                    rgb(15, 24, 43),
+                );
+                let color = if !enabled {
+                    rgb(66, 82, 110)
+                } else if index == 5 {
+                    rgb(245, 92, 92)
+                } else {
+                    rgb(170, 202, 250)
+                };
                 self.debug_control_icon(hdc, rect, index, running, color);
             }
         }
 
         let status_top = if has_session { s(140) } else { s(94) };
-        let status_rect = RECT { left: left + s(8), top: status_top, right: right - s(8), bottom: status_top + s(58) };
+        let status_rect = RECT {
+            left: left + s(8),
+            top: status_top,
+            right: right - s(8),
+            bottom: status_top + s(58),
+        };
         self.panel_card(hdc, status_rect, s(6), rgb(38, 58, 91), rgb(15, 27, 49));
         let failed = state.status.starts_with("Build failed")
             || state.status.starts_with("Could not")
@@ -1000,14 +1159,24 @@ impl App {
             || state.status.contains("not installed")
             || state.status.contains("closed its output")
             || state.status.contains("error");
-        let dot_color = if failed { rgb(220, 60, 60) } else if running || paused { rgb(49, 211, 118) } else { self.theme.muted };
+        let dot_color = if failed {
+            rgb(220, 60, 60)
+        } else if running || paused {
+            rgb(49, 211, 118)
+        } else {
+            self.theme.muted
+        };
         let (title, detail) = if running {
             ("Running".to_string(), "Debug session active".to_string())
         } else if paused {
-            let detail = state.frames.first().and_then(|frame| {
-                let name = frame.path.as_ref()?.file_name()?.to_string_lossy();
-                Some(format!("{name} \u{00b7} line {}", frame.line))
-            }).unwrap_or_else(|| state.status.clone());
+            let detail = state
+                .frames
+                .first()
+                .and_then(|frame| {
+                    let name = frame.path.as_ref()?.file_name()?.to_string_lossy();
+                    Some(format!("{name} \u{00b7} line {}", frame.line))
+                })
+                .unwrap_or_else(|| state.status.clone());
             ("Paused".to_string(), detail)
         } else if has_session {
             let adapter = state.config.map_or("LLDB", DebugConfig::adapter_name);
@@ -1047,14 +1216,38 @@ impl App {
             let brush = CreateSolidBrush(dot_color);
             let old_brush = SelectObject(hdc, brush);
             let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-            Ellipse(hdc, status_rect.left + s(12), status_rect.top + s(13), status_rect.left + s(21), status_rect.top + s(22));
+            Ellipse(
+                hdc,
+                status_rect.left + s(12),
+                status_rect.top + s(13),
+                status_rect.left + s(21),
+                status_rect.top + s(22),
+            );
             SelectObject(hdc, old_pen);
             SelectObject(hdc, old_brush);
             DeleteObject(brush);
         }
-        self.label_ellipsis(hdc, &title, status_rect.left + s(29), status_rect.top + s(7), self.theme.text,
-            RECT { left, top: clip.top, right: status_rect.right - s(94), bottom: clip.bottom });
-        Self::label(hdc, &detail, status_rect.left + s(29), status_rect.top + s(26), self.theme.muted, clip);
+        self.label_ellipsis(
+            hdc,
+            &title,
+            status_rect.left + s(29),
+            status_rect.top + s(7),
+            self.theme.text,
+            RECT {
+                left,
+                top: clip.top,
+                right: status_rect.right - s(94),
+                bottom: clip.bottom,
+            },
+        );
+        Self::label(
+            hdc,
+            &detail,
+            status_rect.left + s(29),
+            status_rect.top + s(26),
+            self.theme.muted,
+            clip,
+        );
         if has_session {
             let adapter = state.config.map_or("LLDB", DebugConfig::adapter_name);
             let width = self.text_width(hdc, adapter);
@@ -1069,80 +1262,281 @@ impl App {
         }
 
         let layout = self.debug_panel_layout(bottom);
-        let breakpoint_count: usize = self.tabs.iter().map(|tab| tab.document.breakpoints().len()).sum();
+        let breakpoint_count: usize = self
+            .tabs
+            .iter()
+            .map(|tab| tab.document.breakpoints().len())
+            .sum();
         let headers = [
-            (layout.variables_header_y, "VARIABLES", state.scopes.iter().map(|scope| scope.variables.len()).sum::<usize>()),
+            (
+                layout.variables_header_y,
+                "VARIABLES",
+                state
+                    .scopes
+                    .iter()
+                    .map(|scope| scope.variables.len())
+                    .sum::<usize>(),
+            ),
             (layout.call_stack_header_y, "CALL STACK", state.frames.len()),
             (layout.breakpoints_header_y, "BREAKPOINTS", breakpoint_count),
         ];
         for (index, (y, title, count)) in headers.iter().enumerate() {
-            if *y + s(28) > bottom { continue; }
-            Self::fill(hdc, RECT { left, top: *y, right, bottom: *y + s(28) }, self.theme.active_bg);
-            Self::label(hdc, if self.debug_sections_expanded[index] { "\u{25be}" } else { "\u{25b8}" }, left + s(8), *y + s(5), rgb(86, 164, 225), clip);
+            if *y + s(28) > bottom {
+                continue;
+            }
+            Self::fill(
+                hdc,
+                RECT {
+                    left,
+                    top: *y,
+                    right,
+                    bottom: *y + s(28),
+                },
+                self.theme.active_bg,
+            );
+            Self::label(
+                hdc,
+                if self.debug_sections_expanded[index] {
+                    "\u{25be}"
+                } else {
+                    "\u{25b8}"
+                },
+                left + s(8),
+                *y + s(5),
+                rgb(86, 164, 225),
+                clip,
+            );
             Self::label(hdc, title, left + s(24), *y + s(5), rgb(86, 164, 225), clip);
-            let badge = RECT { left: right - s(35), top: *y + s(4), right: right - s(10), bottom: *y + s(24) };
+            let badge = RECT {
+                left: right - s(35),
+                top: *y + s(4),
+                right: right - s(10),
+                bottom: *y + s(24),
+            };
             self.panel_card(hdc, badge, s(9), rgb(48, 70, 108), rgb(24, 40, 69));
-            Self::label(hdc, &count.to_string(), badge.left + s(8), *y + s(5), rgb(205, 220, 245), clip);
+            Self::label(
+                hdc,
+                &count.to_string(),
+                badge.left + s(8),
+                *y + s(5),
+                rgb(205, 220, 245),
+                clip,
+            );
         }
 
         if self.debug_sections_expanded[0] {
             if state.scopes.is_empty() {
-                Self::label(hdc, "Variables appear when execution pauses.", left + s(12), layout.variables_body_y + s(7), self.theme.muted, clip);
+                Self::label(
+                    hdc,
+                    "Variables appear when execution pauses.",
+                    left + s(12),
+                    layout.variables_body_y + s(7),
+                    self.theme.muted,
+                    clip,
+                );
             }
             for row in &layout.variable_rows {
                 let indent = s(12) * row.depth as i32;
                 if row.is_header {
-                    Self::label(hdc, "\u{25be}", left + s(12), row.y + s(2), self.theme.muted, clip);
-                    Self::label(hdc, &row.name, left + s(28), row.y + s(2), self.theme.text, clip);
+                    Self::label(
+                        hdc,
+                        "\u{25be}",
+                        left + s(12),
+                        row.y + s(2),
+                        self.theme.muted,
+                        clip,
+                    );
+                    Self::label(
+                        hdc,
+                        &row.name,
+                        left + s(28),
+                        row.y + s(2),
+                        self.theme.text,
+                        clip,
+                    );
                     continue;
                 }
                 if row.loading {
-                    Self::label(hdc, &row.name, left + s(27) + indent, row.y + s(2), self.theme.muted, clip);
+                    Self::label(
+                        hdc,
+                        &row.name,
+                        left + s(27) + indent,
+                        row.y + s(2),
+                        self.theme.muted,
+                        clip,
+                    );
                     continue;
                 }
-                let glyph = if !row.expandable { " " } else if row.expanded { "\u{25be}" } else { "\u{25b8}" };
-                Self::fill(hdc, RECT { left: left + s(8), top: row.y + s(22), right: right - s(8), bottom: row.y + s(23) }, rgb(27, 40, 64));
-                Self::label(hdc, glyph, left + s(12) + indent, row.y + s(2), self.theme.muted, clip);
-                self.label_ellipsis(hdc, &row.name, left + s(27) + indent, row.y + s(2), rgb(205, 220, 245),
-                    RECT { left, top: clip.top, right: right - s(130), bottom: clip.bottom });
-                self.label_ellipsis(hdc, &row.value, right - s(126), row.y + s(2),
-                    if row.value.starts_with('"') { rgb(230, 155, 90) } else { rgb(65, 205, 220) },
-                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom });
+                let glyph = if !row.expandable {
+                    " "
+                } else if row.expanded {
+                    "\u{25be}"
+                } else {
+                    "\u{25b8}"
+                };
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: left + s(8),
+                        top: row.y + s(22),
+                        right: right - s(8),
+                        bottom: row.y + s(23),
+                    },
+                    rgb(27, 40, 64),
+                );
+                Self::label(
+                    hdc,
+                    glyph,
+                    left + s(12) + indent,
+                    row.y + s(2),
+                    self.theme.muted,
+                    clip,
+                );
+                self.label_ellipsis(
+                    hdc,
+                    &row.name,
+                    left + s(27) + indent,
+                    row.y + s(2),
+                    rgb(205, 220, 245),
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(130),
+                        bottom: clip.bottom,
+                    },
+                );
+                self.label_ellipsis(
+                    hdc,
+                    &row.value,
+                    right - s(126),
+                    row.y + s(2),
+                    if row.value.starts_with('"') {
+                        rgb(230, 155, 90)
+                    } else {
+                        rgb(65, 205, 220)
+                    },
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(8),
+                        bottom: clip.bottom,
+                    },
+                );
             }
         }
 
         if self.debug_sections_expanded[1] && layout.call_stack_body_y < bottom {
             let mut y = layout.call_stack_body_y + s(3);
             if state.frames.is_empty() {
-                Self::label(hdc, "Call stack appears during a debug session.", left + s(12), y + s(4), self.theme.muted, clip);
+                Self::label(
+                    hdc,
+                    "Call stack appears during a debug session.",
+                    left + s(12),
+                    y + s(4),
+                    self.theme.muted,
+                    clip,
+                );
             }
             for (index, frame) in state.frames.iter().take(5).enumerate() {
-                if y + s(23) > bottom { break; }
-                if index == 0 {
-                    self.panel_card(hdc, RECT { left: left + s(8), top: y, right: right - s(8), bottom: y + s(22) }, s(3), rgb(39, 91, 160), rgb(22, 57, 108));
+                if y + s(23) > bottom {
+                    break;
                 }
-                let location = frame.path.as_ref().and_then(|p| p.file_name())
-                    .map(|name| format!("{}:{}", name.to_string_lossy(), frame.line)).unwrap_or_default();
-                self.label_ellipsis(hdc, &frame.name, left + s(16), y + s(2), self.theme.text,
-                    RECT { left, top: clip.top, right: right - s(110), bottom: clip.bottom });
-                Self::label(hdc, &location, right - s(105), y + s(2), self.theme.muted, clip);
+                if index == 0 {
+                    self.panel_card(
+                        hdc,
+                        RECT {
+                            left: left + s(8),
+                            top: y,
+                            right: right - s(8),
+                            bottom: y + s(22),
+                        },
+                        s(3),
+                        rgb(39, 91, 160),
+                        rgb(22, 57, 108),
+                    );
+                }
+                let location = frame
+                    .path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|name| format!("{}:{}", name.to_string_lossy(), frame.line))
+                    .unwrap_or_default();
+                self.label_ellipsis(
+                    hdc,
+                    &frame.name,
+                    left + s(16),
+                    y + s(2),
+                    self.theme.text,
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(110),
+                        bottom: clip.bottom,
+                    },
+                );
+                Self::label(
+                    hdc,
+                    &location,
+                    right - s(105),
+                    y + s(2),
+                    self.theme.muted,
+                    clip,
+                );
                 y += s(23);
             }
         }
 
         if self.debug_sections_expanded[2] && layout.breakpoints_body_y < bottom {
             let mut y = layout.breakpoints_body_y + s(5);
-            let breakpoints: Vec<(String, usize)> = self.tabs.iter().filter_map(|tab| {
-                let name = tab.document.path.as_ref()?.file_name()?.to_string_lossy().into_owned();
-                Some((name, tab.document.breakpoints()))
-            }).flat_map(|(name, lines)| lines.iter().map(move |line| (name.clone(), line + 1))).collect();
+            let breakpoints: Vec<(String, usize)> = self
+                .tabs
+                .iter()
+                .filter_map(|tab| {
+                    let name = tab
+                        .document
+                        .path
+                        .as_ref()?
+                        .file_name()?
+                        .to_string_lossy()
+                        .into_owned();
+                    Some((name, tab.document.breakpoints()))
+                })
+                .flat_map(|(name, lines)| lines.iter().map(move |line| (name.clone(), line + 1)))
+                .collect();
             if breakpoints.is_empty() {
-                Self::label(hdc, "Click the editor gutter or press F9 to add one.", left + s(12), y + s(3), self.theme.muted, clip);
+                Self::label(
+                    hdc,
+                    "Click the editor gutter or press F9 to add one.",
+                    left + s(12),
+                    y + s(3),
+                    self.theme.muted,
+                    clip,
+                );
             }
             for (name, line) in &breakpoints {
-                if y + s(24) > bottom { break; }
-                self.panel_card(hdc, RECT { left: left + s(10), top: y + s(2), right: left + s(27), bottom: y + s(19) }, s(3), rgb(45, 115, 196), rgb(32, 116, 210));
-                Self::label(hdc, "\u{2713}", left + s(13), y + s(1), rgb(245, 250, 255), clip);
+                if y + s(24) > bottom {
+                    break;
+                }
+                self.panel_card(
+                    hdc,
+                    RECT {
+                        left: left + s(10),
+                        top: y + s(2),
+                        right: left + s(27),
+                        bottom: y + s(19),
+                    },
+                    s(3),
+                    rgb(45, 115, 196),
+                    rgb(32, 116, 210),
+                );
+                Self::label(
+                    hdc,
+                    "\u{2713}",
+                    left + s(13),
+                    y + s(1),
+                    rgb(245, 250, 255),
+                    clip,
+                );
                 unsafe {
                     let brush = CreateSolidBrush(rgb(245, 82, 82));
                     let old_brush = SelectObject(hdc, brush);
@@ -1152,15 +1546,33 @@ impl App {
                     SelectObject(hdc, old_brush);
                     DeleteObject(brush);
                 }
-                self.label_ellipsis(hdc, &format!("{name}:{line}"), left + s(52), y + s(4), self.theme.text,
-                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom });
+                self.label_ellipsis(
+                    hdc,
+                    &format!("{name}:{line}"),
+                    left + s(52),
+                    y + s(4),
+                    self.theme.text,
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(8),
+                        bottom: clip.bottom,
+                    },
+                );
                 y += s(24);
             }
         }
     }
 
     #[allow(dead_code)]
-    fn paint_extensions_panel_legacy(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
+    fn paint_extensions_panel_legacy(
+        &self,
+        hdc: HDC,
+        left: i32,
+        right: i32,
+        bottom: i32,
+        clip: RECT,
+    ) {
         let s = |v: i32| self.scale(v);
 
         // 1. VS Code style Search bar with vector icon and filter
@@ -1186,7 +1598,13 @@ impl App {
             rgb(100, 116, 145)
         };
         self.stroke(hdc, icon_color, |hdc| unsafe {
-            Ellipse(hdc, icon_cx - s(4), icon_cy - s(4), icon_cx + s(4), icon_cy + s(4));
+            Ellipse(
+                hdc,
+                icon_cx - s(4),
+                icon_cy - s(4),
+                icon_cx + s(4),
+                icon_cy + s(4),
+            );
             MoveToEx(hdc, icon_cx + s(3), icon_cy + s(3), null_mut());
             LineTo(hdc, icon_cx + s(7), icon_cy + s(7));
         });
@@ -1326,7 +1744,14 @@ impl App {
             ("POPULAR", visible.len())
         };
         let sec_text = format!("▾  {section_title} ({section_count})");
-        Self::label(hdc, &sec_text, left + s(12), section_y, rgb(110, 130, 160), clip);
+        Self::label(
+            hdc,
+            &sec_text,
+            left + s(12),
+            section_y,
+            rgb(110, 130, 160),
+            clip,
+        );
         let sec_w = self.text_width(hdc, &sec_text);
         Self::fill(
             hdc,
@@ -1353,7 +1778,14 @@ impl App {
             } else {
                 format!("No extensions match \"{query}\"")
             };
-            Self::label(hdc, &notice, left + s(16), ey + s(12), self.theme.muted, clip);
+            Self::label(
+                hdc,
+                &notice,
+                left + s(16),
+                ey + s(12),
+                self.theme.muted,
+                clip,
+            );
             // This isn't a real marketplace search yet, just a small curated
             // list; say so instead of leaving an unexplained blank panel that
             // reads as "search is broken".
@@ -1400,20 +1832,79 @@ impl App {
                 let stripe_h = s(3);
                 let sw = s(6);
                 let sx0 = icon_rect.left + s(7);
-                Self::fill(hdc, RECT { left: sx0, top: stripe_y, right: sx0 + sw, bottom: stripe_y + stripe_h }, rgb(86, 182, 240));
-                Self::fill(hdc, RECT { left: sx0 + sw + s(1), top: stripe_y, right: sx0 + sw * 2 + s(1), bottom: stripe_y + stripe_h }, rgb(236, 72, 153));
-                Self::fill(hdc, RECT { left: sx0 + sw * 2 + s(2), top: stripe_y, right: sx0 + sw * 3 + s(2), bottom: stripe_y + stripe_h }, rgb(245, 197, 24));
-                Self::fill(hdc, RECT { left: sx0 + sw * 3 + s(3), top: stripe_y, right: sx0 + sw * 4 + s(3), bottom: stripe_y + stripe_h }, rgb(168, 85, 247));
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: sx0,
+                        top: stripe_y,
+                        right: sx0 + sw,
+                        bottom: stripe_y + stripe_h,
+                    },
+                    rgb(86, 182, 240),
+                );
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: sx0 + sw + s(1),
+                        top: stripe_y,
+                        right: sx0 + sw * 2 + s(1),
+                        bottom: stripe_y + stripe_h,
+                    },
+                    rgb(236, 72, 153),
+                );
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: sx0 + sw * 2 + s(2),
+                        top: stripe_y,
+                        right: sx0 + sw * 3 + s(2),
+                        bottom: stripe_y + stripe_h,
+                    },
+                    rgb(245, 197, 24),
+                );
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: sx0 + sw * 3 + s(3),
+                        top: stripe_y,
+                        right: sx0 + sw * 4 + s(3),
+                        bottom: stripe_y + stripe_h,
+                    },
+                    rgb(168, 85, 247),
+                );
 
                 // Curly code braces
-                unsafe { SelectObject(hdc, self.brand_font); }
-                self.label_mid(hdc, "{ }", icon_rect.left + s(9), (icon_rect.top + icon_rect.bottom) / 2 - s(4), rgb(255, 255, 255), icon_rect);
-                unsafe { SelectObject(hdc, self.ui_font); }
+                unsafe {
+                    SelectObject(hdc, self.brand_font);
+                }
+                self.label_mid(
+                    hdc,
+                    "{ }",
+                    icon_rect.left + s(9),
+                    (icon_rect.top + icon_rect.bottom) / 2 - s(4),
+                    rgb(255, 255, 255),
+                    icon_rect,
+                );
+                unsafe {
+                    SelectObject(hdc, self.ui_font);
+                }
             } else {
                 Self::rounded_fill(hdc, icon_rect, s(6), rgb(14, 28, 54));
                 self.card_outline(hdc, icon_rect, s(6), rgb(35, 70, 125));
-                if !self.icons.draw_generic(hdc, GenericIcon::FolderSrc, icon_rect.left + s(7), icon_rect.top + s(7), s(26)) {
-                    self.draw_vector_folder(hdc, icon_rect.left + s(7), icon_rect.top + s(7), s(26), false);
+                if !self.icons.draw_generic(
+                    hdc,
+                    GenericIcon::FolderSrc,
+                    icon_rect.left + s(7),
+                    icon_rect.top + s(7),
+                    s(26),
+                ) {
+                    self.draw_vector_folder(
+                        hdc,
+                        icon_rect.left + s(7),
+                        icon_rect.top + s(7),
+                        s(26),
+                        false,
+                    );
                 }
             }
 
@@ -1422,10 +1913,21 @@ impl App {
 
             // Row 1: Extension Title & Verified badge & Version
             let display_title = ext.name.split(" - ").next().unwrap_or(&ext.name);
-            unsafe { SelectObject(hdc, self.brand_font); }
-            Self::label(hdc, display_title, content_left, ey + s(6), rgb(245, 247, 250), card_rect);
+            unsafe {
+                SelectObject(hdc, self.brand_font);
+            }
+            Self::label(
+                hdc,
+                display_title,
+                content_left,
+                ey + s(6),
+                rgb(245, 247, 250),
+                card_rect,
+            );
             let title_w = self.text_width(hdc, display_title);
-            unsafe { SelectObject(hdc, self.ui_font); }
+            unsafe {
+                SelectObject(hdc, self.ui_font);
+            }
 
             let badge_x = content_left + title_w + s(5);
             Self::rounded_fill(
@@ -1439,10 +1941,24 @@ impl App {
                 s(3),
                 rgb(56, 189, 248),
             );
-            Self::label(hdc, "✓", badge_x + s(2), ey + s(7), rgb(255, 255, 255), card_rect);
+            Self::label(
+                hdc,
+                "✓",
+                badge_x + s(2),
+                ey + s(7),
+                rgb(255, 255, 255),
+                card_rect,
+            );
 
             let ver_x = badge_x + s(16);
-            Self::label(hdc, &ext.version, ver_x, ey + s(7), rgb(100, 116, 140), card_rect);
+            Self::label(
+                hdc,
+                &ext.version,
+                ver_x,
+                ey + s(7),
+                rgb(100, 116, 140),
+                card_rect,
+            );
 
             // Row 2: Description (clean single-line with ellipsis)
             let desc_clip = RECT {
@@ -1451,17 +1967,31 @@ impl App {
                 right: content_right,
                 bottom: ey + s(46),
             };
-            self.label_ellipsis(hdc, &ext.description, content_left, ey + s(27), rgb(148, 163, 184), desc_clip);
+            self.label_ellipsis(
+                hdc,
+                &ext.description,
+                content_left,
+                ey + s(27),
+                rgb(148, 163, 184),
+                desc_clip,
+            );
 
             // Row 3: Metadata (Publisher, Downloads & Rating) on left
-            let meta_text = format!("by {}   ↓ {}   {}", ext.publisher, ext.downloads, ext.rating);
+            let meta_text = format!("by {}", ext.publisher);
             let meta_clip = RECT {
                 left: content_left,
                 top: ey + s(53),
                 right: card_rect.right - s(86),
                 bottom: ey + s(75),
             };
-            self.label_ellipsis(hdc, &meta_text, content_left, ey + s(53), rgb(100, 116, 145), meta_clip);
+            self.label_ellipsis(
+                hdc,
+                &meta_text,
+                content_left,
+                ey + s(53),
+                rgb(100, 116, 145),
+                meta_clip,
+            );
 
             // Row 3: Action Button on right
             let btn_w = s(76);
@@ -1477,17 +2007,38 @@ impl App {
                 self.panel_card(hdc, btn_rect, s(4), rgb(56, 189, 248), rgb(18, 38, 72));
                 let text_w = self.text_width(hdc, "Checking...");
                 let tx = btn_rect.left + ((btn_rect.right - btn_rect.left) - text_w) / 2;
-                self.label_mid(hdc, "Checking...", tx, (btn_rect.top + btn_rect.bottom) / 2, rgb(186, 230, 253), btn_rect);
+                self.label_mid(
+                    hdc,
+                    "Checking...",
+                    tx,
+                    (btn_rect.top + btn_rect.bottom) / 2,
+                    rgb(186, 230, 253),
+                    btn_rect,
+                );
             } else if ext.installed {
                 self.panel_card(hdc, btn_rect, s(4), rgb(48, 70, 105), rgb(20, 32, 54));
                 let text_w = self.text_width(hdc, "✓ Installed");
                 let tx = btn_rect.left + ((btn_rect.right - btn_rect.left) - text_w) / 2;
-                self.label_mid(hdc, "✓ Installed", tx, (btn_rect.top + btn_rect.bottom) / 2, rgb(148, 195, 245), btn_rect);
+                self.label_mid(
+                    hdc,
+                    "✓ Installed",
+                    tx,
+                    (btn_rect.top + btn_rect.bottom) / 2,
+                    rgb(148, 195, 245),
+                    btn_rect,
+                );
             } else {
                 Self::rounded_fill(hdc, btn_rect, s(4), rgb(14, 99, 156));
                 let text_w = self.text_width(hdc, "Install");
                 let tx = btn_rect.left + ((btn_rect.right - btn_rect.left) - text_w) / 2;
-                self.label_mid(hdc, "Install", tx, (btn_rect.top + btn_rect.bottom) / 2, rgb(255, 255, 255), btn_rect);
+                self.label_mid(
+                    hdc,
+                    "Install",
+                    tx,
+                    (btn_rect.top + btn_rect.bottom) / 2,
+                    rgb(255, 255, 255),
+                    btn_rect,
+                );
             }
 
             ey += card_h + card_gap;
@@ -1506,7 +2057,14 @@ impl App {
             self.panel_card(hdc, guide_rect, s(6), rgb(28, 42, 68), rgb(12, 18, 34));
 
             // Header
-            Self::label(hdc, "WORKFLOW CAPABILITIES", guide_rect.left + s(10), guide_rect.top + s(8), rgb(100, 116, 145), guide_rect);
+            Self::label(
+                hdc,
+                "WORKFLOW CAPABILITIES",
+                guide_rect.left + s(10),
+                guide_rect.top + s(8),
+                rgb(100, 116, 145),
+                guide_rect,
+            );
             Self::fill(
                 hdc,
                 RECT {
@@ -1520,51 +2078,149 @@ impl App {
 
             // Row 1: Prettier
             let r1_y = guide_rect.top + s(32);
-            Self::label(hdc, "{ }", guide_rect.left + s(10), r1_y, rgb(56, 189, 248), guide_rect);
-            Self::label(hdc, "Prettier Formatting", guide_rect.left + s(30), r1_y, rgb(226, 232, 240), guide_rect);
-            Self::label(hdc, "Shift + Alt + F formats active document", guide_rect.left + s(30), r1_y + s(16), rgb(100, 116, 145), guide_rect);
+            Self::label(
+                hdc,
+                "{ }",
+                guide_rect.left + s(10),
+                r1_y,
+                rgb(56, 189, 248),
+                guide_rect,
+            );
+            Self::label(
+                hdc,
+                "Prettier Formatting",
+                guide_rect.left + s(30),
+                r1_y,
+                rgb(226, 232, 240),
+                guide_rect,
+            );
+            Self::label(
+                hdc,
+                "Shift + Alt + F formats active document",
+                guide_rect.left + s(30),
+                r1_y + s(16),
+                rgb(100, 116, 145),
+                guide_rect,
+            );
 
             // Row 2: Material Icons
             let r2_y = r1_y + s(40);
-            if !self.icons.draw_generic(hdc, GenericIcon::FolderSrc, guide_rect.left + s(8), r2_y, s(16)) {
+            if !self.icons.draw_generic(
+                hdc,
+                GenericIcon::FolderSrc,
+                guide_rect.left + s(8),
+                r2_y,
+                s(16),
+            ) {
                 self.draw_vector_folder(hdc, guide_rect.left + s(8), r2_y, s(16), false);
             }
-            Self::label(hdc, "Material Icon Theme", guide_rect.left + s(30), r2_y, rgb(226, 232, 240), guide_rect);
-            Self::label(hdc, "Visual themes for 20+ file types and tabs", guide_rect.left + s(30), r2_y + s(16), rgb(100, 116, 145), guide_rect);
+            Self::label(
+                hdc,
+                "Material Icon Theme",
+                guide_rect.left + s(30),
+                r2_y,
+                rgb(226, 232, 240),
+                guide_rect,
+            );
+            Self::label(
+                hdc,
+                "Visual themes for 20+ file types and tabs",
+                guide_rect.left + s(30),
+                r2_y + s(16),
+                rgb(100, 116, 145),
+                guide_rect,
+            );
 
             // Row 3: Real-Time Engine
             let r3_y = r2_y + s(40);
-            Self::label(hdc, "⚡", guide_rect.left + s(10), r3_y, rgb(245, 197, 24), guide_rect);
-            Self::label(hdc, "Real-Time Node Subprocess", guide_rect.left + s(30), r3_y, rgb(226, 232, 240), guide_rect);
-            Self::label(hdc, "Non-blocking background CLI execution", guide_rect.left + s(30), r3_y + s(16), rgb(100, 116, 145), guide_rect);
+            Self::label(
+                hdc,
+                "⚡",
+                guide_rect.left + s(10),
+                r3_y,
+                rgb(245, 197, 24),
+                guide_rect,
+            );
+            Self::label(
+                hdc,
+                "Real-Time Node Subprocess",
+                guide_rect.left + s(30),
+                r3_y,
+                rgb(226, 232, 240),
+                guide_rect,
+            );
+            Self::label(
+                hdc,
+                "Non-blocking background CLI execution",
+                guide_rect.left + s(30),
+                r3_y + s(16),
+                rgb(100, 116, 145),
+                guide_rect,
+            );
         }
     }
 
     fn paint_extensions_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
         let s = |v: i32| self.scale(v);
 
-        let search = RECT { left: left + s(8), top: s(48), right: right - s(8), bottom: s(84) };
+        let search = RECT {
+            left: left + s(8),
+            top: s(48),
+            right: right - s(8),
+            bottom: s(84),
+        };
         self.panel_card(
             hdc,
             search,
             s(5),
-            if self.extensions_search_active { rgb(56, 189, 248) } else { rgb(42, 62, 96) },
+            if self.extensions_search_active {
+                rgb(56, 189, 248)
+            } else {
+                rgb(42, 62, 96)
+            },
             rgb(13, 22, 39),
         );
         let mx = search.left + s(15);
         let my = (search.top + search.bottom) / 2;
-        self.stroke(hdc, if self.extensions_search_active { rgb(56, 189, 248) } else { rgb(103, 132, 176) }, |hdc| unsafe {
-            Ellipse(hdc, mx - s(5), my - s(5), mx + s(5), my + s(5));
-            MoveToEx(hdc, mx + s(4), my + s(4), null_mut());
-            LineTo(hdc, mx + s(8), my + s(8));
-        });
+        self.stroke(
+            hdc,
+            if self.extensions_search_active {
+                rgb(56, 189, 248)
+            } else {
+                rgb(103, 132, 176)
+            },
+            |hdc| unsafe {
+                Ellipse(hdc, mx - s(5), my - s(5), mx + s(5), my + s(5));
+                MoveToEx(hdc, mx + s(4), my + s(4), null_mut());
+                LineTo(hdc, mx + s(8), my + s(8));
+            },
+        );
         let text_x = search.left + s(31);
         let text_y = search.top + s(9);
-        let search_clip = RECT { left: text_x, top: search.top, right: search.right - s(32), bottom: search.bottom };
+        let search_clip = RECT {
+            left: text_x,
+            top: search.top,
+            right: search.right - s(32),
+            bottom: search.bottom,
+        };
         if self.extensions_query.is_empty() {
-            let placeholder = if self.extensions_search_active && self.caret_on { "|" } else { "Search Extensions" };
-            Self::label(hdc, placeholder, text_x, text_y,
-                if self.extensions_search_active { self.theme.text } else { self.theme.muted }, search_clip);
+            let placeholder = if self.extensions_search_active && self.caret_on {
+                "|"
+            } else {
+                "Search Extensions"
+            };
+            Self::label(
+                hdc,
+                placeholder,
+                text_x,
+                text_y,
+                if self.extensions_search_active {
+                    self.theme.text
+                } else {
+                    self.theme.muted
+                },
+                search_clip,
+            );
         } else {
             let value = if self.extensions_search_active && self.caret_on {
                 format!("{}|", self.extensions_query)
@@ -1594,52 +2250,146 @@ impl App {
             });
         }
 
-        let tabs = RECT { left: left + s(8), top: s(92), right: right - s(8), bottom: s(122) };
+        let tabs = RECT {
+            left: left + s(8),
+            top: s(92),
+            right: right - s(8),
+            bottom: s(122),
+        };
         self.panel_card(hdc, tabs, s(5), rgb(31, 47, 77), rgb(13, 22, 39));
         let half = (tabs.right - tabs.left) / 2;
-        let market = RECT { left: tabs.left + s(2), top: tabs.top + s(2), right: tabs.left + half, bottom: tabs.bottom - s(2) };
-        let installed = RECT { left: market.right, top: market.top, right: tabs.right - s(2), bottom: market.bottom };
-        let selected = if self.extensions_tab == ExtensionsTab::Marketplace { market } else { installed };
+        let market = RECT {
+            left: tabs.left + s(2),
+            top: tabs.top + s(2),
+            right: tabs.left + half,
+            bottom: tabs.bottom - s(2),
+        };
+        let installed = RECT {
+            left: market.right,
+            top: market.top,
+            right: tabs.right - s(2),
+            bottom: market.bottom,
+        };
+        let selected = if self.extensions_tab == ExtensionsTab::Marketplace {
+            market
+        } else {
+            installed
+        };
         self.panel_card(hdc, selected, s(4), rgb(56, 189, 248), rgb(27, 57, 103));
         let tab_label = |app: &App, label: &str, rect: RECT, active: bool| {
             let width = app.text_width(hdc, label);
-            Self::label(hdc, label, rect.left + (rect.right - rect.left - width) / 2, rect.top + s(5),
-                if active { rgb(245, 250, 255) } else { rgb(154, 174, 207) }, rect);
+            Self::label(
+                hdc,
+                label,
+                rect.left + (rect.right - rect.left - width) / 2,
+                rect.top + s(5),
+                if active {
+                    rgb(245, 250, 255)
+                } else {
+                    rgb(154, 174, 207)
+                },
+                rect,
+            );
         };
-        tab_label(self, "Marketplace", market, self.extensions_tab == ExtensionsTab::Marketplace);
+        tab_label(
+            self,
+            "Marketplace",
+            market,
+            self.extensions_tab == ExtensionsTab::Marketplace,
+        );
         let installed_count = self.extensions.iter().filter(|ext| ext.installed).count();
         let installed_text = format!("Installed  {installed_count}");
-        tab_label(self, &installed_text, installed, self.extensions_tab == ExtensionsTab::Installed);
+        tab_label(
+            self,
+            &installed_text,
+            installed,
+            self.extensions_tab == ExtensionsTab::Installed,
+        );
 
         let filter_top = s(132);
-        let filter_specs = [
-            ("Featured", ExtensionsFilter::Featured, 69),
-            ("Popular", ExtensionsFilter::Popular, 57),
-            ("Recently Updated", ExtensionsFilter::Recent, 112),
-        ];
         let mut filter_x = left + s(8);
-        for (label, filter, width) in filter_specs {
-            let rect = RECT { left: filter_x, top: filter_top, right: filter_x + s(width), bottom: filter_top + s(28) };
-            let active = self.extensions_filter == filter && self.extensions_tab == ExtensionsTab::Marketplace;
-            self.panel_card(hdc, rect, s(5),
-                if active { rgb(56, 189, 248) } else { rgb(35, 50, 78) },
-                if active { rgb(26, 55, 98) } else { rgb(15, 24, 43) });
+        for (filter, label, width) in ExtensionsFilter::PILLS {
+            let rect = RECT {
+                left: filter_x,
+                top: filter_top,
+                right: filter_x + s(width),
+                bottom: filter_top + s(28),
+            };
+            // Filters apply to the curated list, not to search results.
+            let active = self.extensions_filter == filter
+                && self.extensions_tab == ExtensionsTab::Marketplace
+                && self.extensions_query.trim().is_empty();
+            self.panel_card(
+                hdc,
+                rect,
+                s(5),
+                if active {
+                    rgb(56, 189, 248)
+                } else {
+                    rgb(35, 50, 78)
+                },
+                if active {
+                    rgb(26, 55, 98)
+                } else {
+                    rgb(15, 24, 43)
+                },
+            );
             let label_width = self.text_width(hdc, label);
-            self.label_ellipsis(hdc, label, rect.left + ((rect.right - rect.left - label_width) / 2).max(s(5)), rect.top + s(4),
-                if active { rgb(235, 246, 255) } else { rgb(151, 171, 204) },
-                RECT { left: rect.left + s(4), top: rect.top, right: rect.right - s(4), bottom: rect.bottom });
+            self.label_ellipsis(
+                hdc,
+                label,
+                rect.left + ((rect.right - rect.left - label_width) / 2).max(s(5)),
+                rect.top + s(4),
+                if active {
+                    rgb(235, 246, 255)
+                } else {
+                    rgb(151, 171, 204)
+                },
+                RECT {
+                    left: rect.left + s(4),
+                    top: rect.top,
+                    right: rect.right - s(4),
+                    bottom: rect.bottom,
+                },
+            );
             filter_x = rect.right + s(4);
         }
 
         let visible = self.filtered_extensions();
         let section_y = s(170);
-        let section_name = if self.extensions_tab == ExtensionsTab::Installed { "INSTALLED" } else { "RECOMMENDED" };
-        Self::label(hdc, section_name, left + s(10), section_y, rgb(156, 181, 220), clip);
+        let section_name = if self.extensions_tab == ExtensionsTab::Installed {
+            "INSTALLED"
+        } else {
+            "RECOMMENDED"
+        };
+        Self::label(
+            hdc,
+            section_name,
+            left + s(10),
+            section_y,
+            rgb(156, 181, 220),
+            clip,
+        );
         let heading_width = self.text_width(hdc, section_name);
         let count = visible.len().to_string();
-        let badge = RECT { left: left + s(18) + heading_width, top: section_y - s(2), right: left + s(46) + heading_width, bottom: section_y + s(20) };
+        // Sized to the number: a registry search can match hundreds.
+        let badge_left = left + s(18) + heading_width;
+        let badge_right = badge_left + self.text_width(hdc, &count) + s(18);
+        let badge = RECT {
+            left: badge_left,
+            top: section_y - s(2),
+            right: badge_right,
+            bottom: section_y + s(20),
+        };
         self.panel_card(hdc, badge, s(10), rgb(47, 68, 105), rgb(24, 39, 67));
-        Self::label(hdc, &count, badge.left + s(9), section_y, rgb(214, 227, 248), badge);
+        Self::label(
+            hdc,
+            &count,
+            badge.left + s(9),
+            section_y,
+            rgb(214, 227, 248),
+            badge,
+        );
 
         let mut y = s(194);
         let card_h = s(116);
@@ -1652,25 +2402,71 @@ impl App {
             } else {
                 format!("No extensions match \"{}\"", self.extensions_query.trim())
             };
-            self.label_ellipsis(hdc, &message, left + s(12), y + s(10), self.theme.muted,
-                RECT { left, top: clip.top, right: right - s(12), bottom: clip.bottom });
+            self.label_ellipsis(
+                hdc,
+                &message,
+                left + s(12),
+                y + s(10),
+                self.theme.muted,
+                RECT {
+                    left,
+                    top: clip.top,
+                    right: right - s(12),
+                    bottom: clip.bottom,
+                },
+            );
             return;
         }
 
-        for ext in visible.iter().take(3) {
-            if y + card_h > bottom { break; }
-            let card = RECT { left: left + s(8), top: y, right: right - s(8), bottom: y + card_h };
+        // As many cards as fit; the click handler in input.rs applies the
+        // same rule, so a card that isn't drawn can't be clicked.
+        for ext in &visible {
+            if y + card_h > bottom {
+                break;
+            }
+            let card = RECT {
+                left: left + s(8),
+                top: y,
+                right: right - s(8),
+                bottom: y + card_h,
+            };
             self.panel_card(hdc, card, s(6), rgb(35, 52, 84), rgb(15, 25, 44));
-            let icon = RECT { left: card.left + s(10), top: card.top + s(12), right: card.left + s(56), bottom: card.top + s(58) };
+            let icon = RECT {
+                left: card.left + s(10),
+                top: card.top + s(12),
+                right: card.left + s(56),
+                bottom: card.top + s(58),
+            };
             let content_x = icon.right + s(10);
             if ext.id == "prettier" {
                 self.panel_card(hdc, icon, s(6), rgb(47, 63, 96), rgb(22, 29, 47));
                 unsafe { SelectObject(hdc, self.brand_font) };
-                Self::label(hdc, "{ }", icon.left + s(10), icon.top + s(9), rgb(248, 250, 255), icon);
+                Self::label(
+                    hdc,
+                    "{ }",
+                    icon.left + s(10),
+                    icon.top + s(9),
+                    rgb(248, 250, 255),
+                    icon,
+                );
                 unsafe { SelectObject(hdc, self.ui_font) };
-                let colors = [rgb(86, 182, 240), rgb(236, 72, 153), rgb(245, 197, 24), rgb(168, 85, 247)];
+                let colors = [
+                    rgb(86, 182, 240),
+                    rgb(236, 72, 153),
+                    rgb(245, 197, 24),
+                    rgb(168, 85, 247),
+                ];
                 for (index, color) in colors.iter().enumerate() {
-                    Self::fill(hdc, RECT { left: icon.left + s(7 + index as i32 * 8), top: icon.bottom - s(8), right: icon.left + s(13 + index as i32 * 8), bottom: icon.bottom - s(5) }, *color);
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: icon.left + s(7 + index as i32 * 8),
+                            top: icon.bottom - s(8),
+                            right: icon.left + s(13 + index as i32 * 8),
+                            bottom: icon.bottom - s(5),
+                        },
+                        *color,
+                    );
                 }
             } else if ext.id == "dracula" {
                 self.panel_card(hdc, icon, s(6), rgb(70, 55, 112), rgb(30, 24, 55));
@@ -1678,58 +2474,184 @@ impl App {
                     let brush = CreateSolidBrush(rgb(167, 109, 242));
                     let old_brush = SelectObject(hdc, brush);
                     let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-                    Ellipse(hdc, icon.left + s(10), icon.top + s(9), icon.right - s(9), icon.bottom - s(9));
+                    Ellipse(
+                        hdc,
+                        icon.left + s(10),
+                        icon.top + s(9),
+                        icon.right - s(9),
+                        icon.bottom - s(9),
+                    );
                     SelectObject(hdc, old_pen);
                     SelectObject(hdc, old_brush);
                     DeleteObject(brush);
                 }
             } else {
                 self.panel_card(hdc, icon, s(6), rgb(39, 83, 72), rgb(18, 43, 39));
-                if !self.icons.draw_generic(hdc, GenericIcon::FolderSrc, icon.left + s(9), icon.top + s(9), s(28)) {
+                if !self.icons.draw_generic(
+                    hdc,
+                    GenericIcon::FolderSrc,
+                    icon.left + s(9),
+                    icon.top + s(9),
+                    s(28),
+                ) {
                     self.draw_vector_folder(hdc, icon.left + s(9), icon.top + s(9), s(28), false);
                 }
             }
 
             let title = ext.name.split(" - ").next().unwrap_or(&ext.name);
             unsafe { SelectObject(hdc, self.brand_font) };
-            self.label_ellipsis(hdc, title, content_x, card.top + s(9), rgb(244, 248, 255),
-                RECT { left: content_x, top: card.top, right: card.right - s(70), bottom: card.bottom });
+            self.label_ellipsis(
+                hdc,
+                title,
+                content_x,
+                card.top + s(9),
+                rgb(244, 248, 255),
+                RECT {
+                    left: content_x,
+                    top: card.top,
+                    right: card.right - s(70),
+                    bottom: card.bottom,
+                },
+            );
             unsafe { SelectObject(hdc, self.ui_font) };
-            Self::rounded_fill(hdc, RECT { left: card.right - s(62), top: card.top + s(10), right: card.right - s(50), bottom: card.top + s(22) }, s(3), rgb(56, 189, 248));
-            Self::label(hdc, "\u{2713}", card.right - s(60), card.top + s(8), rgb(255, 255, 255), card);
-            self.label_ellipsis(hdc, &ext.version, card.right - s(46), card.top + s(9), rgb(130, 151, 184),
-                RECT { left: card.right - s(46), top: card.top, right: card.right - s(8), bottom: card.bottom });
-            self.label_ellipsis(hdc, &ext.description, content_x, card.top + s(36), rgb(167, 186, 216),
-                RECT { left: content_x, top: card.top, right: card.right - s(10), bottom: card.bottom });
-            self.label_ellipsis(hdc, &ext.publisher, content_x, card.top + s(62), rgb(111, 137, 177),
-                RECT { left: content_x, top: card.top, right: card.right - s(10), bottom: card.bottom });
-            let metadata = if ext.downloads.is_empty() { ext.rating.clone() } else { format!("\u{2193} {}   {}", ext.downloads, ext.rating) };
-            self.label_ellipsis(hdc, &metadata, content_x, card.top + s(87), rgb(111, 137, 177),
-                RECT { left: content_x, top: card.top, right: card.right - s(92), bottom: card.bottom });
-            let action = RECT { left: card.right - s(82), top: card.top + s(80), right: card.right - s(10), bottom: card.top + s(106) };
+            self.label_ellipsis(
+                hdc,
+                &ext.version,
+                card.right - s(46),
+                card.top + s(9),
+                rgb(130, 151, 184),
+                RECT {
+                    left: card.right - s(46),
+                    top: card.top,
+                    right: card.right - s(8),
+                    bottom: card.bottom,
+                },
+            );
+            self.label_ellipsis(
+                hdc,
+                &ext.description,
+                content_x,
+                card.top + s(36),
+                rgb(167, 186, 216),
+                RECT {
+                    left: content_x,
+                    top: card.top,
+                    right: card.right - s(10),
+                    bottom: card.bottom,
+                },
+            );
+            self.label_ellipsis(
+                hdc,
+                &ext.publisher,
+                content_x,
+                card.top + s(62),
+                rgb(111, 137, 177),
+                RECT {
+                    left: content_x,
+                    top: card.top,
+                    right: card.right - s(10),
+                    bottom: card.bottom,
+                },
+            );
+            self.label_ellipsis(
+                hdc,
+                ext.category().label(),
+                content_x,
+                card.top + s(87),
+                rgb(111, 137, 177),
+                RECT {
+                    left: content_x,
+                    top: card.top,
+                    right: card.right - s(92),
+                    bottom: card.bottom,
+                },
+            );
+            let action = RECT {
+                left: card.right - s(82),
+                top: card.top + s(80),
+                right: card.right - s(10),
+                bottom: card.top + s(106),
+            };
             if ext.installing {
                 self.panel_card(hdc, action, s(4), rgb(56, 189, 248), rgb(22, 48, 83));
-                Self::label(hdc, "Checking...", action.left + s(8), action.top + s(4), rgb(190, 228, 250), action);
+                Self::label(
+                    hdc,
+                    "Checking...",
+                    action.left + s(8),
+                    action.top + s(4),
+                    rgb(190, 228, 250),
+                    action,
+                );
             } else if ext.installed {
                 self.panel_card(hdc, action, s(4), rgb(29, 145, 84), rgb(15, 58, 45));
-                Self::label(hdc, "\u{2713} Installed", action.left + s(8), action.top + s(4), rgb(202, 250, 220), action);
+                Self::label(
+                    hdc,
+                    "\u{2713} Installed",
+                    action.left + s(8),
+                    action.top + s(4),
+                    rgb(202, 250, 220),
+                    action,
+                );
             } else {
                 Self::rounded_fill(hdc, action, s(4), rgb(15, 116, 177));
                 let width = self.text_width(hdc, "Install");
-                Self::label(hdc, "Install", action.left + (action.right - action.left - width) / 2, action.top + s(4), rgb(255, 255, 255), action);
+                Self::label(
+                    hdc,
+                    "Install",
+                    action.left + (action.right - action.left - width) / 2,
+                    action.top + s(4),
+                    rgb(255, 255, 255),
+                    action,
+                );
             }
             y += card_h + gap;
         }
 
         let capabilities_top = y + s(8);
         if capabilities_top + s(104) < bottom {
-            Self::fill(hdc, RECT { left: left + s(8), top: capabilities_top, right: right - s(8), bottom: capabilities_top + s(1) }, rgb(35, 52, 84));
-            Self::label(hdc, "ACTIVE CAPABILITIES", left + s(10), capabilities_top + s(12), rgb(156, 181, 220), clip);
-            let prettier_ready = self.extensions.iter().any(|ext| ext.id == "prettier" && ext.installed);
-            let material_ready = self.extensions.iter().any(|ext| ext.id == "material-icons" && ext.installed);
+            Self::fill(
+                hdc,
+                RECT {
+                    left: left + s(8),
+                    top: capabilities_top,
+                    right: right - s(8),
+                    bottom: capabilities_top + s(1),
+                },
+                rgb(35, 52, 84),
+            );
+            Self::label(
+                hdc,
+                "ACTIVE CAPABILITIES",
+                left + s(10),
+                capabilities_top + s(12),
+                rgb(156, 181, 220),
+                clip,
+            );
+            let prettier_ready = self
+                .extensions
+                .iter()
+                .any(|ext| ext.id == "prettier" && ext.installed);
+            let material_ready = self
+                .extensions
+                .iter()
+                .any(|ext| ext.id == "material-icons" && ext.installed);
             let rows = [
-                ("Formatter", if prettier_ready { "Prettier ready" } else { "Built-in JSON/TOML ready" }),
-                ("Icon Theme", if material_ready { "Material Icon Theme active" } else { "Built-in icons active" }),
+                (
+                    "Formatter",
+                    if prettier_ready {
+                        "Prettier ready"
+                    } else {
+                        "Built-in JSON/TOML ready"
+                    },
+                ),
+                (
+                    "Icon Theme",
+                    if material_ready {
+                        "Material Icon Theme active"
+                    } else {
+                        "Built-in icons active"
+                    },
+                ),
             ];
             for (index, (name, detail)) in rows.iter().enumerate() {
                 let row_y = capabilities_top + s(38 + index as i32 * 32);
@@ -1743,10 +2665,20 @@ impl App {
                     DeleteObject(brush);
                 }
                 Self::label(hdc, name, left + s(27), row_y, self.theme.text, clip);
-                self.label_ellipsis(hdc, detail, left + s(104), row_y, self.theme.muted,
-                    RECT { left, top: clip.top, right: right - s(10), bottom: clip.bottom });
+                self.label_ellipsis(
+                    hdc,
+                    detail,
+                    left + s(104),
+                    row_y,
+                    self.theme.muted,
+                    RECT {
+                        left,
+                        top: clip.top,
+                        right: right - s(10),
+                        bottom: clip.bottom,
+                    },
+                );
             }
         }
     }
 }
-

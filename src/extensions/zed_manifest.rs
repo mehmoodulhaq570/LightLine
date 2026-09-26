@@ -60,13 +60,19 @@ mod tests {
         let manifest: Manifest = toml::from_str(toml).unwrap();
         assert_eq!(manifest.id, "material-icon-theme");
         assert_eq!(manifest.version, "1.3.1");
-        assert_eq!(manifest.repository.as_deref(), Some("https://github.com/zed-extensions/material-icon-theme"));
+        assert_eq!(
+            manifest.repository.as_deref(),
+            Some("https://github.com/zed-extensions/material-icon-theme")
+        );
     }
 
     #[test]
     fn real_installed_extension_is_classified_as_an_icon_theme() {
         let Some(dir) = std::env::var_os("APPDATA").map(|appdata| {
-            std::path::PathBuf::from(appdata).join("LightLine").join("extensions").join("material-icon-theme")
+            std::path::PathBuf::from(appdata)
+                .join("LightLine")
+                .join("extensions")
+                .join("material-icon-theme")
         }) else {
             return;
         };

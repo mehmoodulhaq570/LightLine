@@ -41,7 +41,11 @@ impl App {
         let s = |v: i32| self.scale(v);
         let left_bound = chip_right + s(24);
         let clip_right = (branch_x - s(16)).max(left_bound);
-        let indent_label = if self.settings.insert_spaces { "Spaces" } else { "Tab Size" };
+        let indent_label = if self.settings.insert_spaces {
+            "Spaces"
+        } else {
+            "Tab Size"
+        };
         let prefix = format!(
             "Ln {}, Col {}    {indent_label}: {}    UTF-8    ",
             self.view().cursor.line + 1,
@@ -68,7 +72,13 @@ impl App {
     // Mirrors the paint-time geometry in status_language_control using a
     // throwaway HDC, the same way App::position_at_pane measures text for
     // click-to-cursor mapping outside of a paint call.
-    pub(in crate::windows_app) fn click_status_language(&mut self, hwnd: HWND, rect: RECT, x: i32, y: i32) {
+    pub(in crate::windows_app) fn click_status_language(
+        &mut self,
+        hwnd: HWND,
+        rect: RECT,
+        x: i32,
+        y: i32,
+    ) {
         let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
         let language_rect = unsafe {
             let hdc = GetDC(hwnd);
@@ -260,7 +270,12 @@ impl App {
                     close_left + self.scale(12),
                     controls_mid_y + self.scale(6),
                 );
-                MoveToEx(hdc, close_left + self.scale(12), controls_mid_y - self.scale(6), null_mut());
+                MoveToEx(
+                    hdc,
+                    close_left + self.scale(12),
+                    controls_mid_y - self.scale(6),
+                    null_mut(),
+                );
                 LineTo(hdc, close_left, controls_mid_y + self.scale(6));
             });
             if self.sidebar_width > 0 {
@@ -270,7 +285,13 @@ impl App {
                     right: self.sidebar_right(),
                     bottom: card_bottom,
                 };
-                self.panel_card(hdc, panel, card_radius, self.theme.card_edge, self.theme.sidebar_bg);
+                self.panel_card(
+                    hdc,
+                    panel,
+                    card_radius,
+                    self.theme.card_edge,
+                    self.theme.sidebar_bg,
+                );
             }
             // Editor card: the rounded body first, then square-filled regions
             // inside it for the gutter and tab strip, which stay clear of the
@@ -281,7 +302,13 @@ impl App {
                 right: self.editor_right(hwnd),
                 bottom: card_bottom,
             };
-            self.panel_card(hdc, editor_card, card_radius, self.theme.card_edge, self.theme.editor_bg);
+            self.panel_card(
+                hdc,
+                editor_card,
+                card_radius,
+                self.theme.card_edge,
+                self.theme.editor_bg,
+            );
             FillRect(
                 hdc,
                 &RECT {
@@ -481,7 +508,14 @@ impl App {
                 }
                 let label = self.tab_label(index);
                 let chars: Vec<u16> = label.encode_utf16().collect();
-                SetTextColor(hdc, if index == self.active { self.theme.text } else { self.theme.muted });
+                SetTextColor(
+                    hdc,
+                    if index == self.active {
+                        self.theme.text
+                    } else {
+                        self.theme.muted
+                    },
+                );
                 let clip = RECT {
                     left: left + self.scale(37),
                     top: chrome_top,
@@ -713,8 +747,13 @@ impl App {
                     };
                     self.draw_close_icon(hdc, rect_close, self.theme.muted);
 
-                    let input_is_new = self.explorer_input.as_ref().is_some_and(|inp| !inp.is_rename);
-                    if let Some(input) = &self.explorer_input && !input.is_rename {
+                    let input_is_new = self
+                        .explorer_input
+                        .as_ref()
+                        .is_some_and(|inp| !inp.is_rename);
+                    if let Some(input) = &self.explorer_input
+                        && !input.is_rename
+                    {
                         let top = self.scale(EXPLORER_TOP);
                         let input_rect = RECT {
                             left: self.scale(RAIL + 20),
@@ -796,7 +835,9 @@ impl App {
                         .skip(self.explorer_first_row)
                     {
                         let top = self.scale(
-                            EXPLORER_TOP + (row + row_offset - self.explorer_first_row) as i32 * EXPLORER_ROW,
+                            EXPLORER_TOP
+                                + (row + row_offset - self.explorer_first_row) as i32
+                                    * EXPLORER_ROW,
                         );
                         if top >= sidebar_bottom - self.scale(38) {
                             break;
@@ -804,7 +845,8 @@ impl App {
                         let is_being_renamed = self.explorer_input.as_ref().is_some_and(|inp| {
                             inp.is_rename && inp.old_path.as_deref() == Some(&item.entry.path)
                         });
-                        let selected = self.selected_explorer_path.as_deref() == Some(&item.entry.path)
+                        let selected = self.selected_explorer_path.as_deref()
+                            == Some(&item.entry.path)
                             || self
                                 .doc()
                                 .path
@@ -821,8 +863,16 @@ impl App {
                                 hdc,
                                 sel_rect,
                                 self.scale(6),
-                                if is_being_renamed { self.theme.blue } else { rgb(48, 84, 156) },
-                                if is_being_renamed { rgb(16, 26, 48) } else { rgb(26, 44, 90) },
+                                if is_being_renamed {
+                                    self.theme.blue
+                                } else {
+                                    rgb(48, 84, 156)
+                                },
+                                if is_being_renamed {
+                                    rgb(16, 26, 48)
+                                } else {
+                                    rgb(26, 44, 90)
+                                },
                             );
                         }
                         let name = item
@@ -884,7 +934,11 @@ impl App {
                             }
                         }
                         if is_being_renamed {
-                            let input_buf = self.explorer_input.as_ref().map(|i| i.buffer.as_str()).unwrap_or("");
+                            let input_buf = self
+                                .explorer_input
+                                .as_ref()
+                                .map(|i| i.buffer.as_str())
+                                .unwrap_or("");
                             let text_x = left + self.scale(36);
                             let text_clip = RECT {
                                 left: text_x,
@@ -1086,8 +1140,22 @@ impl App {
             let right_ready = "\u{25cf}  Ready";
             let ready_width = self.text_width(hdc, right_ready);
             let ready_x = rect.right - ready_width - self.scale(16);
-            Self::label(hdc, "\u{25cf}", ready_x, editor_bottom + self.scale(5), rgb(52, 211, 153), rect);
-            Self::label(hdc, "Ready", ready_x + self.scale(14), editor_bottom + self.scale(5), self.theme.text, rect);
+            Self::label(
+                hdc,
+                "\u{25cf}",
+                ready_x,
+                editor_bottom + self.scale(5),
+                rgb(52, 211, 153),
+                rect,
+            );
+            Self::label(
+                hdc,
+                "Ready",
+                ready_x + self.scale(14),
+                editor_bottom + self.scale(5),
+                self.theme.text,
+                rect,
+            );
 
             // Middle info: Ln, Col, Spaces, Encoding, Language. The language
             // name is a real clickable control (see status_language_control),
@@ -1095,8 +1163,20 @@ impl App {
             // labels instead of blending into the plain muted text.
             let (mid_x, clip_right, prefix, language_rect) =
                 self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
-            let label_clip = RECT { left: mid_x, top: editor_bottom, right: clip_right, bottom: rect.bottom };
-            Self::label(hdc, &prefix, mid_x, editor_bottom + self.scale(5), self.theme.muted, label_clip);
+            let label_clip = RECT {
+                left: mid_x,
+                top: editor_bottom,
+                right: clip_right,
+                bottom: rect.bottom,
+            };
+            Self::label(
+                hdc,
+                &prefix,
+                mid_x,
+                editor_bottom + self.scale(5),
+                self.theme.muted,
+                label_clip,
+            );
             let language = language_label(self.doc().path.as_deref());
             Self::label(
                 hdc,
@@ -1114,16 +1194,32 @@ impl App {
                 let right = mid_x - self.scale(16);
                 if right > left + self.scale(40) {
                     let lower = message.to_ascii_lowercase();
-                    let failed = ["fail", "error", "not available", "could not", "skipped", "invalid"]
-                        .iter()
-                        .any(|word| lower.contains(word));
+                    let failed = [
+                        "fail",
+                        "error",
+                        "not available",
+                        "could not",
+                        "skipped",
+                        "invalid",
+                    ]
+                    .iter()
+                    .any(|word| lower.contains(word));
                     Self::label(
                         hdc,
                         message,
                         left,
                         editor_bottom + self.scale(5),
-                        if failed { self.theme.error } else { self.theme.muted },
-                        RECT { left, top: editor_bottom, right, bottom: rect.bottom },
+                        if failed {
+                            self.theme.error
+                        } else {
+                            self.theme.muted
+                        },
+                        RECT {
+                            left,
+                            top: editor_bottom,
+                            right,
+                            bottom: rect.bottom,
+                        },
                     );
                 }
             }

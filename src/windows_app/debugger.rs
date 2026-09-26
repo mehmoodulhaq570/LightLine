@@ -175,6 +175,11 @@ impl App {
             self.debug_not_started(hwnd, "Save the Python file before debugging it");
             return;
         };
+        self.launch_python_debug(hwnd, file);
+    }
+
+    // Starts debugpy on `file` with the breakpoints currently set.
+    fn launch_python_debug(&mut self, hwnd: HWND, file: PathBuf) {
         let root = workflow::python_project_root(&file, self.workspace_root.as_deref());
         let Some(interpreter) = self.resolve_python_interpreter(&root) else {
             self.debug_not_started(
@@ -194,6 +199,7 @@ impl App {
         self.debug_state = DebugState {
             status: "Starting...".into(),
             config: Some(DebugConfig::PythonFile),
+            python_file: Some(file.clone()),
             ..Default::default()
         };
         self.start_debug_client(
@@ -337,7 +343,10 @@ impl App {
                     self.debug_state.expanded.clear();
                     self.debug_state.children.clear();
                 }
-                DebugEvent::Variables { reference, variables } => {
+                DebugEvent::Variables {
+                    reference,
+                    variables,
+                } => {
                     self.debug_state.children.insert(reference, variables);
                 }
                 DebugEvent::RunInTerminal { args, cwd, env } => {
@@ -419,14 +428,32 @@ impl App {
         }
     }
 
+    // Relaunches what the session was debugging, whichever tab is active now.
     pub(super) fn debug_restart(&mut self, hwnd: HWND) {
+        let config = self.debug_state.config;
+        let python_file = self.debug_state.python_file.clone();
         self.debug = None;
         while self.debug_events.try_recv().is_ok() {}
         self.debug_state = DebugState {
             status: "Restarting...".into(),
             ..Default::default()
         };
-        self.start_debug_session(hwnd);
+        match (config, python_file) {
+            (Some(DebugConfig::PythonFile), Some(file)) => {
+                let editing = self
+                    .doc()
+                    .path
+                    .as_deref()
+                    .is_some_and(|open| Self::same_path(open, &file));
+                if editing && self.doc().is_dirty() && !self.save(hwnd, false) {
+                    self.debug_not_started(hwnd, "Save the Python file before debugging it");
+                    return;
+                }
+                self.launch_python_debug(hwnd, file);
+            }
+            (Some(DebugConfig::RustWorkspace), _) => self.start_rust_debug(hwnd),
+            _ => self.start_debug_session(hwnd),
+        }
     }
 
     // The configuration dropdown: Automatic follows the active file; picking
@@ -575,15 +602,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
-    pub(super) fn debug_variables_start_y(&self) -> i32 {
-        if self.debug.is_some() {
-            self.scale(236)
-        } else {
-            self.scale(190)
-        }
-    }
-
     // Flattens the VARIABLES tree (scope headers, their variables, and any
     // expanded children) into rows with absolute y positions. Used by both
     // paint_debug_panel (to draw) and the click handler (to hit-test), so the
@@ -616,7 +634,8 @@ impl App {
             y += header_height;
             let mut truncated = false;
             for variable in &scope.variables {
-                if !self.push_debug_variable_row(&mut rows, variable, 0, &mut y, bottom, row_height) {
+                if !self.push_debug_variable_row(&mut rows, variable, 0, &mut y, bottom, row_height)
+                {
                     truncated = true;
                     break;
                 }
@@ -643,7 +662,11 @@ impl App {
             return false;
         }
         let expandable = variable.variables_reference != 0;
-        let expanded = expandable && self.debug_state.expanded.contains(&variable.variables_reference);
+        let expanded = expandable
+            && self
+                .debug_state
+                .expanded
+                .contains(&variable.variables_reference);
         rows.push(DebugVariableRow {
             y: *y,
             depth,
@@ -662,7 +685,8 @@ impl App {
         match self.debug_state.children.get(&variable.variables_reference) {
             Some(children) => {
                 for child in children {
-                    if !self.push_debug_variable_row(rows, child, depth + 1, y, bottom, row_height) {
+                    if !self.push_debug_variable_row(rows, child, depth + 1, y, bottom, row_height)
+                    {
                         return false;
                     }
                 }
@@ -753,14 +777,13 @@ fn build_debug_binary(root: &Path) -> Result<PathBuf, String> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        let is_bin_artifact = value.get("reason").and_then(Value::as_str) == Some("compiler-artifact")
+        let is_bin_artifact = value.get("reason").and_then(Value::as_str)
+            == Some("compiler-artifact")
             && value
                 .pointer("/target/kind")
                 .and_then(Value::as_array)
                 .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some("bin")));
-        if is_bin_artifact
-            && let Some(exe) = value.get("executable").and_then(Value::as_str)
-        {
+        if is_bin_artifact && let Some(exe) = value.get("executable").and_then(Value::as_str) {
             executable = Some(PathBuf::from(exe));
         }
     }

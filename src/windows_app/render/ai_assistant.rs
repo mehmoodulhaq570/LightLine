@@ -4,7 +4,13 @@ impl App {
     pub(in crate::windows_app) fn paint_ai_assistant(&self, hdc: HDC, rect: RECT) {
         let s = |value: i32| self.scale(value);
         let card_radius = s(CARD_RADIUS);
-        self.panel_card(hdc, rect, card_radius, self.theme.card_edge, self.theme.sidebar_bg);
+        self.panel_card(
+            hdc,
+            rect,
+            card_radius,
+            self.theme.card_edge,
+            self.theme.sidebar_bg,
+        );
 
         let clip = rect;
         let header_h = s(42);
@@ -12,7 +18,13 @@ impl App {
 
         // --- Header Bar ---
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.sparkle_glyph(hdc, rect.left + s(14), rect.top + s(13), s(16), self.theme.violet);
+        self.sparkle_glyph(
+            hdc,
+            rect.left + s(14),
+            rect.top + s(13),
+            s(16),
+            self.theme.violet,
+        );
         Self::label(
             hdc,
             "AI Assistant",
@@ -31,7 +43,13 @@ impl App {
             bottom: rect.top + s(30),
         };
         Self::rounded_fill(hdc, badge_rect, s(5), rgb(38, 26, 80));
-        self.sparkle_glyph(hdc, model_left + s(6), rect.top + s(15), s(10), rgb(180, 150, 255));
+        self.sparkle_glyph(
+            hdc,
+            model_left + s(6),
+            rect.top + s(15),
+            s(10),
+            rgb(180, 150, 255),
+        );
         unsafe { SelectObject(hdc, self.ui_font) };
         Self::label(
             hdc,
@@ -44,9 +62,30 @@ impl App {
 
         // Header controls (minimize, refresh, close)
         let btn_y = rect.top + s(11);
-        Self::label(hdc, "\u{2014}", rect.right - s(66), btn_y, self.theme.muted, clip);
-        Self::label(hdc, "\u{21bb}", rect.right - s(46), btn_y, self.theme.muted, clip);
-        Self::label(hdc, "\u{00d7}", rect.right - s(24), btn_y, self.theme.muted, clip);
+        Self::label(
+            hdc,
+            "\u{2014}",
+            rect.right - s(66),
+            btn_y,
+            self.theme.muted,
+            clip,
+        );
+        Self::label(
+            hdc,
+            "\u{21bb}",
+            rect.right - s(46),
+            btn_y,
+            self.theme.muted,
+            clip,
+        );
+        Self::label(
+            hdc,
+            "\u{00d7}",
+            rect.right - s(24),
+            btn_y,
+            self.theme.muted,
+            clip,
+        );
 
         // Header bottom divider
         Self::fill(
@@ -98,7 +137,13 @@ impl App {
             bottom: assistant_top + s(22),
         };
         Self::rounded_fill(hdc, avatar_rect, s(6), rgb(72, 50, 175));
-        self.sparkle_glyph(hdc, avatar_rect.left + s(5), avatar_rect.top + s(5), s(12), self.theme.text);
+        self.sparkle_glyph(
+            hdc,
+            avatar_rect.left + s(5),
+            avatar_rect.top + s(5),
+            s(12),
+            self.theme.text,
+        );
 
         unsafe { SelectObject(hdc, self.brand_font) };
         Self::label(
@@ -212,7 +257,14 @@ impl App {
             bottom: code_rect.top + s(24),
         };
         Self::rounded_fill(hdc, copy_rect, s(4), rgb(22, 34, 58));
-        Self::label(hdc, "Copy", copy_rect.left + s(8), copy_rect.top + s(2), self.theme.muted, copy_rect);
+        Self::label(
+            hdc,
+            "Copy",
+            copy_rect.left + s(8),
+            copy_rect.top + s(2),
+            self.theme.muted,
+            copy_rect,
+        );
 
         // Code lines (monospace font)
         unsafe { SelectObject(hdc, self.font) };
@@ -220,12 +272,37 @@ impl App {
         let c_top = code_rect.top + s(30);
 
         let lines = [
-            ("let ", self.theme.blue, "tab_width = self.scale(TAB_WIDTH);", self.theme.text),
-            ("let ", self.theme.blue, "tab_height = self.scale(TAB_HEIGHT);", self.theme.text),
+            (
+                "let ",
+                self.theme.blue,
+                "tab_width = self.scale(TAB_WIDTH);",
+                self.theme.text,
+            ),
+            (
+                "let ",
+                self.theme.blue,
+                "tab_height = self.scale(TAB_HEIGHT);",
+                self.theme.text,
+            ),
             ("", self.theme.text, "", self.theme.text),
-            ("for ", self.theme.blue, "(index, _) in self.visible_tabs().enumerate() {", self.theme.text),
-            ("    if ", self.theme.blue, "index >= self.tabs.len() { break; }", self.theme.text),
-            ("    let ", self.theme.blue, "left = index as i32 * tab_width;", self.theme.text),
+            (
+                "for ",
+                self.theme.blue,
+                "(index, _) in self.visible_tabs().enumerate() {",
+                self.theme.text,
+            ),
+            (
+                "    if ",
+                self.theme.blue,
+                "index >= self.tabs.len() { break; }",
+                self.theme.text,
+            ),
+            (
+                "    let ",
+                self.theme.blue,
+                "left = index as i32 * tab_width;",
+                self.theme.text,
+            ),
         ];
 
         for (i, (kw, kw_col, rest, rest_col)) in lines.iter().enumerate() {
@@ -271,7 +348,14 @@ impl App {
             bottom: input_rect.top + s(32),
         };
         Self::rounded_fill(hdc, send_btn, s(12), rgb(68, 88, 225));
-        Self::label(hdc, "\u{27a4}", send_btn.left + s(6), send_btn.top + s(4), self.theme.text, send_btn);
+        Self::label(
+            hdc,
+            "\u{27a4}",
+            send_btn.left + s(6),
+            send_btn.top + s(4),
+            self.theme.text,
+            send_btn,
+        );
 
         // Bottom chips row
         let chip_y = input_rect.bottom + s(8);
@@ -282,8 +366,21 @@ impl App {
             bottom: chip_y + s(20),
         };
         Self::rounded_fill(hdc, tera_chip, s(4), rgb(32, 24, 70));
-        self.sparkle_glyph(hdc, tera_chip.left + s(5), chip_y + s(5), s(9), rgb(180, 150, 255));
-        Self::label(hdc, "Tera", tera_chip.left + s(18), chip_y + s(2), rgb(200, 185, 255), clip);
+        self.sparkle_glyph(
+            hdc,
+            tera_chip.left + s(5),
+            chip_y + s(5),
+            s(9),
+            rgb(180, 150, 255),
+        );
+        Self::label(
+            hdc,
+            "Tera",
+            tera_chip.left + s(18),
+            chip_y + s(2),
+            rgb(200, 185, 255),
+            clip,
+        );
 
         let model_chip = RECT {
             left: tera_chip.right + s(8),
@@ -292,11 +389,32 @@ impl App {
             bottom: chip_y + s(20),
         };
         Self::rounded_fill(hdc, model_chip, s(4), rgb(20, 32, 58));
-        Self::label(hdc, "Medium \u{25be}", model_chip.left + s(8), chip_y + s(2), self.theme.muted, clip);
+        Self::label(
+            hdc,
+            "Medium \u{25be}",
+            model_chip.left + s(8),
+            chip_y + s(2),
+            self.theme.muted,
+            clip,
+        );
 
         // Attachment & Mic icons on right
-        Self::label(hdc, "\u{2301}", rect.right - s(48), chip_y + s(2), self.theme.muted, clip);
-        Self::label(hdc, "\u{25c8}", rect.right - s(28), chip_y + s(2), self.theme.muted, clip);
+        Self::label(
+            hdc,
+            "\u{2301}",
+            rect.right - s(48),
+            chip_y + s(2),
+            self.theme.muted,
+            clip,
+        );
+        Self::label(
+            hdc,
+            "\u{25c8}",
+            rect.right - s(28),
+            chip_y + s(2),
+            self.theme.muted,
+            clip,
+        );
     }
 
     pub(in crate::windows_app) fn sparkle_glyph(
@@ -318,13 +436,25 @@ impl App {
             let cy = y + s / 2;
             let points = [
                 POINT { x: cx, y },
-                POINT { x: cx + s / 6, y: cy - s / 6 },
+                POINT {
+                    x: cx + s / 6,
+                    y: cy - s / 6,
+                },
                 POINT { x: x + s, y: cy },
-                POINT { x: cx + s / 6, y: cy + s / 6 },
+                POINT {
+                    x: cx + s / 6,
+                    y: cy + s / 6,
+                },
                 POINT { x: cx, y: y + s },
-                POINT { x: cx - s / 6, y: cy + s / 6 },
+                POINT {
+                    x: cx - s / 6,
+                    y: cy + s / 6,
+                },
                 POINT { x, y: cy },
-                POINT { x: cx - s / 6, y: cy - s / 6 },
+                POINT {
+                    x: cx - s / 6,
+                    y: cy - s / 6,
+                },
             ];
             Polygon(hdc, points.as_ptr(), points.len() as i32);
 

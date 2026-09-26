@@ -11,8 +11,8 @@ mod terminal;
 mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
-    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, GitAction, SideView, Tab, TerminalPane, TerminalTab,
-    WorkerMessage, is_c_family_path, is_cpp_path,
+    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, GitAction, SideView, Tab, TerminalPane,
+    TerminalTab, WorkerMessage, is_c_family_path, is_cpp_path,
 };
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
@@ -47,7 +47,9 @@ use lightline::terminal::{
     Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, ShellKind, Snapshot,
     TerminalService, TerminalSize,
 };
-pub use lightline::workflow::{self, Change, CommitEntry, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit};
+pub use lightline::workflow::{
+    self, Change, CommitEntry, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit,
+};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -124,7 +126,11 @@ fn repo_relative(path: &Path, root: &Path) -> Option<PathBuf> {
         return Some(rest.to_path_buf());
     }
     let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
-    let depth = lower(&path).strip_prefix(lower(&root)).ok()?.components().count();
+    let depth = lower(&path)
+        .strip_prefix(lower(&root))
+        .ok()?
+        .components()
+        .count();
     let components: Vec<_> = path.components().collect();
     Some(components[components.len() - depth..].iter().collect())
 }

@@ -651,7 +651,14 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
         // Close glyph.
-        SetTextColor(hdc, if state.hover_close { DLG_TEXT } else { DLG_MUTED });
+        SetTextColor(
+            hdc,
+            if state.hover_close {
+                DLG_TEXT
+            } else {
+                DLG_MUTED
+            },
+        );
         let mut close_rect = state.close_rect;
         let close_glyph = utf16("\u{2715}");
         DrawTextW(
@@ -695,7 +702,11 @@ fn paint_dialog(state: &mut DialogState, hwnd: HWND) {
                 DLG_BTN
             };
             App::rounded_fill(hdc, button.rect, state.radius, color);
-            let text_color = if is_primary { rgb(240, 246, 255) } else { DLG_TEXT };
+            let text_color = if is_primary {
+                rgb(240, 246, 255)
+            } else {
+                DLG_TEXT
+            };
             SetTextColor(hdc, text_color);
             let mut rect = button.rect;
             DrawTextW(

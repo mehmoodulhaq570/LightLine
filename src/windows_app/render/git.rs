@@ -147,14 +147,7 @@ impl App {
                     let word = change.label();
                     let word_width = self.text_width(hdc, word);
                     let buttons_left = right - self.scale(60);
-                    Self::label(
-                        hdc,
-                        word,
-                        buttons_left - word_width,
-                        top,
-                        color,
-                        clip,
-                    );
+                    Self::label(hdc, word, buttons_left - word_width, top, color, clip);
                     self.label_ellipsis(
                         hdc,
                         &display_path(&change.path),
@@ -169,14 +162,21 @@ impl App {
                         },
                     );
                     let (toggle, discard) = self.git_row_buttons(right, rect, *staged);
-                    let busy = if self.git_busy { self.theme.edge } else { self.theme.muted };
+                    let busy = if self.git_busy {
+                        self.theme.edge
+                    } else {
+                        self.theme.muted
+                    };
                     self.git_glyph(hdc, if *staged { "-" } else { "+" }, &toggle, busy, clip);
                     if let Some(discard) = discard {
                         self.git_glyph(hdc, "\u{21b3}", &discard, busy, clip);
                     }
                 }
                 GitRow::Commit(entry) => {
-                    let newest = self.history.first().is_some_and(|item| item.oid == entry.oid);
+                    let newest = self
+                        .history
+                        .first()
+                        .is_some_and(|item| item.oid == entry.oid);
                     if selected || newest {
                         self.panel_card(
                             hdc,
@@ -187,8 +187,16 @@ impl App {
                                 bottom: top + self.scale(ROW_COMMIT - 3),
                             },
                             self.scale(5),
-                            if selected { self.theme.blue } else { self.theme.edge },
-                            if selected { self.theme.select_bg } else { self.theme.active_bg },
+                            if selected {
+                                self.theme.blue
+                            } else {
+                                self.theme.edge
+                            },
+                            if selected {
+                                self.theme.select_bg
+                            } else {
+                                self.theme.active_bg
+                            },
                         );
                     }
                     let node_x = left + self.scale(25);
@@ -211,7 +219,11 @@ impl App {
                             bottom: top + self.scale(19),
                         },
                         self.scale(9),
-                        if newest { self.theme.violet } else { self.theme.blue },
+                        if newest {
+                            self.theme.violet
+                        } else {
+                            self.theme.blue
+                        },
                     );
                     self.label_ellipsis(
                         hdc,
@@ -303,7 +315,11 @@ impl App {
             hdc,
             box_rect,
             self.scale(6),
-            if focused { self.theme.blue } else { self.theme.edge },
+            if focused {
+                self.theme.blue
+            } else {
+                self.theme.edge
+            },
             self.theme.active_bg,
         );
         let empty = self.commit_message.is_empty();
@@ -317,7 +333,11 @@ impl App {
             &text,
             box_rect.left + self.scale(10),
             box_rect.top + self.scale(12),
-            if empty { self.theme.muted } else { self.theme.text },
+            if empty {
+                self.theme.muted
+            } else {
+                self.theme.text
+            },
             RECT {
                 left: box_rect.left + self.scale(10),
                 top: box_rect.top,
@@ -351,7 +371,11 @@ impl App {
             hdc,
             layout.commit_button,
             self.scale(6),
-            if ready { rgb(108, 92, 246) } else { self.theme.edge },
+            if ready {
+                rgb(108, 92, 246)
+            } else {
+                self.theme.edge
+            },
             if ready {
                 rgb(79, 70, 210)
             } else {
@@ -369,7 +393,11 @@ impl App {
             label,
             (layout.commit_button.left + layout.commit_button.right - width) / 2,
             layout.commit_button.top + self.scale(8),
-            if ready { self.theme.text } else { self.theme.muted },
+            if ready {
+                self.theme.text
+            } else {
+                self.theme.muted
+            },
             clip,
         );
     }
@@ -446,7 +474,11 @@ impl App {
             &sync,
             rect.right - sync_width - self.scale(4),
             rect.top + self.scale(9),
-            if self.git_conflicted { self.theme.error } else { self.theme.green },
+            if self.git_conflicted {
+                self.theme.error
+            } else {
+                self.theme.green
+            },
             clip,
         );
     }
@@ -473,7 +505,9 @@ impl App {
         let track_height = (track.bottom - track.top).max(1);
         let thumb_height = ((track_height as i64 * viewport as i64) / total as i64)
             .max(self.scale(24) as i64) as i32;
-        let max_first = rows.len().saturating_sub(self.git_visible_rows_from_height(viewport));
+        let max_first = rows
+            .len()
+            .saturating_sub(self.git_visible_rows_from_height(viewport));
         let travel = (track_height - thumb_height).max(0);
         let offset = if max_first == 0 {
             0

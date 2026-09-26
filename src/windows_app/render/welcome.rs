@@ -57,17 +57,17 @@ const CARDS: [(&str, &str, WelcomeAction); 4] = [
         "Start with your workspace",
         WelcomeAction::OpenFolder,
     ),
-    ("Write Code", "Fast, focused editing", WelcomeAction::NewFile),
+    (
+        "Write Code",
+        "Fast, focused editing",
+        WelcomeAction::NewFile,
+    ),
     (
         "Run & Debug",
         "Find issues, fix faster",
         WelcomeAction::RunDebug,
     ),
-    (
-        "Terminal",
-        "Run commands in place",
-        WelcomeAction::Terminal,
-    ),
+    ("Terminal", "Run commands in place", WelcomeAction::Terminal),
 ];
 
 // (gradient top, gradient bottom, icon badge) per card.
@@ -150,9 +150,8 @@ impl App {
 
         for (index, (_, _, action)) in NAV_ITEMS.iter().enumerate() {
             // Home occupies row zero; the six workbench destinations follow it.
-            let top = content_top
-                + s(WELCOME_RAIL_FIRST_ROW)
-                + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
+            let top =
+                content_top + s(WELCOME_RAIL_FIRST_ROW) + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
             targets.push((
                 RECT {
                     left: s(7),
@@ -193,7 +192,7 @@ impl App {
         let panel_height = (s(PANEL_HEADER_H)
             + (recent_rows as i32 * s(RECENT_ROW_H)).max(quick_rows as i32 * s(QUICK_ROW_H))
             + s(10))
-            .min(available);
+        .min(available);
         let recent_width = (content_right - content_left - card_gap) * 57 / 100;
         let recent_panel = RECT {
             left: content_left,
@@ -338,11 +337,21 @@ impl App {
             s(56),
             s(12),
             self.theme.text,
-            RECT { left: s(56), top: 0, right: s(160), bottom: layout.content_top },
+            RECT {
+                left: s(56),
+                top: 0,
+                right: s(160),
+                bottom: layout.content_top,
+            },
         );
         Self::rounded_fill(
             hdc,
-            RECT { left: s(132), top: s(15), right: s(164), bottom: s(35) },
+            RECT {
+                left: s(132),
+                top: s(15),
+                right: s(164),
+                bottom: s(35),
+            },
             s(5),
             rgb(63, 47, 150),
         );
@@ -353,7 +362,12 @@ impl App {
             s(138),
             s(15),
             self.theme.text,
-            RECT { left: s(132), top: 0, right: s(164), bottom: layout.content_top },
+            RECT {
+                left: s(132),
+                top: 0,
+                right: s(164),
+                bottom: layout.content_top,
+            },
         );
 
         let command = self.command_center_rect(hwnd);
@@ -386,7 +400,14 @@ impl App {
                 bottom: command.bottom - s(4),
             };
             Self::rounded_fill(hdc, key, s(4), rgb(25, 43, 76));
-            Self::label(hdc, "Ctrl P", key.left + s(5), key.top + s(1), self.theme.text, key);
+            Self::label(
+                hdc,
+                "Ctrl P",
+                key.left + s(5),
+                key.top + s(1),
+                self.theme.text,
+                key,
+            );
         }
 
         let button = s(46);
@@ -396,7 +417,13 @@ impl App {
             MoveToEx(hdc, controls_left + s(17), middle + s(5), null_mut());
             LineTo(hdc, controls_left + s(29), middle + s(5));
             let max_left = controls_left + button + s(17);
-            Rectangle(hdc, max_left, middle - s(6), max_left + s(12), middle + s(6));
+            Rectangle(
+                hdc,
+                max_left,
+                middle - s(6),
+                max_left + s(12),
+                middle + s(6),
+            );
             let close_left = controls_left + button * 2 + s(17);
             MoveToEx(hdc, close_left, middle - s(6), null_mut());
             LineTo(hdc, close_left + s(12), middle + s(6));
@@ -435,17 +462,42 @@ impl App {
         self.panel_card(hdc, welcome_row, s(7), rgb(50, 84, 154), rgb(18, 35, 72));
         Self::fill(
             hdc,
-            RECT { left: 0, top: welcome_row.top + s(5), right: s(3), bottom: welcome_row.bottom - s(5) },
+            RECT {
+                left: 0,
+                top: welcome_row.top + s(5),
+                right: s(3),
+                bottom: welcome_row.bottom - s(5),
+            },
             self.theme.violet,
         );
-        self.home_glyph(hdc, s(19), welcome_row.top + s(11), s(20), rgb(240, 245, 255));
+        self.home_glyph(
+            hdc,
+            s(19),
+            welcome_row.top + s(11),
+            s(20),
+            rgb(240, 245, 255),
+        );
 
         for (index, (_, icon, _)) in NAV_ITEMS.iter().enumerate() {
             let top = first_top + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
             self.rail_icon(hdc, *icon, s(19), top + s(11), self.theme.muted);
         }
-        Self::label(hdc, "◎", s(19), layout.status_top - s(62), self.theme.muted, clip);
-        Self::label(hdc, "⚙", s(18), layout.status_top - s(34), self.theme.muted, clip);
+        Self::label(
+            hdc,
+            "◎",
+            s(19),
+            layout.status_top - s(62),
+            self.theme.muted,
+            clip,
+        );
+        Self::label(
+            hdc,
+            "⚙",
+            s(18),
+            layout.status_top - s(34),
+            self.theme.muted,
+            clip,
+        );
     }
 
     fn paint_welcome_hero(&self, hdc: HDC, layout: &WelcomeLayout) {
@@ -461,7 +513,14 @@ impl App {
             SelectObject(hdc, self.ui_font);
             SetTextCharacterExtra(hdc, s(2));
         }
-        Self::label(hdc, "WELCOME TO", left, layout.hero_top, self.theme.violet, clip);
+        Self::label(
+            hdc,
+            "WELCOME TO",
+            left,
+            layout.hero_top,
+            self.theme.violet,
+            clip,
+        );
         unsafe { SetTextCharacterExtra(hdc, 0) };
 
         let logo_top = layout.hero_top + s(26);
@@ -602,8 +661,20 @@ impl App {
                         );
                     }
                 }
-                2 => self.rail_icon(hdc, 3, badge.left + s(11), badge.top + s(11), self.theme.text),
-                _ => self.prompt_glyph(hdc, badge.left + s(10), badge.top + s(10), s(20), self.theme.text),
+                2 => self.rail_icon(
+                    hdc,
+                    3,
+                    badge.left + s(11),
+                    badge.top + s(11),
+                    self.theme.text,
+                ),
+                _ => self.prompt_glyph(
+                    hdc,
+                    badge.left + s(10),
+                    badge.top + s(10),
+                    s(20),
+                    self.theme.text,
+                ),
             }
             unsafe { SelectObject(hdc, self.brand_font) };
             Self::label(
@@ -645,7 +716,13 @@ impl App {
             bottom: panel.bottom,
         };
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.clock_glyph(hdc, panel.left + s(16), panel.top + s(17), s(17), self.theme.blue);
+        self.clock_glyph(
+            hdc,
+            panel.left + s(16),
+            panel.top + s(17),
+            s(17),
+            self.theme.blue,
+        );
         self.label_mid(
             hdc,
             "Recent Projects",
@@ -685,7 +762,13 @@ impl App {
                 bottom: top + s(RECENT_ROW_H) - s(4),
             };
             Self::rounded_fill(hdc, row, s(8), self.theme.active_bg);
-            if !self.icons.draw_generic(hdc, GenericIcon::Folder, row.left + s(12), top + s(15), s(17)) {
+            if !self.icons.draw_generic(
+                hdc,
+                GenericIcon::Folder,
+                row.left + s(12),
+                top + s(15),
+                s(17),
+            ) {
                 self.draw_vector_folder(hdc, row.left + s(12), top + s(15), s(17), false);
             }
             let text_left = row.left + s(40);
@@ -726,7 +809,13 @@ impl App {
             bottom: panel.bottom,
         };
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.rail_icon(hdc, 5, panel.left + s(14), panel.top + s(17), self.theme.violet);
+        self.rail_icon(
+            hdc,
+            5,
+            panel.left + s(14),
+            panel.top + s(17),
+            self.theme.violet,
+        );
         self.label_mid(
             hdc,
             "Quick Actions",
@@ -747,7 +836,14 @@ impl App {
                 bottom: middle + s(11),
             };
             Self::rounded_fill(hdc, chip, s(5), CHIP_BG);
-            self.label_mid(hdc, shortcut, chip.left + s(8), middle, self.theme.muted, clip);
+            self.label_mid(
+                hdc,
+                shortcut,
+                chip.left + s(8),
+                middle,
+                self.theme.muted,
+                clip,
+            );
             match index {
                 0 | 1 => {
                     if !self.icons.draw_generic(
@@ -783,11 +879,31 @@ impl App {
                         );
                     }
                 }
-                3 => Self::label(hdc, "⌘", panel.left + s(16), middle - s(11), self.theme.muted, clip),
+                3 => Self::label(
+                    hdc,
+                    "⌘",
+                    panel.left + s(16),
+                    middle - s(11),
+                    self.theme.muted,
+                    clip,
+                ),
                 4 => self.rail_icon(hdc, 1, panel.left + s(16), middle - s(9), self.theme.muted),
-                _ => self.prompt_glyph(hdc, panel.left + s(16), middle - s(9), s(18), self.theme.muted),
+                _ => self.prompt_glyph(
+                    hdc,
+                    panel.left + s(16),
+                    middle - s(9),
+                    s(18),
+                    self.theme.muted,
+                ),
             }
-            self.label_mid(hdc, label, panel.left + s(42), middle, self.theme.text, clip);
+            self.label_mid(
+                hdc,
+                label,
+                panel.left + s(42),
+                middle,
+                self.theme.text,
+                clip,
+            );
         }
     }
 
@@ -804,7 +920,13 @@ impl App {
             bottom: panel.bottom,
         };
         unsafe { SelectObject(hdc, self.brand_font) };
-        self.bulb_glyph(hdc, panel.left + s(16), panel.top + s(16), s(18), rgb(245, 205, 110));
+        self.bulb_glyph(
+            hdc,
+            panel.left + s(16),
+            panel.top + s(16),
+            s(18),
+            rgb(245, 205, 110),
+        );
         self.label_mid(
             hdc,
             "Getting Started",
@@ -816,7 +938,13 @@ impl App {
         for (index, (title, subtitle, _)) in STEPS.iter().enumerate() {
             let top = panel.top + s(PANEL_HEADER_H) + index as i32 * s(STEP_ROW_H);
             let middle = top + s(STEP_ROW_H) / 2;
-            self.ring_glyph(hdc, panel.left + s(18), middle - s(11), s(22), self.theme.violet);
+            self.ring_glyph(
+                hdc,
+                panel.left + s(18),
+                middle - s(11),
+                s(22),
+                self.theme.violet,
+            );
             let row_clip = RECT {
                 left: panel.left + s(52),
                 top,
@@ -824,9 +952,23 @@ impl App {
                 bottom: top + s(STEP_ROW_H),
             };
             unsafe { SelectObject(hdc, self.brand_font) };
-            self.label_ellipsis(hdc, title, panel.left + s(52), middle - s(19), self.theme.text, row_clip);
+            self.label_ellipsis(
+                hdc,
+                title,
+                panel.left + s(52),
+                middle - s(19),
+                self.theme.text,
+                row_clip,
+            );
             unsafe { SelectObject(hdc, self.ui_font) };
-            self.label_ellipsis(hdc, subtitle, panel.left + s(52), middle + s(2), self.theme.muted, row_clip);
+            self.label_ellipsis(
+                hdc,
+                subtitle,
+                panel.left + s(52),
+                middle + s(2),
+                self.theme.muted,
+                row_clip,
+            );
             self.chevron(hdc, panel.right - s(20), middle, false);
             if index + 1 < STEPS.len() {
                 Self::fill(
@@ -845,13 +987,7 @@ impl App {
         let Some(community) = layout.community else {
             return;
         };
-        self.gradient_card(
-            hdc,
-            community,
-            s(12),
-            rgb(46, 40, 132),
-            rgb(28, 30, 78),
-        );
+        self.gradient_card(hdc, community, s(12), rgb(46, 40, 132), rgb(28, 30, 78));
         let clip = RECT {
             left: community.left + s(16),
             top: community.top,
@@ -865,7 +1001,13 @@ impl App {
             bottom: community.top + s(68),
         };
         Self::rounded_fill(hdc, badge, s(10), rgb(96, 82, 220));
-        self.rail_icon(hdc, 2, badge.left + s(15), badge.top + s(15), self.theme.text);
+        self.rail_icon(
+            hdc,
+            2,
+            badge.left + s(15),
+            badge.top + s(15),
+            self.theme.text,
+        );
         unsafe { SelectObject(hdc, self.brand_font) };
         Self::label(
             hdc,
@@ -941,7 +1083,14 @@ impl App {
         self.label_mid(hdc, &left_text, s(16), middle, self.theme.muted, clip);
         let hint = "Ctrl+O file  \u{2022}  Ctrl+N new  \u{2022}  Ctrl+Shift+O folder";
         let width = self.text_width(hdc, hint);
-        self.label_mid(hdc, hint, rect.right - s(16) - width, middle, self.theme.muted, clip);
+        self.label_mid(
+            hdc,
+            hint,
+            rect.right - s(16) - width,
+            middle,
+            self.theme.muted,
+            clip,
+        );
     }
 
     // --- small vector glyphs, drawn to match the hand-drawn rail icons ---
@@ -964,14 +1113,8 @@ impl App {
     fn home_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
         self.stroke(hdc, color, |hdc| unsafe {
             let points = [
-                POINT {
-                    x,
-                    y: y + size / 2,
-                },
-                POINT {
-                    x: x + size / 2,
-                    y,
-                },
+                POINT { x, y: y + size / 2 },
+                POINT { x: x + size / 2, y },
                 POINT {
                     x: x + size,
                     y: y + size / 2,

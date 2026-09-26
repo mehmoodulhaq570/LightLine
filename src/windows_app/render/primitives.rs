@@ -167,7 +167,11 @@ impl App {
             let doc = self.doc();
             let cursor_line = self.view().cursor.line;
             let row = doc
-                .visual_row_of(self.view().first_line, cursor_line, self.visible_lines(hwnd) + 1)
+                .visual_row_of(
+                    self.view().first_line,
+                    cursor_line,
+                    self.visible_lines(hwnd) + 1,
+                )
                 .map_or(-1, |row| row as i32);
             let y = self.editor_top() + row * self.line_height;
             RECT {
@@ -304,7 +308,11 @@ impl App {
         y: i32,
         color: u32,
     ) {
-        if kind == 0 && self.icons.draw_generic(hdc, GenericIcon::FolderOpen, x, y, self.scale(17)) {
+        if kind == 0
+            && self
+                .icons
+                .draw_generic(hdc, GenericIcon::FolderOpen, x, y, self.scale(17))
+        {
             return;
         }
         unsafe {
@@ -316,22 +324,58 @@ impl App {
                 0 => {
                     // Back sheet
                     let back_pts = [
-                        POINT { x: x + s(2), y: y + s(1) },
-                        POINT { x: x + s(9), y: y + s(1) },
-                        POINT { x: x + s(12), y: y + s(4) },
-                        POINT { x: x + s(12), y: y + s(12) },
-                        POINT { x: x + s(2), y: y + s(12) },
-                        POINT { x: x + s(2), y: y + s(1) },
+                        POINT {
+                            x: x + s(2),
+                            y: y + s(1),
+                        },
+                        POINT {
+                            x: x + s(9),
+                            y: y + s(1),
+                        },
+                        POINT {
+                            x: x + s(12),
+                            y: y + s(4),
+                        },
+                        POINT {
+                            x: x + s(12),
+                            y: y + s(12),
+                        },
+                        POINT {
+                            x: x + s(2),
+                            y: y + s(12),
+                        },
+                        POINT {
+                            x: x + s(2),
+                            y: y + s(1),
+                        },
                     ];
                     Polyline(hdc, back_pts.as_ptr(), back_pts.len() as i32);
                     // Front sheet
                     let front_pts = [
-                        POINT { x: x + s(5), y: y + s(4) },
-                        POINT { x: x + s(13), y: y + s(4) },
-                        POINT { x: x + s(16), y: y + s(7) },
-                        POINT { x: x + s(16), y: y + s(17) },
-                        POINT { x: x + s(5), y: y + s(17) },
-                        POINT { x: x + s(5), y: y + s(4) },
+                        POINT {
+                            x: x + s(5),
+                            y: y + s(4),
+                        },
+                        POINT {
+                            x: x + s(13),
+                            y: y + s(4),
+                        },
+                        POINT {
+                            x: x + s(16),
+                            y: y + s(7),
+                        },
+                        POINT {
+                            x: x + s(16),
+                            y: y + s(17),
+                        },
+                        POINT {
+                            x: x + s(5),
+                            y: y + s(17),
+                        },
+                        POINT {
+                            x: x + s(5),
+                            y: y + s(4),
+                        },
                     ];
                     Polyline(hdc, front_pts.as_ptr(), front_pts.len() as i32);
                     // Dog-ear fold on front sheet
@@ -450,7 +494,7 @@ impl App {
     ) {
         unsafe {
             let s = |v: i32| (v * size) / 16;
-            let folder_tab_color = rgb(235, 175, 65);  // warm amber gold tab
+            let folder_tab_color = rgb(235, 175, 65); // warm amber gold tab
             let folder_body_color = rgb(215, 155, 45); // deeper gold body
             let folder_flap_color = rgb(248, 192, 75); // bright front flap when open
 
@@ -465,12 +509,30 @@ impl App {
                 // Closed folder:
                 // 1. Back/tab
                 let tab_pts = [
-                    POINT { x: x + s(1), y: y + s(2) },
-                    POINT { x: x + s(6), y: y + s(2) },
-                    POINT { x: x + s(8), y: y + s(4) },
-                    POINT { x: x + s(14), y: y + s(4) },
-                    POINT { x: x + s(14), y: y + s(13) },
-                    POINT { x: x + s(1), y: y + s(13) },
+                    POINT {
+                        x: x + s(1),
+                        y: y + s(2),
+                    },
+                    POINT {
+                        x: x + s(6),
+                        y: y + s(2),
+                    },
+                    POINT {
+                        x: x + s(8),
+                        y: y + s(4),
+                    },
+                    POINT {
+                        x: x + s(14),
+                        y: y + s(4),
+                    },
+                    POINT {
+                        x: x + s(14),
+                        y: y + s(13),
+                    },
+                    POINT {
+                        x: x + s(1),
+                        y: y + s(13),
+                    },
                 ];
                 Polygon(hdc, tab_pts.as_ptr(), tab_pts.len() as i32);
 
@@ -481,12 +543,30 @@ impl App {
                 // Open folder:
                 // 1. Back folder sheet
                 let back_pts = [
-                    POINT { x: x + s(1), y: y + s(2) },
-                    POINT { x: x + s(6), y: y + s(2) },
-                    POINT { x: x + s(8), y: y + s(4) },
-                    POINT { x: x + s(14), y: y + s(4) },
-                    POINT { x: x + s(14), y: y + s(13) },
-                    POINT { x: x + s(1), y: y + s(13) },
+                    POINT {
+                        x: x + s(1),
+                        y: y + s(2),
+                    },
+                    POINT {
+                        x: x + s(6),
+                        y: y + s(2),
+                    },
+                    POINT {
+                        x: x + s(8),
+                        y: y + s(4),
+                    },
+                    POINT {
+                        x: x + s(14),
+                        y: y + s(4),
+                    },
+                    POINT {
+                        x: x + s(14),
+                        y: y + s(13),
+                    },
+                    POINT {
+                        x: x + s(1),
+                        y: y + s(13),
+                    },
                 ];
                 Polygon(hdc, back_pts.as_ptr(), back_pts.len() as i32);
 
@@ -494,10 +574,22 @@ impl App {
                 let brush_flap = CreateSolidBrush(folder_flap_color);
                 SelectObject(hdc, brush_flap);
                 let flap_pts = [
-                    POINT { x: x + s(1), y: y + s(7) },
-                    POINT { x: x + s(13), y: y + s(7) },
-                    POINT { x: x + s(15), y: y + s(14) },
-                    POINT { x: x + s(3), y: y + s(14) },
+                    POINT {
+                        x: x + s(1),
+                        y: y + s(7),
+                    },
+                    POINT {
+                        x: x + s(13),
+                        y: y + s(7),
+                    },
+                    POINT {
+                        x: x + s(15),
+                        y: y + s(14),
+                    },
+                    POINT {
+                        x: x + s(3),
+                        y: y + s(14),
+                    },
                 ];
                 Polygon(hdc, flap_pts.as_ptr(), flap_pts.len() as i32);
                 DeleteObject(brush_flap);
@@ -530,11 +622,26 @@ impl App {
 
             // Document sheet with top-right dog-ear fold
             let doc_pts = [
-                POINT { x: x + s(2), y: y + s(1) },
-                POINT { x: x + s(10), y: y + s(1) },
-                POINT { x: x + s(14), y: y + s(5) },
-                POINT { x: x + s(14), y: y + s(15) },
-                POINT { x: x + s(2), y: y + s(15) },
+                POINT {
+                    x: x + s(2),
+                    y: y + s(1),
+                },
+                POINT {
+                    x: x + s(10),
+                    y: y + s(1),
+                },
+                POINT {
+                    x: x + s(14),
+                    y: y + s(5),
+                },
+                POINT {
+                    x: x + s(14),
+                    y: y + s(15),
+                },
+                POINT {
+                    x: x + s(2),
+                    y: y + s(15),
+                },
             ];
             Polygon(hdc, doc_pts.as_ptr(), doc_pts.len() as i32);
 
@@ -544,9 +651,18 @@ impl App {
             SelectObject(hdc, brush_fold);
             SelectObject(hdc, pen_fold);
             let fold_pts = [
-                POINT { x: x + s(10), y: y + s(1) },
-                POINT { x: x + s(14), y: y + s(5) },
-                POINT { x: x + s(10), y: y + s(5) },
+                POINT {
+                    x: x + s(10),
+                    y: y + s(1),
+                },
+                POINT {
+                    x: x + s(14),
+                    y: y + s(5),
+                },
+                POINT {
+                    x: x + s(10),
+                    y: y + s(5),
+                },
             ];
             Polygon(hdc, fold_pts.as_ptr(), fold_pts.len() as i32);
 
@@ -563,7 +679,15 @@ impl App {
                 let badge_pen = CreatePen(PS_SOLID, 1, rgb(16, 24, 38));
                 SelectObject(hdc, badge_brush);
                 SelectObject(hdc, badge_pen);
-                RoundRect(hdc, badge_pill.left, badge_pill.top, badge_pill.right, badge_pill.bottom, s(3), s(3));
+                RoundRect(
+                    hdc,
+                    badge_pill.left,
+                    badge_pill.top,
+                    badge_pill.right,
+                    badge_pill.bottom,
+                    s(3),
+                    s(3),
+                );
                 DeleteObject(badge_brush);
                 DeleteObject(badge_pen);
 
@@ -613,57 +737,57 @@ pub(in crate::windows_app) fn file_type_style(path: &Path) -> FileTypeStyle {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     match ext.to_ascii_lowercase().as_str() {
         "rs" => FileTypeStyle {
-            body_color: rgb(222, 105, 45),   // Rust orange
+            body_color: rgb(222, 105, 45), // Rust orange
             accent_color: rgb(245, 145, 80),
             badge: "Rs",
         },
         "py" | "pyw" => FileTypeStyle {
             body_color: rgb(53, 114, 165),   // Python blue
-            accent_color: rgb(255, 212, 59),  // Python yellow
+            accent_color: rgb(255, 212, 59), // Python yellow
             badge: "Py",
         },
         "md" | "markdown" => FileTypeStyle {
-            body_color: rgb(65, 145, 195),   // Markdown cyan blue
+            body_color: rgb(65, 145, 195), // Markdown cyan blue
             accent_color: rgb(160, 220, 255),
             badge: "M",
         },
         "toml" => FileTypeStyle {
-            body_color: rgb(205, 145, 55),   // Cargo toml gold
+            body_color: rgb(205, 145, 55), // Cargo toml gold
             accent_color: rgb(255, 200, 100),
             badge: "C",
         },
         "json" => FileTypeStyle {
-            body_color: rgb(215, 165, 45),   // JSON amber
+            body_color: rgb(215, 165, 45), // JSON amber
             accent_color: rgb(255, 220, 105),
             badge: "{}",
         },
         "yaml" | "yml" => FileTypeStyle {
-            body_color: rgb(195, 80, 145),   // YAML magenta
+            body_color: rgb(195, 80, 145), // YAML magenta
             accent_color: rgb(240, 125, 195),
             badge: "Y",
         },
         "png" | "jpg" | "jpeg" | "svg" | "ico" | "webp" | "bmp" => FileTypeStyle {
-            body_color: rgb(165, 95, 220),   // Image purple
+            body_color: rgb(165, 95, 220), // Image purple
             accent_color: rgb(215, 160, 255),
             badge: "IMG",
         },
         "ps1" | "bat" | "cmd" | "sh" => FileTypeStyle {
-            body_color: rgb(45, 165, 115),   // Terminal green
+            body_color: rgb(45, 165, 115), // Terminal green
             accent_color: rgb(95, 215, 160),
             badge: ">_",
         },
         "lock" => FileTypeStyle {
-            body_color: rgb(125, 135, 150),  // Lock silver
+            body_color: rgb(125, 135, 150), // Lock silver
             accent_color: rgb(175, 185, 200),
             badge: "LK",
         },
         _ if name.starts_with(".git") => FileTypeStyle {
-            body_color: rgb(240, 80, 50),    // Git red/orange
+            body_color: rgb(240, 80, 50), // Git red/orange
             accent_color: rgb(255, 130, 100),
             badge: "Git",
         },
         _ => FileTypeStyle {
-            body_color: rgb(90, 105, 130),   // Default document slate
+            body_color: rgb(90, 105, 130), // Default document slate
             accent_color: rgb(145, 160, 185),
             badge: "",
         },
@@ -694,4 +818,3 @@ pub(in crate::windows_app) fn safe_slice_range(s: &str, start: usize, end: usize
     }
     &s[st..en]
 }
-

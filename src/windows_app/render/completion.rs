@@ -4,13 +4,13 @@ use super::super::*;
 // an IDE list without needing a full icon set. Unknown kinds fall back to a dot.
 fn completion_glyph(kind: u8) -> &'static str {
     match kind {
-        2..=4 => "f",    // method, function, constructor
-        5 | 10 => "#",       // field, property
-        6 => "v",            // variable
+        2..=4 => "f",                         // method, function, constructor
+        5 | 10 => "#",                        // field, property
+        6 => "v",                             // variable
         7 | 8 | 9 | 13 | 19 | 22 | 23 => "C", // class, interface, module, enum, folder, struct, type-param
-        14 => "k",           // keyword
-        15 => "~",           // snippet
-        _ => "\u{2022}",     // text and everything else
+        14 => "k",                            // keyword
+        15 => "~",                            // snippet
+        _ => "\u{2022}",                      // text and everything else
     }
 }
 
@@ -88,7 +88,11 @@ impl App {
                     self.theme.select_bg,
                 );
             }
-            let glyph_color = if selected_row { self.theme.text } else { self.theme.muted };
+            let glyph_color = if selected_row {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
             Self::label(
                 hdc,
                 completion_glyph(item.kind),

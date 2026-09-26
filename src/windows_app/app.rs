@@ -45,7 +45,12 @@ pub(super) enum WorkerMessage {
     // because refreshes fire on activation, save and every completed action.
     Repo(u64, Result<RepoState, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
-    GutterDiff(PathBuf, PathBuf, Option<String>, Result<Vec<DiffRow>, String>),
+    GutterDiff(
+        PathBuf,
+        PathBuf,
+        Option<String>,
+        Result<Vec<DiffRow>, String>,
+    ),
     // A live gutter recompute: (request generation, file, marks).
     GutterComputed(u64, PathBuf, GutterDiff),
     GitWrite(GitAction, Result<(), String>),
@@ -126,8 +131,39 @@ pub(super) enum ExtensionsTab {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum ExtensionsFilter {
     Featured,
-    Popular,
-    Recent,
+    Themes,
+    Formatters,
+}
+
+impl ExtensionsFilter {
+    // The Marketplace filter pills: label and unscaled width, shared by the
+    // painter and the click handler so the two can't drift apart.
+    pub(super) const PILLS: [(ExtensionsFilter, &'static str, i32); 3] = [
+        (ExtensionsFilter::Featured, "Featured", 69),
+        (ExtensionsFilter::Themes, "Themes", 60),
+        (ExtensionsFilter::Formatters, "Formatters", 82),
+    ];
+}
+
+// What LightLine knows an extension to be. Only the curated entries are
+// known up front; a registry entry's kind is found out when it's installed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ExtensionCategory {
+    Formatter,
+    IconTheme,
+    ColorTheme,
+    Unknown,
+}
+
+impl ExtensionCategory {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            ExtensionCategory::Formatter => "Formatter",
+            ExtensionCategory::IconTheme => "Icon theme",
+            ExtensionCategory::ColorTheme => "Color theme",
+            ExtensionCategory::Unknown => "Zed extension",
+        }
+    }
 }
 
 // Owned strings (not &'static str) because entries can now come from the
@@ -140,11 +176,19 @@ pub(super) struct Extension {
     pub(super) publisher: String,
     pub(super) version: String,
     pub(super) description: String,
-    pub(super) downloads: String,
-    #[allow(dead_code)]
-    pub(super) rating: String,
     pub(super) installed: bool,
     pub(super) installing: bool,
+}
+
+impl Extension {
+    pub(super) fn category(&self) -> ExtensionCategory {
+        match self.id.as_str() {
+            "prettier" => ExtensionCategory::Formatter,
+            "material-icons" => ExtensionCategory::IconTheme,
+            "dracula" => ExtensionCategory::ColorTheme,
+            _ => ExtensionCategory::Unknown,
+        }
+    }
 }
 
 pub(super) struct Tab {
@@ -182,7 +226,12 @@ pub(super) struct ExplorerRow {
 pub(super) fn is_c_family_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "c" | "cc" | "cpp" | "cxx"))
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "c" | "cc" | "cpp" | "cxx"
+            )
+        })
 }
 
 // LightLine's internal extension id for Material Icon Theme predates this
@@ -518,6 +567,9 @@ pub(super) struct DebugState {
     pub(super) status: String,
     // What the current (or last) session launched; None before the first.
     pub(super) config: Option<DebugConfig>,
+    // The script a Python session launched, so Restart relaunches that file
+    // rather than whichever tab is active by then.
+    pub(super) python_file: Option<PathBuf>,
     pub(super) running: bool,
     pub(super) thread_id: i64,
     pub(super) frames: Vec<DebugFrame>,
@@ -623,7 +675,12 @@ fn family_available(name: &str) -> bool {
 // Gutter mark lines after an edit that replaced lines `start..=old_end` and
 // changed the line count by `delta`: marks above stay, marks below move by
 // `delta`, and marks on lines the edit removed are dropped.
-fn shifted_mark_lines(lines: &HashSet<usize>, start: usize, old_end: usize, delta: isize) -> HashSet<usize> {
+fn shifted_mark_lines(
+    lines: &HashSet<usize>,
+    start: usize,
+    old_end: usize,
+    delta: isize,
+) -> HashSet<usize> {
     let new_end = old_end as isize + delta;
     lines
         .iter()
@@ -929,8 +986,6 @@ impl App {
                     publisher: "esbenp".into(),
                     version: "v3.4.2".into(),
                     description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
-                    downloads: "42.8M".into(),
-                    rating: "★ 4.8".into(),
                     installed: false,
                     installing: false,
                 },
@@ -940,8 +995,6 @@ impl App {
                     publisher: "Zed Industries (zed-extensions/material-icon-theme)".into(),
                     version: "1.3.1".into(),
                     description: "Material Design file & folder icons, consumed from the real Zed extension registry".into(),
-                    downloads: "24.1M".into(),
-                    rating: "★ 4.9".into(),
                     installed: lightline::extensions::installer::is_installed("material-icon-theme"),
                     installing: false,
                 },
@@ -951,8 +1004,6 @@ impl App {
                     publisher: "Dracula Team".into(),
                     version: "Zed Registry".into(),
                     description: "A dark color theme with vivid, accessible syntax colors".into(),
-                    downloads: "860K".into(),
-                    rating: "\u{2605} 4.8".into(),
                     installed: lightline::extensions::installer::is_installed("dracula"),
                     installing: false,
                 },
@@ -995,7 +1046,8 @@ impl App {
 
     pub(super) fn filtered_extensions(&self) -> Vec<&Extension> {
         let q = self.extensions_query.trim().to_lowercase();
-        let mut visible: Vec<&Extension> = self.extensions
+        let mut visible: Vec<&Extension> = self
+            .extensions
             .iter()
             .filter(|ext| {
                 if self.extensions_tab == ExtensionsTab::Installed {
@@ -1008,21 +1060,28 @@ impl App {
                     // box is what reveals the rest.
                     return matches!(ext.id.as_str(), "prettier" | "material-icons" | "dracula");
                 }
+                // Registry entries share one placeholder description and
+                // publisher, which would make "theme" or "zed" match all of
+                // them; only curated entries have real ones to search.
+                let described = ext.category() != ExtensionCategory::Unknown;
                 ext.id.to_lowercase().contains(&q)
                     || ext.name.to_lowercase().contains(&q)
-                    || ext.description.to_lowercase().contains(&q)
-                    || ext.publisher.to_lowercase().contains(&q)
+                    || (described && ext.description.to_lowercase().contains(&q))
+                    || (described && ext.publisher.to_lowercase().contains(&q))
             })
             .collect();
         if q.is_empty() && self.extensions_tab == ExtensionsTab::Marketplace {
             match self.extensions_filter {
                 ExtensionsFilter::Featured => {}
-                ExtensionsFilter::Popular => visible.sort_by_key(|ext| match ext.id.as_str() {
-                    "prettier" => 0,
-                    "material-icons" => 1,
-                    _ => 2,
+                ExtensionsFilter::Themes => visible.retain(|ext| {
+                    matches!(
+                        ext.category(),
+                        ExtensionCategory::IconTheme | ExtensionCategory::ColorTheme
+                    )
                 }),
-                ExtensionsFilter::Recent => visible.reverse(),
+                ExtensionsFilter::Formatters => {
+                    visible.retain(|ext| ext.category() == ExtensionCategory::Formatter)
+                }
             }
         }
         visible
@@ -1094,13 +1153,10 @@ impl App {
                             return Ok(ExtensionInstallKind::IconTheme);
                         }
                         if lightline::extensions::zed_manifest::is_color_theme(&dir) {
-                            let Some(zed_theme) =
-                                lightline::color_theme::ZedColorTheme::load(&dir)
+                            let Some(zed_theme) = lightline::color_theme::ZedColorTheme::load(&dir)
                             else {
                                 let _ = lightline::extensions::installer::uninstall(&registry_id);
-                                return Err(
-                                    "its theme file could not be parsed".to_string()
-                                );
+                                return Err("its theme file could not be parsed".to_string());
                             };
                             let base = Theme::default_dark().with_overrides(&color_overrides);
                             let theme = Theme::from_zed_color_theme(&base, &zed_theme);
@@ -1237,7 +1293,9 @@ impl App {
     }
     pub(super) fn ai_width(&self, rect: RECT) -> i32 {
         if self.ai_assistant_visible {
-            self.scale(360).min((rect.right - self.editor_left()) / 2).max(self.scale(260))
+            self.scale(360)
+                .min((rect.right - self.editor_left()) / 2)
+                .max(self.scale(260))
         } else {
             0
         }
@@ -1255,7 +1313,6 @@ impl App {
             total_right
         }
     }
-
 
     pub(super) fn pane_divider(&self, hwnd: HWND) -> i32 {
         let right = self.editor_right(hwnd);
@@ -1781,9 +1838,14 @@ impl App {
             cbSize: size_of::<SCROLLINFO>() as u32,
             fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
             nMin: 0,
-            nMax: doc.visible_line_count().saturating_sub(1).min(i32::MAX as usize) as i32,
+            nMax: doc
+                .visible_line_count()
+                .saturating_sub(1)
+                .min(i32::MAX as usize) as i32,
             nPage: visible as u32,
-            nPos: doc.visual_index(self.view().first_line).min(i32::MAX as usize) as i32,
+            nPos: doc
+                .visual_index(self.view().first_line)
+                .min(i32::MAX as usize) as i32,
             nTrackPos: 0,
         };
         unsafe {
@@ -2039,9 +2101,13 @@ impl App {
     }
 
     pub(super) fn poll_watcher(&mut self, hwnd: HWND) {
-        let Some(watcher) = &self.watcher else { return; };
+        let Some(watcher) = &self.watcher else {
+            return;
+        };
         let events = watcher.poll();
-        if events.is_empty() { return; }
+        if events.is_empty() {
+            return;
+        }
         let mut needs_refresh = false;
         let mut git_changed = false;
         let visible = self.visible_lines(hwnd);
@@ -2102,7 +2168,9 @@ impl App {
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
                     self.directory_cache.remove(&dir);
-                    if self.workspace_root.as_ref() == Some(&dir) || self.expanded_dirs.contains(&dir) {
+                    if self.workspace_root.as_ref() == Some(&dir)
+                        || self.expanded_dirs.contains(&dir)
+                    {
                         self.load_directory(&dir);
                     }
                     needs_refresh = true;
@@ -2199,7 +2267,14 @@ impl App {
             *seen = (self.status.clone(), Instant::now());
             if !self.status.is_empty() {
                 // Repaint once it expires so the message goes away on time.
-                unsafe { SetTimer(self.hwnd, STATUS_TIMER, VISIBLE.as_millis() as u32 + 50, None) };
+                unsafe {
+                    SetTimer(
+                        self.hwnd,
+                        STATUS_TIMER,
+                        VISIBLE.as_millis() as u32 + 50,
+                        None,
+                    )
+                };
             }
         }
         (!self.status.is_empty() && seen.1.elapsed() < VISIBLE).then_some(self.status.as_str())
@@ -2252,14 +2327,25 @@ impl App {
             return;
         } else if self.git_untracked.contains(&path) {
             let added = (0..self.doc().line_count()).collect();
-            self.git_diff_cache.insert(path, GutterDiff { added, ..GutterDiff::default() });
+            self.git_diff_cache.insert(
+                path,
+                GutterDiff {
+                    added,
+                    ..GutterDiff::default()
+                },
+            );
         } else {
             self.git_diff_cache.remove(&path);
         }
         unsafe { InvalidateRect(self.hwnd, null(), 0) };
     }
 
-    pub(super) fn gutter_diff_computed(&mut self, generation: u64, path: PathBuf, diff: GutterDiff) {
+    pub(super) fn gutter_diff_computed(
+        &mut self,
+        generation: u64,
+        path: PathBuf,
+        diff: GutterDiff,
+    ) {
         if generation == self.gutter_generation {
             self.git_diff_cache.insert(path, diff);
         }
@@ -2351,7 +2437,9 @@ impl App {
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
                     self.directory_cache.remove(parent);
-                    if self.expanded_dirs.contains(parent) || self.workspace_root.as_deref() == Some(parent) {
+                    if self.expanded_dirs.contains(parent)
+                        || self.workspace_root.as_deref() == Some(parent)
+                    {
                         self.load_directory(parent);
                     }
                 }
@@ -2428,8 +2516,9 @@ impl App {
                 Ok(document) => Ok(Tab::new(document)),
                 // Not valid UTF-8 text and not a decodable image: fall back to
                 // a read-only hex dump instead of refusing to open the file.
-                Err(error) if error.kind() == io::ErrorKind::InvalidData => std::fs::read(&path)
-                    .map(|bytes| Tab::new_binary_preview(path.clone(), &bytes)),
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                    std::fs::read(&path).map(|bytes| Tab::new_binary_preview(path.clone(), &bytes))
+                }
                 Err(error) => Err(error),
             }
         };
@@ -2532,7 +2621,11 @@ mod split_tests {
     #[test]
     fn find_and_replace_all_replaces_all_occurrences() {
         let mut doc = Document::new();
-        doc.replace(Pos::default(), Pos::default(), "hello world hello rust hello");
+        doc.replace(
+            Pos::default(),
+            Pos::default(),
+            "hello world hello rust hello",
+        );
         let query = "hello";
         let replacement = "hi";
         let mut count = 0;
@@ -2562,8 +2655,6 @@ mod split_tests {
                 publisher: "esbenp".into(),
                 version: "v3.4.2".into(),
                 description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
-                downloads: "42.8M".into(),
-                rating: "★ 4.8".into(),
                 installed: false,
                 installing: false,
             },
@@ -2573,8 +2664,6 @@ mod split_tests {
                 publisher: "Philipp Kief".into(),
                 version: "v5.1.0".into(),
                 description: "Material Design file & folder icons for LightLine".into(),
-                downloads: "24.1M".into(),
-                rating: "★ 4.9".into(),
                 installed: true,
                 installing: false,
             },
@@ -2609,7 +2698,13 @@ mod split_tests {
 
     #[test]
     fn explorer_file_create_rename_delete() {
-        let temp_dir = std::env::temp_dir().join(format!("lightline_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "lightline_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Create file
@@ -2645,23 +2740,41 @@ mod split_tests {
         // removed line 5 goes, the one below moves up.
         assert_eq!(sorted(shifted_mark_lines(&marks, 4, 6, -2)), vec![1, 7]);
         // Undo of that: two lines re-inserted after line 4.
-        assert_eq!(sorted(shifted_mark_lines(&[1, 7].into_iter().collect(), 4, 4, 2)), vec![1, 9]);
+        assert_eq!(
+            sorted(shifted_mark_lines(&[1, 7].into_iter().collect(), 4, 4, 2)),
+            vec![1, 9]
+        );
     }
 
     #[test]
     fn repo_relative_matches_canonical_paths_against_git_roots() {
         // An opened file (canonicalize() form) against Git's own root form.
         assert_eq!(
-            repo_relative(Path::new(r"\\?\C:\Work\repo\src\main.rs"), Path::new("C:/Work/repo")),
+            repo_relative(
+                Path::new(r"\\?\C:\Work\repo\src\main.rs"),
+                Path::new("C:/Work/repo")
+            ),
             Some(PathBuf::from(r"src\main.rs"))
         );
         // Case differences, as Windows paths are case-insensitive.
         assert_eq!(
-            repo_relative(Path::new(r"\\?\C:\work\Repo\a.rs"), Path::new("C:/Work/repo")),
+            repo_relative(
+                Path::new(r"\\?\C:\work\Repo\a.rs"),
+                Path::new("C:/Work/repo")
+            ),
             Some(PathBuf::from("a.rs"))
         );
         // A file outside the repository has no repo-relative path.
-        assert_eq!(repo_relative(Path::new(r"\\?\C:\Other\a.rs"), Path::new("C:/Work/repo")), None);
-        assert_eq!(repo_relative(Path::new(r"C:\Work\repository\a.rs"), Path::new("C:/Work/repo")), None);
+        assert_eq!(
+            repo_relative(Path::new(r"\\?\C:\Other\a.rs"), Path::new("C:/Work/repo")),
+            None
+        );
+        assert_eq!(
+            repo_relative(
+                Path::new(r"C:\Work\repository\a.rs"),
+                Path::new("C:/Work/repo")
+            ),
+            None
+        );
     }
 }

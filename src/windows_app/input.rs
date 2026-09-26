@@ -242,11 +242,7 @@ impl App {
                 return true;
             }
         }
-        if self.panel_focus
-            && !ctrl
-            && self.side_view == SideView::Review
-            && !self.commit_focus
-        {
+        if self.panel_focus && !ctrl && self.side_view == SideView::Review && !self.commit_focus {
             // The list mixes section titles with rows, so navigation has to
             // step over the ones that cannot be opened.
             let index = self.panel_selected;
@@ -407,7 +403,8 @@ impl App {
                     self.debug_continue(hwnd);
                     return true;
                 }
-                x if x == VK_F9 as u32 => {
+                // Not while a sidebar list has the keys: the editor caret is hidden.
+                x if x == VK_F9 as u32 && !self.panel_focus => {
                     let line = self.view().cursor.line;
                     self.doc_mut().toggle_breakpoint(line);
                     self.refresh(hwnd);
@@ -889,13 +886,19 @@ impl App {
         }
         if self.commit_focus && self.side_view == SideView::Review {
             // Control characters arrive through key(); only real text lands here.
-            if unit >= 32 && unit != 127 && let Some(ch) = char::from_u32(unit as u32) {
+            if unit >= 32
+                && unit != 127
+                && let Some(ch) = char::from_u32(unit as u32)
+            {
                 self.commit_message.push(ch);
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
             return;
         }
-        if self.quick_open || self.search_input || (self.side_view == SideView::Extensions && self.extensions_search_active) {
+        if self.quick_open
+            || self.search_input
+            || (self.side_view == SideView::Extensions && self.extensions_search_active)
+        {
             if unit >= 32
                 && unit != 127
                 && let Some(ch) = char::from_u32(unit as u32)
@@ -1083,7 +1086,10 @@ impl App {
                     view.cursor = tab.document.clamp(Pos { line, byte });
                     view.selection_anchor = None;
                 }
-                if view.selection_anchor.is_some_and(|anchor| tab.document.is_line_hidden(anchor.line)) {
+                if view
+                    .selection_anchor
+                    .is_some_and(|anchor| tab.document.is_line_hidden(anchor.line))
+                {
                     view.selection_anchor = None;
                 }
             }
@@ -1233,7 +1239,11 @@ impl App {
                         0 => ShowWindow(hwnd, SW_MINIMIZE),
                         1 => ShowWindow(
                             hwnd,
-                            if IsZoomed(hwnd) != 0 { SW_RESTORE } else { SW_MAXIMIZE },
+                            if IsZoomed(hwnd) != 0 {
+                                SW_RESTORE
+                            } else {
+                                SW_MAXIMIZE
+                            },
                         ),
                         _ => PostMessageW(hwnd, WM_CLOSE, 0, 0),
                     };
@@ -1241,11 +1251,7 @@ impl App {
                 return;
             }
             let command = self.command_center_rect(hwnd);
-            if x >= command.left
-                && x < command.right
-                && y >= command.top
-                && y < command.bottom
-            {
+            if x >= command.left && x < command.right && y >= command.top && y < command.bottom {
                 self.show_quick_open(hwnd);
             } else if x < self.scale(176) {
                 self.show_welcome(hwnd);
@@ -1288,9 +1294,7 @@ impl App {
             self.terminal_focus = false;
             let y = y - self.chrome_top();
             let panel_bottom = rect.bottom - self.chrome_top();
-            if y >= self.scale(RAIL_FIRST_ROW)
-                && y < self.scale(RAIL_FIRST_ROW + RAIL_ROW * 6)
-            {
+            if y >= self.scale(RAIL_FIRST_ROW) && y < self.scale(RAIL_FIRST_ROW + RAIL_ROW * 6) {
                 let row = (y - self.scale(RAIL_FIRST_ROW)) / self.scale(RAIL_ROW).max(1);
                 match row {
                     0 => self.toggle_side_view(hwnd, SideView::Files),
@@ -1403,9 +1407,7 @@ impl App {
                             GitHit::Refresh => self.refresh_git(hwnd),
                             GitHit::Push => self.git_remote(hwnd, workflow::RemoteAction::Push),
                             GitHit::Pull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
-                            GitHit::Fetch => {
-                                self.git_remote(hwnd, workflow::RemoteAction::Fetch)
-                            }
+                            GitHit::Fetch => self.git_remote(hwnd, workflow::RemoteAction::Fetch),
                             GitHit::ToggleSection(section) => {
                                 self.git_toggle_section(hwnd, section)
                             }
@@ -1501,7 +1503,10 @@ impl App {
                     let search_right = right - s(8);
                     if x >= search_left && x <= search_right {
                         // Clear button click
-                        if !self.extensions_query.is_empty() && x >= search_right - s(30) && x <= search_right {
+                        if !self.extensions_query.is_empty()
+                            && x >= search_right - s(30)
+                            && x <= search_right
+                        {
                             self.extensions_query.clear();
                             self.refresh(hwnd);
                             return;
@@ -1537,16 +1542,9 @@ impl App {
                 }
 
                 // 3. Marketplace sorting/filter pills.
-                if self.extensions_tab == ExtensionsTab::Marketplace
-                    && y >= s(132)
-                    && y <= s(160)
-                {
+                if self.extensions_tab == ExtensionsTab::Marketplace && y >= s(132) && y <= s(160) {
                     let mut filter_x = left + s(8);
-                    for (filter, width) in [
-                        (ExtensionsFilter::Featured, 69),
-                        (ExtensionsFilter::Popular, 57),
-                        (ExtensionsFilter::Recent, 112),
-                    ] {
+                    for (filter, _, width) in ExtensionsFilter::PILLS {
                         if x >= filter_x && x < filter_x + s(width) {
                             self.extensions_filter = filter;
                             self.refresh(hwnd);
@@ -1561,10 +1559,13 @@ impl App {
                 let card_step = card_h + s(8);
                 let start_y = s(194);
                 let visible = self.filtered_extensions();
+                let bottom = (panel_bottom - self.scale(STATUS)).max(0);
                 if y >= start_y {
                     let row = ((y - start_y) / card_step.max(1)) as usize;
-                    if row < visible.len().min(3) {
-                        let ey = start_y + row as i32 * card_step;
+                    let ey = start_y + row as i32 * card_step;
+                    // Only cards that were painted, i.e. that fit (see
+                    // paint_extensions_panel).
+                    if row < visible.len() && ey + card_h <= bottom {
                         let card_right = editor_left - s(8);
                         let btn_w = s(72);
                         let btn_h = s(26);
@@ -1596,35 +1597,35 @@ impl App {
                 && y < self.scale(EXPLORER_TOP)
                 && let Some(root) = self.workspace_root.clone()
             {
-                    let s = |v: i32| self.scale(v);
-                    if x >= editor_left - s(26) && x <= editor_left - s(4) {
-                        self.close_workspace(hwnd);
-                        return;
-                    } else if x >= editor_left - s(48) && x < editor_left - s(26) {
-                        self.directory_cache.clear();
-                        self.load_directory(&root);
-                        self.refresh(hwnd);
-                        return;
-                    } else if x >= editor_left - s(70) && x < editor_left - s(48) {
-                        let target = self.selected_dir_or_root().unwrap_or(root);
-                        self.start_explorer_input(target, true, false, None, hwnd);
-                        return;
-                    } else if x >= editor_left - s(92) && x < editor_left - s(70) {
-                        let target = self.selected_dir_or_root().unwrap_or(root);
-                        self.start_explorer_input(target, false, false, None, hwnd);
-                        return;
+                let s = |v: i32| self.scale(v);
+                if x >= editor_left - s(26) && x <= editor_left - s(4) {
+                    self.close_workspace(hwnd);
+                    return;
+                } else if x >= editor_left - s(48) && x < editor_left - s(26) {
+                    self.directory_cache.clear();
+                    self.load_directory(&root);
+                    self.refresh(hwnd);
+                    return;
+                } else if x >= editor_left - s(70) && x < editor_left - s(48) {
+                    let target = self.selected_dir_or_root().unwrap_or(root);
+                    self.start_explorer_input(target, true, false, None, hwnd);
+                    return;
+                } else if x >= editor_left - s(92) && x < editor_left - s(70) {
+                    let target = self.selected_dir_or_root().unwrap_or(root);
+                    self.start_explorer_input(target, false, false, None, hwnd);
+                    return;
+                } else {
+                    if self.expanded_dirs.contains(&root) {
+                        self.expanded_dirs.remove(&root);
                     } else {
-                        if self.expanded_dirs.contains(&root) {
-                            self.expanded_dirs.remove(&root);
-                        } else {
-                            self.expanded_dirs.insert(root.clone());
-                            self.load_directory(&root);
-                        }
-                        self.selected_explorer_path = Some(root);
-                        self.panel_focus = true;
-                        self.refresh(hwnd);
-                        return;
+                        self.expanded_dirs.insert(root.clone());
+                        self.load_directory(&root);
                     }
+                    self.selected_explorer_path = Some(root);
+                    self.panel_focus = true;
+                    self.refresh(hwnd);
+                    return;
+                }
             }
             if y >= panel_bottom - self.scale(STATUS + 35) {
                 self.show_active_tab(hwnd);
@@ -1728,11 +1729,7 @@ impl App {
         let card_right = rect.right - self.chrome_gap();
         if y < self.tab_strip_bottom() {
             let command = self.command_center_rect(hwnd);
-            if x >= command.left
-                && x < command.right
-                && y >= command.top
-                && y < command.bottom
-            {
+            if x >= command.left && x < command.right && y >= command.top && y < command.bottom {
                 self.show_quick_open(hwnd);
                 return;
             }
@@ -1832,7 +1829,11 @@ impl App {
 
         let editor_left = self.editor_left();
         let rail = self.scale(RAIL);
-        if x < rail || x >= editor_left || self.side_view != SideView::Files || !self.explorer_visible {
+        if x < rail
+            || x >= editor_left
+            || self.side_view != SideView::Files
+            || !self.explorer_visible
+        {
             return;
         }
         let Some(root) = self.workspace_root.clone() else {
@@ -1845,8 +1846,8 @@ impl App {
         let panel_y = y - self.chrome_top();
         let row_top = self.scale(EXPLORER_TOP);
         if panel_y >= row_top {
-            let row_idx = self.explorer_first_row
-                + ((panel_y - row_top) / self.scale(EXPLORER_ROW)) as usize;
+            let row_idx =
+                self.explorer_first_row + ((panel_y - row_top) / self.scale(EXPLORER_ROW)) as usize;
             if let Some(row) = self.explorer_rows().get(row_idx) {
                 target_path = Some(row.entry.path.clone());
                 is_dir = row.entry.is_dir;
@@ -1864,8 +1865,8 @@ impl App {
 
         use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, DestroyMenu, TrackPopupMenu, MF_SEPARATOR, MF_STRING,
-            TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+            AppendMenuW, CreatePopupMenu, DestroyMenu, MF_SEPARATOR, MF_STRING, TPM_LEFTALIGN,
+            TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
         };
 
         unsafe {
@@ -1884,9 +1885,19 @@ impl App {
             const CMD_CLOSE_WORKSPACE: usize = 8;
 
             AppendMenuW(menu, MF_STRING, CMD_NEW_FILE, wide("New File...").as_ptr());
-            AppendMenuW(menu, MF_STRING, CMD_NEW_FOLDER, wide("New Folder...").as_ptr());
+            AppendMenuW(
+                menu,
+                MF_STRING,
+                CMD_NEW_FOLDER,
+                wide("New Folder...").as_ptr(),
+            );
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
-            AppendMenuW(menu, MF_STRING, CMD_REVEAL, wide("Reveal in File Explorer").as_ptr());
+            AppendMenuW(
+                menu,
+                MF_STRING,
+                CMD_REVEAL,
+                wide("Reveal in File Explorer").as_ptr(),
+            );
             AppendMenuW(menu, MF_STRING, CMD_COPY_PATH, wide("Copy Path").as_ptr());
             AppendMenuW(
                 menu,
@@ -1927,10 +1938,7 @@ impl App {
             let parent_dir = if is_dir {
                 clicked_path.clone()
             } else {
-                clicked_path
-                    .parent()
-                    .unwrap_or(&root)
-                    .to_path_buf()
+                clicked_path.parent().unwrap_or(&root).to_path_buf()
             };
 
             match cmd {
@@ -1965,13 +1973,7 @@ impl App {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned();
-                    self.start_explorer_input(
-                        parent_dir,
-                        is_dir,
-                        true,
-                        Some(clicked_path),
-                        hwnd,
-                    );
+                    self.start_explorer_input(parent_dir, is_dir, true, Some(clicked_path), hwnd);
                     if let Some(input) = &mut self.explorer_input {
                         input.buffer = old_name;
                     }

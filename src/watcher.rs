@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -111,13 +111,19 @@ fn watcher_thread(
             match commands.try_recv() {
                 Ok(WatchCommand::WatchDirectory(path)) => {
                     if let Ok(meta) = std::fs::metadata(&path) {
-                        dir_stamps.insert(path.clone(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+                        dir_stamps.insert(
+                            path.clone(),
+                            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                        );
                     }
                     watched_dirs.insert(path);
                 }
                 Ok(WatchCommand::WatchFile(path)) => {
                     if let Ok(meta) = std::fs::metadata(&path) {
-                        file_stamps.insert(path.clone(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+                        file_stamps.insert(
+                            path.clone(),
+                            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                        );
                     }
                     watched_files.insert(path);
                 }
@@ -166,13 +172,19 @@ fn watcher_thread(
             Ok(WatchCommand::Shutdown) => return,
             Ok(WatchCommand::WatchDirectory(path)) => {
                 if let Ok(meta) = std::fs::metadata(&path) {
-                    dir_stamps.insert(path.clone(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+                    dir_stamps.insert(
+                        path.clone(),
+                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    );
                 }
                 watched_dirs.insert(path);
             }
             Ok(WatchCommand::WatchFile(path)) => {
                 if let Ok(meta) = std::fs::metadata(&path) {
-                    file_stamps.insert(path.clone(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+                    file_stamps.insert(
+                        path.clone(),
+                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    );
                 }
                 watched_files.insert(path);
             }
@@ -192,10 +204,8 @@ mod tests {
 
     #[test]
     fn watcher_detects_file_modification() {
-        let dir = std::env::temp_dir().join(format!(
-            "lightline-watcher-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("lightline-watcher-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("test.txt");
         std::fs::write(&file, "initial").unwrap();
@@ -214,7 +224,9 @@ mod tests {
         thread::sleep(Duration::from_secs(3));
 
         let events = watcher.poll();
-        let changed = events.iter().any(|e| matches!(e, WatchEvent::FileChanged(p) if p == &file));
+        let changed = events
+            .iter()
+            .any(|e| matches!(e, WatchEvent::FileChanged(p) if p == &file));
         assert!(changed, "Expected FileChanged event for {:?}", file);
 
         drop(watcher);

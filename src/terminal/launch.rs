@@ -188,18 +188,29 @@ pub fn resolve_cmd() -> Result<PathBuf, String> {
 pub fn resolve_git_bash() -> Result<PathBuf, String> {
     for root_var in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
         if let Some(root) = std::env::var_os(root_var) {
-            let candidate = PathBuf::from(&root).join("Git").join("bin").join("bash.exe");
+            let candidate = PathBuf::from(&root)
+                .join("Git")
+                .join("bin")
+                .join("bash.exe");
             if is_real_executable(&candidate) {
                 return Ok(candidate);
             }
-            let candidate_usr = PathBuf::from(&root).join("Git").join("usr").join("bin").join("bash.exe");
+            let candidate_usr = PathBuf::from(&root)
+                .join("Git")
+                .join("usr")
+                .join("bin")
+                .join("bash.exe");
             if is_real_executable(&candidate_usr) {
                 return Ok(candidate_usr);
             }
         }
     }
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        let candidate = PathBuf::from(&local).join("Programs").join("Git").join("bin").join("bash.exe");
+        let candidate = PathBuf::from(&local)
+            .join("Programs")
+            .join("Git")
+            .join("bin")
+            .join("bash.exe");
         if is_real_executable(&candidate) {
             return Ok(candidate);
         }
@@ -259,7 +270,9 @@ pub fn resolve_wsl() -> Result<PathBuf, String> {
 }
 
 fn wsl_has_distribution() -> bool {
-    wsl_distribution_names().iter().any(|name| is_user_distribution(name))
+    wsl_distribution_names()
+        .iter()
+        .any(|name| is_user_distribution(name))
 }
 
 // Docker Desktop registers its own internal distributions (docker-desktop,
@@ -276,10 +289,14 @@ fn is_user_distribution(name: &str) -> bool {
 #[cfg(windows)]
 fn wsl_distribution_names() -> Vec<String> {
     use windows_sys::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW,
-        RegGetValueW, RegOpenKeyExW,
+        HKEY, HKEY_CURRENT_USER, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW, RegGetValueW,
+        RegOpenKeyExW,
     };
-    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let wide = |text: &str| {
+        text.encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
     let root = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss");
     let value = wide("DistributionName");
     let mut names = Vec::new();
@@ -346,7 +363,9 @@ fn prepare_with_shell(
     shell_kind: ShellKind,
 ) -> Result<LaunchSpec, String> {
     let (cwd, no_profile) = match request {
-        LaunchRequest::Shell { cwd, no_profile, .. }
+        LaunchRequest::Shell {
+            cwd, no_profile, ..
+        }
         | LaunchRequest::Python {
             cwd, no_profile, ..
         } => (cwd, *no_profile),
@@ -571,7 +590,10 @@ mod tests {
         // answer must agree with the names read from the registry.
         let names = wsl_distribution_names();
         eprintln!("registered WSL distributions: {names:?}");
-        assert_eq!(wsl_has_distribution(), names.iter().any(|name| is_user_distribution(name)));
+        assert_eq!(
+            wsl_has_distribution(),
+            names.iter().any(|name| is_user_distribution(name))
+        );
     }
 
     fn decode(encoded: &str) -> String {

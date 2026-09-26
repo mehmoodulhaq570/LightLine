@@ -170,7 +170,11 @@ impl App {
             return rows;
         }
         let staged: Vec<&Change> = self.changes.iter().filter(|change| change.staged).collect();
-        let unstaged: Vec<&Change> = self.changes.iter().filter(|change| change.unstaged).collect();
+        let unstaged: Vec<&Change> = self
+            .changes
+            .iter()
+            .filter(|change| change.unstaged)
+            .collect();
         let has_staged = !staged.is_empty();
         if has_staged {
             rows.push(GitRow::Header {
@@ -301,11 +305,7 @@ impl App {
         if contains(&layout.commit_button, x, y) {
             return GitHit::CommitButton;
         }
-        match layout
-            .sync
-            .iter()
-            .position(|rect| contains(rect, x, y))
-        {
+        match layout.sync.iter().position(|rect| contains(rect, x, y)) {
             Some(0) => return GitHit::Push,
             Some(1) => return GitHit::Pull,
             Some(2) => return GitHit::Fetch,
@@ -391,7 +391,9 @@ impl App {
         let rows = self.git_rows();
         self.panel_first = self.panel_first.min(rows.len().saturating_sub(1));
         self.panel_selected = self.panel_selected.min(rows.len().saturating_sub(1));
-        if !rows.get(self.panel_selected).is_some_and(GitRow::selectable)
+        if !rows
+            .get(self.panel_selected)
+            .is_some_and(GitRow::selectable)
             && let Some(index) = rows.iter().position(GitRow::selectable)
         {
             self.panel_selected = index;
@@ -488,7 +490,9 @@ impl App {
         self.open(hwnd, Some(path));
         let line = {
             let doc = self.doc();
-            number.saturating_sub(1).min(doc.line_count().saturating_sub(1))
+            number
+                .saturating_sub(1)
+                .min(doc.line_count().saturating_sub(1))
         };
         self.move_cursor(Pos { line, byte: 0 }, false);
         self.keep_cursor_visible(hwnd);

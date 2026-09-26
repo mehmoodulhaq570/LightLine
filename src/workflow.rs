@@ -1,6 +1,6 @@
+use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -36,7 +36,11 @@ fn recent_path() -> Option<PathBuf> {
 /// extension a user has placed there. No installer/registry writes here yet —
 /// this is only ever read from.
 pub fn extensions_dir() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("LightLine").join("extensions"))
+    Some(
+        PathBuf::from(std::env::var_os("APPDATA")?)
+            .join("LightLine")
+            .join("extensions"),
+    )
 }
 
 pub fn recent_workspaces() -> Vec<PathBuf> {
@@ -113,10 +117,7 @@ fn session_view_from(value: &Value) -> SessionView {
         })
     };
     SessionView {
-        cursor: value
-            .get("cursor")
-            .and_then(pair)
-            .unwrap_or((0, 0)),
+        cursor: value.get("cursor").and_then(pair).unwrap_or((0, 0)),
         anchor: value.get("anchor").and_then(pair),
         first_line: value.get("first").and_then(Value::as_u64).unwrap_or(0) as usize,
     }
@@ -150,7 +151,10 @@ pub fn load_session() -> Session {
             items
                 .iter()
                 .filter_map(|item| {
-                    let path = item.get("path").and_then(Value::as_str).map(PathBuf::from)?;
+                    let path = item
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .map(PathBuf::from)?;
                     if !path.is_file() {
                         return None;
                     }
@@ -162,8 +166,14 @@ pub fn load_session() -> Session {
                     };
                     let views = match views {
                         Some(views) => [
-                            views.first().map(session_view_from).unwrap_or_else(|| default.clone()),
-                            views.get(1).map(session_view_from).unwrap_or_else(|| default.clone()),
+                            views
+                                .first()
+                                .map(session_view_from)
+                                .unwrap_or_else(|| default.clone()),
+                            views
+                                .get(1)
+                                .map(session_view_from)
+                                .unwrap_or_else(|| default.clone()),
                         ],
                         None => [default.clone(), default],
                     };
@@ -173,11 +183,7 @@ pub fn load_session() -> Session {
                 .collect()
         })
         .unwrap_or_default();
-    Session {
-        root,
-        active,
-        tabs,
-    }
+    Session { root, active, tabs }
 }
 
 pub fn save_session(session: &Session) {
@@ -528,7 +534,10 @@ pub fn run_python_file_stream(
     }
 }
 
-fn stream_reader(mut reader: impl Read + Send + 'static, output: Sender<String>) -> std::thread::JoinHandle<()> {
+fn stream_reader(
+    mut reader: impl Read + Send + 'static,
+    output: Sender<String>,
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut buffer = [0; 1024];
         loop {
@@ -641,7 +650,11 @@ pub fn command_available(name: &str) -> bool {
 // -o and only works from inside a Developer Command Prompt environment, so
 // detecting it on PATH doesn't mean the -o command line below would work.
 pub fn detect_c_compiler(is_cpp: bool) -> Option<&'static str> {
-    let ordered = if is_cpp { ["g++", "clang++"] } else { ["gcc", "clang"] };
+    let ordered = if is_cpp {
+        ["g++", "clang++"]
+    } else {
+        ["gcc", "clang"]
+    };
     ordered.into_iter().find(|name| command_available(name))
 }
 
@@ -649,7 +662,11 @@ pub fn detect_c_compiler(is_cpp: bool) -> Option<&'static str> {
 /// binary produced) and turns gcc/clang's diagnostics into the same
 /// `Diagnostic` type LSP servers report, so the existing squiggly-underline
 /// rendering can show C/C++ errors too without a persistent language server.
-pub fn c_syntax_diagnostics(file: &Path, compiler: &str, is_cpp: bool) -> Vec<crate::lsp::Diagnostic> {
+pub fn c_syntax_diagnostics(
+    file: &Path,
+    compiler: &str,
+    is_cpp: bool,
+) -> Vec<crate::lsp::Diagnostic> {
     let mut command = background_command(compiler);
     command.arg("-fsyntax-only").arg("-Wall");
     if is_cpp {
@@ -690,8 +707,14 @@ fn parse_gcc_diagnostic(line: &str) -> Option<crate::lsp::Diagnostic> {
     let line_index = line_number - 1;
     Some(Diagnostic {
         range: Range {
-            start: Position { line: line_index, character },
-            end: Position { line: line_index, character: character + 1 },
+            start: Position {
+                line: line_index,
+                character,
+            },
+            end: Position {
+                line: line_index,
+                character: character + 1,
+            },
         },
         severity,
         message: message.trim().to_string(),
@@ -804,7 +827,10 @@ pub fn parse_porcelain_v2(text: &str) -> RepoState {
         }
     }
 
-    let records: Vec<&str> = text.split('\0').filter(|record| !record.is_empty()).collect();
+    let records: Vec<&str> = text
+        .split('\0')
+        .filter(|record| !record.is_empty())
+        .collect();
     let mut state = RepoState::default();
     let mut oid = String::new();
     let mut index = 0;
@@ -962,8 +988,12 @@ pub fn parse_log(text: &str) -> Vec<CommitEntry> {
     text.lines()
         .filter_map(|line| {
             let mut fields = line.split('\u{1f}');
-            let (oid, author, date, subject) =
-                (fields.next()?, fields.next()?, fields.next()?, fields.next()?);
+            let (oid, author, date, subject) = (
+                fields.next()?,
+                fields.next()?,
+                fields.next()?,
+                fields.next()?,
+            );
             (!oid.is_empty()).then(|| CommitEntry {
                 oid: oid.to_owned(),
                 author: author.to_owned(),
@@ -1007,13 +1037,15 @@ pub fn git_diff(root: &Path, path: &Path, scope: DiffScope) -> Result<Vec<DiffRo
             .collect());
     }
     let mut output = match scope {
-        DiffScope::Head => git_command(root, &["diff", "--no-ext-diff", "--unified=2", "HEAD", "--"]),
-        DiffScope::Staged => {
-            git_command(root, &["diff", "--no-ext-diff", "--cached", "--unified=2", "--"])
-        }
-        DiffScope::Unstaged => {
-            git_command(root, &["diff", "--no-ext-diff", "--unified=2", "--"])
-        }
+        DiffScope::Head => git_command(
+            root,
+            &["diff", "--no-ext-diff", "--unified=2", "HEAD", "--"],
+        ),
+        DiffScope::Staged => git_command(
+            root,
+            &["diff", "--no-ext-diff", "--cached", "--unified=2", "--"],
+        ),
+        DiffScope::Unstaged => git_command(root, &["diff", "--no-ext-diff", "--unified=2", "--"]),
     };
     let output = output
         .arg(path)
@@ -1180,7 +1212,11 @@ fn myers_line_ops(a: &[&str], b: &[&str], max_d: usize) -> Option<Vec<LineOp>> {
         let previous = &trace[(d - 1) as usize];
         let at = |k: isize| previous[(k + d - 1) as usize];
         let k = x - y;
-        let prev_k = if k == -d || (k != d && at(k - 1) < at(k + 1)) { k + 1 } else { k - 1 };
+        let prev_k = if k == -d || (k != d && at(k - 1) < at(k + 1)) {
+            k + 1
+        } else {
+            k - 1
+        };
         let prev_x = at(prev_k);
         let prev_y = prev_x - prev_k;
         while x > prev_x && y > prev_y {
@@ -1188,7 +1224,11 @@ fn myers_line_ops(a: &[&str], b: &[&str], max_d: usize) -> Option<Vec<LineOp>> {
             x -= 1;
             y -= 1;
         }
-        ops.push(if x == prev_x { LineOp::Insert } else { LineOp::Delete });
+        ops.push(if x == prev_x {
+            LineOp::Insert
+        } else {
+            LineOp::Delete
+        });
         x = prev_x;
         y = prev_y;
     }
@@ -1205,14 +1245,24 @@ fn myers_line_ops(a: &[&str], b: &[&str], max_d: usize) -> Option<Vec<LineOp>> {
 // `at`, replacing `removed` HEAD lines. Pure insertions are added, pure
 // removals leave a deletion marker on the following line, and anything
 // mixed is modified.
-fn mark_gutter_hunk(diff: &mut GutterDiff, at: usize, removed: usize, inserted: usize, buffer_len: usize) {
+fn mark_gutter_hunk(
+    diff: &mut GutterDiff,
+    at: usize,
+    removed: usize,
+    inserted: usize,
+    buffer_len: usize,
+) {
     if inserted == 0 {
         if removed > 0 && buffer_len > 0 {
             diff.deleted.insert(at.min(buffer_len - 1));
         }
         return;
     }
-    let target = if removed == 0 { &mut diff.added } else { &mut diff.modified };
+    let target = if removed == 0 {
+        &mut diff.added
+    } else {
+        &mut diff.modified
+    };
     target.extend(at..at + inserted);
 }
 
@@ -1236,7 +1286,10 @@ pub fn compute_gutter_diff(head_text: &str, buf_lines: &[String]) -> GutterDiff 
         prefix += 1;
     }
     let mut suffix = 0;
-    while suffix < n - prefix && suffix < m - prefix && head_lines[n - 1 - suffix] == buf[m - 1 - suffix] {
+    while suffix < n - prefix
+        && suffix < m - prefix
+        && head_lines[n - 1 - suffix] == buf[m - 1 - suffix]
+    {
         suffix += 1;
     }
     let old = &head_lines[prefix..n - suffix];
@@ -1384,10 +1437,7 @@ mod tests {
         let file = root.join("loose_script.py");
         fs::write(&file, "print('hi')\n").unwrap();
         let workspace = temp_dir("python-workspace");
-        assert_eq!(
-            python_project_root(&file, Some(&workspace)),
-            workspace
-        );
+        assert_eq!(python_project_root(&file, Some(&workspace)), workspace);
         assert_eq!(python_project_root(&file, None), root);
         fs::remove_dir_all(&root).unwrap();
         fs::remove_dir_all(&workspace).unwrap();
@@ -1480,11 +1530,7 @@ mod tests {
         };
         let root = temp_dir("python-run-input");
         let file = root.join("script.py");
-        fs::write(
-            &file,
-            "name = input('name? ')\nprint('hello ' + name)\n",
-        )
-        .unwrap();
+        fs::write(&file, "name = input('name? ')\nprint('hello ' + name)\n").unwrap();
         let (output_tx, output_rx) = mpsc::channel();
         let (input_tx, input_rx) = mpsc::channel();
         input_tx.send("LightLine\n".to_string()).unwrap();
@@ -1744,8 +1790,10 @@ mod tests {
 
     #[test]
     fn parses_commit_log_records() {
-        let rows = parse_log("aaaa\u{1f}Ada\u{1f}Sep 12\u{1f}Add terminal\n\
-                              bbbb\u{1f}Ada\u{1f}Sep 13\u{1f}Fix: a bug, then another");
+        let rows = parse_log(
+            "aaaa\u{1f}Ada\u{1f}Sep 12\u{1f}Add terminal\n\
+                              bbbb\u{1f}Ada\u{1f}Sep 13\u{1f}Fix: a bug, then another",
+        );
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].oid, "aaaa");
         assert_eq!(rows[0].author, "Ada");
@@ -1768,13 +1816,22 @@ mod tests {
         let head = "line1\nline2\nline3\nline4\nline5\n";
 
         // Identical, including the final newline: no marks at all.
-        assert_eq!(compute_gutter_diff(head, &buffer(head)), GutterDiff::default());
+        assert_eq!(
+            compute_gutter_diff(head, &buffer(head)),
+            GutterDiff::default()
+        );
 
-        let added = compute_gutter_diff(head, &buffer("line1\nline2\nnew line\nline3\nline4\nline5\n"));
+        let added = compute_gutter_diff(
+            head,
+            &buffer("line1\nline2\nnew line\nline3\nline4\nline5\n"),
+        );
         assert_eq!(sorted(&added.added), vec![2]);
         assert!(added.modified.is_empty() && added.deleted.is_empty());
 
-        let modified = compute_gutter_diff(head, &buffer("line1\nline2 modified\nline3\nline4\nline5\n"));
+        let modified = compute_gutter_diff(
+            head,
+            &buffer("line1\nline2 modified\nline3\nline4\nline5\n"),
+        );
         assert_eq!(sorted(&modified.modified), vec![1]);
         assert!(modified.added.is_empty() && modified.deleted.is_empty());
 
@@ -1804,8 +1861,14 @@ mod tests {
 
     #[test]
     fn gutter_diff_handles_empty_sides_and_large_rewrites() {
-        assert_eq!(sorted(&compute_gutter_diff("a\n", &buffer("a\nx\ny\n")).added), vec![1, 2]);
-        assert_eq!(sorted(&compute_gutter_diff("x\ny\n", &buffer("")).deleted), vec![0]);
+        assert_eq!(
+            sorted(&compute_gutter_diff("a\n", &buffer("a\nx\ny\n")).added),
+            vec![1, 2]
+        );
+        assert_eq!(
+            sorted(&compute_gutter_diff("x\ny\n", &buffer("")).deleted),
+            vec![0]
+        );
         let head: String = (0..5000).map(|i| format!("old {i}\n")).collect();
         let new: String = (0..5000).map(|i| format!("new {i}\n")).collect();
         let diff = compute_gutter_diff(&head, &buffer(&new));

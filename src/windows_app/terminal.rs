@@ -222,7 +222,12 @@ impl App {
 
     // Create a fresh interactive shell pane, spawn its session, and make it
     // the active tab. Returns the new pane's index, or None on spawn failure.
-    fn spawn_terminal_pane(&mut self, hwnd: HWND, shell_kind: ShellKind, no_profile: bool) -> Option<usize> {
+    fn spawn_terminal_pane(
+        &mut self,
+        hwnd: HWND,
+        shell_kind: ShellKind,
+        no_profile: bool,
+    ) -> Option<usize> {
         let request = self.terminal_launch_request(shell_kind, no_profile);
         let size = self.terminal_size_for(hwnd);
         let hwnd_value = hwnd as isize;
@@ -289,7 +294,10 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
-        if self.spawn_terminal_pane(hwnd, shell_kind, no_profile).is_some() {
+        if self
+            .spawn_terminal_pane(hwnd, shell_kind, no_profile)
+            .is_some()
+        {
             self.focus_active_shell(hwnd);
         }
         self.update_title(hwnd);
@@ -357,7 +365,10 @@ impl App {
         self.terminal_tab = TerminalTab::Terminal;
         let old = self.terminal_active.min(self.terminals.len() - 1);
         let shell_kind = self.terminals[old].shell_kind;
-        if self.spawn_terminal_pane(hwnd, shell_kind, no_profile).is_some() {
+        if self
+            .spawn_terminal_pane(hwnd, shell_kind, no_profile)
+            .is_some()
+        {
             self.terminals.remove(old);
             self.terminal_active = self.terminals.len() - 1;
             self.focus_active_shell(hwnd);
@@ -597,9 +608,17 @@ impl App {
         }
     }
 
-    pub(super) fn terminal_header_hit(&self, left: i32, right: i32, top: i32, x: i32, y: i32) -> TerminalHeaderHit {
+    pub(super) fn terminal_header_hit(
+        &self,
+        left: i32,
+        right: i32,
+        top: i32,
+        x: i32,
+        y: i32,
+    ) -> TerminalHeaderHit {
         let layout = self.terminal_header_layout(left, right, top);
-        let inside = |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+        let inside =
+            |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
         if inside(&layout.hide) {
             return TerminalHeaderHit::Hide;
         }
@@ -639,9 +658,9 @@ impl App {
     pub(super) fn show_shell_picker_menu(&mut self, hwnd: HWND, x: i32, y: i32) {
         use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, DestroyMenu, TrackPopupMenu, MF_CHECKED, MF_DISABLED,
-            MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, TPM_LEFTALIGN,
-            TPM_RETURNCMD, TPM_RIGHTBUTTON,
+            AppendMenuW, CreatePopupMenu, DestroyMenu, MF_CHECKED, MF_DISABLED, MF_GRAYED,
+            MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, TPM_LEFTALIGN, TPM_RETURNCMD,
+            TPM_RIGHTBUTTON, TrackPopupMenu,
         };
 
         let menu = unsafe { CreatePopupMenu() };
@@ -665,7 +684,11 @@ impl App {
         let bash_avail = ShellKind::GitBash.is_available();
         let wsl_avail = ShellKind::Wsl.is_available();
 
-        let add_shell_item = |parent_menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU, cmd: usize, kind: ShellKind, avail: bool, is_default: bool| {
+        let add_shell_item = |parent_menu: windows_sys::Win32::UI::WindowsAndMessaging::HMENU,
+                              cmd: usize,
+                              kind: ShellKind,
+                              avail: bool,
+                              is_default: bool| {
             let mut flags = MF_STRING;
             if is_default {
                 flags |= MF_CHECKED;
@@ -687,19 +710,67 @@ impl App {
             unsafe { AppendMenuW(parent_menu, flags, cmd, wide(&text).as_ptr()) };
         };
 
-        add_shell_item(menu, CMD_POWERSHELL, ShellKind::PowerShell, pwsh_avail, default_shell == ShellKind::PowerShell);
-        add_shell_item(menu, CMD_CMD, ShellKind::CommandPrompt, cmd_avail, default_shell == ShellKind::CommandPrompt);
-        add_shell_item(menu, CMD_GIT_BASH, ShellKind::GitBash, bash_avail, default_shell == ShellKind::GitBash);
-        add_shell_item(menu, CMD_WSL, ShellKind::Wsl, wsl_avail, default_shell == ShellKind::Wsl);
+        add_shell_item(
+            menu,
+            CMD_POWERSHELL,
+            ShellKind::PowerShell,
+            pwsh_avail,
+            default_shell == ShellKind::PowerShell,
+        );
+        add_shell_item(
+            menu,
+            CMD_CMD,
+            ShellKind::CommandPrompt,
+            cmd_avail,
+            default_shell == ShellKind::CommandPrompt,
+        );
+        add_shell_item(
+            menu,
+            CMD_GIT_BASH,
+            ShellKind::GitBash,
+            bash_avail,
+            default_shell == ShellKind::GitBash,
+        );
+        add_shell_item(
+            menu,
+            CMD_WSL,
+            ShellKind::Wsl,
+            wsl_avail,
+            default_shell == ShellKind::Wsl,
+        );
 
         unsafe {
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             let default_submenu = CreatePopupMenu();
             if !default_submenu.is_null() {
-                add_shell_item(default_submenu, CMD_SET_DEFAULT_POWERSHELL, ShellKind::PowerShell, pwsh_avail, default_shell == ShellKind::PowerShell);
-                add_shell_item(default_submenu, CMD_SET_DEFAULT_CMD, ShellKind::CommandPrompt, cmd_avail, default_shell == ShellKind::CommandPrompt);
-                add_shell_item(default_submenu, CMD_SET_DEFAULT_GIT_BASH, ShellKind::GitBash, bash_avail, default_shell == ShellKind::GitBash);
-                add_shell_item(default_submenu, CMD_SET_DEFAULT_WSL, ShellKind::Wsl, wsl_avail, default_shell == ShellKind::Wsl);
+                add_shell_item(
+                    default_submenu,
+                    CMD_SET_DEFAULT_POWERSHELL,
+                    ShellKind::PowerShell,
+                    pwsh_avail,
+                    default_shell == ShellKind::PowerShell,
+                );
+                add_shell_item(
+                    default_submenu,
+                    CMD_SET_DEFAULT_CMD,
+                    ShellKind::CommandPrompt,
+                    cmd_avail,
+                    default_shell == ShellKind::CommandPrompt,
+                );
+                add_shell_item(
+                    default_submenu,
+                    CMD_SET_DEFAULT_GIT_BASH,
+                    ShellKind::GitBash,
+                    bash_avail,
+                    default_shell == ShellKind::GitBash,
+                );
+                add_shell_item(
+                    default_submenu,
+                    CMD_SET_DEFAULT_WSL,
+                    ShellKind::Wsl,
+                    wsl_avail,
+                    default_shell == ShellKind::Wsl,
+                );
 
                 AppendMenuW(
                     menu,
@@ -732,8 +803,12 @@ impl App {
             CMD_CMD => self.new_terminal_with_shell(hwnd, ShellKind::CommandPrompt, false),
             CMD_GIT_BASH => self.new_terminal_with_shell(hwnd, ShellKind::GitBash, false),
             CMD_WSL => self.new_terminal_with_shell(hwnd, ShellKind::Wsl, false),
-            CMD_SET_DEFAULT_POWERSHELL => self.set_default_terminal_profile(hwnd, ShellKind::PowerShell),
-            CMD_SET_DEFAULT_CMD => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
+            CMD_SET_DEFAULT_POWERSHELL => {
+                self.set_default_terminal_profile(hwnd, ShellKind::PowerShell)
+            }
+            CMD_SET_DEFAULT_CMD => {
+                self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt)
+            }
             CMD_SET_DEFAULT_GIT_BASH => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
             CMD_SET_DEFAULT_WSL => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
             _ => {}
@@ -979,9 +1054,9 @@ impl App {
                 Some(pane) => pane.service.scrollback(pane.id, next).is_ok(),
                 None => false,
             },
-            TerminalTab::Output => {
-                self.run_session.is_some_and(|id| self.terminal.scrollback(id, next).is_ok())
-            }
+            TerminalTab::Output => self
+                .run_session
+                .is_some_and(|id| self.terminal.scrollback(id, next).is_ok()),
         };
         if ok {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1081,8 +1156,17 @@ mod input_tests {
             ..TermModifiers::default()
         };
 
-        assert_eq!(output_control_bytes(TermKey::Enter, plain), Some(b"\r\n".to_vec()));
-        assert_eq!(output_control_bytes(TermKey::Backspace, plain), Some(vec![127]));
-        assert_eq!(output_control_bytes(TermKey::Backspace, control), Some(vec![8]));
+        assert_eq!(
+            output_control_bytes(TermKey::Enter, plain),
+            Some(b"\r\n".to_vec())
+        );
+        assert_eq!(
+            output_control_bytes(TermKey::Backspace, plain),
+            Some(vec![127])
+        );
+        assert_eq!(
+            output_control_bytes(TermKey::Backspace, control),
+            Some(vec![8])
+        );
     }
 }

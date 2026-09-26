@@ -509,7 +509,11 @@ impl App {
     }
 
     pub(super) fn show_diff(&mut self, hwnd: HWND, path: PathBuf, staged: bool) {
-        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
+        let Some(root) = self
+            .git_root
+            .clone()
+            .or_else(|| self.workspace_root.clone())
+        else {
             return;
         };
         self.review_staged = staged;
@@ -601,7 +605,9 @@ impl App {
                         Ok(entries) => {
                             self.zed_registry_loaded = true;
                             for (id, version) in entries {
-                                if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
+                                if let Some(ext) =
+                                    self.extensions.iter_mut().find(|ext| ext.id == id)
+                                {
                                     ext.version = version;
                                     continue;
                                 }
@@ -610,18 +616,18 @@ impl App {
                                     name: id,
                                     publisher: "zed-industries/extensions".into(),
                                     version,
-                                    description: "Zed extension — install to see whether LightLine \
-                                                   supports it yet (icon themes only, for now)"
-                                        .into(),
-                                    downloads: String::new(),
-                                    rating: String::new(),
+                                    description:
+                                        "Zed extension — install to see whether LightLine \
+                                                   supports it yet (icon and color themes)"
+                                            .into(),
                                     installed: false,
                                     installing: false,
                                 });
                             }
                         }
                         Err(error) => {
-                            self.status = format!("Could not reach the Zed extension registry: {error}");
+                            self.status =
+                                format!("Could not reach the Zed extension registry: {error}");
                         }
                     }
                 }
@@ -661,14 +667,20 @@ impl App {
                     self.debug_build_finished(hwnd, result);
                 }
                 WorkerMessage::CDiagnostics(file, diagnostics) => {
-                    if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.document.path.as_deref() == Some(file.as_path())) {
+                    if let Some(tab) = self
+                        .tabs
+                        .iter_mut()
+                        .find(|tab| tab.document.path.as_deref() == Some(file.as_path()))
+                    {
                         let count = diagnostics.len();
                         tab.diagnostics = diagnostics;
                         if count > 0 {
                             self.status = format!(
                                 "{count} issue{} found while checking {}",
                                 if count == 1 { "" } else { "s" },
-                                file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                                file.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
                             );
                         }
                     }
@@ -687,8 +699,10 @@ impl App {
                     }
                     match result {
                         Ok(formatted) => {
-                            let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
-                            let current_clean = self.doc().text().replace("\r\n", "\n").replace('\r', "\n");
+                            let formatted_clean =
+                                formatted.replace("\r\n", "\n").replace('\r', "\n");
+                            let current_clean =
+                                self.doc().text().replace("\r\n", "\n").replace('\r', "\n");
                             if formatted_clean == current_clean {
                                 self.status = format!("Already formatted with {formatter_name}");
                             } else {

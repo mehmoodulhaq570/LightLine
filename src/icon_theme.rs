@@ -115,7 +115,11 @@ impl IconTheme {
             .get(dir_name)
             .or_else(|| self.named_directory_icons.get(lower.as_str()))
             .or(self.directory_icons.as_ref())?;
-        let relative = if expanded { &icons.expanded } else { &icons.collapsed };
+        let relative = if expanded {
+            &icons.expanded
+        } else {
+            &icons.collapsed
+        };
         Some(self.resolve_path(relative))
     }
 
@@ -132,7 +136,11 @@ impl IconTheme {
     /// particular folder name.
     pub fn generic_folder_icon(&self, expanded: bool) -> Option<PathBuf> {
         let icons = self.directory_icons.as_ref()?;
-        let relative = if expanded { &icons.expanded } else { &icons.collapsed };
+        let relative = if expanded {
+            &icons.expanded
+        } else {
+            &icons.collapsed
+        };
         Some(self.resolve_path(relative))
     }
 
@@ -158,7 +166,11 @@ mod tests {
     }
 
     fn lightline_extensions_dir() -> Option<PathBuf> {
-        Some(PathBuf::from(std::env::var_os("APPDATA")?).join("LightLine").join("extensions"))
+        Some(
+            PathBuf::from(std::env::var_os("APPDATA")?)
+                .join("LightLine")
+                .join("extensions"),
+        )
     }
 
     #[test]
@@ -171,28 +183,49 @@ mod tests {
             return;
         };
 
-        let rust = theme.resolve_file("main.rs").expect("main.rs should resolve");
+        let rust = theme
+            .resolve_file("main.rs")
+            .expect("main.rs should resolve");
         assert!(rust.ends_with("icons/rust.svg") || rust.ends_with("icons\\rust.svg"));
-        assert!(rust.is_file(), "resolved path {rust:?} should exist on disk");
+        assert!(
+            rust.is_file(),
+            "resolved path {rust:?} should exist on disk"
+        );
 
-        let python = theme.resolve_file("main.py").expect("main.py should resolve");
+        let python = theme
+            .resolve_file("main.py")
+            .expect("main.py should resolve");
         assert!(python.is_file());
 
         // The real theme gives package.json its own Node.js icon rather than
         // a generic JSON one -- exactly the kind of real-world mapping a
         // hand-written fixture wouldn't have caught.
-        let package_json = theme.resolve_file("package.json").expect("package.json should resolve");
-        assert!(package_json.ends_with("icons/nodejs.svg") || package_json.ends_with("icons\\nodejs.svg"));
+        let package_json = theme
+            .resolve_file("package.json")
+            .expect("package.json should resolve");
+        assert!(
+            package_json.ends_with("icons/nodejs.svg")
+                || package_json.ends_with("icons\\nodejs.svg")
+        );
         assert!(package_json.is_file());
 
-        let readme = theme.resolve_file("README.md").expect("README.md should resolve");
+        let readme = theme
+            .resolve_file("README.md")
+            .expect("README.md should resolve");
         assert!(readme.is_file());
 
-        let src_collapsed = theme.resolve_directory("src", false).expect("src folder should resolve");
-        assert!(src_collapsed.ends_with("icons/folder-src.svg") || src_collapsed.ends_with("icons\\folder-src.svg"));
+        let src_collapsed = theme
+            .resolve_directory("src", false)
+            .expect("src folder should resolve");
+        assert!(
+            src_collapsed.ends_with("icons/folder-src.svg")
+                || src_collapsed.ends_with("icons\\folder-src.svg")
+        );
         assert!(src_collapsed.is_file());
 
-        let src_expanded = theme.resolve_directory("src", true).expect("expanded src folder should resolve");
+        let src_expanded = theme
+            .resolve_directory("src", true)
+            .expect("expanded src folder should resolve");
         assert!(
             src_expanded.ends_with("icons/folder-src-open.svg")
                 || src_expanded.ends_with("icons\\folder-src-open.svg")

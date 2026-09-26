@@ -69,6 +69,9 @@ pub(super) enum DebugGlyph {
     StepOut,
     Restart,
     Stop,
+    // Editor gutter markers.
+    Breakpoint,
+    ExecutionArrow,
 }
 
 impl DebugGlyph {
@@ -101,6 +104,11 @@ impl DebugGlyph {
             ),
             DebugGlyph::Restart => format!(
                 r#"<path {line} d="M21.35 5.2v5.1h-5.1"/><path {line} d="M19.12 14.55a7.65 7.65 0 1 1-1.8-7.96l4.03 3.71"/>"#
+            ),
+            DebugGlyph::Breakpoint => format!(r#"<circle fill="{color}" cx="12" cy="12" r="9"/>"#),
+            // The line execution is paused on, pointing into the code.
+            DebugGlyph::ExecutionArrow => format!(
+                r#"<path fill="{color}" d="M3.5 7.2a1.7 1.7 0 0 1 1.7-1.7h8.6a1.7 1.7 0 0 1 1.25.55l5.1 5.35a.9.9 0 0 1 0 1.2l-5.1 5.35a1.7 1.7 0 0 1-1.25.55H5.2a1.7 1.7 0 0 1-1.7-1.7z"/>"#
             ),
             DebugGlyph::Stop => {
                 format!(r#"<rect fill="{color}" x="5.5" y="5.5" width="13" height="13" rx="2.2"/>"#)
@@ -192,10 +200,10 @@ impl IconSet {
         y: i32,
         size: i32,
     ) -> bool {
-        if use_theme
-            && let Some(icon) = self.themed_icon(hdc, path, is_dir, expanded)
-        {
-            return unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 };
+        if use_theme && let Some(icon) = self.themed_icon(hdc, path, is_dir, expanded) {
+            return unsafe {
+                DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0
+            };
         }
         let builtin = BuiltinIcon::resolve_for_path(path, is_dir, expanded);
         self.draw_builtin(hdc, builtin, x, y, size)
@@ -204,7 +212,14 @@ impl IconSet {
     // Draws a plain file/folder glyph that isn't resolved from any
     // particular name -- the welcome screen's "Open Folder" icon, the
     // explorer's workspace-root row, the Extensions panel's icon badges.
-    pub(super) fn draw_generic(&self, hdc: HDC, kind: GenericIcon, x: i32, y: i32, size: i32) -> bool {
+    pub(super) fn draw_generic(
+        &self,
+        hdc: HDC,
+        kind: GenericIcon,
+        x: i32,
+        y: i32,
+        size: i32,
+    ) -> bool {
         if let Some(theme) = self.theme.as_ref() {
             let svg_path = match kind {
                 GenericIcon::File => theme.generic_file_icon(),
@@ -213,7 +228,9 @@ impl IconSet {
                 GenericIcon::FolderSrc => theme.resolve_directory("src", false),
             };
             if let Some(icon) = svg_path.and_then(|path| self.cached_icon(hdc, path)) {
-                return unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 };
+                return unsafe {
+                    DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0
+                };
             }
         }
         let builtin = match kind {
@@ -225,7 +242,14 @@ impl IconSet {
         self.draw_builtin(hdc, builtin, x, y, size)
     }
 
-    pub(super) fn draw_builtin(&self, hdc: HDC, kind: BuiltinIcon, x: i32, y: i32, size: i32) -> bool {
+    pub(super) fn draw_builtin(
+        &self,
+        hdc: HDC,
+        kind: BuiltinIcon,
+        x: i32,
+        y: i32,
+        size: i32,
+    ) -> bool {
         let Some(icon) = self.cached_builtin(hdc, kind) else {
             return false;
         };
@@ -402,6 +426,8 @@ mod icon_tests {
             DebugGlyph::StepOut,
             DebugGlyph::Restart,
             DebugGlyph::Stop,
+            DebugGlyph::Breakpoint,
+            DebugGlyph::ExecutionArrow,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");
@@ -439,7 +465,10 @@ mod icon_tests {
         for icon_kind in all_icons {
             let svg = icon_kind.svg_str();
             let icon = IconSet::svg_to_hicon(hdc, svg.as_bytes(), 18);
-            assert!(icon.is_some(), "failed to rasterize builtin icon {icon_kind:?}");
+            assert!(
+                icon.is_some(),
+                "failed to rasterize builtin icon {icon_kind:?}"
+            );
             let icon = icon.unwrap();
             assert!(!icon.is_null());
             unsafe { DestroyIcon(icon) };

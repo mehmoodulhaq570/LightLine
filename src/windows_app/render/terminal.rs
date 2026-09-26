@@ -56,7 +56,11 @@ impl App {
             "OUTPUT",
             layout.output.left,
             top + self.scale(9),
-            if output_active { self.theme.text } else { self.theme.muted },
+            if output_active {
+                self.theme.text
+            } else {
+                self.theme.muted
+            },
             layout.output,
         );
         if output_active {
@@ -84,13 +88,18 @@ impl App {
             } else {
                 format!("{shell_tag} {title}")
             };
-            let active = self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
+            let active =
+                self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
             Self::label(
                 hdc,
                 &label,
                 rect.left + self.scale(6),
                 top + self.scale(9),
-                if active { self.theme.text } else { self.theme.muted },
+                if active {
+                    self.theme.text
+                } else {
+                    self.theme.muted
+                },
                 *rect,
             );
             if active {
@@ -130,7 +139,11 @@ impl App {
             "\u{2715}",
             layout.kill.left + self.scale(4),
             top + self.scale(9),
-            if shell_open { self.theme.muted } else { rgb(74, 80, 94) },
+            if shell_open {
+                self.theme.muted
+            } else {
+                rgb(74, 80, 94)
+            },
             layout.kill,
         );
 

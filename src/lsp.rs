@@ -522,7 +522,9 @@ fn run_server(
                         emit(
                             stopped(
                                 config.language,
-                                format!("Could not set up Pyright automatically: {error}. You can still install it manually with `npm.cmd install -g pyright`."),
+                                format!(
+                                    "Could not set up Pyright automatically: {error}. You can still install it manually with `npm.cmd install -g pyright`."
+                                ),
                             ),
                             &events,
                             &wake,
@@ -886,10 +888,7 @@ fn run_server(
     if let Some(error) = failure {
         let stderr_text = stderr.lock().map(|saved| saved.clone()).unwrap_or_default();
         emit(
-            stopped(
-                config.language,
-                stop_message(&config, &error, &stderr_text),
-            ),
+            stopped(config.language, stop_message(&config, &error, &stderr_text)),
             &events,
             &wake,
         );
@@ -1234,7 +1233,10 @@ fn parse_completion(message: &Value) -> Vec<CompletionItem> {
         Some(Value::Null) | None => return Vec::new(),
         Some(value) => value,
     };
-    let Some(items) = result.get("items").and_then(Value::as_array).or_else(|| result.as_array())
+    let Some(items) = result
+        .get("items")
+        .and_then(Value::as_array)
+        .or_else(|| result.as_array())
     else {
         return Vec::new();
     };
@@ -1263,8 +1265,15 @@ fn parse_completion(message: &Value) -> Vec<CompletionItem> {
             });
             Some(CompletionItem {
                 label: label.to_owned(),
-                kind: item.get("kind").and_then(Value::as_u64).unwrap_or(0).min(25) as u8,
-                detail: item.get("detail").and_then(Value::as_str).map(str::to_owned),
+                kind: item
+                    .get("kind")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(25) as u8,
+                detail: item
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 insert,
                 edit_start,
                 edit_end,
@@ -1329,10 +1338,7 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let mut text = percent_decode(rest.as_bytes());
     // Drop the leading slash on /C:/... Windows paths.
     #[cfg(windows)]
-    if text.first() == Some(&b'/')
-        && text.get(2) == Some(&b':')
-        && text[1].is_ascii_alphabetic()
-    {
+    if text.first() == Some(&b'/') && text.get(2) == Some(&b':') && text[1].is_ascii_alphabetic() {
         text.remove(0);
     }
     let path = String::from_utf8(text).ok()?;
@@ -1433,7 +1439,10 @@ mod tests {
             find_in_path_with(&path_var, &["pyright-langserver.cmd", "pyright-langserver"]),
             Some(script)
         );
-        assert_eq!(find_in_path_with(&path_var, &["definitely-missing.cmd"]), None);
+        assert_eq!(
+            find_in_path_with(&path_var, &["definitely-missing.cmd"]),
+            None
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

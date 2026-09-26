@@ -121,7 +121,10 @@ impl Theme {
     // Applies settings.json's `colors` overrides (already loaded/parsed by
     // src/settings.rs, previously only consulted for the 4 syntax colors
     // that had a key; now the single place every themeable key is resolved).
-    pub(super) fn with_overrides(mut self, overrides: &std::collections::HashMap<String, u32>) -> Self {
+    pub(super) fn with_overrides(
+        mut self,
+        overrides: &std::collections::HashMap<String, u32>,
+    ) -> Self {
         let apply = |key: &str, field: &mut u32| {
             if let Some(&color) = overrides.get(key) {
                 *field = color;

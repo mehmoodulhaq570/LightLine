@@ -129,15 +129,23 @@ mod tests {
     #[test]
     #[ignore = "hits the real network; run explicitly with --ignored"]
     fn resolves_the_real_material_icon_theme_entry() {
-        let resolved = resolve("material-icon-theme").expect("should resolve from the live registry");
-        assert_eq!(resolved.git_url, "https://github.com/zed-extensions/material-icon-theme.git");
+        let resolved =
+            resolve("material-icon-theme").expect("should resolve from the live registry");
+        assert_eq!(
+            resolved.git_url,
+            "https://github.com/zed-extensions/material-icon-theme.git"
+        );
     }
 
     #[test]
     #[ignore = "hits the real network; run explicitly with --ignored"]
     fn lists_hundreds_of_real_ids_including_material_icon_theme() {
         let ids = list_ids().expect("should list from the live registry");
-        assert!(ids.len() > 100, "expected hundreds of real registry entries, got {}", ids.len());
+        assert!(
+            ids.len() > 100,
+            "expected hundreds of real registry entries, got {}",
+            ids.len()
+        );
         let material = ids
             .iter()
             .find(|(id, _)| id == "material-icon-theme")
