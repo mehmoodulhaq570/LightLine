@@ -84,6 +84,7 @@ pub enum Event {
 
 pub struct DebugClient {
     sender: Sender<Command>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 impl DebugClient {
@@ -93,8 +94,11 @@ impl DebugClient {
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         let (sender, commands) = mpsc::channel();
-        thread::spawn(move || run_adapter(request, commands, events, wake));
-        Self { sender }
+        let worker = thread::spawn(move || run_adapter(request, commands, events, wake));
+        Self {
+            sender,
+            worker: Some(worker),
+        }
     }
 
     pub fn send(&self, command: Command) -> bool {
@@ -105,6 +109,11 @@ impl DebugClient {
 impl Drop for DebugClient {
     fn drop(&mut self) {
         let _ = self.sender.send(Command::Disconnect);
+        // Do not leave a previous adapter posting stale Terminated/Failed
+        // events into a newly restarted session's channel.
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 

@@ -496,6 +496,7 @@ pub(super) struct App {
     pub(super) debug_state: DebugState,
     pub(super) debug_pending_root: Option<PathBuf>,
     pub(super) debug_pending_breakpoints: Vec<(PathBuf, Vec<u32>)>,
+    pub(super) debug_sections_expanded: [bool; 3],
 }
 
 // Everything the Debug side panel paints, kept separate from the live
@@ -945,6 +946,7 @@ impl App {
             },
             debug_pending_root: None,
             debug_pending_breakpoints: Vec::new(),
+            debug_sections_expanded: [true; 3],
             extensions_search_active: false,
         }
     }

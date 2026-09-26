@@ -22,6 +22,16 @@ pub(super) struct DebugVariableRow {
     pub(super) value: String,
 }
 
+pub(super) struct DebugPanelLayout {
+    pub(super) variables_header_y: i32,
+    pub(super) variables_body_y: i32,
+    pub(super) variable_rows: Vec<DebugVariableRow>,
+    pub(super) call_stack_header_y: i32,
+    pub(super) call_stack_body_y: i32,
+    pub(super) breakpoints_header_y: i32,
+    pub(super) breakpoints_body_y: i32,
+}
+
 impl App {
     // Play button / F5: build the workspace, then launch it under lldb-dap
     // with the breakpoints currently set across all open tabs.
@@ -182,6 +192,13 @@ impl App {
         }
     }
 
+    pub(super) fn debug_pause(&mut self, hwnd: HWND) {
+        if let Some(client) = &self.debug {
+            client.send(DebugCommand::Pause);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
     pub(super) fn debug_step_over(&mut self, hwnd: HWND) {
         if let Some(client) = &self.debug {
             client.send(DebugCommand::Next);
@@ -199,6 +216,23 @@ impl App {
     pub(super) fn debug_step_out(&mut self, hwnd: HWND) {
         if let Some(client) = &self.debug {
             client.send(DebugCommand::StepOut);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+    }
+
+    pub(super) fn debug_restart(&mut self, hwnd: HWND) {
+        self.debug = None;
+        while self.debug_events.try_recv().is_ok() {}
+        self.debug_state = DebugState {
+            status: "Restarting...".into(),
+            ..Default::default()
+        };
+        self.start_debug_session(hwnd);
+    }
+
+    pub(super) fn toggle_debug_section(&mut self, hwnd: HWND, section: usize) {
+        if let Some(expanded) = self.debug_sections_expanded.get_mut(section) {
+            *expanded = !*expanded;
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
@@ -226,9 +260,55 @@ impl App {
     // paint_debug_panel draws in: past the toolbar, the status line, and the
     // "VARIABLES" section header. Shared so the click handler in input.rs
     // lands on exactly the rows that were actually painted.
-    pub(super) fn debug_variables_start_y(&self) -> i32 {
+    pub(super) fn debug_panel_layout(&self, bottom: i32) -> DebugPanelLayout {
         let s = |v: i32| self.scale(v);
-        s(88) + s(24) + s(24)
+        let header_height = s(28);
+        let row_height = s(23);
+        let scope_height = s(22);
+        let gap = s(7);
+        let variables_header_y = s(190);
+        let variables_body_y = variables_header_y + header_height;
+        let mut variable_rows = Vec::new();
+        let mut y = variables_body_y;
+        if self.debug_sections_expanded[0] {
+            if self.debug_state.scopes.is_empty() {
+                y += s(34);
+            } else {
+                // Keep enough room for the remaining section headers even
+                // when the debugger reports a very large locals tree.
+                let rows_bottom = (bottom - header_height * 2 - gap * 2).max(y);
+                let (rows, next_y) =
+                    self.debug_variable_rows(y, rows_bottom, row_height, scope_height);
+                variable_rows = rows;
+                y = next_y + s(5);
+            }
+        }
+        let call_stack_header_y = y + gap;
+        let call_stack_body_y = call_stack_header_y + header_height;
+        y = call_stack_body_y;
+        if self.debug_sections_expanded[1] {
+            y += if self.debug_state.frames.is_empty() {
+                s(34)
+            } else {
+                row_height * self.debug_state.frames.len().min(5) as i32 + s(5)
+            };
+        }
+        let breakpoints_header_y = y + gap;
+        let breakpoints_body_y = breakpoints_header_y + header_height;
+        DebugPanelLayout {
+            variables_header_y,
+            variables_body_y,
+            variable_rows,
+            call_stack_header_y,
+            call_stack_body_y,
+            breakpoints_header_y,
+            breakpoints_body_y,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn debug_variables_start_y(&self) -> i32 {
+        self.scale(218)
     }
 
     // Flattens the VARIABLES tree (scope headers, their variables, and any

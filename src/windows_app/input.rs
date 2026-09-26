@@ -1394,14 +1394,32 @@ impl App {
             }
             if self.side_view == SideView::Debug {
                 let rail = self.scale(RAIL);
-                if y >= self.scale(47) && y <= self.scale(75) {
-                    for index in 0..4 {
+                let start = self.debug_start_button(editor_left);
+                if x >= start.left && x < start.right && y >= start.top && y < start.bottom {
+                    if self.debug.is_none() {
+                        self.start_debug_session(hwnd);
+                    }
+                    return;
+                }
+                if y >= self.scale(90) && y < self.scale(122) {
+                    for index in 0..6 {
                         let rect = self.debug_toolbar_button(rail, editor_left, index);
-                        if x >= rect.left && x < rect.right {
+                        if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
+                            let enabled = match index {
+                                0 => self.debug.is_some(),
+                                1..=3 => self.debug.is_some() && !self.debug_state.running,
+                                _ => self.debug.is_some(),
+                            };
+                            if !enabled {
+                                return;
+                            }
                             match index {
+                                0 if self.debug_state.running => self.debug_pause(hwnd),
                                 0 => self.debug_continue(hwnd),
                                 1 => self.debug_step_over(hwnd),
                                 2 => self.debug_step_in(hwnd),
+                                3 => self.debug_step_out(hwnd),
+                                4 => self.debug_restart(hwnd),
                                 _ => self.debug_stop(hwnd),
                             }
                             return;
@@ -1411,10 +1429,20 @@ impl App {
                 }
                 if x >= rail && x < editor_left {
                     let bottom = (panel_bottom - self.scale(STATUS)).max(0);
-                    let start_y = self.debug_variables_start_y();
-                    let (rows, _) = self.debug_variable_rows(start_y, bottom, self.scale(18), self.scale(16));
-                    for row in &rows {
-                        if row.expandable && y >= row.y && y < row.y + self.scale(18) {
+                    let layout = self.debug_panel_layout(bottom);
+                    let section_headers = [
+                        layout.variables_header_y,
+                        layout.call_stack_header_y,
+                        layout.breakpoints_header_y,
+                    ];
+                    for (section, header_y) in section_headers.iter().enumerate() {
+                        if y >= *header_y && y < *header_y + self.scale(28) {
+                            self.toggle_debug_section(hwnd, section);
+                            return;
+                        }
+                    }
+                    for row in &layout.variable_rows {
+                        if row.expandable && y >= row.y && y < row.y + self.scale(23) {
                             self.toggle_debug_variable(hwnd, row.reference);
                             return;
                         }

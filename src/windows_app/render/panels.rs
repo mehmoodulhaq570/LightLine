@@ -651,9 +651,17 @@ impl App {
         }
     }
 
-    // Geometry shared with the click handler in input.rs: four evenly-sized
-    // toolbar buttons (continue/pause, step over, step in, stop) above the
-    // live status line.
+    pub(in crate::windows_app) fn debug_start_button(&self, right: i32) -> RECT {
+        RECT {
+            left: right - self.scale(56),
+            top: self.scale(48),
+            right: right - self.scale(8),
+            bottom: self.scale(82),
+        }
+    }
+
+    // Geometry shared with the click handler in input.rs: six compact debug
+    // controls below the launch configuration.
     pub(in crate::windows_app) fn debug_toolbar_button(
         &self,
         left: i32,
@@ -661,14 +669,14 @@ impl App {
         index: i32,
     ) -> RECT {
         let s = |v: i32| self.scale(v);
-        let gap = s(6);
-        let width = (right - left - s(16) - gap * 3) / 4;
+        let gap = s(5);
+        let width = (right - left - s(16) - gap * 5) / 6;
         let button_left = left + s(8) + index * (width + gap);
         RECT {
             left: button_left,
-            top: s(48),
+            top: s(90),
             right: button_left + width,
-            bottom: s(78),
+            bottom: s(122),
         }
     }
 
@@ -749,7 +757,8 @@ impl App {
         }
     }
 
-    fn paint_debug_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
+    #[allow(dead_code)]
+    fn paint_debug_panel_legacy(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
         let s = |v: i32| self.scale(v);
         let state = &self.debug_state;
         let has_session = self.debug.is_some();
@@ -925,6 +934,220 @@ impl App {
                     RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom },
                 );
                 y += s(18);
+            }
+        }
+    }
+
+    fn debug_control_icon(&self, hdc: HDC, rect: RECT, index: usize, running: bool, color: u32) {
+        if index == 0 && !running {
+            self.debug_icon(hdc, rect, 0, color);
+            return;
+        }
+        if index == 1 {
+            self.debug_icon(hdc, rect, 1, color);
+            return;
+        }
+        if index == 2 {
+            self.debug_icon(hdc, rect, 2, color);
+            return;
+        }
+        if index == 5 {
+            self.debug_icon(hdc, rect, 4, color);
+            return;
+        }
+        let cx = (rect.left + rect.right) / 2;
+        let cy = (rect.top + rect.bottom) / 2;
+        let r = self.scale(6);
+        unsafe {
+            let brush = CreateSolidBrush(color);
+            let pen = CreatePen(PS_SOLID, self.scale(2).max(1), color);
+            let old_brush = SelectObject(hdc, brush);
+            let old_pen = SelectObject(hdc, pen);
+            if index == 0 {
+                let bar = self.scale(3);
+                FillRect(hdc, &RECT { left: cx - r, top: cy - r, right: cx - r + bar, bottom: cy + r }, brush);
+                FillRect(hdc, &RECT { left: cx + r - bar, top: cy - r, right: cx + r, bottom: cy + r }, brush);
+            } else if index == 3 {
+                MoveToEx(hdc, cx, cy + r, null_mut());
+                LineTo(hdc, cx, cy - r + self.scale(2));
+                let head = [
+                    POINT { x: cx - self.scale(4), y: cy - r + self.scale(4) },
+                    POINT { x: cx, y: cy - r },
+                    POINT { x: cx + self.scale(4), y: cy - r + self.scale(4) },
+                ];
+                SelectObject(hdc, GetStockObject(NULL_PEN));
+                Polygon(hdc, head.as_ptr(), 3);
+            } else {
+                SelectObject(hdc, GetStockObject(NULL_BRUSH));
+                Arc(hdc, cx - r, cy - r, cx + r, cy + r, cx + r, cy, cx, cy - r);
+                SelectObject(hdc, brush);
+                let head = [
+                    POINT { x: cx - self.scale(1), y: cy - r - self.scale(2) },
+                    POINT { x: cx + self.scale(5), y: cy - r },
+                    POINT { x: cx + self.scale(2), y: cy - r + self.scale(5) },
+                ];
+                SelectObject(hdc, GetStockObject(NULL_PEN));
+                Polygon(hdc, head.as_ptr(), 3);
+            }
+            SelectObject(hdc, old_pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(brush);
+            DeleteObject(pen);
+        }
+    }
+
+    fn paint_debug_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
+        let s = |v: i32| self.scale(v);
+        let state = &self.debug_state;
+        let has_session = self.debug.is_some();
+        let running = has_session && state.running;
+        let paused = has_session && !running;
+
+        let config = RECT { left: left + s(8), top: s(48), right: right - s(64), bottom: s(82) };
+        self.panel_card(hdc, config, s(5), rgb(42, 65, 105), rgb(13, 23, 42));
+        self.label_ellipsis(hdc, "Rust: Current Workspace", config.left + s(12), s(56), self.theme.text,
+            RECT { left: config.left, top: clip.top, right: config.right - s(40), bottom: clip.bottom });
+        Self::label(hdc, "LLDB", config.right - s(38), s(56), self.theme.muted, clip);
+        let start = self.debug_start_button(right);
+        self.panel_card(hdc, start, s(5),
+            if has_session { rgb(38, 55, 79) } else { rgb(34, 197, 94) },
+            if has_session { rgb(16, 25, 43) } else { rgb(13, 57, 46) });
+        self.debug_icon(hdc, start, 0,
+            if has_session { rgb(66, 82, 110) } else { rgb(245, 255, 250) });
+
+        for index in 0..6 {
+            let enabled = match index {
+                0 => has_session,
+                1..=3 => paused,
+                _ => has_session,
+            };
+            let rect = self.debug_toolbar_button(left, right, index as i32);
+            self.panel_card(hdc, rect, s(5),
+                if enabled { rgb(48, 78, 126) } else { rgb(31, 43, 67) }, rgb(15, 24, 43));
+            let color = if !enabled { rgb(66, 82, 110) }
+                else if index == 5 { rgb(245, 92, 92) }
+                else { rgb(170, 202, 250) };
+            self.debug_control_icon(hdc, rect, index, running, color);
+        }
+
+        let status_rect = RECT { left: left + s(8), top: s(132), right: right - s(8), bottom: s(182) };
+        self.panel_card(hdc, status_rect, s(6), rgb(38, 58, 91), rgb(15, 27, 49));
+        let failed = state.status.starts_with("Build failed") || state.status.contains("not found") || state.status.contains("error");
+        let dot_color = if failed { rgb(220, 60, 60) } else if running || paused { rgb(49, 211, 118) } else { self.theme.muted };
+        let (title, detail) = if running {
+            ("Running".to_string(), "Debug session active".to_string())
+        } else if paused {
+            let detail = state.frames.first().and_then(|frame| {
+                let name = frame.path.as_ref()?.file_name()?.to_string_lossy();
+                Some(format!("{name} \u{00b7} line {}", frame.line))
+            }).unwrap_or_else(|| state.status.clone());
+            ("Paused".to_string(), detail)
+        } else if state.status == "Not running" || state.status == "Program exited" {
+            ("Ready to debug".to_string(), "Start a workspace debugging session".to_string())
+        } else {
+            (state.status.clone(), "Debugger is not active".to_string())
+        };
+        unsafe {
+            let brush = CreateSolidBrush(dot_color);
+            let old_brush = SelectObject(hdc, brush);
+            let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+            Ellipse(hdc, status_rect.left + s(12), status_rect.top + s(13), status_rect.left + s(21), status_rect.top + s(22));
+            SelectObject(hdc, old_pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(brush);
+        }
+        self.label_ellipsis(hdc, &title, status_rect.left + s(29), status_rect.top + s(7), self.theme.text,
+            RECT { left, top: clip.top, right: status_rect.right - s(94), bottom: clip.bottom });
+        Self::label(hdc, &detail, status_rect.left + s(29), status_rect.top + s(26), self.theme.muted, clip);
+        Self::label(hdc, "LLDB Debugger", status_rect.right - s(90), status_rect.top + s(7), self.theme.muted, clip);
+
+        let layout = self.debug_panel_layout(bottom);
+        let breakpoint_count: usize = self.tabs.iter().map(|tab| tab.document.breakpoints().len()).sum();
+        let headers = [
+            (layout.variables_header_y, "VARIABLES", state.scopes.iter().map(|scope| scope.variables.len()).sum::<usize>()),
+            (layout.call_stack_header_y, "CALL STACK", state.frames.len()),
+            (layout.breakpoints_header_y, "BREAKPOINTS", breakpoint_count),
+        ];
+        for (index, (y, title, count)) in headers.iter().enumerate() {
+            if *y + s(28) > bottom { continue; }
+            Self::fill(hdc, RECT { left, top: *y, right, bottom: *y + s(28) }, self.theme.active_bg);
+            Self::label(hdc, if self.debug_sections_expanded[index] { "\u{25be}" } else { "\u{25b8}" }, left + s(8), *y + s(5), rgb(86, 164, 225), clip);
+            Self::label(hdc, title, left + s(24), *y + s(5), rgb(86, 164, 225), clip);
+            let badge = RECT { left: right - s(35), top: *y + s(4), right: right - s(10), bottom: *y + s(24) };
+            self.panel_card(hdc, badge, s(9), rgb(48, 70, 108), rgb(24, 40, 69));
+            Self::label(hdc, &count.to_string(), badge.left + s(8), *y + s(5), rgb(205, 220, 245), clip);
+        }
+
+        if self.debug_sections_expanded[0] {
+            if state.scopes.is_empty() {
+                Self::label(hdc, "Variables appear when execution pauses.", left + s(12), layout.variables_body_y + s(7), self.theme.muted, clip);
+            }
+            for row in &layout.variable_rows {
+                let indent = s(12) * row.depth as i32;
+                if row.is_header {
+                    Self::label(hdc, "\u{25be}", left + s(12), row.y + s(2), self.theme.muted, clip);
+                    Self::label(hdc, &row.name, left + s(28), row.y + s(2), self.theme.text, clip);
+                    continue;
+                }
+                if row.loading {
+                    Self::label(hdc, &row.name, left + s(27) + indent, row.y + s(2), self.theme.muted, clip);
+                    continue;
+                }
+                let glyph = if !row.expandable { " " } else if row.expanded { "\u{25be}" } else { "\u{25b8}" };
+                Self::fill(hdc, RECT { left: left + s(8), top: row.y + s(22), right: right - s(8), bottom: row.y + s(23) }, rgb(27, 40, 64));
+                Self::label(hdc, glyph, left + s(12) + indent, row.y + s(2), self.theme.muted, clip);
+                self.label_ellipsis(hdc, &row.name, left + s(27) + indent, row.y + s(2), rgb(205, 220, 245),
+                    RECT { left, top: clip.top, right: right - s(130), bottom: clip.bottom });
+                self.label_ellipsis(hdc, &row.value, right - s(126), row.y + s(2),
+                    if row.value.starts_with('"') { rgb(230, 155, 90) } else { rgb(65, 205, 220) },
+                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom });
+            }
+        }
+
+        if self.debug_sections_expanded[1] && layout.call_stack_body_y < bottom {
+            let mut y = layout.call_stack_body_y + s(3);
+            if state.frames.is_empty() {
+                Self::label(hdc, "Call stack appears during a debug session.", left + s(12), y + s(4), self.theme.muted, clip);
+            }
+            for (index, frame) in state.frames.iter().take(5).enumerate() {
+                if y + s(23) > bottom { break; }
+                if index == 0 {
+                    self.panel_card(hdc, RECT { left: left + s(8), top: y, right: right - s(8), bottom: y + s(22) }, s(3), rgb(39, 91, 160), rgb(22, 57, 108));
+                }
+                let location = frame.path.as_ref().and_then(|p| p.file_name())
+                    .map(|name| format!("{}:{}", name.to_string_lossy(), frame.line)).unwrap_or_default();
+                self.label_ellipsis(hdc, &frame.name, left + s(16), y + s(2), self.theme.text,
+                    RECT { left, top: clip.top, right: right - s(110), bottom: clip.bottom });
+                Self::label(hdc, &location, right - s(105), y + s(2), self.theme.muted, clip);
+                y += s(23);
+            }
+        }
+
+        if self.debug_sections_expanded[2] && layout.breakpoints_body_y < bottom {
+            let mut y = layout.breakpoints_body_y + s(5);
+            let breakpoints: Vec<(String, usize)> = self.tabs.iter().filter_map(|tab| {
+                let name = tab.document.path.as_ref()?.file_name()?.to_string_lossy().into_owned();
+                Some((name, tab.document.breakpoints()))
+            }).flat_map(|(name, lines)| lines.iter().map(move |line| (name.clone(), line + 1))).collect();
+            if breakpoints.is_empty() {
+                Self::label(hdc, "Click the editor gutter or press F9 to add one.", left + s(12), y + s(3), self.theme.muted, clip);
+            }
+            for (name, line) in &breakpoints {
+                if y + s(24) > bottom { break; }
+                self.panel_card(hdc, RECT { left: left + s(10), top: y + s(2), right: left + s(27), bottom: y + s(19) }, s(3), rgb(45, 115, 196), rgb(32, 116, 210));
+                Self::label(hdc, "\u{2713}", left + s(13), y + s(1), rgb(245, 250, 255), clip);
+                unsafe {
+                    let brush = CreateSolidBrush(rgb(245, 82, 82));
+                    let old_brush = SelectObject(hdc, brush);
+                    let old_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                    Ellipse(hdc, left + s(35), y + s(7), left + s(44), y + s(16));
+                    SelectObject(hdc, old_pen);
+                    SelectObject(hdc, old_brush);
+                    DeleteObject(brush);
+                }
+                self.label_ellipsis(hdc, &format!("{name}:{line}"), left + s(52), y + s(4), self.theme.text,
+                    RECT { left, top: clip.top, right: right - s(8), bottom: clip.bottom });
+                y += s(24);
             }
         }
     }
