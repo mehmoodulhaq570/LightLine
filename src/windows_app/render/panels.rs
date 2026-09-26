@@ -124,6 +124,24 @@ impl App {
             self.theme.muted,
             clip,
         );
+        if self.side_view == SideView::Debug {
+            Self::label(
+                hdc,
+                "\u{2699}",
+                editor_left - self.scale(62),
+                self.scale(10),
+                self.theme.muted,
+                clip,
+            );
+            Self::label(
+                hdc,
+                "\u{2026}",
+                editor_left - self.scale(32),
+                self.scale(7),
+                self.theme.muted,
+                clip,
+            );
+        }
         Self::fill(
             hdc,
             RECT {
@@ -653,10 +671,10 @@ impl App {
 
     pub(in crate::windows_app) fn debug_start_button(&self, right: i32) -> RECT {
         RECT {
-            left: right - self.scale(56),
+            left: right - self.scale(70),
             top: self.scale(48),
             right: right - self.scale(8),
-            bottom: self.scale(82),
+            bottom: self.scale(86),
         }
     }
 
@@ -674,9 +692,9 @@ impl App {
         let button_left = left + s(8) + index * (width + gap);
         RECT {
             left: button_left,
-            top: s(90),
+            top: s(94),
             right: button_left + width,
-            bottom: s(122),
+            bottom: s(130),
         }
     }
 
@@ -1003,11 +1021,11 @@ impl App {
         let running = has_session && state.running;
         let paused = has_session && !running;
 
-        let config = RECT { left: left + s(8), top: s(48), right: right - s(64), bottom: s(82) };
+        let config = RECT { left: left + s(8), top: s(48), right: right - s(78), bottom: s(86) };
         self.panel_card(hdc, config, s(5), rgb(42, 65, 105), rgb(13, 23, 42));
         self.label_ellipsis(hdc, "Rust: Current Workspace", config.left + s(12), s(56), self.theme.text,
-            RECT { left: config.left, top: clip.top, right: config.right - s(40), bottom: clip.bottom });
-        Self::label(hdc, "LLDB", config.right - s(38), s(56), self.theme.muted, clip);
+            RECT { left: config.left, top: clip.top, right: config.right - s(28), bottom: clip.bottom });
+        self.chevron(hdc, config.right - s(14), (config.top + config.bottom) / 2, false);
         let start = self.debug_start_button(right);
         self.panel_card(hdc, start, s(5),
             if has_session { rgb(38, 55, 79) } else { rgb(34, 197, 94) },
@@ -1015,22 +1033,25 @@ impl App {
         self.debug_icon(hdc, start, 0,
             if has_session { rgb(66, 82, 110) } else { rgb(245, 255, 250) });
 
-        for index in 0..6 {
-            let enabled = match index {
-                0 => has_session,
-                1..=3 => paused,
-                _ => has_session,
-            };
-            let rect = self.debug_toolbar_button(left, right, index as i32);
-            self.panel_card(hdc, rect, s(5),
-                if enabled { rgb(48, 78, 126) } else { rgb(31, 43, 67) }, rgb(15, 24, 43));
-            let color = if !enabled { rgb(66, 82, 110) }
-                else if index == 5 { rgb(245, 92, 92) }
-                else { rgb(170, 202, 250) };
-            self.debug_control_icon(hdc, rect, index, running, color);
+        if has_session {
+            for index in 0..6 {
+                let enabled = match index {
+                    0 => true,
+                    1..=3 => paused,
+                    _ => true,
+                };
+                let rect = self.debug_toolbar_button(left, right, index as i32);
+                self.panel_card(hdc, rect, s(5),
+                    if enabled { rgb(48, 78, 126) } else { rgb(31, 43, 67) }, rgb(15, 24, 43));
+                let color = if !enabled { rgb(66, 82, 110) }
+                    else if index == 5 { rgb(245, 92, 92) }
+                    else { rgb(170, 202, 250) };
+                self.debug_control_icon(hdc, rect, index, running, color);
+            }
         }
 
-        let status_rect = RECT { left: left + s(8), top: s(132), right: right - s(8), bottom: s(182) };
+        let status_top = if has_session { s(140) } else { s(94) };
+        let status_rect = RECT { left: left + s(8), top: status_top, right: right - s(8), bottom: status_top + s(58) };
         self.panel_card(hdc, status_rect, s(6), rgb(38, 58, 91), rgb(15, 27, 49));
         let failed = state.status.starts_with("Build failed") || state.status.contains("not found") || state.status.contains("error");
         let dot_color = if failed { rgb(220, 60, 60) } else if running || paused { rgb(49, 211, 118) } else { self.theme.muted };
@@ -1059,7 +1080,9 @@ impl App {
         self.label_ellipsis(hdc, &title, status_rect.left + s(29), status_rect.top + s(7), self.theme.text,
             RECT { left, top: clip.top, right: status_rect.right - s(94), bottom: clip.bottom });
         Self::label(hdc, &detail, status_rect.left + s(29), status_rect.top + s(26), self.theme.muted, clip);
-        Self::label(hdc, "LLDB Debugger", status_rect.right - s(90), status_rect.top + s(7), self.theme.muted, clip);
+        if has_session {
+            Self::label(hdc, "LLDB Debugger", status_rect.right - s(90), status_rect.top + s(7), self.theme.muted, clip);
+        }
 
         let layout = self.debug_panel_layout(bottom);
         let breakpoint_count: usize = self.tabs.iter().map(|tab| tab.document.breakpoints().len()).sum();

@@ -266,7 +266,7 @@ impl App {
         let row_height = s(23);
         let scope_height = s(22);
         let gap = s(7);
-        let variables_header_y = s(190);
+        let variables_header_y = if self.debug.is_some() { s(208) } else { s(162) };
         let variables_body_y = variables_header_y + header_height;
         let mut variable_rows = Vec::new();
         let mut y = variables_body_y;
@@ -308,7 +308,11 @@ impl App {
 
     #[allow(dead_code)]
     pub(super) fn debug_variables_start_y(&self) -> i32 {
-        self.scale(218)
+        if self.debug.is_some() {
+            self.scale(236)
+        } else {
+            self.scale(190)
+        }
     }
 
     // Flattens the VARIABLES tree (scope headers, their variables, and any

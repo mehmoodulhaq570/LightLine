@@ -1316,6 +1316,17 @@ impl App {
                 return;
             }
             if y < self.scale(39) {
+                if self.side_view == SideView::Debug {
+                    if x >= editor_left - self.scale(38) {
+                        self.show_quick_open(hwnd);
+                        self.quick_query = ">".into();
+                        return;
+                    }
+                    if x >= editor_left - self.scale(68) {
+                        self.open_settings(hwnd);
+                        return;
+                    }
+                }
                 if x >= editor_left - self.scale(26) {
                     self.set_sidebar_visible(hwnd, false);
                     return;
@@ -1401,7 +1412,7 @@ impl App {
                     }
                     return;
                 }
-                if y >= self.scale(90) && y < self.scale(122) {
+                if y >= self.scale(94) && y < self.scale(130) {
                     for index in 0..6 {
                         let rect = self.debug_toolbar_button(rail, editor_left, index);
                         if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
