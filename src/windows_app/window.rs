@@ -599,6 +599,11 @@ pub fn run() -> io::Result<()> {
         // The approved workbench keeps a compact terminal dock available by
         // default; it remains collapsible with Ctrl+` or the header close.
         app.borrow_mut().open_terminal(hwnd);
+        // Reported only now: opening the startup file or session sets its own
+        // status, which would otherwise replace this straight away.
+        if let Err(error) = lightline::settings::Settings::try_load() {
+            app.borrow_mut().status = error;
+        }
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
             TranslateMessage(&msg);

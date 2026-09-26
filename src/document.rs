@@ -141,6 +141,18 @@ impl Document {
         self.saved_revision = self.revision;
     }
 
+    /// True while the file on disk still has the modification time and size
+    /// this document last read or wrote, so a watcher event for it is this
+    /// document's own save rather than an outside edit.
+    pub fn disk_matches_last_save(&self) -> bool {
+        let (Some(path), Some((modified, len))) = (&self.path, self.last_saved) else {
+            return false;
+        };
+        fs::metadata(path).is_ok_and(|current| {
+            current.len() == len && current.modified().is_ok_and(|time| time == modified)
+        })
+    }
+
     pub fn breakpoints(&self) -> &BTreeSet<usize> {
         &self.breakpoints
     }

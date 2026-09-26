@@ -770,10 +770,7 @@ impl App {
         let (worker_tx, worker_rx) = mpsc::channel();
         let (lsp_tx, lsp_rx) = mpsc::channel();
         let (debug_tx, debug_rx) = mpsc::channel();
-        let (settings, settings_error) = match lightline::settings::Settings::try_load() {
-            Ok(settings) => (settings, None),
-            Err(error) => (lightline::settings::Settings::default(), Some(error)),
-        };
+        let settings = lightline::settings::Settings::load();
         let theme = Theme::default_dark().with_overrides(&settings.colors);
         Self {
             tabs: vec![Tab::new(Document::new())],
@@ -800,7 +797,7 @@ impl App {
             backbuffer: None,
             scrollbar_visible: None,
             transition: None,
-            status: settings_error.unwrap_or_else(|| "Ready".into()),
+            status: "Ready".into(),
             focused: false,
             caret_on: true,
             dragging: false,
@@ -2004,6 +2001,7 @@ impl App {
         if events.is_empty() { return; }
         let mut needs_refresh = false;
         let mut git_changed = false;
+        let visible = self.visible_lines(hwnd);
         for event in events {
             match event {
                 lightline::watcher::WatchEvent::FileChanged(path)
@@ -2019,9 +2017,27 @@ impl App {
                             .as_deref()
                             .is_some_and(|p| Self::same_path(p, &path))
                         {
+                            // LightLine's own save also fires this event.
+                            // Reloading then would wipe the undo history and
+                            // replace the save's status message.
+                            if tab.document.disk_matches_last_save() {
+                                continue;
+                            }
                             if !tab.document.is_dirty() {
                                 if let Ok(doc) = Document::open(path.clone()) {
                                     tab.document = doc;
+                                    // The new text can be shorter: keep every
+                                    // cursor, selection and scroll inside it.
+                                    let last_line = tab.document.line_count().saturating_sub(1);
+                                    let last_page =
+                                        last_line.saturating_sub(visible.saturating_sub(1));
+                                    for view in &mut tab.views {
+                                        view.cursor = tab.document.clamp(view.cursor);
+                                        view.selection_anchor = view
+                                            .selection_anchor
+                                            .map(|anchor| tab.document.clamp(anchor));
+                                        view.first_line = view.first_line.min(last_page);
+                                    }
                                     if let Some(syntax) = &mut tab.syntax {
                                         syntax.invalidate_from(0);
                                     }

@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings Needed a Restart**: `settings.json` was read only at startup, so saving a change such as `"formatOnSave": true` from inside LightLine did nothing until the next launch. Saving the file now re-reads and applies it immediately ("Settings saved and applied").
 - **Broken `settings.json` Was Silently Ignored**: A syntax error (e.g. a trailing comma) made LightLine quietly fall back to every default. The error is now shown in red in the status bar, on startup and on save, and the settings already in effect are kept.
 - **Command Palette Showed Only 7 Commands**: The Quick Open list was cut off at seven rows, so commands further down, like `Open Settings (JSON)`, could not be reached without typing a filter. The list now scrolls with `Up`/`Down`, `Page Up`/`Page Down` and the mouse wheel, shows a position hint such as `8–14 of 33`, and file results go up to 50 instead of 8. Clicking the hint line no longer opens a hidden eighth result.
-- **Ctrl+P Went to the Shell**: With the terminal focused, `Ctrl+P` was sent to the shell instead of opening Quick Open. It is now kept for LightLine, like `Ctrl+Shift+P`.
+- **Ctrl+P and Ctrl+, Went to the Shell**: With the terminal focused, as it is right after launch, `Ctrl+P` and `Ctrl+,` were sent to the shell instead of opening Quick Open or the settings. Both are now kept for LightLine, like `Ctrl+Shift+P`.
+- **Every Save Reloaded the File**: The file watcher treated LightLine's own save as an outside change and reloaded the document, which wiped its undo history (`Ctrl+Z` could not go back past a save, so format-on-save could not be undone) and replaced the save's status message with "Reloaded: ...". Changes whose modification time and size match LightLine's own last save are now ignored; edits from other programs still reload.
+- **Crash When an Open File Shrank on Disk**: Reloading a file that another program had made shorter left the cursor past the new end, and the next repaint panicked (index out of bounds). Cursors, selections and scroll positions are now kept inside the reloaded text.
 
 ### 2026-09-25
 
