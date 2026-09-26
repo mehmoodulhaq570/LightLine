@@ -1367,6 +1367,9 @@ impl App {
                             GitHit::Fetch => {
                                 self.git_remote(hwnd, workflow::RemoteAction::Fetch)
                             }
+                            GitHit::ToggleSection(section) => {
+                                self.git_toggle_section(hwnd, section)
+                            }
                             GitHit::StageAll => self.git_stage_all(hwnd),
                             GitHit::UnstageAll => self.git_unstage_all(hwnd),
                             GitHit::Toggle(index) => self.git_toggle_row(hwnd, index),

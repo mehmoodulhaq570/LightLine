@@ -66,6 +66,7 @@ pub(super) enum GitHit {
     Push,
     Pull,
     Fetch,
+    ToggleSection(GitSection),
     Row(usize),
     Toggle(usize),
     Discard(usize),
@@ -177,25 +178,29 @@ impl App {
                 count: staged.len(),
                 section: GitSection::Staged,
             });
-            rows.extend(staged.into_iter().map(|change| GitRow::Change {
-                change: change.clone(),
-                staged: true,
-            }));
+            if !self.git_staged_collapsed {
+                rows.extend(staged.into_iter().map(|change| GitRow::Change {
+                    change: change.clone(),
+                    staged: true,
+                }));
+            }
         }
         rows.push(GitRow::Header {
             title: "CHANGES",
             count: unstaged.len(),
             section: GitSection::Changes,
         });
-        if !has_staged && unstaged.is_empty() {
-            rows.push(GitRow::Clean);
-        } else if unstaged.is_empty() {
-            rows.push(GitRow::Note("No unstaged changes."));
-        } else {
-            rows.extend(unstaged.into_iter().map(|change| GitRow::Change {
-                change: change.clone(),
-                staged: false,
-            }));
+        if !self.git_changes_collapsed {
+            if !has_staged && unstaged.is_empty() {
+                rows.push(GitRow::Clean);
+            } else if unstaged.is_empty() {
+                rows.push(GitRow::Note("No unstaged changes."));
+            } else {
+                rows.extend(unstaged.into_iter().map(|change| GitRow::Change {
+                    change: change.clone(),
+                    staged: false,
+                }));
+            }
         }
         if !self.history.is_empty() {
             rows.push(GitRow::Header {
@@ -203,7 +208,9 @@ impl App {
                 count: self.history.len(),
                 section: GitSection::History,
             });
-            rows.extend(self.history.iter().cloned().map(GitRow::Commit));
+            if !self.git_history_collapsed {
+                rows.extend(self.history.iter().cloned().map(GitRow::Commit));
+            }
         }
         rows
     }
@@ -336,8 +343,13 @@ impl App {
                     }
                     return GitHit::Row(index);
                 }
-                GitRow::Header { section, .. } => match section {
-                    GitSection::Changes => {
+                GitRow::Header { section, .. } => {
+                    let action = match section {
+                        GitSection::Changes => Some(GitHit::StageAll),
+                        GitSection::Staged => Some(GitHit::UnstageAll),
+                        GitSection::History => None,
+                    };
+                    if let Some(action) = action {
                         let size = self.scale(ROW_BUTTON);
                         let edge = right - self.scale(8);
                         let rect = RECT {
@@ -347,30 +359,45 @@ impl App {
                             bottom: rect.bottom,
                         };
                         if contains(&rect, x, y) {
-                            return GitHit::StageAll;
+                            return action;
                         }
                     }
-                    GitSection::Staged => {
-                        let size = self.scale(ROW_BUTTON);
-                        let edge = right - self.scale(8);
-                        let rect = RECT {
-                            left: edge - size,
-                            top: rect.top,
-                            right: edge,
-                            bottom: rect.bottom,
-                        };
-                        if contains(&rect, x, y) {
-                            return GitHit::UnstageAll;
-                        }
-                    }
-                    GitSection::History => {}
-                },
+                    return GitHit::ToggleSection(*section);
+                }
                 GitRow::Commit(_) => return GitHit::Row(index),
                 GitRow::Clean | GitRow::Note(_) => {}
             }
             return GitHit::Nothing;
         }
         GitHit::Nothing
+    }
+
+    pub(super) fn git_section_collapsed(&self, section: GitSection) -> bool {
+        match section {
+            GitSection::Staged => self.git_staged_collapsed,
+            GitSection::Changes => self.git_changes_collapsed,
+            GitSection::History => self.git_history_collapsed,
+        }
+    }
+
+    pub(super) fn git_toggle_section(&mut self, hwnd: HWND, section: GitSection) {
+        let collapsed = match section {
+            GitSection::Staged => &mut self.git_staged_collapsed,
+            GitSection::Changes => &mut self.git_changes_collapsed,
+            GitSection::History => &mut self.git_history_collapsed,
+        };
+        *collapsed = !*collapsed;
+
+        let rows = self.git_rows();
+        self.panel_first = self.panel_first.min(rows.len().saturating_sub(1));
+        self.panel_selected = self.panel_selected.min(rows.len().saturating_sub(1));
+        if !rows.get(self.panel_selected).is_some_and(GitRow::selectable)
+            && let Some(index) = rows.iter().position(GitRow::selectable)
+        {
+            self.panel_selected = index;
+        }
+        self.git_scroll_into_view(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     /// Move the selection to the next row Up/Down can act on.

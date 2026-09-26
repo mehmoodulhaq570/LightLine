@@ -59,10 +59,19 @@ impl App {
                             self.theme.edge,
                         );
                     }
+                    let collapsed = self.git_section_collapsed(*section);
+                    Self::label(
+                        hdc,
+                        if collapsed { ">" } else { "v" },
+                        left + self.scale(13),
+                        top + self.scale(9),
+                        self.theme.muted,
+                        clip,
+                    );
                     Self::label(
                         hdc,
                         title,
-                        left + self.scale(14),
+                        left + self.scale(31),
                         top + self.scale(9),
                         self.theme.muted,
                         clip,
@@ -71,9 +80,9 @@ impl App {
                     let count_width = self.text_width(hdc, &count_text);
                     let title_width = self.text_width(hdc, title);
                     let badge = RECT {
-                        left: left + self.scale(20) + title_width,
+                        left: left + self.scale(37) + title_width,
                         top: top + self.scale(7),
-                        right: left + self.scale(32) + title_width + count_width,
+                        right: left + self.scale(49) + title_width + count_width,
                         bottom: top + self.scale(27),
                     };
                     self.panel_card(
