@@ -62,18 +62,21 @@ jobs:
         env:
           VERSION: ${{ needs.release-request.outputs.version }}
         run: |
-          # PowerShell 7.3+ auto-converts a non-zero exit from a native
-          # command into a terminating error, so `git ls-remote --exit-code`
-          # (which exits 2, not 0, precisely when the tag is *absent*) would
-          # fail this step on the success path if left to that default.
-          # Disable it here and check $LASTEXITCODE ourselves instead.
-          $PSNativeCommandUseErrorActionPreference = $false
+          # Deliberately not "--exit-code": that flag makes git exit 2 (not
+          # 0) precisely when the tag is *absent*, and PowerShell 7.3+'s
+          # default of auto-throwing on any non-zero native-command exit
+          # code turns that ordinary "not found" result into a step
+          # failure. Without the flag, ls-remote always exits 0 and we can
+          # tell whether the tag exists from its output alone.
           $tag = "v$env:VERSION"
-          git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
-          if ($LASTEXITCODE -eq 0) {
+          $existing = git ls-remote --tags origin "refs/tags/$tag" 2>&1
+          Write-Host "git ls-remote exit code: $LASTEXITCODE"
+          Write-Host "git ls-remote output: $existing"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not check for existing tag $tag (git ls-remote exited with code $LASTEXITCODE): $existing"
+          }
+          if ($existing) {
             throw "Release tag $tag already exists."
-          } elseif ($LASTEXITCODE -ne 2) {
-            throw "Could not check for existing tag $tag (git ls-remote exited with code $LASTEXITCODE)."
           }
 
       - name: Check formatting
