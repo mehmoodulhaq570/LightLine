@@ -45,7 +45,7 @@
 ### Portable Binary (Recommended)
 Grab the latest build from **[GitHub Releases](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**:
 - **[`lightline.exe`](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**: Direct standalone executable.
-- **[`lightline-v0.1.0-windows-x86_64.zip`](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**: Archive bundling the executable, README, and CHANGELOG.
+- **[`lightline-v<version>-windows-x86_64.zip`](https://github.com/mehmoodulhaq570/LightLine/releases/latest)**: Archive bundling the executable, README, and CHANGELOG.
 - **[`SHA256SUMS.txt`](https://github.com/mehmoodulhaq570/LightLine/releases/latest/download/SHA256SUMS.txt)**: SHA-256 checksums for both release downloads.
 
 #### Windows SmartScreen notice
@@ -168,7 +168,7 @@ The Extensions panel (`Ctrl+Shift+X`) installs real extensions from the live [Ze
 
 Two extension types are supported today, both pure data (no extension code runs inside LightLine):
 
-- **Icon themes** — map file/folder names to SVG icons. **Material Icon Theme** installs automatically on first launch.
+- **Icon themes** — map file/folder names to SVG icons. **Material Icon Theme** can be installed from the Extensions panel; until an icon theme is installed, LightLine uses its built-in vector icons.
 - **Color themes** — map editor/chrome/syntax colors onto LightLine's `Theme`. Installing one (e.g. **Dracula**) updates the running editor's colors immediately, with no restart; anything a theme doesn't specify keeps LightLine's own default. Uninstalling it reverts to the default theme.
 
 Any other extension type (language servers, procedural/WASM extensions) is reported as not supported yet rather than silently half-installed.
@@ -193,7 +193,7 @@ Release builds of `lightline.exe` are built from this repository by the GitHub A
 
 **Privacy policy**
 
-LightLine does not collect or send usage data. It only uses the network when you ask it to: searching and installing extensions (reads the public Zed extension registry and clones the extension's git repository), downloading language tooling such as Pyright, and running **Python: Install debugpy**, which runs `pip install debugpy` from PyPI in the Output tab. LightLine writes only inside its own folder at `%APPDATA%\LightLine` plus the files and folders you open, create, or edit; the one exception is **Python: Install debugpy**, which installs `debugpy` into your selected Python environment. LightLine can be removed by deleting `lightline.exe` and, optionally, the `%APPDATA%\LightLine` folder.
+LightLine does not collect or send usage data. It uses the network only for these features: searching and installing extensions (reads the public Zed extension registry and clones the extension's git repository); **Push**, **Pull** and **Fetch** in Source Control, which run `git` against your repository's own remote; **Python: Install debugpy**, which runs `pip install debugpy` from PyPI in the Output tab; and a one-time Pyright setup: the first time you open a Python file with Node.js and npm installed and no Pyright found, LightLine downloads Pyright from npm into `%APPDATA%\LightLine\pyright`. LightLine writes only inside its own folder at `%APPDATA%\LightLine` plus the files and folders you open, create, or edit; the one exception is **Python: Install debugpy**, which installs `debugpy` into your selected Python environment. LightLine can be removed by deleting `lightline.exe` and, optionally, the `%APPDATA%\LightLine` folder.
 
 ---
 
