@@ -1499,6 +1499,16 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
+    pub(super) fn toggle_ai_assistant(&mut self, hwnd: HWND) {
+        if self.welcome {
+            self.welcome = false;
+            self.ai_assistant_visible = true;
+        } else {
+            self.ai_assistant_visible = !self.ai_assistant_visible;
+        }
+        self.show_active_tab(hwnd);
+    }
+
     pub(super) fn code_left(&self, hwnd: HWND) -> i32 {
         self.pane_left(hwnd, self.focused_pane) + self.scale(GUTTER + PAD)
     }
@@ -1575,11 +1585,8 @@ impl App {
     }
 
     pub(super) fn visible_tab_count(&self, hwnd: HWND) -> usize {
-        let mut rect = RECT::default();
-        unsafe {
-            GetClientRect(hwnd, &mut rect);
-        }
-        ((rect.right - self.editor_left() - self.scale(120)) / self.scale(TAB_WIDTH).max(1)).max(1)
+        let right = self.editor_right(hwnd);
+        ((right - self.editor_left() - self.scale(120)) / self.scale(TAB_WIDTH).max(1)).max(1)
             as usize
     }
 
