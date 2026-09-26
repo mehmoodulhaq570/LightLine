@@ -56,6 +56,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
+          # dtolnay/rust-toolchain only installs what's listed here; unlike
+          # the windows-latest image's preinstalled default toolchain (what
+          # rust.yml's build relies on), this pinned 1.98.0 install has
+          # neither by default, and this workflow needs both below.
+          components: rustfmt, clippy
 
       - name: Verify release tag is unused
         shell: pwsh
