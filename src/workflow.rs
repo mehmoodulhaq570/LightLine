@@ -2881,4 +2881,73 @@ mod tests {
             vec!["line2 modified", "new line"]
         );
     }
+
+    #[test]
+    fn remote_command_maps_each_action() {
+        assert_eq!(remote_command(RemoteAction::Push), "git push");
+        assert_eq!(remote_command(RemoteAction::Pull), "git pull --ff-only");
+        assert_eq!(remote_command(RemoteAction::Fetch), "git fetch --all");
+    }
+
+    #[test]
+    fn change_label_covers_remaining_status_codes() {
+        let make = |status: &str, unmerged: bool| Change {
+            path: PathBuf::from("f"),
+            status: status.to_owned(),
+            old_path: None,
+            staged: false,
+            unstaged: false,
+            untracked: false,
+            unmerged,
+        };
+        assert_eq!(make("C.", false).label(), "Copied");
+        assert_eq!(make(".T", false).label(), "Type change");
+        assert_eq!(make("UU", false).label(), "Conflicted");
+        assert_eq!(make("??", false).label(), "Untracked");
+        assert_eq!(make("X.", false).label(), "Changed");
+        assert_eq!(make("", false).label(), "Changed");
+        assert_eq!(make(".M", true).label(), "Conflicted");
+    }
+
+    #[test]
+    fn head_label_is_empty_without_branch_or_detached_oid() {
+        assert_eq!(RepoState::default().head_label(), "");
+    }
+
+    #[test]
+    fn parse_log_skips_malformed_and_empty_oid_lines() {
+        let rows = parse_log(
+            "aaaa\u{1f}Ada\u{1f}Sep 12\u{1f}ok\nnot a record\n\u{1f}Ada\u{1f}Sep 12\u{1f}no oid\n",
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].oid, "aaaa");
+    }
+
+    #[test]
+    fn parse_diff_marks_pure_deletions_and_additions() {
+        let rows = parse_diff("@@ -1,2 +1,1 @@\n keep\n-gone\n");
+        assert_eq!(rows.len(), 2);
+        assert!(!rows[0].changed);
+        assert!(rows[1].changed);
+        assert_eq!(rows[1].before, "gone");
+        assert_eq!(rows[1].after_number, None);
+        assert_eq!(rows[1].deleted_at, Some(2));
+
+        let rows = parse_diff("@@ -1,1 +1,2 @@\n keep\n+new\n");
+        assert_eq!(rows[1].after, "new");
+        assert_eq!(rows[1].before_number, None);
+        assert_eq!(rows[1].deleted_at, None);
+    }
+
+    #[test]
+    fn parse_diff_ignores_text_before_the_first_hunk() {
+        assert!(parse_diff("diff --git a/x b/x\n--- a/x\n+++ b/x\n").is_empty());
+        assert!(parse_diff("").is_empty());
+    }
+
+    #[test]
+    fn gutter_diff_ignores_crlf_in_head_text() {
+        let diff = compute_gutter_diff("a\r\nb\r\n", &buffer("a\nb\n"));
+        assert!(diff.added.is_empty() && diff.modified.is_empty() && diff.deleted.is_empty());
+    }
 }

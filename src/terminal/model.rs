@@ -605,4 +605,34 @@ mod tests {
         let second_row = text.lines().nth(1).unwrap_or("");
         assert!(second_row.starts_with("    X"));
     }
+
+    #[test]
+    fn terminal_selected_text_orders_reversed_ranges_and_joins_wrapped_rows() {
+        let mut model = TerminalModel::new(TerminalSize::new(3, 5).unwrap());
+        model.process(b"abcdefgh\r\nxy");
+        let snap = snapshot(&mut model, 0);
+        // Rows 0 and 1 are one soft-wrapped line, so no newline between them.
+        assert_eq!(snap.selected_text((0, 0), (1, 3)), "abcdefgh");
+        assert_eq!(snap.selected_text((1, 3), (0, 0)), "abcdefgh");
+        assert_eq!(snap.text(), "abcdefgh\nxy");
+    }
+
+    #[test]
+    fn terminal_selected_text_stops_at_missing_rows() {
+        let mut model = TerminalModel::new(TerminalSize::new(2, 4).unwrap());
+        model.process(b"hi");
+        let snap = snapshot(&mut model, 0);
+        // Both screen rows are copied (the second is empty); the selection
+        // ends at the last row that exists instead of reaching row 10.
+        assert_eq!(snap.selected_text((0, 0), (10, 0)), "hi\n\n");
+    }
+
+    #[test]
+    fn terminal_bell_and_title_are_reported() {
+        let mut model = TerminalModel::new(TerminalSize::new(2, 10).unwrap());
+        model.process(b"\x07\x1b]2;my title\x07");
+        let snap = snapshot(&mut model, 0);
+        assert_eq!(snap.bell_count, 1);
+        assert_eq!(snap.title, "my title");
+    }
 }
