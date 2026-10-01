@@ -18,8 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The ARM image may come without rustup or a toolchain; the x86_64 one
-      # has both preinstalled.
+      # The ARM image may come without rustup; the x86_64 one has it
+      # preinstalled.
       - name: Install rustup (ARM64)
         if: runner.arch == 'ARM64'
         shell: pwsh
@@ -34,10 +34,12 @@ jobs:
           $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
           Join-Path $cargoHome "bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
-      - name: Install Rust toolchain (ARM64)
-        if: runner.arch == 'ARM64'
+      # Pinned to the same version as release.yml, so a new stable release
+      # cannot fail PR checks with lints the code has not been updated for.
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.0
           components: clippy
 
       # ureq's TLS uses ring, which needs clang to build for Windows ARM64.

@@ -310,7 +310,7 @@ impl TerminalService {
         #[cfg(windows)]
         {
             let number = NEXT_SESSION
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
                 .map_err(|_| ControlError::Spawn("Session ID space exhausted".into()))?;
             let id = SessionId(number);
             let shared = Arc::new(Shared::new(size, self.wake.clone()));
