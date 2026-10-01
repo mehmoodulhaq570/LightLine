@@ -115,8 +115,17 @@ pub enum Event {
 }
 
 pub struct DebugClient {
-    sender: Sender<Command>,
+    sender: Sender<Input>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+// What the adapter's worker thread waits for: a command from the editor, or
+// word from the reader thread that the adapter sent a message. One queue for
+// both lets the worker sleep until there is work; it used to wake every
+// 30 ms to check two queues, all the time a debug session was running.
+enum Input {
+    Command(Command),
+    AdapterMessage,
 }
 
 impl DebugClient {
@@ -126,7 +135,8 @@ impl DebugClient {
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {
         let (sender, commands) = mpsc::channel();
-        let worker = thread::spawn(move || run_adapter(request, commands, events, wake));
+        let arrivals = sender.clone();
+        let worker = thread::spawn(move || run_adapter(request, commands, arrivals, events, wake));
         Self {
             sender,
             worker: Some(worker),
@@ -134,13 +144,13 @@ impl DebugClient {
     }
 
     pub fn send(&self, command: Command) -> bool {
-        self.sender.send(command).is_ok()
+        self.sender.send(Input::Command(command)).is_ok()
     }
 }
 
 impl Drop for DebugClient {
     fn drop(&mut self) {
-        let _ = self.sender.send(Command::Disconnect);
+        let _ = self.sender.send(Input::Command(Command::Disconnect));
         // Do not leave a previous adapter posting stale Terminated/Failed
         // events into a newly restarted session's channel.
         if let Some(worker) = self.worker.take() {
@@ -314,7 +324,9 @@ fn finish_stop(flow: StopFlow, events: &Sender<Event>, wake: &Arc<dyn Fn() + Sen
 
 fn run_adapter(
     request: LaunchRequest,
-    commands: Receiver<Command>,
+    commands: Receiver<Input>,
+    // Tells the worker, waiting on `commands`, that an adapter message arrived.
+    arrivals: Sender<Input>,
     events: Sender<Event>,
     wake: Arc<dyn Fn() + Send + Sync>,
 ) {
@@ -399,20 +411,18 @@ fn run_adapter(
     let reader = thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
         loop {
-            match read_packet(&mut stdout) {
-                Ok(Some(message)) => {
-                    if incoming_tx.send(Ok(message)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    let _ = incoming_tx.send(Err(format!("{adapter_name} closed its output")));
-                    break;
-                }
-                Err(error) => {
-                    let _ = incoming_tx.send(Err(format!("DAP read failed: {error}")));
-                    break;
-                }
+            let incoming = match read_packet(&mut stdout) {
+                Ok(Some(message)) => Ok(message),
+                Ok(None) => Err(format!("{adapter_name} closed its output")),
+                Err(error) => Err(format!("DAP read failed: {error}")),
+            };
+            let last = incoming.is_err();
+            if incoming_tx.send(incoming).is_err() || arrivals.send(Input::AdapterMessage).is_err()
+            {
+                break;
+            }
+            if last {
+                break;
             }
         }
     });
@@ -778,28 +788,30 @@ fn run_adapter(
             .as_ref()
             .map(|f| f.thread_id)
             .unwrap_or(current_thread);
-        let sent = match commands.recv_timeout(Duration::from_millis(30)) {
-            Ok(Command::Disconnect) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Ok(Command::Continue) => send_thread_command(
+        // Sleep until a command or an adapter message arrives.
+        let Ok(input) = commands.recv() else { break };
+        let sent = match input {
+            Input::Command(Command::Disconnect) => break,
+            Input::Command(Command::Continue) => send_thread_command(
                 &mut stdin,
                 &mut seq,
                 &mut pending,
                 "continue",
                 active_thread,
             ),
-            Ok(Command::Next) => {
+            Input::Command(Command::Next) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "next", active_thread)
             }
-            Ok(Command::StepIn) => {
+            Input::Command(Command::StepIn) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "stepIn", active_thread)
             }
-            Ok(Command::StepOut) => {
+            Input::Command(Command::StepOut) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "stepOut", active_thread)
             }
-            Ok(Command::Pause) => {
+            Input::Command(Command::Pause) => {
                 send_thread_command(&mut stdin, &mut seq, &mut pending, "pause", active_thread)
             }
-            Ok(Command::Variables(reference)) => send_request(
+            Input::Command(Command::Variables(reference)) => send_request(
                 &mut stdin,
                 &mut seq,
                 &mut pending,
@@ -807,7 +819,7 @@ fn run_adapter(
                 json!({"variablesReference": reference}),
                 PendingKind::VariablesOnDemand { reference },
             ),
-            Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
+            Input::AdapterMessage => Ok(()),
         };
         if sent.is_err() {
             failure = Some("Could not send debug command".into());

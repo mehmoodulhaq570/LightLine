@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Changed
+- **Debugger Uses No CPU While Paused**: During a Rust or Python debug session, the thread talking to the debug adapter woke about 30 times a second to check for work, even while stopped at a breakpoint. It now sleeps until the editor or the adapter has something for it: paused at a breakpoint, 95 wakeups in 3 seconds went to none.
+
 ## [v0.3.1] - 2026-09-29
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.3.1-windows-x86_64.zip`, `lightline-v0.3.1-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned, like v0.3.0: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
