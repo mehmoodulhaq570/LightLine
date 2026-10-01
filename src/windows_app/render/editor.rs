@@ -1234,11 +1234,15 @@ impl App {
                         hdc,
                         RECT {
                             left: divider - self.scale(1),
-                            top: self.scale(TAB_HEIGHT),
+                            top: self.tab_strip_bottom(),
                             right: divider + self.scale(1),
                             bottom: code_bottom,
                         },
-                        self.theme.edge,
+                        if self.divider_dragging {
+                            self.theme.blue
+                        } else {
+                            self.theme.edge
+                        },
                     );
                 }
             }

@@ -508,7 +508,7 @@ pub(super) struct App {
     pub(super) pane_tabs: [usize; 2],
     pub(super) focused_pane: usize,
     pub(super) split_visible: bool,
-    pub(super) split_ratio: i32,
+    pub(super) split_ratio: f64,
     pub(super) divider_dragging: bool,
     pub(super) tab_first: usize,
     pub(super) font: HFONT,
@@ -1044,7 +1044,7 @@ impl App {
             pane_tabs: [0, 0],
             focused_pane: 0,
             split_visible: false,
-            split_ratio: 50,
+            split_ratio: 0.5,
             divider_dragging: false,
             tab_first: 0,
             font,
@@ -1486,9 +1486,7 @@ impl App {
             self.active = selected;
             self.status = "Split closed".into();
         } else {
-            let mut rect = RECT::default();
-            unsafe { GetClientRect(hwnd, &mut rect) };
-            if rect.right - self.editor_left() < self.scale(430) {
+            if self.editor_right(hwnd) - self.editor_left() < self.scale(430) {
                 self.status = "Widen the window to split the editor".into();
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return;
@@ -1533,12 +1531,31 @@ impl App {
         let right = self.editor_right(hwnd);
         let width = (right - self.editor_left()).max(0);
         let minimum = self.scale(150).min(width / 2);
-        self.editor_left() + (width * self.split_ratio / 100).clamp(minimum, width - minimum)
+        self.editor_left()
+            + ((width as f64 * self.split_ratio).round() as i32).clamp(minimum, width - minimum)
+    }
+    pub(super) fn split_divider_at(&self, hwnd: HWND, x: i32, y: i32) -> bool {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        let bottom = if self.terminal_visible {
+            self.terminal_top(hwnd)
+        } else {
+            rect.bottom - self.scale(STATUS)
+        };
+        self.split_visible
+            && !self.welcome
+            && !self.quick_open
+            && !(self.side_view == SideView::Review && self.review_file.is_some())
+            && y >= self.tab_strip_bottom()
+            && y < bottom
+            && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)
     }
     pub(super) fn resize_split(&mut self, hwnd: HWND, x: i32) {
         let right = self.editor_right(hwnd);
         let width = (right - self.editor_left()).max(1);
-        self.split_ratio = (((x - self.editor_left()) * 100) / width).clamp(10, 90);
+        let minimum = self.scale(150).min(width / 2);
+        let offset = (x - self.editor_left()).clamp(minimum, width - minimum);
+        self.split_ratio = offset as f64 / width as f64;
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 

@@ -1824,10 +1824,7 @@ impl App {
                 }
             }
         }
-        if self.split_visible
-            && y >= self.tab_strip_bottom()
-            && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)
-        {
+        if self.split_divider_at(hwnd, x, y) {
             self.divider_dragging = true;
             unsafe { SetCapture(hwnd) };
             return;
