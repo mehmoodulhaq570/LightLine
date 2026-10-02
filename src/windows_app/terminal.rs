@@ -262,6 +262,7 @@ impl App {
         match self.terminal_tab {
             TerminalTab::Terminal => self.terminals.get(self.terminal_active)?.snapshot.as_ref(),
             TerminalTab::Output => self.run_snapshot.as_ref(),
+            TerminalTab::Problems => None,
         }
     }
 
@@ -430,8 +431,20 @@ impl App {
                 if self.terminal_focus {
                     self.caret_on = true;
                 }
+
                 unsafe { SetFocus(hwnd) };
                 unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            TerminalTab::Problems => {
+                self.terminal_tab = TerminalTab::Problems;
+                self.terminal_focus = false;
+                self.problem_focus = true;
+                self.problem_selected = 0;
+                self.problem_first = 0;
+                unsafe {
+                    SetFocus(hwnd);
+                    InvalidateRect(hwnd, null(), 0);
+                }
             }
         }
     }
@@ -1109,6 +1122,7 @@ impl App {
                         .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
                 }
             }
+            TerminalTab::Problems => false,
         };
         if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1128,6 +1142,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.input(id, bytes).is_ok()),
+            TerminalTab::Problems => false,
         };
         if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1156,6 +1171,7 @@ impl App {
                     let _ = self.terminal.scrollback(id, 0);
                 }
             }
+            TerminalTab::Problems => {}
         }
     }
 
@@ -1182,6 +1198,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.scrollback(id, next).is_ok()),
+            TerminalTab::Problems => false,
         };
         if ok {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1206,6 +1223,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.paste(id, &text).is_ok()),
+            TerminalTab::Problems => false,
         };
         if !sent {
             self.status = "Terminal is busy; try pasting again".into();

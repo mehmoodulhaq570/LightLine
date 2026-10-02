@@ -723,6 +723,15 @@ impl App {
                             );
                         }
                     }
+
+                    let problem_count = self.problem_entries().len();
+                    self.problem_selected =
+                        self.problem_selected.min(problem_count.saturating_sub(1));
+
+                    if problem_count == 0 {
+                        self.problem_selected = 0;
+                        self.problem_first = 0;
+                    }
                 }
                 WorkerMessage::Formatted(path, formatter_name, serial, result) => {
                     // Only apply to the tab the format request was actually

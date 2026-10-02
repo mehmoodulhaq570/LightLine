@@ -38,6 +38,18 @@ impl App {
     pub(super) fn problem_counts(&self) -> (usize, usize) {
         problem_counts(self.tabs.iter().flat_map(|tab| &tab.diagnostics))
     }
+    pub(super) fn problem_entries(&self) -> Vec<(usize, usize, LspDiagnostic)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.display_path().is_some())
+            .flat_map(|(tab_index, tab)| {
+                tab.diagnostics.iter().cloned().map(move |diagnostic| {
+                    (tab_index, diagnostic.range.start.line as usize, diagnostic)
+                })
+            })
+            .collect()
+    }
 
     pub(super) fn ensure_lsp(&mut self, hwnd: HWND) {
         let Some(language) = Tab::lsp_language(self.doc()) else {
@@ -270,6 +282,14 @@ impl App {
                     }) && version.is_none_or(|number| number == tab.lsp_version)
                     {
                         tab.diagnostics = items;
+                    }
+                    let problem_count = self.problem_entries().len();
+                    self.problem_selected =
+                        self.problem_selected.min(problem_count.saturating_sub(1));
+
+                    if problem_count == 0 {
+                        self.problem_selected = 0;
+                        self.problem_first = 0;
                     }
                 }
                 LspEvent::Hover {
@@ -612,6 +632,21 @@ impl App {
         if self.editor_context_hover(hwnd, x, y) || self.more_menu_hover(hwnd, x, y) {
             return;
         }
+
+        if self.terminal_tab == TerminalTab::Problems {
+            let over_problem_scrollbar = self.problems_scrollbar_at(hwnd, x, y);
+
+            if over_problem_scrollbar != self.problem_scrollbar_hover {
+                self.problem_scrollbar_hover = over_problem_scrollbar;
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+
+            if over_problem_scrollbar {
+                self.clear_hover(hwnd);
+                return;
+            }
+        }
+
         let over_scrollbar = self.scrollbar_at(hwnd, x, y);
         self.set_scrollbar_hover(hwnd, over_scrollbar);
         if over_scrollbar.is_some() {

@@ -391,6 +391,7 @@ unsafe extern "system" fn wnd_proc(
         WM_MOUSEMOVE => {
             if (app.dragging
                 || app.scrollbar_grab.is_some()
+                || app.problem_scrollbar_grab.is_some()
                 || app.divider_dragging
                 || app.sidebar_dragging
                 || app.terminal_resizing
@@ -412,6 +413,12 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_LBUTTONUP => {
+            if app.problem_scrollbar_grab.take().is_some() {
+                app.problem_scrollbar_hover = false;
+                unsafe {
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            }
             if app.scrollbar_grab.take().is_some() {
                 app.invalidate_scrollbar(hwnd, app.focused_pane);
                 // Released away from the scrollbar, it's no longer under the
@@ -474,6 +481,49 @@ unsafe extern "system" fn wnd_proc(
                 && point.x >= app.editor_left()
                 && point.y >= app.terminal_top(hwnd)
             {
+                if app.terminal_tab == TerminalTab::Problems {
+                    let problem_count = app.problem_entries().len();
+
+                    if problem_count > 0 {
+                        let terminal_top = app.terminal_top(hwnd);
+                        let terminal_bottom = rect.bottom - app.scale(STATUS);
+
+                        let header_height = app.scale(36);
+                        let first_row_y = terminal_top + header_height + app.scale(8);
+                        let row_height = app.scale(28).max(1);
+
+                        let visible_rows =
+                            ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+
+                        let max_first = problem_count.saturating_sub(visible_rows);
+
+                        if delta > 0 {
+                            app.problem_first = app.problem_first.saturating_sub(1);
+                        } else {
+                            app.problem_first = (app.problem_first + 1).min(max_first);
+                        }
+
+                        app.problem_selected =
+                            app.problem_selected.min(problem_count.saturating_sub(1));
+
+                        if app.problem_selected < app.problem_first {
+                            app.problem_selected = app.problem_first;
+                        }
+
+                        let last_visible = app.problem_first + visible_rows.saturating_sub(1);
+
+                        if app.problem_selected > last_visible {
+                            app.problem_selected = last_visible.min(problem_count - 1);
+                        }
+                    } else {
+                        app.problem_first = 0;
+                        app.problem_selected = 0;
+                    }
+
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return 0;
+                }
+
                 app.scroll_terminal(hwnd, delta as i32);
                 return 0;
             }

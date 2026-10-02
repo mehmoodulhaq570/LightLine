@@ -34,7 +34,9 @@ impl App {
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
-        if self.editor_context_key(hwnd, key, ctrl, shift) {
+        if !(self.terminal_tab == TerminalTab::Problems && self.problem_focus)
+            && self.editor_context_key(hwnd, key, ctrl, shift)
+        {
             return true;
         }
         if self.more_menu_key(hwnd, key) {
@@ -267,6 +269,83 @@ impl App {
             if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return true;
+            }
+        }
+        if self.terminal_tab == TerminalTab::Problems && self.problem_focus && !ctrl {
+            let problem_entries = self.problem_entries();
+
+            if !problem_entries.is_empty() {
+                self.problem_selected = self
+                    .problem_selected
+                    .min(problem_entries.len().saturating_sub(1));
+            } else {
+                self.problem_selected = 0;
+            }
+
+            match key {
+                x if x == VK_UP as u32 => {
+                    self.problem_selected = self.problem_selected.saturating_sub(1);
+
+                    if self.problem_selected < self.problem_first {
+                        self.problem_first = self.problem_selected;
+                    }
+
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                x if x == VK_DOWN as u32 => {
+                    if !problem_entries.is_empty() {
+                        self.problem_selected =
+                            (self.problem_selected + 1).min(problem_entries.len() - 1);
+
+                        let row_height = self.scale(28).max(1);
+                        let terminal_top = self.terminal_top(hwnd);
+
+                        let mut rect = RECT::default();
+                        unsafe { GetClientRect(hwnd, &mut rect) };
+
+                        let terminal_bottom = rect.bottom - self.scale(STATUS);
+                        let header_height = self.scale(36);
+                        let first_row_y = terminal_top + header_height + self.scale(8);
+
+                        let visible_rows =
+                            ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+
+                        let max_first = problem_entries.len().saturating_sub(visible_rows);
+
+                        if self.problem_selected >= self.problem_first + visible_rows {
+                            self.problem_first =
+                                (self.problem_selected + 1).saturating_sub(visible_rows);
+                        }
+
+                        self.problem_first = self.problem_first.min(max_first);
+                    }
+
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                x if x == VK_RETURN as u32 => {
+                    if let Some((tab_index, line, _)) = problem_entries.get(self.problem_selected) {
+                        let tab_index = *tab_index;
+                        let line = *line;
+
+                        self.activate_tab(hwnd, tab_index);
+                        self.terminal_tab = TerminalTab::Problems;
+                        self.problem_focus = false;
+                        self.move_cursor(Pos { line, byte: 0 }, false);
+                        self.doc_mut().unfold_to_reveal(line);
+                        self.keep_cursor_visible(hwnd);
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                    return true;
+                }
+                x if x == VK_ESCAPE as u32 => {
+                    self.problem_focus = false;
+                    self.terminal_tab = TerminalTab::Terminal;
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return true;
+                }
+                _ => {}
             }
         }
         if self.panel_focus && !ctrl && self.side_view == SideView::Review && !self.commit_focus {
@@ -1755,24 +1834,15 @@ impl App {
         }
         if self.terminal_visible && y >= self.terminal_top(hwnd) {
             let top = self.terminal_top(hwnd);
-            let header_bottom = top + self.scale(34);
+            let layout = self.terminal_header_layout(editor_left, rect.right, top);
+            let header_bottom = layout.header_bottom;
             if y < header_bottom {
                 match self.terminal_header_hit(editor_left, rect.right, top, x, y) {
                     // The far-right close hides the panel but keeps every
                     // shell session running, exactly like dismissing a dock.
                     TerminalHeaderHit::Hide => self.close_terminal(hwnd),
                     TerminalHeaderHit::Problems => {
-                        let (errors, warnings) = self.problem_counts();
-                        self.status = if errors + warnings == 0 {
-                            "No problems in open files".into()
-                        } else {
-                            format!(
-                                "{errors} error{}, {warnings} warning{} in open files",
-                                if errors == 1 { "" } else { "s" },
-                                if warnings == 1 { "" } else { "s" }
-                            )
-                        };
-                        self.refresh(hwnd);
+                        self.switch_terminal_tab(hwnd, TerminalTab::Problems);
                     }
                     TerminalHeaderHit::OutputTab => {
                         self.switch_terminal_tab(hwnd, TerminalTab::Output);
@@ -1788,6 +1858,57 @@ impl App {
                 }
                 return;
             }
+            if self.terminal_tab == TerminalTab::Problems {
+                if self.problems_scrollbar_at(hwnd, x, y) {
+                    self.problems_scrollbar_press(hwnd, y);
+                    return;
+                }
+
+                let problem_entries = self.problem_entries();
+                let row_height = self.scale(28);
+                let first_row_y = header_bottom + self.scale(8);
+
+                if y >= first_row_y {
+                    let terminal_bottom = rect.bottom - self.scale(STATUS);
+                    let visible_rows =
+                        ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+
+                    let max_first = problem_entries.len().saturating_sub(visible_rows);
+                    let first_problem = self.problem_first.min(max_first);
+
+                    let clicked_row = ((y - first_row_y) / row_height) as usize;
+
+                    if clicked_row >= visible_rows {
+                        return;
+                    }
+
+                    let problem_index = first_problem + clicked_row;
+
+                    if problem_index >= problem_entries.len() {
+                        return;
+                    }
+
+                    if let Some((tab_index, line, _)) = problem_entries.get(problem_index) {
+                        self.problem_selected = problem_index;
+                        self.activate_tab(hwnd, *tab_index);
+                        self.terminal_tab = TerminalTab::Problems;
+                        self.problem_focus = true;
+                        self.move_cursor(
+                            Pos {
+                                line: *line,
+                                byte: 0,
+                            },
+                            false,
+                        );
+                        self.doc_mut().unfold_to_reveal(*line);
+                        self.keep_cursor_visible(hwnd);
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                    }
+                }
+
+                return;
+            }
+
             self.focus_terminal(hwnd);
             self.start_terminal_selection(hwnd, x, y);
             return;
@@ -1931,6 +2052,11 @@ impl App {
     }
 
     pub(super) fn mouse_drag(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.problem_scrollbar_grab.is_some() {
+            self.problems_scrollbar_drag(hwnd, y);
+            return;
+        }
+
         if self.scrollbar_grab.is_some() {
             self.scrollbar_drag(hwnd, y);
             return;

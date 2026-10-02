@@ -4,10 +4,20 @@ use super::super::*;
 // CURSOR uses a soft block color distinct from the palette so it stays visible on
 // both default and colored cells.
 const CURSOR_BG: u32 = rgb(158, 178, 214);
+// `amount` (0..=1) of `over` mixed into `base`; both are COLORREFs.
+fn blend(base: u32, over: u32, amount: f32) -> u32 {
+    let channel = |shift: u32| {
+        let from = ((base >> shift) & 0xff) as f32;
+        let to = ((over >> shift) & 0xff) as f32;
+        ((from + (to - from) * amount).round() as u32) << shift
+    };
+    channel(0) | channel(8) | channel(16)
+}
 
 impl App {
     pub(in crate::windows_app) fn paint_terminal(
         &mut self,
+        hwnd: HWND,
         hdc: HDC,
         left: i32,
         right: i32,
@@ -41,14 +51,35 @@ impl App {
         let layout = self.terminal_header_layout(left, right, top);
         let header_bottom = layout.header_bottom;
 
+        let problem_count = self.problem_entries().len();
+        let problems_active = self.terminal_tab == TerminalTab::Problems;
+        let problems_label = format!("PROBLEMS  {problem_count}");
+
         Self::label(
             hdc,
-            "PROBLEMS  0",
+            &problems_label,
             layout.problems.left,
             top + self.scale(9),
-            self.theme.muted,
+            if problems_active {
+                self.theme.text
+            } else {
+                self.theme.muted
+            },
             layout.problems,
         );
+
+        if problems_active {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: layout.problems.left,
+                    top: header_bottom - self.scale(2),
+                    right: layout.problems.right,
+                    bottom: header_bottom,
+                },
+                self.theme.violet,
+            );
+        }
 
         let output_active = self.terminal_tab == TerminalTab::Output;
         Self::label(
@@ -165,6 +196,7 @@ impl App {
                 .terminals
                 .get(self.terminal_active)
                 .and_then(|pane| pane.snapshot.clone()),
+            TerminalTab::Problems => None,
         };
         let status = match &active_snapshot {
             Some(snapshot) => match &snapshot.status {
@@ -204,6 +236,126 @@ impl App {
             self.theme.muted,
             layout.hide,
         );
+        if self.terminal_tab == TerminalTab::Problems {
+            let entries = self.problem_entries();
+            let row_height = self.scale(28);
+            let first_row_y = header_bottom + self.scale(8);
+            let visible_rows = ((bottom - first_row_y).max(0) / row_height) as usize;
+            let max_first = entries.len().saturating_sub(visible_rows.max(1));
+            let first_problem = self.problem_first.min(max_first);
+
+            for (row_index, (_, _, diagnostic)) in entries
+                .iter()
+                .skip(first_problem)
+                .take(visible_rows.max(1))
+                .enumerate()
+            {
+                let problem_index = first_problem + row_index;
+                let row_y = first_row_y + row_index as i32 * row_height;
+                let selected = problem_index == self.problem_selected;
+
+                if selected {
+                    Self::fill(
+                        hdc,
+                        RECT {
+                            left: left + self.scale(4),
+                            top: row_y - self.scale(4),
+                            right: right - self.scale(4),
+                            bottom: row_y + row_height - self.scale(4),
+                        },
+                        self.theme.card_edge,
+                    );
+                }
+
+                let severity = match diagnostic.severity {
+                    1 => "ERROR",
+                    2 => "WARNING",
+                    _ => "PROBLEM",
+                };
+
+                let (tab_index, _, _) = &entries[problem_index];
+                let file_name = self.tabs[*tab_index]
+                    .display_path()
+                    .and_then(|path| path.file_name())
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Unknown file");
+
+                let line = diagnostic.range.start.line + 1;
+
+                let text = format!(
+                    "{severity}  {file_name}:{line}  {}",
+                    diagnostic.message.lines().next().unwrap_or("")
+                );
+
+                Self::label(
+                    hdc,
+                    &text,
+                    left + self.scale(12),
+                    row_y,
+                    if selected {
+                        self.theme.text
+                    } else {
+                        self.theme.muted
+                    },
+                    RECT {
+                        left,
+                        top: row_y - self.scale(4),
+                        right,
+                        bottom: row_y + row_height,
+                    },
+                );
+            }
+
+            if entries.is_empty() {
+                Self::label(
+                    hdc,
+                    "No problems in open files",
+                    left + self.scale(12),
+                    header_bottom + self.scale(12),
+                    self.theme.muted,
+                    RECT {
+                        left,
+                        top: header_bottom,
+                        right,
+                        bottom,
+                    },
+                );
+            }
+            if let Some((track, slider)) = self.problems_scrollbar(hwnd) {
+                let edge = self.scale(1).max(1);
+
+                Self::fill(hdc, track, self.theme.editor_bg);
+                Self::fill(
+                    hdc,
+                    RECT {
+                        right: track.left + edge,
+                        ..track
+                    },
+                    self.theme.edge,
+                );
+
+                let strength = if self.problem_scrollbar_hover {
+                    0.3
+                } else {
+                    0.2
+                };
+
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: track.left + edge,
+                        ..slider
+                    },
+                    blend(self.theme.editor_bg, self.theme.text, strength),
+                );
+            }
+
+            if self.terminal_profile_menu_open {
+                self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
+            }
+
+            return;
+        }
         let Some(snapshot) = active_snapshot else {
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);

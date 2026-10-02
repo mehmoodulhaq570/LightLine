@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Added a Problems tab to the terminal panel with live diagnostic counts, problem navigation, and file/line jumping.
+
 ## [v0.3.1] - 2026-09-29
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.3.1-windows-x86_64.zip`, `lightline-v0.3.1-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned, like v0.3.0: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.

@@ -17,6 +17,7 @@ pub(super) enum SideView {
 pub(super) enum TerminalTab {
     Output,
     Terminal,
+    Problems,
 }
 
 // One interactive shell instance in the bottom Terminal area. Each pane owns
@@ -536,6 +537,11 @@ pub(super) struct App {
     pub(super) scrollbar_grab: Option<(i32, usize)>,
     // The pane whose scrollbar is under the mouse, drawn lighter.
     pub(super) scrollbar_hover: Option<usize>,
+    // While the Problems scrollbar slider is held: the mouse's y when it
+    // was pressed, and the problem index then at the top.
+    pub(super) problem_scrollbar_grab: Option<(i32, usize)>,
+    // Whether the Problems scrollbar is under the mouse.
+    pub(super) problem_scrollbar_hover: bool,
     // The window title last set, for the same reason: setting it on every
     // click and keystroke made Windows redraw the frame and tell the
     // taskbar each time, even when it hadn't changed.
@@ -580,6 +586,8 @@ pub(super) struct App {
     pub(super) terminal_selecting: bool,
     pub(super) terminal_select_anchor: Option<(u16, u16)>,
     pub(super) terminal_select_end: Option<(u16, u16)>,
+    pub(super) problem_selected: usize,
+    pub(super) problem_first: usize,
     pub(super) explorer_first_row: usize,
     pub(super) explorer_input: Option<ExplorerInputState>,
     pub(super) selected_explorer_path: Option<PathBuf>,
@@ -617,6 +625,7 @@ pub(super) struct App {
     pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
     pub(super) terminal_focus: bool,
+    pub(super) problem_focus: bool,
     pub(super) terminal_profile_menu_open: bool,
     pub(super) terminal_profile_defaults_open: bool,
     pub(super) terminal_profile_availability: Vec<(ShellKind, bool)>,
@@ -1064,6 +1073,8 @@ impl App {
             backbuffer: None,
             scrollbar_grab: None,
             scrollbar_hover: None,
+            problem_scrollbar_grab: None,
+            problem_scrollbar_hover: false,
             transition: None,
             status: "Ready".into(),
             title_shown: RefCell::new(String::new()),
@@ -1123,6 +1134,8 @@ impl App {
             }),
             terminal_tab: TerminalTab::Terminal,
             terminals: Vec::new(),
+            problem_selected: 0,
+            problem_first: 0,
             terminal_active: 0,
             terminal_counter: 0,
             run_session: None,
@@ -1130,6 +1143,7 @@ impl App {
             run_applied_size: None,
             terminal_visible: false,
             terminal_focus: false,
+            problem_focus: false,
             terminal_profile_menu_open: false,
             terminal_profile_defaults_open: false,
             terminal_profile_availability: Vec::new(),
@@ -1929,6 +1943,7 @@ impl App {
     pub(super) fn activate_tab(&mut self, hwnd: HWND, index: usize) {
         if index < self.tabs.len() {
             self.terminal_focus = false;
+            self.problem_focus = false;
             if index != self.active {
                 self.start_transition(hwnd);
             }
@@ -2189,7 +2204,155 @@ impl App {
             },
         ))
     }
+    pub(super) fn problems_scrollbar(&self, hwnd: HWND) -> Option<(RECT, RECT)> {
+        let problem_count = self.problem_entries().len();
+        if problem_count == 0 {
+            return None;
+        }
 
+        let terminal_top = self.terminal_top(hwnd);
+
+        let mut rect = RECT::default();
+        unsafe {
+            GetClientRect(hwnd, &mut rect);
+        }
+
+        let terminal_bottom = rect.bottom - self.scale(STATUS);
+        let header_bottom = self
+            .terminal_header_layout(0, rect.right, terminal_top)
+            .header_bottom;
+        let track = RECT {
+            left: rect.right - self.scale(SCROLLBAR),
+            top: header_bottom,
+            right: rect.right,
+            bottom: terminal_bottom,
+        };
+
+        let height = track.bottom - track.top;
+        if height <= 0 {
+            return None;
+        }
+
+        let row_height = self.scale(28).max(1);
+        let first_row_y = header_bottom + self.scale(8);
+        let visible_rows = ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+
+        if problem_count <= visible_rows {
+            return None;
+        }
+
+        let max_first = problem_count.saturating_sub(visible_rows);
+
+        let length = ((height as usize * visible_rows / problem_count) as i32)
+            .clamp(self.scale(20).min(height), height);
+
+        let room = (height - length).max(1);
+        let first = self.problem_first.min(max_first);
+
+        let top = track.top + (room as usize * first / max_first.max(1)) as i32;
+
+        Some((
+            track,
+            RECT {
+                top,
+                bottom: top + length,
+                ..track
+            },
+        ))
+    }
+    /// Whether the Problems panel scrollbar is at (`x`, `y`).
+    pub(super) fn problems_scrollbar_at(&self, hwnd: HWND, x: i32, y: i32) -> bool {
+        self.problems_scrollbar(hwnd).is_some_and(|(track, _)| {
+            x >= track.left && x < track.right && y >= track.top && y < track.bottom
+        })
+    }
+
+    /// A press on the Problems scrollbar. On the slider it starts a drag;
+    /// on the track it jumps the problem list and then starts a drag.
+    pub(super) fn problems_scrollbar_press(&mut self, hwnd: HWND, y: i32) {
+        let Some((track, slider)) = self.problems_scrollbar(hwnd) else {
+            return;
+        };
+
+        let problem_count = self.problem_entries().len();
+        if problem_count == 0 {
+            return;
+        }
+
+        let row_height = self.scale(28).max(1);
+        let terminal_top = self.terminal_top(hwnd);
+
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+
+        let terminal_bottom = rect.bottom - self.scale(STATUS);
+        let header_height = self.scale(36);
+        let first_row_y = terminal_top + header_height + self.scale(8);
+        let visible_rows = ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+        let max_first = problem_count.saturating_sub(visible_rows);
+
+        if y < slider.top || y >= slider.bottom {
+            let length = slider.bottom - slider.top;
+            let room = (track.bottom - track.top - length).max(1);
+
+            let offset = (y - length / 2 - track.top).clamp(0, room) as usize;
+
+            let first = (offset * max_first + room as usize / 2) / room as usize;
+
+            self.problem_first = first.min(max_first);
+            self.problem_selected = self.problem_selected.clamp(
+                self.problem_first,
+                (self.problem_first + visible_rows - 1).min(problem_count - 1),
+            );
+        }
+
+        self.problem_scrollbar_grab = Some((y, self.problem_first));
+
+        unsafe {
+            SetCapture(hwnd);
+            InvalidateRect(hwnd, null(), 0);
+        }
+    }
+    /// While the Problems scrollbar slider is held, move the visible problem range
+    /// with the mouse.
+    pub(super) fn problems_scrollbar_drag(&mut self, hwnd: HWND, y: i32) {
+        let Some((from_y, from_first)) = self.problem_scrollbar_grab else {
+            return;
+        };
+
+        let Some((track, slider)) = self.problems_scrollbar(hwnd) else {
+            return;
+        };
+
+        let problem_count = self.problem_entries().len();
+        if problem_count == 0 {
+            return;
+        }
+
+        let row_height = self.scale(28).max(1);
+        let terminal_top = self.terminal_top(hwnd);
+
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+
+        let terminal_bottom = rect.bottom - self.scale(STATUS);
+        let first_row_y = terminal_top + self.scale(36) + self.scale(8);
+        let visible_rows = ((terminal_bottom - first_row_y).max(0) / row_height).max(1) as usize;
+        let max_first = problem_count.saturating_sub(visible_rows);
+
+        let room = (track.bottom - track.top - (slider.bottom - slider.top)).max(1) as i64;
+
+        let moved = (y - from_y) as i64 * max_first as i64 / room;
+
+        self.problem_first = (from_first as i64 + moved).clamp(0, max_first as i64) as usize;
+
+        self.problem_selected = self.problem_selected.clamp(
+            self.problem_first,
+            (self.problem_first + visible_rows - 1).min(problem_count - 1),
+        );
+
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
     /// The code pane whose scrollbar is at (`x`, `y`).
     pub(super) fn scrollbar_at(&self, hwnd: HWND, x: i32, y: i32) -> Option<usize> {
         if self.quick_open {
