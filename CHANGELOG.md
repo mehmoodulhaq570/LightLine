@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 - **Debugger Uses No CPU While Paused**: During a Rust or Python debug session, the thread talking to the debug adapter woke about 30 times a second to check for work, even while stopped at a breakpoint. It now sleeps until the editor or the adapter has something for it: paused at a breakpoint, 95 wakeups in 3 seconds went to none.
+- **No Extra Repaint After a Drag**: Finishing a text selection or a divider, sidebar or terminal-resize drag no longer redraws the whole window a second time. The full redraw now happens only when Windows cuts a drag short.
 
 ## [v0.3.1] - 2026-09-29
 

@@ -37,7 +37,7 @@ jobs:
       # Pinned to the same version as release.yml, so a new stable release
       # cannot fail PR checks with lints the code has not been updated for.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable as of 2026-10-01
         with:
           toolchain: 1.98.0
           components: clippy
