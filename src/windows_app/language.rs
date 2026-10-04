@@ -131,6 +131,47 @@ impl App {
                 .or_else(|| path.parent())
                 .unwrap_or(Path::new("."))
                 .to_path_buf(),
+            LspLanguage::C => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| {
+                    folder.join("compile_commands.json").is_file()
+                        || folder.join("CMakeLists.txt").is_file()
+                        || folder.join("Makefile").is_file()
+                        || folder.join(".git").exists()
+                })
+                .or(self.workspace_root.as_deref())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            LspLanguage::TypeScript => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| {
+                    folder.join("tsconfig.json").is_file()
+                        || folder.join("jsconfig.json").is_file()
+                        || folder.join("package.json").is_file()
+                        || folder.join(".git").exists()
+                })
+                .or(self.workspace_root.as_deref())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            LspLanguage::Go => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| {
+                    folder.join("go.mod").is_file()
+                        || folder.join("go.work").is_file()
+                        || folder.join(".git").exists()
+                })
+                .or(self.workspace_root.as_deref())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
         }
     }
 

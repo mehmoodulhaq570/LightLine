@@ -319,6 +319,17 @@ pub(super) fn is_cpp_path(path: &Path) -> bool {
         .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "cc" | "cpp" | "cxx"))
 }
 
+pub(super) fn is_c_family_or_header_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "ino"
+            )
+        })
+}
+
 impl Tab {
     pub(super) fn new(document: Document) -> Self {
         let syntax = if Self::is_rust(&document) {
@@ -327,6 +338,14 @@ impl Tab {
             Some(Syntax::new_python())
         } else if Self::is_markdown(&document) {
             Some(Syntax::new_markdown())
+        } else if Self::is_c_family_or_header(&document) {
+            Some(Syntax::new_c())
+        } else if Self::is_javascript(&document) {
+            Some(Syntax::new_javascript())
+        } else if Self::is_typescript(&document) {
+            Some(Syntax::new_typescript())
+        } else if Self::is_json(&document) {
+            Some(Syntax::new_json())
         } else {
             None
         };
@@ -456,6 +475,46 @@ impl Tab {
         document.path.as_deref().is_some_and(is_c_family_path)
     }
 
+    pub(super) fn is_c_family_or_header(document: &Document) -> bool {
+        document.path.as_deref().is_some_and(is_c_family_or_header_path)
+    }
+
+    pub(super) fn is_javascript(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "js" | "jsx" | "mjs" | "cjs"))
+    }
+
+    pub(super) fn is_typescript(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "ts" | "tsx" | "mts" | "cts"))
+    }
+
+    pub(super) fn is_json(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "json" | "jsonc"))
+    }
+
+    pub(super) fn is_go(document: &Document) -> bool {
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("go"))
+    }
+
     // True for any file the Run action knows how to execute on its own.
     pub(super) fn is_runnable(document: &Document) -> bool {
         Self::is_python(document) || Self::is_c_family(document)
@@ -470,6 +529,12 @@ impl Tab {
             Some(LspLanguage::Rust)
         } else if Self::is_python(document) {
             Some(LspLanguage::Python)
+        } else if Self::is_c_family_or_header(document) {
+            Some(LspLanguage::C)
+        } else if Self::is_typescript(document) || Self::is_javascript(document) {
+            Some(LspLanguage::TypeScript)
+        } else if Self::is_go(document) {
+            Some(LspLanguage::Go)
         } else {
             None
         }
@@ -487,6 +552,22 @@ impl Tab {
         } else if Self::is_markdown(&self.document) {
             if !matches!(self.syntax, Some(Syntax::Markdown(_))) {
                 self.syntax = Some(Syntax::new_markdown());
+            }
+        } else if Self::is_c_family_or_header(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::C(_))) {
+                self.syntax = Some(Syntax::new_c());
+            }
+        } else if Self::is_javascript(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::JavaScript(_))) {
+                self.syntax = Some(Syntax::new_javascript());
+            }
+        } else if Self::is_typescript(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::TypeScript(_))) {
+                self.syntax = Some(Syntax::new_typescript());
+            }
+        } else if Self::is_json(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::Json(_))) {
+                self.syntax = Some(Syntax::new_json());
             }
         } else {
             self.syntax = None;
@@ -3335,4 +3416,32 @@ mod split_tests {
             None
         );
     }
+
+    #[test]
+    fn tab_detects_expanded_languages_and_syntax() {
+        let cases = [
+            ("main.rs", true, Some(LspLanguage::Rust)),
+            ("script.py", true, Some(LspLanguage::Python)),
+            ("readme.md", true, None),
+            ("hello.c", true, Some(LspLanguage::C)),
+            ("header.h", true, Some(LspLanguage::C)),
+            ("app.cpp", true, Some(LspLanguage::C)),
+            ("index.js", true, Some(LspLanguage::TypeScript)),
+            ("component.jsx", true, Some(LspLanguage::TypeScript)),
+            ("main.ts", true, Some(LspLanguage::TypeScript)),
+            ("page.tsx", true, Some(LspLanguage::TypeScript)),
+            ("config.json", true, None),
+            ("service.go", false, Some(LspLanguage::Go)),
+            ("plain.txt", false, None),
+        ];
+
+        for (filename, has_syntax, expected_lsp) in cases {
+            let mut doc = Document::new();
+            doc.path = Some(PathBuf::from(filename));
+            let tab = Tab::new(doc);
+            assert_eq!(tab.syntax.is_some(), has_syntax, "Syntax check failed for {filename}");
+            assert_eq!(Tab::lsp_language(&tab.document), expected_lsp, "LSP check failed for {filename}");
+        }
+    }
 }
+

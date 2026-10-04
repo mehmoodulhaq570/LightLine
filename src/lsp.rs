@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 pub enum Language {
     Rust,
     Python,
+    C,
+    TypeScript,
+    Go,
 }
 
 impl Language {
@@ -21,13 +24,19 @@ impl Language {
         match self {
             Self::Rust => "Rust",
             Self::Python => "Python",
+            Self::C => "C/C++",
+            Self::TypeScript => "TypeScript/JavaScript",
+            Self::Go => "Go",
         }
     }
 
-    fn language_id(self) -> &'static str {
+    pub fn language_id(self) -> &'static str {
         match self {
             Self::Rust => "rust",
             Self::Python => "python",
+            Self::C => "c",
+            Self::TypeScript => "typescript",
+            Self::Go => "go",
         }
     }
 }
@@ -199,12 +208,12 @@ enum Input {
 }
 
 #[derive(Clone, Debug)]
-struct ServerConfig {
-    language: Language,
-    display_name: &'static str,
-    command: String,
-    args: Vec<String>,
-    settings: Value,
+pub struct ServerConfig {
+    pub language: Language,
+    pub display_name: &'static str,
+    pub command: String,
+    pub args: Vec<String>,
+    pub settings: Value,
 }
 
 struct PendingHover {
@@ -302,7 +311,7 @@ impl Drop for Client {
     }
 }
 
-fn server_config(language: Language, python_interpreter: Option<&Path>) -> ServerConfig {
+pub fn server_config(language: Language, python_interpreter: Option<&Path>) -> ServerConfig {
     match language {
         Language::Rust => ServerConfig {
             language,
@@ -317,6 +326,27 @@ fn server_config(language: Language, python_interpreter: Option<&Path>) -> Serve
             command: "pyright-langserver".into(),
             args: vec!["--stdio".into()],
             settings: python_settings(python_interpreter),
+        },
+        Language::C => ServerConfig {
+            language,
+            display_name: "clangd",
+            command: "clangd".into(),
+            args: Vec::new(),
+            settings: Value::Null,
+        },
+        Language::TypeScript => ServerConfig {
+            language,
+            display_name: "typescript-language-server",
+            command: "typescript-language-server".into(),
+            args: vec!["--stdio".into()],
+            settings: Value::Null,
+        },
+        Language::Go => ServerConfig {
+            language,
+            display_name: "gopls",
+            command: "gopls".into(),
+            args: Vec::new(),
+            settings: Value::Null,
         },
     }
 }
@@ -378,13 +408,33 @@ fn stopped(language: Language, message: impl Into<String>) -> Event {
 fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
     let stderr = stderr.trim();
     if stderr.contains("is not recognized as an internal or external command") {
-        if config.language == Language::Python {
-            return NODE_MISSING.to_string();
+        match config.language {
+            Language::Python => return NODE_MISSING.to_string(),
+            Language::Rust => {
+                return format!(
+                    "{} is not installed or not on PATH. Install it with `rustup component add rust-analyzer rust-src`, then reopen this file. Editing and running still work without it.",
+                    config.display_name
+                );
+            }
+            Language::C => {
+                return format!(
+                    "{} is not installed or not on PATH. Install LLVM/clangd (e.g. `winget install LLVM.LLVM`), then reopen this file. Editing and running still work without it.",
+                    config.display_name
+                );
+            }
+            Language::TypeScript => {
+                return format!(
+                    "{} is not installed or not on PATH. Install it with `npm install -g typescript-language-server typescript`, then reopen this file. Editing and running still work without it.",
+                    config.display_name
+                );
+            }
+            Language::Go => {
+                return format!(
+                    "{} is not installed or not on PATH. Install it with `go install golang.org/x/tools/gopls@latest`, then reopen this file. Editing and running still work without it.",
+                    config.display_name
+                );
+            }
         }
-        return format!(
-            "{} is not installed or not on PATH. Install it with `rustup component add rust-analyzer rust-src`, then reopen this file. Editing and running still work without it.",
-            config.display_name
-        );
     }
     if stderr.is_empty() {
         error.to_string()
@@ -551,7 +601,9 @@ fn run_server(
             }
         }
     } else {
-        ProcessCommand::new(&config.command)
+        let prog = crate::workflow::resolve_command(&config.command)
+            .unwrap_or_else(|| config.command.clone().into());
+        ProcessCommand::new(prog)
     };
     #[cfg(not(windows))]
     let mut process = ProcessCommand::new(&config.command);
@@ -569,10 +621,22 @@ fn run_server(
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
-            let hint = if config.language == Language::Python {
-                ". Install Node.js once (nodejs.org) and LightLine sets Pyright up automatically"
-            } else {
-                ""
+            let hint = match config.language {
+                Language::Python => {
+                    ". Install Node.js once (nodejs.org) and LightLine sets Pyright up automatically"
+                }
+                Language::Rust => {
+                    ". Install rust-analyzer with `rustup component add rust-analyzer rust-src`"
+                }
+                Language::C => {
+                    ". Install LLVM/clangd (e.g. `winget install LLVM.LLVM`)"
+                }
+                Language::TypeScript => {
+                    ". Install typescript-language-server with `npm install -g typescript-language-server typescript`"
+                }
+                Language::Go => {
+                    ". Install gopls with `go install golang.org/x/tools/gopls@latest`"
+                }
             };
             emit(
                 stopped(
@@ -1625,4 +1689,23 @@ mod tests {
         let back = uri_to_path(&uri).unwrap();
         assert_eq!(back, PathBuf::from(r"d:\Projects\demo\src\main.rs"));
     }
+
+    #[test]
+    fn server_configs_have_valid_language_ids() {
+        let cases = [
+            (Language::Rust, "rust-analyzer", "rust", "Rust"),
+            (Language::Python, "Pyright", "python", "Python"),
+            (Language::C, "clangd", "c", "C/C++"),
+            (Language::TypeScript, "typescript-language-server", "typescript", "TypeScript/JavaScript"),
+            (Language::Go, "gopls", "go", "Go"),
+        ];
+        for (lang, expected_server, expected_id, expected_name) in cases {
+            let config = server_config(lang, None);
+            assert_eq!(config.language, lang);
+            assert_eq!(config.display_name, expected_server);
+            assert_eq!(lang.language_id(), expected_id);
+            assert_eq!(lang.name(), expected_name);
+        }
+    }
 }
+

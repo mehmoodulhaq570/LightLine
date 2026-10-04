@@ -8,13 +8,22 @@ use tree_sitter::{
     InputEdit, Language, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
-const PARSE_LIMIT: usize = 128 * 1024;
+const PARSE_LIMIT: usize = 4 * 1024 * 1024;
+const RUST_PARSE_LIMIT: usize = 128 * 1024;
 
 fn within_parse_limit(document: &Document) -> bool {
     let mut bytes = 0;
     (0..document.line_count()).all(|line| {
         bytes += document.line(line).len() + 1;
         bytes <= PARSE_LIMIT
+    })
+}
+
+fn within_rust_parse_limit(document: &Document) -> bool {
+    let mut bytes = 0;
+    (0..document.line_count()).all(|line| {
+        bytes += document.line(line).len() + 1;
+        bytes <= RUST_PARSE_LIMIT
     })
 }
 
@@ -42,6 +51,10 @@ pub struct Span {
 pub enum Syntax {
     Rust(RustSyntax),
     Python(PythonSyntax),
+    C(TreeSitterSyntax),
+    JavaScript(TreeSitterSyntax),
+    TypeScript(TreeSitterSyntax),
+    Json(TreeSitterSyntax),
     Markdown(crate::markdown_syntax::MarkdownSyntax),
 }
 
@@ -54,6 +67,22 @@ impl Syntax {
         Syntax::Python(PythonSyntax::new())
     }
 
+    pub fn new_c() -> Self {
+        Syntax::C(TreeSitterSyntax::new(C))
+    }
+
+    pub fn new_javascript() -> Self {
+        Syntax::JavaScript(TreeSitterSyntax::new(JAVASCRIPT))
+    }
+
+    pub fn new_typescript() -> Self {
+        Syntax::TypeScript(TreeSitterSyntax::new(TYPESCRIPT))
+    }
+
+    pub fn new_json() -> Self {
+        Syntax::Json(TreeSitterSyntax::new(JSON))
+    }
+
     pub fn new_markdown() -> Self {
         Syntax::Markdown(crate::markdown_syntax::MarkdownSyntax::new())
     }
@@ -62,6 +91,10 @@ impl Syntax {
         match self {
             Syntax::Rust(syntax) => syntax.invalidate_from(line),
             Syntax::Python(syntax) => syntax.invalidate_from(),
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Json(syntax) => syntax.invalidate_from(),
             Syntax::Markdown(syntax) => syntax.invalidate_from(line),
         }
     }
@@ -73,6 +106,10 @@ impl Syntax {
         match self {
             Syntax::Rust(syntax) => syntax.edited(change),
             Syntax::Python(syntax) => syntax.edited(change),
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Json(syntax) => syntax.edited(change),
             // Colored line by line: only the fence state from here on changes.
             Syntax::Markdown(syntax) => syntax.invalidate_from(change.start.line),
         }
@@ -82,6 +119,10 @@ impl Syntax {
         match self {
             Syntax::Rust(syntax) => syntax.advance_to(document, target, budget),
             Syntax::Python(syntax) => syntax.advance_to(document),
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Json(syntax) => syntax.advance_to(document),
             Syntax::Markdown(syntax) => syntax.advance_to(document, target, budget),
         }
     }
@@ -90,6 +131,10 @@ impl Syntax {
         match self {
             Syntax::Rust(syntax) => syntax.spans(document, line),
             Syntax::Python(syntax) => syntax.spans(line),
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Json(syntax) => syntax.spans(line),
             Syntax::Markdown(syntax) => syntax.spans(document, line),
         }
     }
@@ -109,6 +154,10 @@ pub fn highlight_snippet(language: &str, source: &str) -> Option<Vec<Vec<Span>>>
     let grammar = match language.trim().to_ascii_lowercase().as_str() {
         "rust" | "rs" => RUST,
         "python" | "py" | "python3" => PYTHON,
+        "c" | "h" => C,
+        "javascript" | "js" | "mjs" | "cjs" | "jsx" => JAVASCRIPT,
+        "typescript" | "ts" | "mts" | "cts" | "tsx" => TYPESCRIPT,
+        "json" | "jsonc" => JSON,
         _ => return None,
     };
     Parsed::new(grammar, source.to_string()).map(|parsed| parsed.spans)
@@ -116,9 +165,9 @@ pub fn highlight_snippet(language: &str, source: &str) -> Option<Vec<Vec<Span>>>
 
 /// A tree-sitter grammar and how its highlight captures map to colors.
 #[derive(Clone, Copy)]
-struct Grammar {
+pub struct Grammar {
     language: fn() -> Language,
-    highlights: &'static str,
+    highlights: fn() -> &'static str,
     color: fn(&str) -> Option<Color>,
 }
 
@@ -130,16 +179,87 @@ fn python_language() -> Language {
     tree_sitter_python::LANGUAGE.into()
 }
 
+fn c_language() -> Language {
+    tree_sitter_c::LANGUAGE.into()
+}
+
+fn javascript_language() -> Language {
+    tree_sitter_javascript::LANGUAGE.into()
+}
+
+fn typescript_language() -> Language {
+    tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+}
+
+fn json_language() -> Language {
+    tree_sitter_json::LANGUAGE.into()
+}
+
+fn rust_highlights() -> &'static str {
+    tree_sitter_rust::HIGHLIGHTS_QUERY
+}
+
+fn python_highlights() -> &'static str {
+    tree_sitter_python::HIGHLIGHTS_QUERY
+}
+
+fn c_highlights() -> &'static str {
+    tree_sitter_c::HIGHLIGHT_QUERY
+}
+
+fn javascript_highlights() -> &'static str {
+    tree_sitter_javascript::HIGHLIGHT_QUERY
+}
+
+fn typescript_highlights() -> &'static str {
+    static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!(
+            "{}\n{}",
+            tree_sitter_javascript::HIGHLIGHT_QUERY,
+            tree_sitter_typescript::HIGHLIGHTS_QUERY
+        )
+    });
+    &QUERY
+}
+
+fn json_highlights() -> &'static str {
+    tree_sitter_json::HIGHLIGHTS_QUERY
+}
+
 const RUST: Grammar = Grammar {
     language: rust_language,
-    highlights: tree_sitter_rust::HIGHLIGHTS_QUERY,
+    highlights: rust_highlights,
     color: rust_capture_color,
 };
 
 const PYTHON: Grammar = Grammar {
     language: python_language,
-    highlights: tree_sitter_python::HIGHLIGHTS_QUERY,
+    highlights: python_highlights,
     color: python_capture_color,
+};
+
+const C: Grammar = Grammar {
+    language: c_language,
+    highlights: c_highlights,
+    color: c_capture_color,
+};
+
+const JAVASCRIPT: Grammar = Grammar {
+    language: javascript_language,
+    highlights: javascript_highlights,
+    color: js_capture_color,
+};
+
+const TYPESCRIPT: Grammar = Grammar {
+    language: typescript_language,
+    highlights: typescript_highlights,
+    color: js_capture_color,
+};
+
+const JSON: Grammar = Grammar {
+    language: json_language,
+    highlights: json_highlights,
+    color: json_capture_color,
 };
 
 /// One document's parse on the worker thread, kept up to date edit by edit:
@@ -166,7 +286,7 @@ impl Parsed {
         let language = (grammar.language)();
         let mut parser = Parser::new();
         parser.set_language(&language).ok()?;
-        let query = Query::new(&language, grammar.highlights).ok()?;
+        let query = Query::new(&language, (grammar.highlights)()).ok()?;
         let tree = parser.parse(&source, None)?;
         let spans = spans_from_query(&query, &tree, &source, grammar.color);
         let line_starts = std::iter::once(0)
@@ -454,6 +574,66 @@ fn python_capture_color(name: &str) -> Option<Color> {
     }
 }
 
+fn c_capture_color(name: &str) -> Option<Color> {
+    if name.starts_with("comment") {
+        Some(Color::Comment)
+    } else if name.starts_with("string") || name.starts_with("character") {
+        Some(Color::String)
+    } else if name.starts_with("keyword") || name == "boolean" {
+        Some(Color::Keyword)
+    } else if name.starts_with("type") {
+        Some(Color::Type)
+    } else if name.starts_with("number") || name.starts_with("constant") {
+        Some(Color::Number)
+    } else if name == "function.macro" || name.starts_with("preproc") {
+        Some(Color::Macro)
+    } else if name.starts_with("function") {
+        Some(Color::Function)
+    } else if name == "operator" {
+        Some(Color::Operator)
+    } else if name.starts_with("attribute") {
+        Some(Color::Attribute)
+    } else {
+        None
+    }
+}
+
+fn js_capture_color(name: &str) -> Option<Color> {
+    if name.starts_with("comment") {
+        Some(Color::Comment)
+    } else if name.starts_with("string") || name.starts_with("character") || name == "escape" {
+        Some(Color::String)
+    } else if name.starts_with("keyword") || name == "boolean" {
+        Some(Color::Keyword)
+    } else if name.starts_with("type") || name == "constructor" {
+        Some(Color::Type)
+    } else if name.starts_with("number") || name.starts_with("constant") {
+        Some(Color::Number)
+    } else if name.starts_with("function") || name.starts_with("method") {
+        Some(Color::Function)
+    } else if name == "operator" {
+        Some(Color::Operator)
+    } else if name.starts_with("attribute") || name.starts_with("decorator") {
+        Some(Color::Attribute)
+    } else {
+        None
+    }
+}
+
+fn json_capture_color(name: &str) -> Option<Color> {
+    if name.starts_with("comment") {
+        Some(Color::Comment)
+    } else if name.starts_with("string") {
+        Some(Color::String)
+    } else if name.starts_with("number") {
+        Some(Color::Number)
+    } else if name == "boolean" || name == "null" || name.starts_with("constant") {
+        Some(Color::Keyword)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum State {
     #[default]
@@ -672,7 +852,7 @@ impl RustSyntax {
     pub fn advance_to(&mut self, document: &Document, target: usize, budget: usize) -> bool {
         if !self.parser_attempted {
             self.parser_attempted = true;
-            if within_parse_limit(document) {
+            if within_rust_parse_limit(document) {
                 self.worker = Some(Worker::start(RUST));
                 self.reset = true;
             }
@@ -721,26 +901,20 @@ impl RustSyntax {
     }
 }
 
-pub struct PythonSyntax {
+pub struct TreeSitterSyntax {
+    grammar: Grammar,
     worker: Option<Worker>,
     tree_spans: Option<Vec<Vec<Span>>>,
     parser_attempted: bool,
-    // See RustSyntax::reset.
     reset: bool,
-    // See RustSyntax::pending.
     pending: bool,
     revision: u64,
 }
 
-impl Default for PythonSyntax {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PythonSyntax {
-    pub fn new() -> Self {
+impl TreeSitterSyntax {
+    pub fn new(grammar: Grammar) -> Self {
         Self {
+            grammar,
             worker: None,
             tree_spans: None,
             parser_attempted: false,
@@ -773,12 +947,12 @@ impl PythonSyntax {
     }
 
     /// Polls the background parser. Files over `PARSE_LIMIT` never start one, so
-    /// they render as plain text; there is no lexical fallback for Python.
+    /// they render as plain text; there is no lexical fallback.
     pub fn advance_to(&mut self, document: &Document) -> bool {
         if !self.parser_attempted {
             self.parser_attempted = true;
             if within_parse_limit(document) {
-                self.worker = Some(Worker::start(PYTHON));
+                self.worker = Some(Worker::start(self.grammar));
                 self.reset = true;
             }
         }
@@ -800,6 +974,40 @@ impl PythonSyntax {
             .as_ref()
             .and_then(|spans| spans.get(line).cloned())
             .unwrap_or_default()
+    }
+}
+
+pub struct PythonSyntax {
+    inner: TreeSitterSyntax,
+}
+
+impl Default for PythonSyntax {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PythonSyntax {
+    pub fn new() -> Self {
+        Self {
+            inner: TreeSitterSyntax::new(PYTHON),
+        }
+    }
+
+    pub fn invalidate_from(&mut self) {
+        self.inner.invalidate_from();
+    }
+
+    pub fn edited(&mut self, change: &TextChange) {
+        self.inner.edited(change);
+    }
+
+    pub fn advance_to(&mut self, document: &Document) -> bool {
+        self.inner.advance_to(document)
+    }
+
+    pub fn spans(&self, line: usize) -> Vec<Span> {
+        self.inner.spans(line)
     }
 }
 
@@ -1427,10 +1635,70 @@ mod tests {
     #[test]
     fn python_oversized_file_falls_back_to_plain_text() {
         let mut doc = Document::new();
-        let text = format!("x = 1\n{}", "# padding line\n".repeat(20_000));
+        let text = format!("x = 1\n{}", "# padding line\n".repeat(PARSE_LIMIT / 15 + 100));
         doc.replace(Pos::default(), Pos::default(), &text);
         let mut syntax = PythonSyntax::new();
         assert!(syntax.advance_to(&doc));
         assert!(syntax.spans(0).is_empty());
+    }
+
+    #[test]
+    fn c_tree_sitter_colors_keywords_and_types() {
+        let mut doc = Document::new();
+        doc.replace(
+            Pos::default(),
+            Pos::default(),
+            "int main(void) {\n    return 0;\n}\n",
+        );
+        let mut syntax = TreeSitterSyntax::new(C);
+        for _ in 0..500 {
+            if syntax.advance_to(&doc) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(syntax.spans(0).iter().any(|span| span.color == Color::Type));
+        assert!(syntax.spans(1).iter().any(|span| span.color == Color::Keyword));
+    }
+
+    #[test]
+    fn json_tree_sitter_colors() {
+        let mut doc = Document::new();
+        doc.replace(
+            Pos::default(),
+            Pos::default(),
+            "{\"answer\": 42, \"flag\": true}\n",
+        );
+        let mut syntax = TreeSitterSyntax::new(JSON);
+        for _ in 0..500 {
+            if syntax.advance_to(&doc) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(syntax.spans(0).iter().any(|span| span.color == Color::String));
+        assert!(syntax.spans(0).iter().any(|span| span.color == Color::Number));
+        assert!(syntax.spans(0).iter().any(|span| span.color == Color::Keyword));
+    }
+
+    #[test]
+    fn js_ts_snippets_are_highlighted() {
+        let js = highlight_snippet("javascript", "const x = 42;\nfunction run() {}\n").unwrap();
+        assert!(js[0].iter().any(|s| s.color == Color::Keyword));
+        assert!(js[0].iter().any(|s| s.color == Color::Number));
+        assert!(js[1].iter().any(|s| s.color == Color::Keyword));
+
+        let ts = highlight_snippet("typescript", "const msg: string = 'hello';\n").unwrap();
+        assert!(ts[0].iter().any(|s| s.color == Color::Keyword));
+        assert!(ts[0].iter().any(|s| s.color == Color::Type));
+        assert!(ts[0].iter().any(|s| s.color == Color::String));
+
+        let c = highlight_snippet("c", "int val = 100;\n").unwrap();
+        assert!(c[0].iter().any(|s| s.color == Color::Type));
+        assert!(c[0].iter().any(|s| s.color == Color::Number));
+
+        let json = highlight_snippet("json", "{\"num\": 123}\n").unwrap();
+        assert!(json[0].iter().any(|s| s.color == Color::String));
+        assert!(json[0].iter().any(|s| s.color == Color::Number));
     }
 }

@@ -206,6 +206,88 @@ impl Formatter for PrettierFormatter {
     }
 }
 
+/// Runs `rustfmt` directly on Rust files via stdin/stdout.
+pub struct RustfmtFormatter;
+
+impl Formatter for RustfmtFormatter {
+    fn name(&self) -> &'static str {
+        "rustfmt"
+    }
+
+    fn supports(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("rs"))
+            .unwrap_or(false)
+    }
+
+    fn command(&self, _path: &Path) -> Command {
+        let mut command = tool_command("rustfmt");
+        command.arg("--emit").arg("stdout");
+        command
+    }
+}
+
+/// Runs `ruff format -` on Python files, falling back to `black -`.
+pub struct PythonFormatter;
+
+impl Formatter for PythonFormatter {
+    fn name(&self) -> &'static str {
+        "Python (ruff/black)"
+    }
+
+    fn supports(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("py") || ext.eq_ignore_ascii_case("pyw"))
+            .unwrap_or(false)
+    }
+
+    fn command(&self, path: &Path) -> Command {
+        let mut command = tool_command("ruff");
+        command.args(["format", "--stdin-filename"]).arg(path).arg("-");
+        command
+    }
+
+    fn format(&self, source: &str, path: &Path) -> Result<String, FormatError> {
+        match run_formatter(self.command(path), source) {
+            Err(FormatError::NotAvailable) => {
+                let mut fallback = tool_command("black");
+                fallback.args(["--stdin-filename"]).arg(path).arg("-");
+                run_formatter(fallback, source)
+            }
+            other => other,
+        }
+    }
+}
+
+/// Runs `clang-format` on C/C++ files.
+pub struct ClangFormatter;
+
+impl Formatter for ClangFormatter {
+    fn name(&self) -> &'static str {
+        "clang-format"
+    }
+
+    fn supports(&self, path: &Path) -> bool {
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        matches!(
+            extension.as_str(),
+            "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh"
+        )
+    }
+
+    fn command(&self, path: &Path) -> Command {
+        let mut command = tool_command("clang-format");
+        command.arg(format!("-assume-filename={}", path.display()));
+        command
+    }
+}
+
 /// Built-in JSON formatter. It only re-indents: every string, number and key
 /// is copied through verbatim, so key order, number spelling and duplicate
 /// keys survive, and `//` and `/* */` comments (JSONC, e.g. tsconfig.json)
@@ -624,6 +706,18 @@ pub fn formatter_for(path: &Path) -> Option<Box<dyn Formatter>> {
     if toml.supports(path) {
         return Some(Box::new(toml));
     }
+    let rustfmt = RustfmtFormatter;
+    if rustfmt.supports(path) {
+        return Some(Box::new(rustfmt));
+    }
+    let python = PythonFormatter;
+    if python.supports(path) {
+        return Some(Box::new(python));
+    }
+    let clang = ClangFormatter;
+    if clang.supports(path) {
+        return Some(Box::new(clang));
+    }
     let prettier = PrettierFormatter;
     if prettier.supports(path) {
         return Some(Box::new(prettier));
@@ -659,7 +753,19 @@ mod tests {
             formatter_for(Path::new("index.ts")).unwrap().name(),
             "Prettier"
         );
-        assert!(formatter_for(Path::new("main.rs")).is_none());
+        assert_eq!(
+            formatter_for(Path::new("main.rs")).unwrap().name(),
+            "rustfmt"
+        );
+        assert_eq!(
+            formatter_for(Path::new("script.py")).unwrap().name(),
+            "Python (ruff/black)"
+        );
+        assert_eq!(
+            formatter_for(Path::new("driver.c")).unwrap().name(),
+            "clang-format"
+        );
+        assert!(formatter_for(Path::new("archive.zip")).is_none());
     }
 
     #[test]
