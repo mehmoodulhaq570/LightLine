@@ -1113,6 +1113,7 @@ impl App {
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let settings = lightline::settings::Settings::load();
+        lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
         let font = Self::font_for_dpi(dpi, zoom, &settings);
         let line_height = Self::measured_line_height(font, dpi, zoom);
         let char_width = Self::measured_char_width(font, dpi, zoom);

@@ -52,7 +52,7 @@ impl Default for Settings {
             indent_guides: true,
             minimap: true,
             smooth_scrolling: false,
-            parse_limit_kb: 128,
+            parse_limit_kb: 4096,
             default_terminal_profile: ShellKind::PowerShell,
             markdown_load_remote_images: false,
             color_theme: None,
@@ -173,7 +173,7 @@ impl Settings {
             settings.smooth_scrolling = b;
         }
         if let Some(n) = value.get("parseLimitKb").and_then(|v| v.as_u64()) {
-            settings.parse_limit_kb = (n as usize).clamp(32, 4096);
+            settings.parse_limit_kb = (n as usize).clamp(32, 16384);
         }
         if let Some(name) = value.get("colorTheme").and_then(|v| v.as_str()) {
             let name = name.trim();
@@ -350,7 +350,18 @@ mod tests {
         assert!(s.auto_indent);
         assert!(s.bracket_matching);
         assert!(!s.format_on_save);
+        assert_eq!(s.parse_limit_kb, 4096);
         assert_eq!(s.default_terminal_profile, ShellKind::PowerShell);
+    }
+
+    #[test]
+    fn parse_limit_round_trips() {
+        let s = Settings {
+            parse_limit_kb: 8192,
+            ..Settings::default()
+        };
+        let loaded = Settings::parse(&s.to_json()).unwrap();
+        assert_eq!(loaded.parse_limit_kb, 8192);
     }
 
     #[test]

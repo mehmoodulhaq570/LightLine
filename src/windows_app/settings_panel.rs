@@ -26,6 +26,7 @@ enum Setting {
     BracketMatching,
     IndentGuides,
     FormatOnSave,
+    ParseLimit,
     ColorTheme,
     TerminalProfile,
     MarkdownImages,
@@ -56,6 +57,7 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::BracketMatching),
     Row::Toggle(Setting::IndentGuides),
     Row::Toggle(Setting::FormatOnSave),
+    Row::Choice(Setting::ParseLimit),
     Row::Heading("APPEARANCE"),
     Row::Choice(Setting::ColorTheme),
     Row::Heading("TERMINAL"),
@@ -86,6 +88,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::BracketMatching => "Highlight matching brackets",
         Setting::IndentGuides => "Indent guides",
         Setting::FormatOnSave => "Format on save",
+        Setting::ParseLimit => "Syntax parse limit",
         Setting::ColorTheme => "Color theme",
         Setting::TerminalProfile => "Default shell",
         Setting::MarkdownImages => "Load web images in previews",
@@ -134,6 +137,14 @@ impl App {
         match setting {
             Setting::FontSize => settings.font_size.to_string(),
             Setting::TabSize => settings.tab_size.to_string(),
+            Setting::ParseLimit => {
+                let kb = settings.parse_limit_kb;
+                if kb >= 1024 {
+                    format!("{} MB", kb / 1024)
+                } else {
+                    format!("{kb} KB")
+                }
+            }
             Setting::ColorTheme => settings
                 .color_theme
                 .clone()
@@ -238,6 +249,17 @@ impl App {
                     .unwrap_or(0);
                 // Saves it too.
                 self.set_default_terminal_profile(hwnd, SHELLS[(current + 1) % SHELLS.len()]);
+            }
+            Row::Choice(Setting::ParseLimit) => {
+                const LIMITS: [usize; 6] = [512, 1024, 2048, 4096, 8192, 16384];
+                let current = LIMITS
+                    .iter()
+                    .position(|&kb| kb == self.settings.parse_limit_kb)
+                    .unwrap_or(3);
+                let next_kb = LIMITS[(current + 1) % LIMITS.len()];
+                self.settings.parse_limit_kb = next_kb;
+                lightline::syntax::set_parse_limit_kb(next_kb);
+                self.save_settings_change(hwnd);
             }
             Row::OpenJson if contains(self.settings_json_button(rect), x, y) => {
                 self.open_settings(hwnd);

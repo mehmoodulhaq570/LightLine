@@ -258,6 +258,7 @@ impl App {
             Ok(settings) => {
                 let font_changed = settings.font_size != self.settings.font_size
                     || settings.font_family != self.settings.font_family;
+                lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
                 self.settings = settings;
                 if font_changed {
                     self.set_metrics(self.dpi, self.zoom);

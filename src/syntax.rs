@@ -1,5 +1,5 @@
 //! Tree-sitter colors for Rust and Python, with bounded lexical fallback for large Rust files.
-//! Oversized Python files (see `PARSE_LIMIT`) render as plain text instead.
+//! Oversized files (see `parse_limit()`) render as plain text instead.
 
 use crate::document::{Document, Pos, TextChange};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -8,14 +8,28 @@ use tree_sitter::{
     InputEdit, Language, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
-const PARSE_LIMIT: usize = 4 * 1024 * 1024;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub const DEFAULT_PARSE_LIMIT: usize = 4 * 1024 * 1024;
+static PARSE_LIMIT_BYTES: AtomicUsize = AtomicUsize::new(DEFAULT_PARSE_LIMIT);
 const RUST_PARSE_LIMIT: usize = 128 * 1024;
 
+/// Configure the maximum file size (in KB) tree-sitter will parse in the background.
+pub fn set_parse_limit_kb(kb: usize) {
+    PARSE_LIMIT_BYTES.store(kb.saturating_mul(1024), Ordering::Relaxed);
+}
+
+/// The current parse limit in bytes.
+pub fn parse_limit() -> usize {
+    PARSE_LIMIT_BYTES.load(Ordering::Relaxed)
+}
+
 fn within_parse_limit(document: &Document) -> bool {
+    let limit = parse_limit();
     let mut bytes = 0;
     (0..document.line_count()).all(|line| {
         bytes += document.line(line).len() + 1;
-        bytes <= PARSE_LIMIT
+        bytes <= limit
     })
 }
 
@@ -720,7 +734,7 @@ impl Worker {
                 let spans = match &mut parsed {
                     // Grown past the limit by editing: stop, as a file that
                     // big wouldn't have been parsed when it was opened.
-                    Some(current) if current.source.len() <= PARSE_LIMIT => {
+                    Some(current) if current.source.len() <= parse_limit() => {
                         (!edited || current.reparse()).then(|| current.spans.clone())
                     }
                     _ => None,
@@ -946,7 +960,7 @@ impl TreeSitterSyntax {
         }
     }
 
-    /// Polls the background parser. Files over `PARSE_LIMIT` never start one, so
+    /// Polls the background parser. Files over `parse_limit()` never start one, so
     /// they render as plain text; there is no lexical fallback.
     pub fn advance_to(&mut self, document: &Document) -> bool {
         if !self.parser_attempted {
@@ -1634,12 +1648,23 @@ mod tests {
 
     #[test]
     fn python_oversized_file_falls_back_to_plain_text() {
+        set_parse_limit_kb(64);
         let mut doc = Document::new();
-        let text = format!("x = 1\n{}", "# padding line\n".repeat(PARSE_LIMIT / 15 + 100));
+        let text = format!("x = 1\n{}", "# padding line\n".repeat(64 * 1024 / 15 + 100));
         doc.replace(Pos::default(), Pos::default(), &text);
         let mut syntax = PythonSyntax::new();
         assert!(syntax.advance_to(&doc));
         assert!(syntax.spans(0).is_empty());
+        set_parse_limit_kb(DEFAULT_PARSE_LIMIT / 1024);
+    }
+
+    #[test]
+    fn dynamic_parse_limit_configuration() {
+        set_parse_limit_kb(1024);
+        assert_eq!(parse_limit(), 1024 * 1024);
+        set_parse_limit_kb(8192);
+        assert_eq!(parse_limit(), 8192 * 1024);
+        set_parse_limit_kb(DEFAULT_PARSE_LIMIT / 1024);
     }
 
     #[test]

@@ -8,6 +8,9 @@ pub(super) enum BuiltinIcon {
     File,
     Rust,
     Python,
+    C,
+    Cpp,
+    Go,
     Markdown,
     Toml,
     Json,
@@ -63,6 +66,9 @@ impl BuiltinIcon {
         match ext.as_str() {
             "rs" => BuiltinIcon::Rust,
             "py" | "pyw" => BuiltinIcon::Python,
+            "c" | "h" => BuiltinIcon::C,
+            "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "ino" => BuiltinIcon::Cpp,
+            "go" => BuiltinIcon::Go,
             "md" | "markdown" => BuiltinIcon::Markdown,
             "toml" => BuiltinIcon::Toml,
             "json" => BuiltinIcon::Json,
@@ -95,6 +101,15 @@ impl BuiltinIcon {
             }
             BuiltinIcon::Python => {
                 r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#3776AB" d="M11.9 2c-3.1 0-2.9 1.3-2.9 1.3l.03 1.4h3v.4H6.3S3.5 4.8 3.5 8c0 3.1 1.7 3 1.7 3h1.1V9.5c0-1.4 1.2-2.5 2.6-2.5h4.1c1.2 0 2.2-1 2.2-2.2V3.4S15.4 2 11.9 2zm-1.8 1.3a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4z"/><path fill="#FFD43B" d="M12.1 22c3.1 0 2.9-1.3 2.9-1.3l-.03-1.4h-3v-.4h5.7s2.8.3 2.8-2.9c0-3.1-1.7-3-1.7-3h-1.1v1.5c0 1.4-1.2 2.5-2.6 2.5H11c-1.2 0-2.2 1-2.2 2.2v1.4s-.2 1.4 3.3 1.4zm1.8-1.3a.7.7 0 1 1 0-1.4.7.7 0 0 1 0 1.4z"/></svg>"##
+            }
+            BuiltinIcon::C => {
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="3" fill="#659AD2"/><path fill="#FFFFFF" d="M15.5 8.5c-.8-.7-1.8-1-3.2-1-2.6 0-4.3 1.9-4.3 4.5s1.7 4.5 4.3 4.5c1.4 0 2.4-.4 3.2-1.1l-1-1.4c-.6.5-1.3.8-2.2.8-1.6 0-2.6-1.1-2.6-2.8s1-2.8 2.6-2.8c.9 0 1.6.3 2.2.8l1-1.5z"/></svg>"##
+            }
+            BuiltinIcon::Cpp => {
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="3" fill="#00599C"/><path fill="#FFFFFF" d="M11.5 8.5c-.7-.7-1.6-1-2.8-1-2.3 0-3.7 1.9-3.7 4.5s1.4 4.5 3.7 4.5c1.2 0 2.1-.4 2.8-1.1l-.9-1.4c-.5.5-1.1.8-1.9.8-1.4 0-2.2-1.1-2.2-2.8s.8-2.8 2.2-2.8c.8 0 1.4.3 1.9.8l.9-1.5zm3 2.5h1.2v1.5h1.5v1.2h-1.5v1.5h-1.2v-1.5H13v-1.2h1.5V11zm4 0h1.2v1.5h1.5v1.2h-1.5v1.5h-1.2v-1.5H17v-1.2h1.5V11z"/></svg>"##
+            }
+            BuiltinIcon::Go => {
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="3" fill="#00ADD8"/><path fill="#FFFFFF" d="M11.5 10c-.5-.7-1.3-1-2.3-1-2 0-3.2 1.6-3.2 3.8s1.2 3.8 3.2 3.8c1.6 0 2.5-.9 2.7-2.1H9.5v-1.4h3.8c0 .3.1.7.1 1 0 2.2-1.5 3.9-4.4 3.9-2.9 0-4.9-2.2-4.9-5.2S6.1 7.6 9 7.6c1.6 0 2.7.5 3.5 1.3L11.5 10zm5.5-2.4c2.9 0 4.6 2.2 4.6 5.2s-1.7 5.2-4.6 5.2-4.6-2.2-4.6-5.2 1.7-5.2 4.6-5.2zm0 1.8c-1.8 0-2.8 1.5-2.8 3.4s1 3.4 2.8 3.4 2.8-1.5 2.8-3.4-1-3.4-2.8-3.4z"/></svg>"##
             }
             BuiltinIcon::Markdown => {
                 r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="22" height="15" x="1" y="4.5" rx="2.5" fill="none" stroke="#4191C3" stroke-width="2"/><path fill="#4191C3" d="M4 16V8h2.5l2 2.5 2-2.5H13v8h-2v-4.5l-1.5 2-1.5-2V16H4zm13-4V8h2v4h2l-3 4-3-4h2z"/></svg>"##
@@ -141,3 +156,72 @@ impl BuiltinIcon {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_expanded_language_icons() {
+        let cases = [
+            ("main.rs", BuiltinIcon::Rust),
+            ("script.py", BuiltinIcon::Python),
+            ("main.c", BuiltinIcon::C),
+            ("header.h", BuiltinIcon::C),
+            ("app.cpp", BuiltinIcon::Cpp),
+            ("file.cc", BuiltinIcon::Cpp),
+            ("source.cxx", BuiltinIcon::Cpp),
+            ("defs.hpp", BuiltinIcon::Cpp),
+            ("defs.hh", BuiltinIcon::Cpp),
+            ("main.go", BuiltinIcon::Go),
+            ("index.js", BuiltinIcon::JavaScript),
+            ("index.ts", BuiltinIcon::TypeScript),
+            ("data.json", BuiltinIcon::Json),
+            ("Cargo.toml", BuiltinIcon::Toml),
+            ("notes.txt", BuiltinIcon::Document),
+            ("unknown.xyz", BuiltinIcon::File),
+        ];
+
+        for (filename, expected) in cases {
+            let actual = BuiltinIcon::resolve_for_path(Path::new(filename), false, false);
+            assert_eq!(actual, expected, "Mismatch for filename: {filename}");
+        }
+    }
+
+    #[test]
+    fn all_builtin_icon_svgs_are_valid() {
+        let icons = [
+            BuiltinIcon::Folder,
+            BuiltinIcon::FolderOpen,
+            BuiltinIcon::FolderSrc,
+            BuiltinIcon::File,
+            BuiltinIcon::Rust,
+            BuiltinIcon::Python,
+            BuiltinIcon::C,
+            BuiltinIcon::Cpp,
+            BuiltinIcon::Go,
+            BuiltinIcon::Markdown,
+            BuiltinIcon::Toml,
+            BuiltinIcon::Json,
+            BuiltinIcon::Yaml,
+            BuiltinIcon::Git,
+            BuiltinIcon::Html,
+            BuiltinIcon::Css,
+            BuiltinIcon::JavaScript,
+            BuiltinIcon::TypeScript,
+            BuiltinIcon::Image,
+            BuiltinIcon::Script,
+            BuiltinIcon::Lock,
+            BuiltinIcon::Document,
+        ];
+
+        for icon in icons {
+            let svg = icon.svg_str();
+            assert!(
+                resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default()).is_ok(),
+                "Failed to parse SVG for icon: {icon:?}"
+            );
+        }
+    }
+}
+
