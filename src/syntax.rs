@@ -68,6 +68,7 @@ pub enum Syntax {
     C(TreeSitterSyntax),
     JavaScript(TreeSitterSyntax),
     TypeScript(TreeSitterSyntax),
+    Tsx(TreeSitterSyntax),
     Json(TreeSitterSyntax),
     Markdown(crate::markdown_syntax::MarkdownSyntax),
 }
@@ -93,6 +94,10 @@ impl Syntax {
         Syntax::TypeScript(TreeSitterSyntax::new(TYPESCRIPT))
     }
 
+    pub fn new_tsx() -> Self {
+        Syntax::Tsx(TreeSitterSyntax::new(TSX))
+    }
+
     pub fn new_json() -> Self {
         Syntax::Json(TreeSitterSyntax::new(JSON))
     }
@@ -108,6 +113,7 @@ impl Syntax {
             Syntax::C(syntax)
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
             | Syntax::Json(syntax) => syntax.invalidate_from(),
             Syntax::Markdown(syntax) => syntax.invalidate_from(line),
         }
@@ -123,6 +129,7 @@ impl Syntax {
             Syntax::C(syntax)
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
             | Syntax::Json(syntax) => syntax.edited(change),
             // Colored line by line: only the fence state from here on changes.
             Syntax::Markdown(syntax) => syntax.invalidate_from(change.start.line),
@@ -136,6 +143,7 @@ impl Syntax {
             Syntax::C(syntax)
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
             | Syntax::Json(syntax) => syntax.advance_to(document),
             Syntax::Markdown(syntax) => syntax.advance_to(document, target, budget),
         }
@@ -148,6 +156,7 @@ impl Syntax {
             Syntax::C(syntax)
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
             | Syntax::Json(syntax) => syntax.spans(line),
             Syntax::Markdown(syntax) => syntax.spans(document, line),
         }
@@ -170,7 +179,8 @@ pub fn highlight_snippet(language: &str, source: &str) -> Option<Vec<Vec<Span>>>
         "python" | "py" | "python3" => PYTHON,
         "c" | "h" => C,
         "javascript" | "js" | "mjs" | "cjs" | "jsx" => JAVASCRIPT,
-        "typescript" | "ts" | "mts" | "cts" | "tsx" => TYPESCRIPT,
+        "typescript" | "ts" | "mts" | "cts" => TYPESCRIPT,
+        "tsx" => TSX,
         "json" | "jsonc" => JSON,
         _ => return None,
     };
@@ -203,6 +213,10 @@ fn javascript_language() -> Language {
 
 fn typescript_language() -> Language {
     tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+}
+
+fn tsx_language() -> Language {
+    tree_sitter_typescript::LANGUAGE_TSX.into()
 }
 
 fn json_language() -> Language {
@@ -266,6 +280,12 @@ const JAVASCRIPT: Grammar = Grammar {
 
 const TYPESCRIPT: Grammar = Grammar {
     language: typescript_language,
+    highlights: typescript_highlights,
+    color: js_capture_color,
+};
+
+const TSX: Grammar = Grammar {
+    language: tsx_language,
     highlights: typescript_highlights,
     color: js_capture_color,
 };
@@ -1725,5 +1745,15 @@ mod tests {
         let json = highlight_snippet("json", "{\"num\": 123}\n").unwrap();
         assert!(json[0].iter().any(|s| s.color == Color::String));
         assert!(json[0].iter().any(|s| s.color == Color::Number));
+    }
+
+    #[test]
+    fn tsx_parses_type_annotations_and_jsx_elements() {
+        let source = "const title: string = 'hello';\nconst element = <div>{title}</div>;\n";
+        let parsed = Parsed::new(TSX, source.into()).expect("TSX grammar and query");
+        assert!(!parsed.tree.root_node().has_error());
+        let spans = highlight_snippet("tsx", source).unwrap();
+        assert!(spans[0].iter().any(|span| span.color == Color::Type));
+        assert!(spans[1].iter().any(|span| span.color == Color::Keyword));
     }
 }

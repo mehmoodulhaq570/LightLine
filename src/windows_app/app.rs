@@ -342,6 +342,8 @@ impl Tab {
             Some(Syntax::new_c())
         } else if Self::is_javascript(&document) {
             Some(Syntax::new_javascript())
+        } else if Self::is_tsx(&document) {
+            Some(Syntax::new_tsx())
         } else if Self::is_typescript(&document) {
             Some(Syntax::new_typescript())
         } else if Self::is_json(&document) {
@@ -488,6 +490,11 @@ impl Tab {
             .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "js" | "jsx" | "mjs" | "cjs"))
     }
 
+    fn is_tsx(document: &Document) -> bool {
+        document.path.as_deref().and_then(Path::extension)
+            .and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
+    }
+
     pub(super) fn is_typescript(document: &Document) -> bool {
         document
             .path
@@ -560,6 +567,10 @@ impl Tab {
         } else if Self::is_javascript(&self.document) {
             if !matches!(self.syntax, Some(Syntax::JavaScript(_))) {
                 self.syntax = Some(Syntax::new_javascript());
+            }
+        } else if Self::is_tsx(&self.document) {
+            if !matches!(self.syntax, Some(Syntax::Tsx(_))) {
+                self.syntax = Some(Syntax::new_tsx());
             }
         } else if Self::is_typescript(&self.document) {
             if !matches!(self.syntax, Some(Syntax::TypeScript(_))) {

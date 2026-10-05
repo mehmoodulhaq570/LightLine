@@ -39,6 +39,19 @@ impl Language {
             Self::Go => "go",
         }
     }
+
+    fn document_language_id(self, uri: &str) -> &'static str {
+        let path = uri_to_path(uri);
+        let extension = path.as_deref().and_then(Path::extension)
+            .and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+        match (self, extension.as_str()) {
+            (Self::C, "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "ino") => "cpp",
+            (Self::TypeScript, "js" | "mjs" | "cjs") => "javascript",
+            (Self::TypeScript, "jsx") => "javascriptreact",
+            (Self::TypeScript, "tsx") => "typescriptreact",
+            _ => self.language_id(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -445,6 +458,44 @@ fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
 
 const NODE_MISSING: &str = "Pyright setup needs Node.js. Install it once from nodejs.org (or `winget install OpenJS.NodeJS.LTS`) and reopen this file — LightLine then downloads and configures Pyright automatically. Editing and running Python work without it.";
 
+/// Supply installed MSVC/SDK headers only for files without a compilation
+/// database. Project-specific compiler commands remain authoritative.
+#[cfg(windows)]
+fn clangd_fallback_flags() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    fn latest_directory(root: &Path) -> Option<PathBuf> {
+        std::fs::read_dir(root).ok()?.filter_map(Result::ok)
+            .map(|entry| entry.path()).filter(|path| path.is_dir())
+            .max_by_key(|path| path.file_name().unwrap_or_default().to_string_lossy()
+                .split('.').map(|part| part.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>())
+    }
+    let mut includes = Vec::new();
+    if let Some(value) = std::env::var_os("INCLUDE") {
+        includes.extend(std::env::split_paths(&value).filter(|path| path.is_dir()));
+    } else if let Some(program_files) = std::env::var_os("ProgramFiles(x86)") {
+        let program_files = PathBuf::from(program_files);
+        let vswhere = program_files.join("Microsoft Visual Studio/Installer/vswhere.exe");
+        if let Ok(output) = ProcessCommand::new(vswhere)
+            .args(["-latest", "-products", "*", "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"])
+            .creation_flags(0x0800_0000).output()
+            && output.status.success()
+        {
+            let installation = String::from_utf8_lossy(&output.stdout);
+            if !installation.trim().is_empty()
+                && let Some(version) = latest_directory(&Path::new(installation.trim()).join("VC/Tools/MSVC"))
+            {
+                includes.push(version.join("include"));
+            }
+        }
+        if let Some(sdk) = latest_directory(&program_files.join("Windows Kits/10/Include")) {
+            includes.extend(["ucrt", "shared", "um", "winrt"].map(|name| sdk.join(name)));
+        }
+    }
+    includes.into_iter().filter(|path| path.is_dir())
+        .flat_map(|path| ["-isystem".to_string(), path.to_string_lossy().into_owned()]).collect()
+}
+
 /// Resolve a program by looking for any of `file_names` in each PATH folder.
 fn find_in_path(file_names: &[&str]) -> Option<PathBuf> {
     find_in_path_with(&std::env::var_os("PATH")?, file_names)
@@ -718,6 +769,10 @@ fn run_server(
     });
     if !config.settings.is_null() {
         params["initializationOptions"] = json!({"settings": config.settings.clone()});
+    }
+    #[cfg(windows)]
+    if config.language == Language::C {
+        params["initializationOptions"] = json!({"fallbackFlags": clangd_fallback_flags()});
     }
     let initialize = json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":params});
     if write_packet(&mut stdin, &initialize).is_err() {
@@ -1002,7 +1057,7 @@ fn send_command(
 ) -> io::Result<()> {
     let message = match command {
         Command::Open { uri, text, version } => {
-            json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":config.language.language_id(),"version":version,"text":text}}})
+            json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":config.language.document_language_id(&uri),"version":version,"text":text}}})
         }
         Command::Change {
             uri,
@@ -1705,6 +1760,21 @@ mod tests {
             assert_eq!(config.display_name, expected_server);
             assert_eq!(lang.language_id(), expected_id);
             assert_eq!(lang.name(), expected_name);
+        }
+    }
+
+    #[test]
+    fn document_language_ids_match_file_extensions() {
+        for (language, file, expected) in [
+            (Language::C, "main.c", "c"),
+            (Language::C, "main.cpp", "cpp"),
+            (Language::C, "types.hpp", "cpp"),
+            (Language::TypeScript, "main.js", "javascript"),
+            (Language::TypeScript, "main.jsx", "javascriptreact"),
+            (Language::TypeScript, "main.ts", "typescript"),
+            (Language::TypeScript, "main.tsx", "typescriptreact"),
+        ] {
+            assert_eq!(language.document_language_id(&file_uri(Path::new(file))), expected);
         }
     }
 }
