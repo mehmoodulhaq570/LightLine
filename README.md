@@ -25,8 +25,9 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 ## Features
 
 - **Smart editing**: syntax colors, code folding, bracket matching, find and replace, word wrap, and a split editor.
-- **Rust and Python support**: errors as you type, completions, go to definition, and hover docs, through rust-analyzer and Pyright.
+- **Language support**: errors as you type, completions, go to definition, and hover docs for Rust, Python, C/C++, JavaScript/TypeScript and Go, through their language servers.
 - **Run and debug**: run Python, C/C++, JavaScript, TypeScript, Go or Rust with one key, and debug Rust and Python with breakpoints, stepping and variables.
+- **Saved Run configurations**: choose an entry file or command, arguments, environment variables and working directory in a panel that follows LightLine's theme. Each workspace remembers its configurations and selected default.
 - **Git built in**: see changed lines in the margin, then stage, commit, push and review diffs without leaving the editor.
 - **Terminal**: PowerShell, Command Prompt, Git Bash or WSL, in tabs.
 - **Markdown preview**: see your README rendered beside the file as you type.
@@ -66,7 +67,7 @@ cargo run --release
 | `Ctrl+Shift+O` | Open a folder |
 | `Ctrl+F` / `Ctrl+H` | Find / replace |
 | `Ctrl+Shift+F` | Search all files |
-| `Ctrl+Shift+R` | Run the current file |
+| `Ctrl+Shift+R` | Run the selected configuration, or detect the current file automatically |
 | `F5` | Start debugging |
 | `` Ctrl+` `` | Show or hide the terminal |
 | `Ctrl+Shift+G` | Source control |
@@ -74,6 +75,14 @@ cargo run --release
 | `Ctrl+,` | Settings |
 
 See the **[User Guide](docs/USER_GUIDE.md)** for every shortcut and setting, and how to set up Rust, Python, debugging, formatting and the AI Assistant.
+
+## Run your code
+
+Click **Run** or press **Ctrl+Shift+R**. No runner extension is needed; install the language's runtime or compiler first. JavaScript uses Node.js, TypeScript/JSX/TSX uses `tsx`, Go runs a package or standalone file, and Rust uses Cargo or `rustc`. Python uses the selected interpreter, and C/C++ uses GCC or Clang. JavaScript/TypeScript projects use their `start` or `dev` script when one is available. Programs run in **Output**, accept keyboard input, and retain their output and exit status. Use **Stop Running Program** in the Command Palette to stop a run.
+
+Open **... → Run Configurations...** in the editor, or **Run: Configure / Select Saved Configuration** in the Command Palette, to customize a run. Click **New**, fill in the fields, then **Save & Select**. Arguments use one line per argument; environment variables use one `NAME=value` per line. Paths are relative to the workspace. **Automatic** restores language detection.
+
+The panel uses LightLine's own controls, theme and fonts, with keyboard navigation, clipboard editing and scrolling in smaller windows. Configurations are saved in the workspace's `.lightline/run.json`; environment values apply only to the launched program and its children. See [Direct language runners](docs/USER_GUIDE.md#direct-language-runners) and [Saved Run configurations](docs/USER_GUIDE.md#saved-run-configurations) for setup and shortcuts.
 
 ## Documentation
 
@@ -92,7 +101,7 @@ LightLine collects no usage data and sends nothing on its own. It uses the netwo
 - allow web images in a Markdown preview;
 - open a Python file for the first time, when it downloads Pyright.
 
-It writes only to `%APPDATA%\LightLine` and the files you open or edit; **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
+LightLine stores preferences and caches in `%APPDATA%\LightLine`, edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in `.lightline-run` beside the source file; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
 
 ## Code signing policy
 

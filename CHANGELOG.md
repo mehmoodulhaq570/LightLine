@@ -9,11 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Direct Language Runners**: **Run** and **Ctrl+Shift+R** now support JavaScript, TypeScript/JSX/TSX, Go and Rust alongside Python and C/C++, without a runner extension. JavaScript uses Node.js, TypeScript uses project-local or global `tsx`, Go runs the current package or standalone file, and Rust selects a Cargo binary/example or compiles a loose file with `rustc`. JavaScript/TypeScript projects prefer their `start` or `dev` script. The runtime or compiler must be installed separately.
+- **Saved Run Configurations**: Each workspace can save an entry file or executable command, arguments, environment variables and working directory in `.lightline/run.json`. **Save & Select** makes a configuration the default for Run; **Automatic** restores language detection. Open **Run Configurations...** from the editor's **...** menu, or **Run: Configure / Select Saved Configuration** from the Command Palette. Create, edit, select and delete configurations, with selection remembered after restarting LightLine.
+- **Expanded Language Support**: Added Tree-sitter syntax colors for C, JavaScript, TypeScript/TSX and JSON, including fenced code snippets. Added C/C++ language support through `clangd`, JavaScript/TypeScript through `typescript-language-server`, and Go through `gopls`, with project-root detection and installation hints.
+- **Additional Formatters**: Rust uses `rustfmt`, Python uses `ruff format` with a `black` fallback, and C/C++ uses `clang-format`. Formatter selection follows the file extension.
+
 #### Changed
+
+- **Run Configuration Panel Uses LightLine's UI**: Replaced the separate Windows form with a panel drawn inside the workbench. The configuration list, buttons, text inputs, selection highlights and scrollbar follow the active LightLine theme and UI font. Supports Tab/Shift+Tab, selection, copy/cut/paste, undo/redo, Unicode input, Ctrl+S/Ctrl+Enter to save and Esc to cancel. Smaller windows support mouse-wheel scrolling, a draggable scrollbar and automatic scrolling to the focused field.
+- **Managed Program Runs**: Runs use a dedicated Output session with keyboard input, preserved output and final exit status. **Stop Running Program** and the Output kill button stop the program and its children; a second run is blocked until the first ends. Rust tests remain separate under **Ctrl+Shift+B**.
+- **Larger Tree-sitter Parse Budget**: The default parse limit is now 4 MiB for the background Python, C, JavaScript, TypeScript and JSON workers. Rust keeps its 128 KiB parser limit and bounded lexical fallback for larger files.
 - **Debugger Uses No CPU While Paused**: During a Rust or Python debug session, the thread talking to the debug adapter woke about 30 times a second to check for work, even while stopped at a breakpoint. It now sleeps until the editor or the adapter has something for it: paused at a breakpoint, 95 wakeups in 3 seconds went to none.
 - **No Extra Repaint After a Drag**: Finishing a text selection or a divider, sidebar or terminal-resize drag no longer redraws the whole window a second time. The full redraw now happens only when Windows cuts a drag short.
 
 #### Fixed
+
+- **Run Output and Input Stay in LightLine**: ConPTY children no longer inherit redirected parent standard handles, which could send output outside the editor and prevent input from reaching the program. Failed compilation stops the run before a stale executable can start, and paths, arguments and environment values containing spaces or quotes are passed as data.
+- **Formatting Without an Extension Gate**: Format Document and format-on-save use the available formatter without requiring the Prettier extension to be enabled.
+- **Windows Language Server Launches**: npm `.cmd` launchers are resolved on PATH, JavaScript/JSX/TSX and C++ documents use the correct language IDs, and clangd can use Windows SDK/MSVC include paths when no project compilation database is available.
 - **Terminal Scrollback Clear Semantics**: Scrollback history is now discarded strictly on `CSI 3 J`, preserving scrollback on `CSI 2 J` screen erases and avoiding unnecessary parser reconstructions during screen updates.
 - **Terminal Saved Cursor and Mode Preservation**: Screen clearing and scrollback resets now preserve saved cursor positions (DECSC/DECRC) and terminal modes across parser reconstruction.
 - **Terminal Tab Renaming Focus and Outside Click**: The terminal rename input now captures keystrokes only while focused; clicking outside the rename input or switching focus to other UI elements cancels rename mode.
