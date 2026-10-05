@@ -163,6 +163,7 @@ impl App {
             && dirty.bottom <= bounds.bottom;
         // A crossfade or a diff view draws over this area differently.
         if !inside
+            || self.run_config_panel.is_some()
             || self.transition.is_some()
             || (self.side_view == SideView::Review && self.review_file.is_some())
         {
@@ -253,6 +254,7 @@ impl App {
             if self.welcome {
                 self.paint_welcome(hwnd, hdc, rect);
                 self.paint_quick_open(hdc, rect);
+                self.paint_run_configurations(hwnd, hdc);
                 SelectObject(hdc, old_font);
                 present(hdc);
                 EndPaint(hwnd, &ps);
@@ -1493,6 +1495,7 @@ impl App {
             self.paint_completion(hdc, rect, editor_bottom);
             self.paint_editor_context_menu(hdc, hwnd);
             self.paint_more_menu(hdc, hwnd);
+            self.paint_run_configurations(hwnd, hdc);
             SelectObject(hdc, old_font);
             present(hdc);
             EndPaint(hwnd, &ps);

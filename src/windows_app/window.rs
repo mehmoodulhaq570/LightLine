@@ -252,6 +252,10 @@ unsafe extern "system" fn wnd_proc(
                 let mut point = POINT::default();
                 GetCursorPos(&mut point);
                 ScreenToClient(hwnd, &mut point);
+                if app.run_config_panel.is_some() {
+                    app.run_config_hover(hwnd, point.x, point.y);
+                    return 1;
+                }
                 let over_ai = app.ai_assistant_visible
                     && !app.welcome
                     && !app.quick_open
@@ -411,6 +415,7 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_LBUTTONUP => {
+            app.run_config_end_drag();
             if app.scrollbar_grab.take().is_some() {
                 app.invalidate_scrollbar(hwnd, app.focused_pane);
                 // Released away from the scrollbar, it's no longer under the
@@ -438,6 +443,7 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_CAPTURECHANGED | WM_CANCELMODE => {
+            app.run_config_end_drag();
             // WM_LBUTTONUP has already cleared these before its ReleaseCapture
             // sends WM_CAPTURECHANGED, so only repaint when a drag was cut short.
             let was_dragging = app.dragging
@@ -469,6 +475,12 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_MOUSEWHEEL => {
+            if app.run_config_panel.is_some() {
+                let mut point = POINT::default();
+                unsafe { GetCursorPos(&mut point); ScreenToClient(hwnd, &mut point); }
+                app.run_config_scroll(hwnd, (wparam >> 16) as i16 as i32, point.x);
+                return 0;
+            }
             if app.editor_context.is_some() {
                 return 0;
             }

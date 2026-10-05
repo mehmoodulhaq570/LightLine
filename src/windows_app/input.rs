@@ -47,6 +47,10 @@ impl App {
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        if self.run_config_panel.is_some() {
+            self.run_config_key(hwnd, key, ctrl, shift);
+            return true;
+        }
         if self.terminal_rename_input.is_some() {
             if !self.terminal_focus
                 || !self.terminal_visible
@@ -958,6 +962,10 @@ impl App {
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
             return;
         }
+        if self.run_config_panel.is_some() {
+            self.run_config_character(hwnd, unit);
+            return;
+        }
         if self.terminal_rename_input.is_some() {
             if !self.terminal_focus
                 || !self.terminal_visible
@@ -1306,6 +1314,10 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+        if self.run_config_panel.is_some() {
+            self.run_config_click(hwnd, x, y, extend, false);
+            return;
+        }
         if self.editor_context_click(hwnd, x, y) {
             return;
         }
@@ -2045,6 +2057,10 @@ impl App {
     }
 
     pub(super) fn mouse_drag(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.run_config_panel.is_some() {
+            self.run_config_click(hwnd, x, y, true, true);
+            return;
+        }
         if self.scrollbar_grab.is_some() {
             self.scrollbar_drag(hwnd, y);
             return;
@@ -2129,6 +2145,7 @@ impl App {
     }
 
     pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.run_config_panel.is_some() { return; }
         self.dismiss_editor_context(hwnd);
         if self.terminal_visible {
             let mut rect = RECT::default();

@@ -89,6 +89,8 @@ Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run t
 
 Open the editor's **...** menu and choose **Run Configurations...**, or use **Run: Configure / Select Saved Configuration** in the Command Palette. **Automatic** keeps the language detection described above.
 
+The panel is part of LightLine's workbench and follows the current editor theme. Select a configuration in the left-hand list, then edit its fields on the right. Use **Tab / Shift+Tab** to move between controls, **Ctrl+S** or **Ctrl+Enter** to save and select, and **Esc** to cancel. Inputs support selection, copy/paste, and undo/redo. In smaller windows, use the mouse wheel or drag the scrollbar; keyboard focus scrolls fields into view automatically.
+
 Click **New**, enter a name, and customize any of these fields:
 
 - **Entry file:** leave blank to follow the active file, or choose a fixed file.

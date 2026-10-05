@@ -650,6 +650,10 @@ impl App {
     }
 
     pub(super) fn mouse_hover_move(&mut self, hwnd: HWND, x: i32, y: i32) {
+        if self.run_config_panel.is_some() {
+            self.run_config_hover(hwnd, x, y);
+            return;
+        }
         if self.editor_context_hover(hwnd, x, y) || self.more_menu_hover(hwnd, x, y) {
             return;
         }
