@@ -11,6 +11,7 @@ pub mod image_cache;
 pub mod lsp;
 pub mod markdown;
 pub mod markdown_syntax;
+pub mod runner;
 pub mod settings;
 pub mod syntax;
 pub mod terminal;

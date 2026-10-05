@@ -20,6 +20,9 @@ enum EditorContextAction {
     Paste,
     SelectAll,
     CommandPalette,
+    StageHunk,
+    DiscardHunk,
+    OpenDiffView,
 }
 
 #[derive(Clone)]
@@ -78,6 +81,7 @@ pub(super) struct EditorContextMenu {
     anchor: POINT,
     diagnostic: Option<EditorContextDiagnostic>,
     has_selection: bool,
+    has_hunk: bool,
     highlighted: Option<EditorContextAction>,
 }
 
@@ -87,11 +91,14 @@ impl EditorContextMenu {
         y: i32,
         diagnostic: Option<EditorContextDiagnostic>,
         has_selection: bool,
+        has_hunk: bool,
     ) -> Self {
         let highlighted = if diagnostic.is_some() {
             Some(EditorContextAction::FixError)
         } else if has_selection {
             Some(EditorContextAction::ExplainSelection)
+        } else if has_hunk {
+            Some(EditorContextAction::StageHunk)
         } else {
             Some(EditorContextAction::Paste)
         };
@@ -99,6 +106,7 @@ impl EditorContextMenu {
             anchor: POINT { x, y },
             diagnostic,
             has_selection,
+            has_hunk,
             highlighted,
         }
     }
@@ -119,6 +127,13 @@ impl EditorContextMenu {
                 EditorContextAction::CommentsForSelection,
                 EditorContextAction::Cut,
                 EditorContextAction::Copy,
+            ]);
+        }
+        if self.has_hunk {
+            actions.extend([
+                EditorContextAction::StageHunk,
+                EditorContextAction::DiscardHunk,
+                EditorContextAction::OpenDiffView,
             ]);
         }
         actions.extend([
@@ -186,6 +201,9 @@ fn action_label(
         EditorContextAction::Paste => "Paste".into(),
         EditorContextAction::SelectAll => "Select all".into(),
         EditorContextAction::CommandPalette => "Command Palette...".into(),
+        EditorContextAction::StageHunk => "Stage Hunk".into(),
+        EditorContextAction::DiscardHunk => "Discard Hunk".into(),
+        EditorContextAction::OpenDiffView => "Open Diff View".into(),
     }
 }
 
@@ -197,6 +215,7 @@ fn action_shortcut(action: EditorContextAction) -> &'static str {
         EditorContextAction::Paste => "Ctrl+V",
         EditorContextAction::SelectAll => "Ctrl+A",
         EditorContextAction::CommandPalette => "Ctrl+Shift+P",
+        EditorContextAction::OpenDiffView => "F7",
         _ => "",
     }
 }
@@ -279,6 +298,23 @@ impl App {
             },
             s(32),
         ));
+        if menu.has_hunk {
+            specs.push((ContextElementKind::Divider, s(7)));
+            specs.push((ContextElementKind::Section("GIT · CURRENT HUNK"), s(18)));
+            for action in [
+                EditorContextAction::StageHunk,
+                EditorContextAction::DiscardHunk,
+                EditorContextAction::OpenDiffView,
+            ] {
+                specs.push((
+                    ContextElementKind::Row {
+                        action,
+                        enabled: true,
+                    },
+                    s(30),
+                ));
+            }
+        }
 
         let padding = s(6);
         let height = specs.iter().map(|(_, height)| *height).sum::<i32>() + padding * 2;
@@ -452,6 +488,15 @@ impl App {
             EditorContextAction::CommandPalette => {
                 self.show_quick_open(hwnd);
                 self.quick_query = ">".into();
+            }
+            EditorContextAction::StageHunk => {
+                self.stage_cursor_hunk(hwnd);
+            }
+            EditorContextAction::DiscardHunk => {
+                self.discard_cursor_hunk(hwnd);
+            }
+            EditorContextAction::OpenDiffView => {
+                self.review_cursor_file_diff(hwnd);
             }
         }
         self.refresh(hwnd);
@@ -799,7 +844,7 @@ mod tests {
 
     #[test]
     fn menu_only_enables_selection_commands_for_a_selection() {
-        let plain = EditorContextMenu::new(0, 0, None, false);
+        let plain = EditorContextMenu::new(0, 0, None, false, false);
         assert!(!plain.enabled_actions().contains(&EditorContextAction::Cut));
         assert!(
             !plain
@@ -812,7 +857,7 @@ mod tests {
                 .contains(&EditorContextAction::Paste)
         );
 
-        let selected = EditorContextMenu::new(0, 0, None, true);
+        let selected = EditorContextMenu::new(0, 0, None, true, false);
         assert!(
             selected
                 .enabled_actions()
@@ -823,5 +868,10 @@ mod tests {
                 .enabled_actions()
                 .contains(&EditorContextAction::ExplainSelection)
         );
+
+        let hunk_menu = EditorContextMenu::new(0, 0, None, false, true);
+        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::StageHunk));
+        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::DiscardHunk));
+        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::OpenDiffView));
     }
 }

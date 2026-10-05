@@ -353,6 +353,8 @@ unsafe extern "system" fn wnd_proc(
                 || (key == VK_RETURN as u32 && app.find_mode)
                 // Alt+Z: toggle word wrap, as in VS Code.
                 || (key == 0x5A && !shift && !app.terminal_focus)
+                // Alt+\: inline AI completion
+                || ((key == VK_OEM_5 as u32 || key == 0xDC) && !shift && !app.terminal_focus)
                 || (app.terminal_focus
                     && key != VK_F4 as u32
                     && key != VK_SPACE as u32

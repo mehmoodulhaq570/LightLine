@@ -75,11 +75,24 @@ pub(super) enum WorkerMessage {
     // request time (so a stale result from a buffer the user kept editing is
     // discarded instead of clobbering newer text), and the outcome.
     Formatted(PathBuf, &'static str, u64, Result<String, String>),
+    GhostSuggestion {
+        tab: usize,
+        pos: Pos,
+        serial: u64,
+        text: Result<String, String>,
+    },
 }
 
 // A pending source-control write. Each one runs on the shared worker channel
 // and re-reads the repository when it finishes, so the panel never drifts
 // ahead of what Git actually did.
+#[derive(Clone, Debug)]
+pub(super) struct GhostText {
+    pub(super) tab: usize,
+    pub(super) pos: Pos,
+    pub(super) text: String,
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum GitAction {
     Stage(Vec<PathBuf>),
@@ -525,6 +538,7 @@ impl Tab {
     // True for any file the Run action knows how to execute on its own.
     pub(super) fn is_runnable(document: &Document) -> bool {
         Self::is_python(document) || Self::is_c_family(document)
+            || document.path.as_deref().is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
     }
 
     pub(super) fn is_cpp(document: &Document) -> bool {
@@ -814,6 +828,8 @@ pub(super) struct App {
     // Folders whose Markdown previews may load web images; read from disk
     // when the first preview opens.
     pub(super) web_image_folders: Option<Vec<PathBuf>>,
+    pub(super) ghost_text: Option<GhostText>,
+    pub(super) ghost_cancel: Arc<AtomicBool>,
 }
 
 // Everything the Debug side panel paints, kept separate from the live
@@ -1334,6 +1350,8 @@ impl App {
             debug_config: None,
             debug_config_menu_open: false,
             web_image_folders: None,
+            ghost_text: None,
+            ghost_cancel: Arc::new(AtomicBool::new(false)),
             extensions_search_active: false,
         }
     }
@@ -2474,6 +2492,10 @@ impl App {
             self.view_mut().selection_anchor = None;
         }
         let pos = self.doc().clamp(pos);
+        if pos != cursor {
+            self.ghost_text = None;
+            self.ghost_cancel.store(true, Ordering::Relaxed);
+        }
         self.view_mut().cursor = pos;
     }
 
@@ -2494,6 +2516,9 @@ impl App {
         if self.tab().read_only() || self.tab().is_placeholder() {
             return;
         }
+        self.ghost_text = None;
+        self.ghost_cancel.store(true, Ordering::Relaxed);
+
         let lines_before = self.doc().line_count();
         let serial_before = self.doc().change_serial();
         let cursor = self.doc_mut().replace(start, end, text);
@@ -2917,6 +2942,186 @@ impl App {
         if generation == self.gutter_generation {
             self.git_diff_cache.insert(path, diff);
         }
+    }
+
+    pub(super) fn active_gutter_diff(&self) -> Option<&GutterDiff> {
+        let path = self.doc().path.as_ref()?;
+        self.git_diff_cache.get(path)
+    }
+
+    pub(super) fn active_hunk_at_cursor(&self) -> Option<DiffHunk> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        let cursor_line = self.view().cursor.line;
+        self.active_gutter_diff()?.hunk_at_line(cursor_line).cloned()
+    }
+
+    pub(super) fn stage_cursor_hunk(&mut self, hwnd: HWND) {
+        let Some(hunk) = self.active_hunk_at_cursor() else {
+            return;
+        };
+        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
+            return;
+        };
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        match workflow::stage_hunk(&root, &path, &hunk) {
+            Ok(()) => {
+                self.status = format!("Staged hunk at line {}", hunk.buffer_start + 1);
+                self.refresh_git(hwnd);
+                self.start_gutter_diff();
+            }
+            Err(err) => {
+                self.error(hwnd, &format!("Failed to stage hunk: {err}"));
+            }
+        }
+    }
+
+    pub(super) fn discard_cursor_hunk(&mut self, hwnd: HWND) {
+        let Some(hunk) = self.active_hunk_at_cursor() else {
+            return;
+        };
+        let doc = self.doc();
+        let total_lines = doc.line_count();
+        let start = Pos {
+            line: hunk.buffer_start.min(total_lines.saturating_sub(1)),
+            byte: 0,
+        };
+        let end_line = hunk.buffer_start + hunk.buffer_len;
+
+        let (actual_start, actual_end, replacement) = if hunk.buffer_len == 0 {
+            let text = if hunk.head_lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", hunk.head_lines.join("\n"))
+            };
+            (start, start, text)
+        } else if hunk.head_lines.is_empty() {
+            if end_line < total_lines {
+                (start, Pos { line: end_line, byte: 0 }, String::new())
+            } else if hunk.buffer_start > 0 {
+                let prev_line = hunk.buffer_start - 1;
+                (
+                    Pos {
+                        line: prev_line,
+                        byte: doc.line(prev_line).len(),
+                    },
+                    doc.end(),
+                    String::new(),
+                )
+            } else {
+                (Pos::default(), doc.end(), String::new())
+            }
+        } else {
+            let text = hunk.head_lines.join("\n");
+            if end_line < total_lines {
+                (start, Pos { line: end_line, byte: 0 }, format!("{text}\n"))
+            } else {
+                (start, doc.end(), text)
+            }
+        };
+
+        self.doc_mut().replace(actual_start, actual_end, &replacement);
+        self.view_mut().cursor = self.doc().clamp(actual_start);
+        self.view_mut().selection_anchor = None;
+        self.start_gutter_diff();
+        self.status = format!("Discarded hunk at line {}", hunk.buffer_start + 1);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn review_cursor_file_diff(&mut self, hwnd: HWND) {
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        self.show_diff(hwnd, path, false);
+    }
+
+    pub(super) fn trigger_inline_ai(&mut self, hwnd: HWND) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        let tab = self.active;
+        let pos = self.view().cursor;
+        let serial = self.doc().change_serial();
+
+        self.ghost_cancel.store(true, Ordering::Relaxed);
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.ghost_cancel = cancel.clone();
+
+        let endpoint = self.settings.ai_endpoint.clone();
+        let Some(model) = self.settings.ai_model.clone() else {
+            self.status = "No AI model selected in AI Assistant".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
+
+        let doc = self.doc();
+        let total_lines = doc.line_count();
+        let start_line = pos.line.saturating_sub(40);
+        let end_line = (pos.line + 40).min(total_lines);
+        let prefix = doc.text_range(Pos { line: start_line, byte: 0 }, pos);
+        let suffix = doc.text_range(
+            pos,
+            Pos {
+                line: end_line.saturating_sub(1),
+                byte: doc.line(end_line.saturating_sub(1)).len(),
+            },
+        );
+        let language = self
+            .doc()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("code")
+            .to_string();
+
+        let tx = self.worker_tx.clone();
+        self.worker_started(hwnd);
+        self.status = "AI completing inline...".into();
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+
+        std::thread::spawn(move || {
+            let res = lightline::ai::complete_inline(
+                &endpoint, &model, &prefix, &suffix, &language, &cancel,
+            );
+            let _ = tx.send(WorkerMessage::GhostSuggestion {
+                tab,
+                pos,
+                serial,
+                text: res,
+            });
+        });
+    }
+
+    pub(super) fn accept_ghost_text(&mut self, hwnd: HWND) -> bool {
+        if let Some(ghost) = self.ghost_text.take()
+            && self.active == ghost.tab
+            && self.view().cursor == ghost.pos
+        {
+
+                let end = self.doc_mut().replace(ghost.pos, ghost.pos, &ghost.text);
+                self.view_mut().cursor = end;
+                self.view_mut().selection_anchor = None;
+                self.start_gutter_diff();
+                self.status = "Accepted inline completion".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return true;
+
+        }
+        false
+    }
+
+    pub(super) fn clear_ghost_text(&mut self, hwnd: HWND) -> bool {
+        if self.ghost_text.is_some() {
+            self.ghost_text = None;
+            self.ghost_cancel.store(true, Ordering::Relaxed);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return true;
+        }
+        false
     }
 
     pub(super) fn error(&mut self, hwnd: HWND, error: &impl std::fmt::Display) {

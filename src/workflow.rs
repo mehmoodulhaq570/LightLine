@@ -317,10 +317,33 @@ impl RepoState {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiffHunk {
+    pub buffer_start: usize,
+    pub buffer_len: usize,
+    pub head_start: usize,
+    pub head_len: usize,
+    pub head_lines: Vec<String>,
+    pub buffer_lines: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GutterDiff {
     pub added: HashSet<usize>,
     pub modified: HashSet<usize>,
     pub deleted: HashSet<usize>,
+    pub hunks: Vec<DiffHunk>,
+}
+
+impl GutterDiff {
+    pub fn hunk_at_line(&self, line: usize) -> Option<&DiffHunk> {
+        self.hunks.iter().find(|hunk| {
+            if hunk.buffer_len == 0 {
+                line == hunk.buffer_start || (hunk.buffer_start > 0 && line == hunk.buffer_start - 1)
+            } else {
+                line >= hunk.buffer_start && line < hunk.buffer_start + hunk.buffer_len
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -777,6 +800,94 @@ fn git_paths(root: &Path, args: &[&str], paths: &[PathBuf]) -> Result<(), String
     let output = command
         .output()
         .map_err(|error| format!("Could not start Git: {error}"))?;
+    if !output.status.success() {
+        return Err(git_failure(&output));
+    }
+    Ok(())
+}
+
+/// Apply a unified diff patch to the Git index or working tree.
+pub fn git_apply_patch(root: &Path, patch: &str, cached: bool) -> Result<(), String> {
+    let mut args = vec!["apply", "--unidiff-zero", "--whitespace=nowarn"];
+    if cached {
+        args.push("--cached");
+    }
+    args.push("-");
+    let mut command = git_command(root, &args);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| format!("Could not start Git: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to send patch to Git: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Git apply failed: {e}"))?;
+    if !output.status.success() {
+        return Err(git_failure(&output));
+    }
+    Ok(())
+}
+
+/// Synthesize a unidiff-zero patch representation for a single hunk.
+pub fn hunk_unified_diff(path: &Path, hunk: &DiffHunk) -> String {
+    let path_str = path.to_string_lossy().replace('\\', "/");
+    let mut patch = format!("--- a/{path_str}\n+++ b/{path_str}\n");
+    let (head_start, head_len) = (hunk.head_start, hunk.head_len);
+    let (buf_start, buf_len) = (hunk.buffer_start, hunk.buffer_len);
+    let old_range = if head_len == 0 {
+        format!("{head_start},0")
+    } else {
+        format!("{},{head_len}", head_start + 1)
+    };
+    let new_range = if buf_len == 0 {
+        format!("{buf_start},0")
+    } else {
+        format!("{},{buf_len}", buf_start + 1)
+    };
+    patch.push_str(&format!("@@ -{old_range} +{new_range} @@\n"));
+    for line in &hunk.head_lines {
+        patch.push('-');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    for line in &hunk.buffer_lines {
+        patch.push('+');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    patch
+}
+
+/// Stages an individual diff hunk into Git's index using a synthesized unified diff.
+pub fn stage_hunk(root: &Path, relative_path: &Path, hunk: &DiffHunk) -> Result<(), String> {
+    let patch = hunk_unified_diff(relative_path, hunk);
+    git_apply_patch(root, &patch, true)
+}
+
+/// Unstages an individual diff hunk from Git's index by reverse-applying its unified diff.
+pub fn unstage_hunk(root: &Path, relative_path: &Path, hunk: &DiffHunk) -> Result<(), String> {
+    let patch = hunk_unified_diff(relative_path, hunk);
+    let args = [
+        "apply",
+        "--reverse",
+        "--cached",
+        "--unidiff-zero",
+        "--whitespace=nowarn",
+        "-",
+    ];
+    let mut command = git_command(root, &args);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| format!("Could not start Git: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to send patch to Git: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Git apply reverse failed: {e}"))?;
     if !output.status.success() {
         return Err(git_failure(&output));
     }
@@ -1368,23 +1479,49 @@ fn diff_between(prefix: usize, old: &[&str], new: &[&str], m: usize) -> GutterDi
     let max_d = (GUTTER_DIFF_BUDGET / (old.len() + new.len()).max(1)).max(8);
     let Some(ops) = myers_line_ops(old, new, max_d) else {
         mark_gutter_hunk(&mut diff, prefix, old.len(), new.len(), m);
+        diff.hunks.push(DiffHunk {
+            buffer_start: prefix,
+            buffer_len: new.len(),
+            head_start: prefix,
+            head_len: old.len(),
+            head_lines: old.iter().map(|s| s.to_string()).collect(),
+            buffer_lines: new.iter().map(|s| s.to_string()).collect(),
+        });
         return diff;
     };
 
     let mut line = prefix;
+    let mut head_line = prefix;
     let (mut removed, mut inserted, mut hunk_start) = (0, 0, prefix);
+    let mut hunk_head_start = prefix;
     for op in ops {
         match op {
             LineOp::Equal => {
                 if removed + inserted > 0 {
                     mark_gutter_hunk(&mut diff, hunk_start, removed, inserted, m);
+                    let head_slice =
+                        &old[(hunk_head_start - prefix)..(hunk_head_start - prefix + removed)];
+                    let buf_slice = &new[(hunk_start - prefix)..(hunk_start - prefix + inserted)];
+                    diff.hunks.push(DiffHunk {
+                        buffer_start: hunk_start,
+                        buffer_len: inserted,
+                        head_start: hunk_head_start,
+                        head_len: removed,
+                        head_lines: head_slice.iter().map(|s| s.to_string()).collect(),
+                        buffer_lines: buf_slice.iter().map(|s| s.to_string()).collect(),
+                    });
                     removed = 0;
                     inserted = 0;
                 }
                 line += 1;
+                head_line += 1;
                 hunk_start = line;
+                hunk_head_start = head_line;
             }
-            LineOp::Delete => removed += 1,
+            LineOp::Delete => {
+                removed += 1;
+                head_line += 1;
+            }
             LineOp::Insert => {
                 inserted += 1;
                 line += 1;
@@ -1393,6 +1530,16 @@ fn diff_between(prefix: usize, old: &[&str], new: &[&str], m: usize) -> GutterDi
     }
     if removed + inserted > 0 {
         mark_gutter_hunk(&mut diff, hunk_start, removed, inserted, m);
+        let head_slice = &old[(hunk_head_start - prefix)..(hunk_head_start - prefix + removed)];
+        let buf_slice = &new[(hunk_start - prefix)..(hunk_start - prefix + inserted)];
+        diff.hunks.push(DiffHunk {
+            buffer_start: hunk_start,
+            buffer_len: inserted,
+            head_start: hunk_head_start,
+            head_len: removed,
+            head_lines: head_slice.iter().map(|s| s.to_string()).collect(),
+            buffer_lines: buf_slice.iter().map(|s| s.to_string()).collect(),
+        });
     }
     diff
 }
@@ -1987,5 +2134,62 @@ mod tests {
             gutter_work(&head, &buffer(&head)),
             GutterWork::Done(diff) if diff == GutterDiff::default()
         ));
+    }
+
+    #[test]
+    fn hunk_unified_diff_formats_added_modified_deleted() {
+        let path = Path::new("src/main.rs");
+
+        // Added hunk
+        let added_hunk = DiffHunk {
+            buffer_start: 2,
+            buffer_len: 1,
+            head_start: 2,
+            head_len: 0,
+            head_lines: vec![],
+            buffer_lines: vec!["println!(\"hello\");".into()],
+        };
+        let patch = hunk_unified_diff(path, &added_hunk);
+        assert!(patch.contains("--- a/src/main.rs\n+++ b/src/main.rs\n"));
+        assert!(patch.contains("@@ -2,0 +3,1 @@\n+println!(\"hello\");\n"));
+
+        // Modified hunk
+        let mod_hunk = DiffHunk {
+            buffer_start: 4,
+            buffer_len: 1,
+            head_start: 4,
+            head_len: 1,
+            head_lines: vec!["let x = 1;".into()],
+            buffer_lines: vec!["let x = 2;".into()],
+        };
+        let patch = hunk_unified_diff(path, &mod_hunk);
+        assert!(patch.contains("@@ -5,1 +5,1 @@\n-let x = 1;\n+let x = 2;\n"));
+
+        // Deleted hunk
+        let del_hunk = DiffHunk {
+            buffer_start: 3,
+            buffer_len: 0,
+            head_start: 3,
+            head_len: 2,
+            head_lines: vec!["old1".into(), "old2".into()],
+            buffer_lines: vec![],
+        };
+        let patch = hunk_unified_diff(path, &del_hunk);
+        assert!(patch.contains("@@ -4,2 +3,0 @@\n-old1\n-old2\n"));
+    }
+
+    #[test]
+    fn gutter_diff_extracts_hunks_with_line_lookup() {
+        let head = "line1\nline2\nline3\nline4\nline5\n";
+        let diff = compute_gutter_diff(
+            head,
+            &buffer("line1\nline2 modified\nnew line\nline3\nline5\n"),
+        );
+        assert!(!diff.hunks.is_empty());
+        let hunk = diff.hunk_at_line(1);
+        assert!(hunk.is_some());
+        assert_eq!(hunk.unwrap().buffer_start, 1);
+        assert_eq!(hunk.unwrap().head_lines, vec!["line2"]);
+        assert_eq!(hunk.unwrap().buffer_lines, vec!["line2 modified", "new line"]);
     }
 }

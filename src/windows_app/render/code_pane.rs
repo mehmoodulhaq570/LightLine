@@ -639,6 +639,23 @@ impl App {
                         caret,
                     );
                     DeleteObject(caret);
+                    if let Some(ghost) = &self.ghost_text {
+                        let active_tab = self.tab_for_pane(pane);
+                        if ghost.tab == active_tab && ghost.pos == cursor {
+                            SetTextColor(hdc, self.theme.muted);
+                            let first_line = ghost.text.lines().next().unwrap_or("");
+                            let display = if ghost.text.contains('\n') {
+                                format!("{first_line} ...")
+                            } else {
+                                first_line.to_string()
+                            };
+                            let ghost_x = x + self.scale(2).max(2);
+                            if ghost_x < right && !display.is_empty() {
+                                let chars: Vec<u16> = display.encode_utf16().collect();
+                                TextOutW(hdc, ghost_x, y, chars.as_ptr(), chars.len() as i32);
+                            }
+                        }
+                    }
                 }
             }
             // The scrollbar goes over the text: a track with a thin edge, and

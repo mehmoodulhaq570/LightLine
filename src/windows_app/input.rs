@@ -428,6 +428,34 @@ impl App {
                     self.review_file = None;
                     self.panel_focus = true;
                 }
+                x if x == VK_F7 as u32 && shift => {
+                    let prev_hunk = (0..self.diff_first).rev().find(|&i| {
+                        self.diff_rows[i].changed && (i == 0 || !self.diff_rows[i - 1].changed)
+                    });
+                    if let Some(target) = prev_hunk {
+                        self.diff_first = target;
+                    }
+                }
+                x if x == VK_F7 as u32 => {
+                    let next_hunk = ((self.diff_first + 1)..self.diff_rows.len()).find(|&i| {
+                        self.diff_rows[i].changed && !self.diff_rows[i - 1].changed
+                    });
+                    if let Some(target) = next_hunk {
+                        self.diff_first = target;
+                    }
+                }
+                0x53 => {
+                    if let Some(path) = self.review_file.clone() {
+                        if self.review_staged {
+                            self.git_write(hwnd, GitAction::Unstage(vec![path.clone()]));
+                            self.review_staged = false;
+                        } else {
+                            self.git_write(hwnd, GitAction::Stage(vec![path.clone()]));
+                            self.review_staged = true;
+                        }
+                        self.show_diff(hwnd, path, self.review_staged);
+                    }
+                }
                 _ => return true,
             }
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -731,6 +759,10 @@ impl App {
         let cursor = self.view().cursor;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
         // Shift+Alt+F formats the current document through the language server.
+        if alt && !shift && !ctrl && (key == VK_OEM_5 as u32 || key == 0xDC) {
+            self.trigger_inline_ai(hwnd);
+            return true;
+        }
         if shift && alt && !ctrl && key == 0x46 {
             self.format_document(hwnd);
             return true;
@@ -759,6 +791,11 @@ impl App {
                 _ => self.dismiss_completion(hwnd),
             }
         }
+        if key == VK_TAB as u32 && !ctrl && !shift {
+            if self.accept_ghost_text(hwnd) {
+                return true;
+            }
+        }
         // Checked before the key acts: Backspace and Delete clear a hover card.
         let stays_in_editor = self.keystroke_stays_in_editor();
         let before = self.caret_frame(hwnd);
@@ -780,6 +817,9 @@ impl App {
                 return true;
             }
             x if x == VK_ESCAPE as u32 => {
+                if self.clear_ghost_text(hwnd) {
+                    return true;
+                }
                 if self.terminal_visible {
                     self.hide_terminal(hwnd);
                     return true;
@@ -2084,7 +2124,8 @@ impl App {
         let problem = self
             .ai_diagnostic_at_cursor()
             .map(|diagnostic| EditorContextDiagnostic::from_lsp(&diagnostic));
-        self.editor_context = Some(EditorContextMenu::new(x, y, problem, selected));
+        let has_hunk = self.active_hunk_at_cursor().is_some();
+        self.editor_context = Some(EditorContextMenu::new(x, y, problem, selected, has_hunk));
         unsafe { InvalidateRect(hwnd, null(), 0) };
         true
     }

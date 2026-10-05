@@ -49,6 +49,8 @@ impl App {
             ("Search in files", 0),
             ("Run Rust tests", 1),
             ("Run Python File", 8),
+            ("Run Active File (Ctrl+Shift+R)", 48),
+            ("Stop Running Program", 49),
             ("Review Git changes", 2),
             ("Open folder", 3),
             ("New file", 4),
@@ -151,6 +153,8 @@ impl App {
                 Some(0) => self.open_project_search(hwnd),
                 Some(1) => self.run_project(hwnd),
                 Some(8) => self.run_python_file(hwnd),
+                Some(48) => self.run_active_file(hwnd),
+                Some(49) => self.stop_running_program(hwnd),
                 Some(2) => self.show_review(hwnd),
                 Some(3) => self.open_folder(hwnd),
                 Some(4) => self.new_file(hwnd),
@@ -350,28 +354,48 @@ impl App {
             self.run_python_file(hwnd);
         } else if Tab::is_c_family(self.doc()) {
             self.run_c_file(hwnd);
-        } else if Tab::is_rust(self.doc()) || self.workspace_root.is_some() {
-            self.run_project(hwnd);
+        } else if self.doc().path.as_deref().is_some_and(|path| lightline::runner::Language::for_path(path).is_some()) {
+            if self.doc().is_dirty() && !self.save(hwnd, false) {
+                self.status = "Save the file before running it".into();
+                self.refresh(hwnd);
+                return;
+            }
+            let Some(file) = self.doc().path.clone() else { return; };
+            match lightline::runner::prepare(&file) {
+                Ok(plan) => self.run_language_plan(hwnd, plan),
+                Err(error) => {
+                    self.status = error;
+                    self.refresh(hwnd);
+                }
+            }
         } else {
-            self.status = "Open a Python, C/C++, or Rust file to run it".into();
+            self.status = "Open a Python, C/C++, JavaScript, TypeScript, Go, or Rust file to run it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 
     pub(super) fn run_project(&mut self, hwnd: HWND) {
-        if self.workspace_root.is_none() {
+        let root = self.doc().path.as_deref().and_then(|file| file.parent())
+            .and_then(|folder| folder.ancestors().find(|folder| folder.join("Cargo.toml").is_file()))
+            .map(Path::to_path_buf)
+            .or_else(|| self.workspace_root.clone().filter(|root| root.join("Cargo.toml").is_file()));
+        let Some(root) = root else {
             self.status = "Open a Rust workspace to run tests".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
-        }
-        if !workflow::command_available("cargo") {
+        };
+        let Some(cargo) = workflow::resolve_command("cargo") else {
             self.status =
                 "Cargo was not found on PATH. Install Rust (rustup.rs) and restart LightLine."
                     .into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
-        }
-        self.run_in_terminal(hwnd, "cargo test --offline");
+        };
+        self.run_language_plan(hwnd, lightline::runner::RunPlan {
+            cwd: PathBuf::from(display_path(&root)),
+            commands: vec![lightline::runner::RunCommand { program: cargo,
+                arguments: vec!["test".into(), "--offline".into()] }],
+        });
     }
 
     pub(super) fn run_c_file(&mut self, hwnd: HWND) {
@@ -393,28 +417,28 @@ impl App {
         let is_cpp = Tab::is_cpp(self.doc());
         let Some(compiler) = workflow::detect_c_compiler(is_cpp) else {
             self.status = if is_cpp {
-                "No C++ compiler found on PATH (install g++/MinGW or MSVC Build Tools)".into()
+                "No C++ compiler found on PATH (install g++/MinGW or Clang)".into()
             } else {
-                "No C compiler found on PATH (install gcc/MinGW or MSVC Build Tools)".into()
+                "No C compiler found on PATH (install gcc/MinGW or Clang)".into()
             };
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
         self.check_c_syntax(hwnd, file.clone(), compiler, is_cpp);
-        let source = display_path(&file);
         let mut output = file.clone();
         output.set_extension("exe");
-        let output = display_path(&output);
-        // Compile then run in one shell command so a compile error is shown
-        // in place of a crash from trying to run a binary that was never
-        // produced; `&&` short-circuits the run half on a nonzero exit.
-        let command = format!(
-            "& {compiler} {} -o {} && & {}",
-            terminal::powershell_quoted(Path::new(&source)),
-            terminal::powershell_quoted(Path::new(&output)),
-            terminal::powershell_quoted(Path::new(&output)),
-        );
-        self.run_in_terminal(hwnd, &command);
+        let output = PathBuf::from(display_path(&output));
+        let source = PathBuf::from(display_path(&file));
+        self.run_language_plan(hwnd, lightline::runner::RunPlan {
+            cwd: source.parent().unwrap_or(Path::new(".")).to_path_buf(),
+            commands: vec![
+                lightline::runner::RunCommand {
+                    program: workflow::resolve_command(compiler).unwrap_or_else(|| compiler.into()),
+                    arguments: vec![source.into(), "-o".into(), output.clone().into()],
+                },
+                lightline::runner::RunCommand { program: output, arguments: Vec::new() },
+            ],
+        });
     }
 
     pub(super) fn run_python_file(&mut self, hwnd: HWND) {
@@ -440,17 +464,13 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        // PowerShell only executes a quoted-string command when it's prefixed
-        // with the call operator; without it "'...exe' -u '...'" parses as a
-        // bare string statement followed by an unexpected "-u" token.
-        // display_path() drops the \\?\ extended-length prefix canonicalize()
-        // leaves on the path, which is noise in a command the user can see.
-        let command = format!(
-            "& {} -u {}",
-            terminal::powershell_quoted(&interpreter),
-            terminal::powershell_quoted(Path::new(&display_path(&file)))
-        );
-        self.run_in_terminal(hwnd, &command);
+        self.run_language_plan(hwnd, lightline::runner::RunPlan {
+            cwd: PathBuf::from(display_path(&root)),
+            commands: vec![lightline::runner::RunCommand {
+                program: PathBuf::from(display_path(&interpreter)),
+                arguments: vec!["-u".into(), display_path(&file).into()],
+            }],
+        });
     }
 
     // The interpreter Run Python File and Python debugging use: the one the
@@ -758,6 +778,36 @@ impl App {
                         }
                         Err(error) => {
                             self.status = format!("{formatter_name} formatting failed: {error}");
+                        }
+                    }
+                }
+                WorkerMessage::GhostSuggestion {
+                    tab,
+                    pos,
+                    serial,
+                    text,
+                } => {
+                    if self.active == tab
+                        && self.doc().change_serial() == serial
+                        && self.view().cursor == pos
+                    {
+                        match text {
+                            Ok(suggestion) if !suggestion.trim().is_empty() => {
+                                self.ghost_text = Some(GhostText {
+                                    tab,
+                                    pos,
+                                    text: suggestion,
+                                });
+                                self.status =
+                                    "Tab to accept inline completion, Esc to dismiss".into();
+                            }
+                            Ok(_) => {
+                                self.ghost_text = None;
+                            }
+                            Err(error) => {
+                                self.ghost_text = None;
+                                self.status = format!("AI completion: {error}");
+                            }
                         }
                     }
                 }

@@ -148,6 +148,8 @@ pub(super) enum AiAction {
     Insert(String),
     /// Put the code in place of what answer `usize`'s question was about.
     Replace(String, usize),
+    /// Smart apply code into active editor with undo support.
+    Apply(String, usize),
 }
 
 /// Where the panel's buttons were painted, for mouse clicks.
@@ -993,6 +995,16 @@ impl App {
                 AiAction::Replace(code, answer) => {
                     if let Some((tab, start, end)) = self.ai_replace_target(*answer) {
                         self.ai_apply_code(hwnd, code, tab, start, end);
+                    }
+                }
+                AiAction::Apply(code, answer) => {
+                    if let Some((tab, start, end)) = self.ai_replace_target(*answer) {
+                        self.ai_apply_code(hwnd, code, tab, start, end);
+                    } else if let Some((start, end)) = self.selection_range() {
+                        self.ai_apply_code(hwnd, code, self.active, start, end);
+                    } else if self.ai_can_insert() {
+                        let cursor = self.view().cursor;
+                        self.ai_apply_code(hwnd, code, self.active, cursor, cursor);
                     }
                 }
             }

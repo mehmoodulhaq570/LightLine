@@ -27,7 +27,7 @@ use windows_sys::Win32::System::Threading::{
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentThreadId,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     OpenThread, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread,
-    STARTUPINFOEXW, SetEvent, THREAD_TERMINATE, TerminateProcess, UpdateProcThreadAttribute,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, SetEvent, THREAD_TERMINATE, TerminateProcess, UpdateProcThreadAttribute,
     WaitForMultipleObjects, WaitForSingleObject,
 };
 
@@ -299,6 +299,11 @@ fn spawn(spec: &LaunchSpec, console: &PseudoConsole, job: &Handle) -> Result<Pro
     let mut attributes = Attributes::new(console.raw)?;
     let mut startup = STARTUPINFOEXW::default();
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+    // Null standard handles with this flag prevent Windows from duplicating
+    // the parent's redirected pipes into a ConPTY child. The attached console
+    // initializes its own handles instead, keeping native programs in the pane.
+    // https://github.com/microsoft/terminal/discussions/15814
+    startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
     startup.lpAttributeList = attributes.pointer();
     let mut information = PROCESS_INFORMATION::default();
     // A ConPTY child must be attached ONLY through the pseudoconsole attribute

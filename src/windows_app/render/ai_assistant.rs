@@ -1078,6 +1078,9 @@ impl App {
             if can_insert {
                 buttons.push(("Insert", AiAction::Insert(block.text.clone())));
             }
+            if can_replace || can_insert {
+                buttons.push(("Apply", AiAction::Apply(block.text.clone(), index)));
+            }
             for (label, action) in buttons {
                 let button = RECT {
                     left: right - self.text_width(hdc, label) - s(16),

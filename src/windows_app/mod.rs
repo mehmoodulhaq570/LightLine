@@ -20,7 +20,7 @@ mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
     ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, FileAction, GitAction, SideView, Tab,
-    TerminalPane, TerminalTab, WorkerMessage, is_c_family_path, is_cpp_path,
+    TerminalPane, TerminalTab, WorkerMessage, GhostText, is_c_family_path, is_cpp_path,
 };
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
 use more_menu::MoreMenu;
@@ -60,7 +60,7 @@ use lightline::terminal::{
     TerminalService, TerminalSize,
 };
 pub use lightline::workflow::{
-    self, Change, CommitEntry, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit,
+    self, Change, CommitEntry, DiffHunk, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

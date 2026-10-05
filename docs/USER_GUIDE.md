@@ -57,7 +57,7 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Shift+R` | Run the active Python, C/C++ or Rust file |
+| `Ctrl+Shift+R` | Run the active Python, C/C++, JavaScript, TypeScript, Go or Rust file/project |
 | `Ctrl+Shift+B` | Run Rust tests (`cargo test`) |
 | `F5` / `Shift+F5` | Start or continue debugging / stop |
 | `F10` | Step over |
@@ -65,6 +65,25 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 | `F9` or a click in the gutter | Toggle a breakpoint |
 
 In the search results and the Source Control list, `↑` / `↓` move, `Enter` opens, and `Space` stages or unstages. While your program runs in the Output pane, it receives what you type, including `Enter`.
+
+### Direct language runners
+
+Click the **Run** triangle or press **Ctrl+Shift+R**. LightLine saves changes first and runs the program in **Output**, with keyboard input and an exit status. Output stays visible after the program exits. Use **Stop Running Program** in the Command Palette, or the kill button while Output is selected, to stop it and its child processes. A second run is blocked until the first finishes or stops.
+
+No runner extension is required. Install the language's runtime or compiler:
+
+| Language | What Run executes | Required tool |
+| --- | --- | --- |
+| Python | The saved file with the selected interpreter | Python |
+| C/C++ | Compile the file, then run it only if compilation succeeds | GCC/G++ or Clang/Clang++ on PATH |
+| JavaScript (`.js`, `.mjs`, `.cjs`) | The file with Node.js | Node.js |
+| TypeScript, JSX, TSX | The file with project-local `tsx`, or `tsx` on PATH | Node.js and `npm install --save-dev tsx` in the project, or `npm install -g tsx` |
+| Go | `go run .` in the current package when a `go.mod`/`go.work` is found; otherwise `go run <file>` | Go |
+| Rust | `cargo run` for Cargo source files, including named binaries/examples; loose files compile with `rustc` and then run | Rust/Cargo |
+
+For JavaScript/TypeScript projects, a `start` script in the nearest `package.json` takes precedence; otherwise a `dev` script is used when present. These run from the package directory with `npm run`. Without a script, files run directly. Runtime configuration and project dependencies still apply; `tsx` runs TypeScript without type-checking it.
+
+Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are stored in `.lightline-run` beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
 
 ---
 
@@ -120,7 +139,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 
 ## Languages, formatting and debugging
 
-Colors, folding, search and running files work with nothing extra installed. These add more:
+Colors, folding and search are built in. Running uses the language tools listed above. These add more:
 
 - **Rust**: for errors, completions and go-to-definition, run `rustup component add rust-analyzer rust-src`.
 - **Python**: install Node.js once (for example `winget install OpenJS.NodeJS.LTS`). The first time you open a Python file, LightLine downloads Pyright into `%APPDATA%\LightLine\pyright`.

@@ -278,6 +278,48 @@ pub fn stream_chat(
     Ok(())
 }
 
+/// Inline code completion: predicts the code snippet that should be inserted at the cursor.
+pub fn complete_inline(
+    endpoint: &str,
+    model: &str,
+    prefix: &str,
+    suffix: &str,
+    language: &str,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
+    let prompt = format!(
+        "You are an inline code completion model for {language}.\n\
+         Given the code before and after the cursor, output ONLY the code that should be inserted directly at the cursor.\n\
+         Do not include explanations, greetings, or markdown code fences.\n\n\
+         [BEFORE CURSOR]\n{prefix}\n[AFTER CURSOR]\n{suffix}\n[COMPLETION]"
+    );
+    let messages = [
+        Message::new(
+            Role::System,
+            "You are an expert code completion engine. Output only the completion code, nothing else.",
+        ),
+        Message::new(Role::User, prompt),
+    ];
+    let mut output = String::new();
+    stream_chat(endpoint, model, &messages, cancel, |chunk| {
+        output.push_str(chunk);
+    })?;
+    Ok(clean_inline_completion(&output))
+}
+
+/// Strip any accidental markdown fences or thinking tags from inline completion.
+pub fn clean_inline_completion(raw: &str) -> String {
+    let (visible, _) = visible_answer(raw);
+    let trimmed = visible.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        let after_lang = rest.split_once('\n').map_or(rest, |(_, code)| code);
+        let code = after_lang.strip_suffix("```").unwrap_or(after_lang);
+        code.trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// The part of an answer to show. Reasoning models first "think out loud"
 /// inside <think>...</think>; that's hidden, and `true` is returned while
 /// the model is still thinking.
@@ -506,5 +548,17 @@ mod tests {
         let endpoint = format!("http://127.0.0.1:{port}");
         let error = list_models(&endpoint).unwrap_err();
         assert_eq!(error, format!("{NOTHING_ANSWERED} {endpoint}."));
+    }
+
+    #[test]
+    fn complete_inline_extracts_clean_code() {
+        let endpoint = serve_once(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+             data: {\"choices\":[{\"delta\":{\"content\":\"```rust\\nlet y = 42;\\n```\"}}]}\n\n\
+             data: [DONE]\n\n",
+        );
+        let cancel = AtomicBool::new(false);
+        let completion = complete_inline(&endpoint, "m", "let x = 10;\n", "", "rust", &cancel).unwrap();
+        assert_eq!(completion, "let y = 42;");
     }
 }

@@ -1,4 +1,5 @@
 /target/
+.lightline-run/
 *.tmp
 design/current-redesign.png
 SignPath.docx

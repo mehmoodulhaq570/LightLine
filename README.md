@@ -26,7 +26,7 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 
 - **Smart editing**: syntax colors, code folding, bracket matching, find and replace, word wrap, and a split editor.
 - **Rust and Python support**: errors as you type, completions, go to definition, and hover docs, through rust-analyzer and Pyright.
-- **Run and debug**: run Python, Rust or C/C++ files with one key, and debug Rust and Python with breakpoints, stepping and variables.
+- **Run and debug**: run Python, C/C++, JavaScript, TypeScript, Go or Rust with one key, and debug Rust and Python with breakpoints, stepping and variables.
 - **Git built in**: see changed lines in the margin, then stage, commit, push and review diffs without leaving the editor.
 - **Terminal**: PowerShell, Command Prompt, Git Bash or WSL, in tabs.
 - **Markdown preview**: see your README rendered beside the file as you type.

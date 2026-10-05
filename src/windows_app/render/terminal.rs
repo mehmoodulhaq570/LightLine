@@ -159,7 +159,10 @@ impl App {
             "\u{2715}",
             layout.kill.left + self.scale(4),
             top + self.scale(9),
-            if shell_open {
+            if match self.terminal_tab {
+                TerminalTab::Output => self.run_session.is_some(),
+                TerminalTab::Terminal => shell_open,
+            } {
                 self.theme.muted
             } else {
                 ui(74, 80, 94)

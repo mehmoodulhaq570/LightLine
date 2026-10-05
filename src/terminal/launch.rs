@@ -65,6 +65,10 @@ pub enum LaunchRequest {
         cwd: PathBuf,
         no_profile: bool,
     },
+    Run {
+        cwd: PathBuf,
+        command: String,
+    },
 }
 
 impl LaunchRequest {
@@ -96,6 +100,7 @@ impl LaunchRequest {
     pub fn without_profile(mut self) -> Self {
         match &mut self {
             Self::Shell { no_profile, .. } | Self::Python { no_profile, .. } => *no_profile = true,
+            Self::Run { .. } => {}
         }
         self
     }
@@ -351,7 +356,7 @@ fn wsl_distribution_names() -> Vec<String> {
 pub fn prepare_launch(request: &LaunchRequest) -> Result<LaunchSpec, String> {
     let shell_kind = match request {
         LaunchRequest::Shell { shell_kind, .. } => *shell_kind,
-        LaunchRequest::Python { .. } => ShellKind::PowerShell,
+        LaunchRequest::Python { .. } | LaunchRequest::Run { .. } => ShellKind::PowerShell,
     };
     let executable = shell_kind.resolve()?;
     prepare_with_shell(request, executable, shell_kind)
@@ -369,6 +374,7 @@ fn prepare_with_shell(
         | LaunchRequest::Python {
             cwd, no_profile, ..
         } => (cwd, *no_profile),
+        LaunchRequest::Run { cwd, .. } => (cwd, true),
     };
     let cwd = absolute_existing(cwd, true)?;
     let mut spec = LaunchSpec {
@@ -401,6 +407,13 @@ fn prepare_with_shell(
             OsString::from(encode_powershell_command(&command)),
         ]);
         spec.environment = python_environment(&interpreter, std::env::var_os("PATH").as_deref())?;
+    }
+    if let LaunchRequest::Run { command, .. } = request {
+        reject_nul(OsStr::new(command))?;
+        spec.arguments.extend([
+            OsString::from("-EncodedCommand"),
+            OsString::from(encode_powershell_command(command)),
+        ]);
     }
     Ok(spec)
 }

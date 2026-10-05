@@ -377,6 +377,10 @@ impl App {
     // signals stop and lets the owner thread reap the child. Hides the panel
     // once the last terminal is gone.
     pub(super) fn close_active_terminal(&mut self, hwnd: HWND) {
+        if self.terminal_tab == TerminalTab::Output {
+            self.stop_running_program(hwnd);
+            return;
+        }
         if self.terminals.is_empty() {
             self.hide_terminal(hwnd);
             return;
@@ -569,6 +573,13 @@ impl App {
             self.run_snapshot = Some(event.snapshot);
             repaint = true;
             if final_status {
+                self.status = match &self.run_snapshot.as_ref().unwrap().status {
+                    SessionStatus::Exited { code: 0 } => "Program finished".into(),
+                    SessionStatus::Exited { code } => format!("Program exited with code {code}"),
+                    SessionStatus::Stopped => "Program stopped".into(),
+                    SessionStatus::Failed(error) => format!("Run failed: {error}"),
+                    _ => unreachable!(),
+                };
                 let _ = self.terminal.remove(event.session_id);
                 self.run_session = None;
                 self.run_applied_size = None;
@@ -1346,6 +1357,50 @@ impl App {
             let _ = self.terminal.input(id, line.as_bytes());
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    pub(super) fn run_language_plan(&mut self, hwnd: HWND, plan: lightline::runner::RunPlan) {
+        self.poll_terminal(hwnd);
+        if self.run_session.is_some() {
+            self.status = "A program is already running. Stop it before starting another.".into();
+            self.refresh(hwnd);
+            return;
+        }
+        let command = match plan.powershell_command() {
+            Ok(command) => command,
+            Err(error) => {
+                self.status = error;
+                self.refresh(hwnd);
+                return;
+            }
+        };
+        let size = self.terminal_size_for(hwnd);
+        match self.terminal.start(SessionKind::ManagedRun,
+            LaunchRequest::Run { cwd: plan.cwd, command }, size)
+        {
+            Ok(id) => {
+                self.welcome = false;
+                self.terminal_visible = true;
+                self.terminal_tab = TerminalTab::Output;
+                self.run_session = Some(id);
+                self.run_applied_size = Some(size);
+                self.run_snapshot = None;
+                self.status = "Running program...".into();
+                self.focus_run_session(hwnd);
+            }
+            Err(error) => self.status = format!("Run could not start: {error}"),
+        }
+        self.refresh(hwnd);
+    }
+
+    pub(super) fn stop_running_program(&mut self, hwnd: HWND) {
+        if let Some(id) = self.run_session {
+            let _ = self.terminal.stop(id);
+            self.status = "Stopping program...".into();
+        } else {
+            self.status = "No program is running".into();
+        }
+        self.refresh(hwnd);
     }
 
     // Stop every shell and the run session and hide the panel, e.g. when
