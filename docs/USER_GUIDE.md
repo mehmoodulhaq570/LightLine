@@ -85,6 +85,22 @@ For JavaScript/TypeScript projects, a `start` script in the nearest `package.jso
 
 Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are stored in `.lightline-run` beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
 
+### Saved Run configurations
+
+Open the editor's **...** menu and choose **Run Configurations...**, or use **Run: Configure / Select Saved Configuration** in the Command Palette. **Automatic** keeps the language detection described above.
+
+Click **New**, enter a name, and customize any of these fields:
+
+- **Entry file:** leave blank to follow the active file, or choose a fixed file.
+- **Command:** leave blank to detect the language from the entry file, or enter an executable such as `npm`, `cargo`, or a full path. Put command options in Arguments; shell operators are not supported here.
+- **Working directory:** leave blank for the detected directory, or enter another folder.
+- **Arguments:** enter one argument per line. A line containing `hello world` is one argument; do not add shell quotes. For detected Cargo and npm runs, these are forwarded to the application or script.
+- **Environment:** enter one `NAME=value` per line. These values apply only to the launched program and its children.
+
+Paths are relative to the open workspace (or the saved file's folder when no workspace is open). **Save & Select** saves the configuration and makes it the default for **Run** / **Ctrl+Shift+R**. Select **Automatic** and click **Save & Select** to return to detection. **Delete** removes the selected saved configuration immediately. Use **Run** in the **...** menu to launch a saved project command while viewing a data file.
+
+Configurations and the selected name persist in `.lightline/run.json`. Keep secrets out of this file if you share it or commit it to source control. Other open entry files with unsaved changes must be saved before launching.
+
 ---
 
 ## Settings

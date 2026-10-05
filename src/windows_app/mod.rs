@@ -13,6 +13,7 @@ mod more_menu;
 mod wrap;
 use markdown_view::{MARKDOWN_TIMER, MarkdownPreview};
 mod panels;
+mod run_config_panel;
 mod session;
 mod settings_panel;
 mod terminal;

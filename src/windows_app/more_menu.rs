@@ -17,6 +17,8 @@ enum MoreAction {
     Replace,
     WordWrap,
     Format,
+    Run,
+    RunConfigurations,
     Close,
     Palette,
 }
@@ -41,6 +43,8 @@ impl App {
                 MoreAction::Replace,
                 MoreAction::WordWrap,
                 MoreAction::Format,
+                MoreAction::Run,
+                MoreAction::RunConfigurations,
             ]);
         }
         actions.extend([MoreAction::Close, MoreAction::Palette]);
@@ -55,6 +59,8 @@ impl App {
             MoreAction::Replace => ("Replace", "Ctrl+H"),
             MoreAction::WordWrap => ("Toggle Word Wrap", "Alt+Z"),
             MoreAction::Format => ("Format Document", "Shift+Alt+F"),
+            MoreAction::Run => ("Run", "Ctrl+Shift+R"),
+            MoreAction::RunConfigurations => ("Run Configurations...", ""),
             MoreAction::Close => ("Close Editor", "Ctrl+W"),
             MoreAction::Palette => ("Command Palette", "Ctrl+Shift+P"),
         }
@@ -197,6 +203,8 @@ impl App {
             MoreAction::Replace => self.open_find(hwnd, true),
             MoreAction::WordWrap => self.toggle_word_wrap(hwnd),
             MoreAction::Format => self.format_document(hwnd),
+            MoreAction::Run => self.run_active_file(hwnd),
+            MoreAction::RunConfigurations => self.show_run_configurations(hwnd),
             MoreAction::Close => self.close_tab(hwnd, self.active),
             MoreAction::Palette => {
                 self.show_quick_open(hwnd);

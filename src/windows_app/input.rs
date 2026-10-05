@@ -791,10 +791,8 @@ impl App {
                 _ => self.dismiss_completion(hwnd),
             }
         }
-        if key == VK_TAB as u32 && !ctrl && !shift {
-            if self.accept_ghost_text(hwnd) {
-                return true;
-            }
+        if key == VK_TAB as u32 && !ctrl && !shift && self.accept_ghost_text(hwnd) {
+            return true;
         }
         // Checked before the key acts: Backspace and Delete clear a hover card.
         let stays_in_editor = self.keystroke_stays_in_editor();

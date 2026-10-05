@@ -51,6 +51,7 @@ impl App {
             ("Run Python File", 8),
             ("Run Active File (Ctrl+Shift+R)", 48),
             ("Stop Running Program", 49),
+            ("Run: Configure / Select Saved Configuration", 50),
             ("Review Git changes", 2),
             ("Open folder", 3),
             ("New file", 4),
@@ -155,6 +156,7 @@ impl App {
                 Some(8) => self.run_python_file(hwnd),
                 Some(48) => self.run_active_file(hwnd),
                 Some(49) => self.stop_running_program(hwnd),
+                Some(50) => self.show_run_configurations(hwnd),
                 Some(2) => self.show_review(hwnd),
                 Some(3) => self.open_folder(hwnd),
                 Some(4) => self.new_file(hwnd),
@@ -350,6 +352,7 @@ impl App {
     // which previously made Run silently no-op (or run the wrong thing) for
     // Python and C/C++ files.
     pub(super) fn run_active_file(&mut self, hwnd: HWND) {
+        if self.run_selected_configuration(hwnd) { return; }
         if Tab::is_python(self.doc()) {
             self.run_python_file(hwnd);
         } else if Tab::is_c_family(self.doc()) {
@@ -786,12 +789,11 @@ impl App {
                     pos,
                     serial,
                     text,
-                } => {
-                    if self.active == tab
-                        && self.doc().change_serial() == serial
-                        && self.view().cursor == pos
-                    {
-                        match text {
+                } if self.active == tab
+                    && self.doc().change_serial() == serial
+                    && self.view().cursor == pos =>
+                {
+                    match text {
                             Ok(suggestion) if !suggestion.trim().is_empty() => {
                                 self.ghost_text = Some(GhostText {
                                     tab,
@@ -809,7 +811,6 @@ impl App {
                                 self.status = format!("AI completion: {error}");
                             }
                         }
-                    }
                 }
                 _ => {}
             }

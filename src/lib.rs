@@ -12,6 +12,7 @@ pub mod lsp;
 pub mod markdown;
 pub mod markdown_syntax;
 pub mod runner;
+pub mod run_config;
 pub mod settings;
 pub mod syntax;
 pub mod terminal;

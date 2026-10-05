@@ -39,11 +39,28 @@ impl RunPlan {
     /// Paths and arguments are encoded as data, never interpolated as shell
     /// syntax. A failed compile exits before the old executable can run.
     pub fn powershell_command(&self) -> Result<String, String> {
+        self.powershell_command_with_environment(&std::collections::BTreeMap::new())
+    }
+
+    pub fn powershell_command_with_environment(
+        &self,
+        environment: &std::collections::BTreeMap<String, String>,
+    ) -> Result<String, String> {
         use crate::terminal::powershell_path_expression as quoted;
         let mut script = format!(
             "$ErrorActionPreference = 'Stop'; try {{ Set-Location -LiteralPath {} -ErrorAction Stop; ",
             quoted(&self.cwd)?
         );
+        for (name, value) in environment {
+            if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
+                return Err("Invalid environment variable name or value".into());
+            }
+            script.push_str(&format!(
+                "[Environment]::SetEnvironmentVariable({}, {}, 'Process'); ",
+                quoted(Path::new(name))?,
+                quoted(Path::new(value))?
+            ));
+        }
         for command in &self.commands {
             script.push_str(&format!("& {}", quoted(&command.program)?));
             for argument in &command.arguments {

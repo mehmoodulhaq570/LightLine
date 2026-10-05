@@ -1360,23 +1360,22 @@ impl App {
     }
 
     pub(super) fn run_language_plan(&mut self, hwnd: HWND, plan: lightline::runner::RunPlan) {
+        match plan.powershell_command() {
+            Ok(command) => self.start_language_run(hwnd, plan.cwd, command),
+            Err(error) => { self.status = error; self.refresh(hwnd); }
+        }
+    }
+
+    pub(super) fn start_language_run(&mut self, hwnd: HWND, cwd: PathBuf, command: String) {
         self.poll_terminal(hwnd);
         if self.run_session.is_some() {
             self.status = "A program is already running. Stop it before starting another.".into();
             self.refresh(hwnd);
             return;
         }
-        let command = match plan.powershell_command() {
-            Ok(command) => command,
-            Err(error) => {
-                self.status = error;
-                self.refresh(hwnd);
-                return;
-            }
-        };
         let size = self.terminal_size_for(hwnd);
         match self.terminal.start(SessionKind::ManagedRun,
-            LaunchRequest::Run { cwd: plan.cwd, command }, size)
+            LaunchRequest::Run { cwd, command }, size)
         {
             Ok(id) => {
                 self.welcome = false;

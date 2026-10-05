@@ -71,6 +71,95 @@ fn verify(file: &Path, marker: &str) {
 }
 
 #[test]
+#[ignore = "requires Node.js and Windows ConPTY"]
+fn saved_configuration_arguments_environment_and_working_directory() {
+    use lightline::run_config::{Configuration, Configurations};
+    let root = fixture("saved configuration ' $(bad)");
+    let cwd = root.join("working folder");
+    fs::create_dir_all(&cwd).unwrap();
+    let file = write(
+        &root,
+        "config.js",
+        "console.log('CONFIG_ARG=' + process.argv[2]); console.log('CONFIG_ENV=' + process.env.LIGHTLINE_CONFIG_TEST); console.log('CONFIG_CWD=' + require('node:path').basename(process.cwd())); console.log('CONFIG_EMPTY=' + (process.env.LIGHTLINE_EMPTY_TEST || 'empty'));\n",
+    );
+    let config = Configuration {
+        name: "Demo".into(),
+        entry_file: "config.js".into(),
+        arguments: vec!["hello world ' $(Write-Output BAD)".into()],
+        working_directory: "working folder".into(),
+        environment: std::collections::BTreeMap::from([
+            (
+                "LIGHTLINE_CONFIG_TEST".into(),
+                "value ' $(Write-Output BAD)".into(),
+            ),
+            ("LIGHTLINE_EMPTY_TEST".into(), String::new()),
+        ]),
+        ..Default::default()
+    };
+    let saved = Configurations {
+        selected: Some("Demo".into()),
+        configurations: vec![config],
+    };
+    saved.save(&root).unwrap();
+    let loaded = Configurations::load(&root).unwrap();
+    let config = loaded.active().unwrap();
+    assert_eq!(config.entry(&root, None).unwrap(), file);
+    let mut plan = prepare(&file).unwrap();
+    config.apply(&root, &mut plan).unwrap();
+    let mut service = TerminalService::default();
+    let id = service
+        .start(
+            SessionKind::ManagedRun,
+            LaunchRequest::Run {
+                cwd: plan.cwd.clone(),
+                command: plan
+                    .powershell_command_with_environment(&config.environment)
+                    .unwrap(),
+            },
+            TerminalSize::new(24, 140).unwrap(),
+        )
+        .unwrap();
+    let (status, output) = finish(&mut service, id);
+    assert_eq!(status, SessionStatus::Exited { code: 0 }, "{output}");
+    assert!(
+        output.contains("CONFIG_ARG=hello world ' $(Write-Output BAD)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("CONFIG_ENV=value ' $(Write-Output BAD)"),
+        "{output}"
+    );
+    assert!(output.contains("CONFIG_CWD=working folder"), "{output}");
+    assert!(output.contains("CONFIG_EMPTY=empty"), "{output}");
+    service.remove(id).unwrap();
+
+    // Explicit commands take command options verbatim, without a forwarding --.
+    let config = Configuration {
+        command: "node".into(),
+        arguments: vec![file.to_string_lossy().into_owned(), "custom command".into()],
+        ..config.clone()
+    };
+    let mut plan = config.command_plan(&root).unwrap().unwrap();
+    config.apply(&root, &mut plan).unwrap();
+    assert_eq!(plan.commands[0].arguments.len(), 2);
+    let id = service
+        .start(
+            SessionKind::ManagedRun,
+            LaunchRequest::Run {
+                cwd: plan.cwd.clone(),
+                command: plan
+                    .powershell_command_with_environment(&config.environment)
+                    .unwrap(),
+            },
+            TerminalSize::new(24, 140).unwrap(),
+        )
+        .unwrap();
+    let (status, output) = finish(&mut service, id);
+    assert_eq!(status, SessionStatus::Exited { code: 0 }, "{output}");
+    assert!(output.contains("CONFIG_ARG=custom command"), "{output}");
+}
+
+#[test]
 #[ignore = "requires installed language tools and live Windows ConPTY"]
 fn runs_javascript_typescript_go_and_rust_projects_and_files() {
     let root = fixture("spaces ' $(Write-Output INJECTED) test");
