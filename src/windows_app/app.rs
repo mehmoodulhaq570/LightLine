@@ -42,12 +42,13 @@ pub(super) enum ExtensionInstallKind {
 }
 
 pub(super) enum WorkerMessage {
+    Directory(u64, u64, PathBuf, Result<Vec<ExplorerEntry>, String>),
     // Workspace root, then each file with its lowercase relative path.
     Files(PathBuf, Vec<(PathBuf, String)>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
     // Generation guards the status request: only the newest answer may paint,
     // because refreshes fire on activation, save and every completed action.
-    Repo(u64, Result<RepoState, String>),
+    Repo(u64, u64, Result<RepoState, String>),
     Diff(PathBuf, PathBuf, Result<Vec<DiffRow>, String>),
     GutterDiff(
         PathBuf,
@@ -104,7 +105,7 @@ pub(super) enum GitAction {
     Commit,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct EditorView {
     pub(super) cursor: Pos,
     pub(super) selection_anchor: Option<Pos>,
@@ -696,6 +697,10 @@ pub(super) struct App {
     pub(super) workspace_branch: Option<String>,
     pub(super) expanded_dirs: HashSet<PathBuf>,
     pub(super) directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
+    pub(super) directory_requests: HashMap<PathBuf, u64>,
+    pub(super) directory_request_serial: u64,
+    pub(super) recovery_last: Instant,
+    pub(super) recovery_key: RefCell<Option<session::RecoveryKey>>,
     pub(super) welcome: bool,
     pub(super) ai_assistant_visible: bool,
     // The AI Assistant's conversation and message box (see ai_chat.rs).
@@ -1217,6 +1222,10 @@ impl App {
             workspace_branch: None,
             expanded_dirs: HashSet::new(),
             directory_cache: HashMap::new(),
+            directory_requests: HashMap::new(),
+            directory_request_serial: 0,
+            recovery_last: Instant::now(),
+            recovery_key: RefCell::new(None),
             welcome: true,
             ai_assistant_visible: false,
             ai: AiChat::new(),
@@ -1484,7 +1493,6 @@ impl App {
                         if lightline::extensions::zed_manifest::is_color_theme(&dir) {
                             let Some(zed_theme) = lightline::color_theme::ZedColorTheme::load(&dir)
                             else {
-                                let _ = lightline::extensions::installer::uninstall(&registry_id);
                                 return Err("its theme file could not be parsed".to_string());
                             };
                             return Ok(ExtensionInstallKind::ColorTheme(zed_theme.name));
@@ -2131,13 +2139,24 @@ impl App {
     }
 
     pub(super) fn can_close_window(&mut self, hwnd: HWND) -> bool {
+        let mut discarded = Vec::new();
         for index in 0..self.tabs.len() {
             if self.tabs[index].document.is_dirty() {
                 self.activate_tab(hwnd, index);
                 if !self.can_discard(hwnd) {
                     return false;
                 }
+                if self.tabs[index].document.is_dirty() {
+                    discarded.push(index);
+                }
             }
+        }
+        for index in discarded {
+            let path = self.tabs[index].document.path.clone();
+            self.tabs[index] = path
+                .filter(|p| p.is_file())
+                .map(|p| Tab::unloaded(p, [EditorView::default(), EditorView::default()]))
+                .unwrap_or_else(Tab::placeholder);
         }
         true
     }
@@ -2495,7 +2514,7 @@ impl App {
         } else {
             self.view_mut().selection_anchor = None;
         }
-        let pos = self.doc().clamp(pos);
+        let pos = self.doc().grapheme_position(pos);
         if pos != cursor {
             self.ghost_text = None;
             self.ghost_cancel.store(true, Ordering::Relaxed);
@@ -2738,6 +2757,7 @@ impl App {
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
                     self.directory_cache.remove(&dir);
+                    self.directory_requests.remove(&dir);
                     if self.workspace_root.as_ref() == Some(&dir)
                         || self.expanded_dirs.contains(&dir)
                     {
@@ -3236,6 +3256,7 @@ impl App {
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
                     self.directory_cache.remove(parent);
+                    self.directory_requests.remove(parent);
                     if self.expanded_dirs.contains(parent)
                         || self.workspace_root.as_deref() == Some(parent)
                     {

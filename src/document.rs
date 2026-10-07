@@ -3,6 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use unicode_segmentation::GraphemeCursor;
 
 /// Largest file opened as editable text. A document is held in memory as
 /// lines, several times its size on disk, so opening a larger file would
@@ -185,6 +186,37 @@ impl Document {
         fs::metadata(path).is_ok_and(|current| {
             current.len() == len && current.modified().is_ok_and(|time| time == modified)
         })
+    }
+
+    pub fn recovery_stamp(&self) -> Option<(u64, u32, u64)> {
+        let (modified, len) = self.last_saved?;
+        let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+        Some((duration.as_secs(), duration.subsec_nanos(), len))
+    }
+
+    /// Restore unsaved text without associating it with a changed/deleted original.
+    pub fn recover(path: Option<&Path>, text: &str, stamp: Option<(u64, u32, u64)>) -> Self {
+        let mut doc = path
+            .and_then(|p| Self::open(p.to_owned()).ok())
+            .filter(|doc| stamp.is_some() && doc.recovery_stamp() == stamp)
+            .unwrap_or_default();
+        doc.replace(Pos::default(), doc.end(), text);
+        doc
+    }
+
+    /// Snap UI carets to complete characters; protocol positions still use `clamp`.
+    pub fn grapheme_position(&self, pos: Pos) -> Pos {
+        let pos = self.clamp(pos);
+        let line = &self.lines[pos.line];
+        let mut cursor = GraphemeCursor::new(pos.byte, line.len(), true);
+        if cursor
+            .is_boundary(line, 0)
+            .expect("complete line provides grapheme context")
+        {
+            pos
+        } else {
+            self.previous(pos)
+        }
     }
 
     pub fn breakpoints(&self) -> &BTreeSet<usize> {
@@ -648,11 +680,11 @@ impl Document {
     pub fn previous(&self, pos: Pos) -> Pos {
         let pos = self.clamp(pos);
         if pos.byte > 0 {
-            let byte = self.lines[pos.line][..pos.byte]
-                .char_indices()
-                .last()
-                .unwrap()
-                .0;
+            let line = &self.lines[pos.line];
+            let byte = GraphemeCursor::new(pos.byte, line.len(), true)
+                .prev_boundary(line, 0)
+                .expect("complete line provides grapheme context")
+                .unwrap_or(0);
             Pos {
                 line: pos.line,
                 byte,
@@ -670,10 +702,14 @@ impl Document {
     pub fn next(&self, pos: Pos) -> Pos {
         let pos = self.clamp(pos);
         if pos.byte < self.lines[pos.line].len() {
-            let ch = self.lines[pos.line][pos.byte..].chars().next().unwrap();
+            let line = &self.lines[pos.line];
+            let byte = GraphemeCursor::new(pos.byte, line.len(), true)
+                .next_boundary(line, 0)
+                .expect("complete line provides grapheme context")
+                .unwrap_or(line.len());
             Pos {
                 line: pos.line,
-                byte: pos.byte + ch.len_utf8(),
+                byte,
             }
         } else if pos.line + 1 < self.lines.len() {
             Pos {
@@ -971,7 +1007,7 @@ impl Document {
 }
 
 #[cfg(windows)]
-fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -1000,6 +1036,78 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn movement_deletion_and_undo_preserve_complete_graphemes() {
+        for grapheme in ["e\u{301}", "👩‍💻", "🇵🇰", "👍🏽", "क्‍ष"] {
+            let mut doc = Document::new();
+            let source = format!("a{grapheme}b");
+            doc.seed(&source);
+            let start = Pos { line: 0, byte: 1 };
+            let end = Pos {
+                line: 0,
+                byte: 1 + grapheme.len(),
+            };
+            assert_eq!(doc.next(start), end, "{grapheme}");
+            assert_eq!(doc.previous(end), start, "{grapheme}");
+            for (byte, _) in grapheme.char_indices().skip(1) {
+                assert_eq!(
+                    doc.grapheme_position(Pos {
+                        line: 0,
+                        byte: byte + 1
+                    }),
+                    start
+                );
+            }
+            doc.replace(doc.previous(end), end, "");
+            assert_eq!(doc.text(), "ab");
+            doc.undo();
+            assert_eq!(doc.text(), source);
+            doc.replace(start, doc.next(start), "");
+            assert_eq!(doc.text(), "ab");
+            doc.undo();
+            assert_eq!(doc.text(), source);
+        }
+    }
+    #[test]
+    fn grapheme_movement_crosses_lines_and_handles_long_ascii_lines() {
+        let mut doc = Document::new();
+        doc.seed(&format!("{}\n👩‍💻", "x".repeat(1_000_000)));
+        let end = Pos {
+            line: 0,
+            byte: 1_000_000,
+        };
+        assert_eq!(doc.previous(end).byte, 999_999);
+        assert_eq!(doc.next(end), Pos { line: 1, byte: 0 });
+        assert_eq!(doc.previous(Pos { line: 1, byte: 0 }), end);
+    }
+    #[test]
+    fn recovery_keeps_unsaved_text_and_protects_changed_originals() {
+        let path =
+            std::env::temp_dir().join(format!("lightline-recover-{}.txt", std::process::id()));
+        fs::write(&path, "original\r\ntext").unwrap();
+        let original = Document::open(path.clone()).unwrap();
+        let stamp = original.recovery_stamp();
+        let recovered = Document::recover(Some(&path), "unsaved\ntext", stamp);
+        assert_eq!(recovered.path.as_ref(), Some(&path));
+        assert!(recovered.is_dirty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original\r\ntext");
+        fs::write(&path, "external change with different size").unwrap();
+        let recovered = Document::recover(Some(&path), "unsaved\ntext", stamp);
+        assert!(recovered.path.is_none());
+        assert!(recovered.is_dirty());
+        assert_eq!(recovered.text(), "unsaved\ntext");
+        fs::remove_file(&path).unwrap();
+        assert!(
+            Document::recover(Some(&path), "unsaved", stamp)
+                .path
+                .is_none()
+        );
+        assert_eq!(
+            Document::recover(None, "untitled 🦀", None).text(),
+            "untitled 🦀"
+        );
+    }
+
     #[test]
     fn edit_records_utf16_ranges_for_replace_undo_and_redo() {
         let mut doc = Document::new();

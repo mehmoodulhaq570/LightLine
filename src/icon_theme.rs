@@ -147,6 +147,33 @@ impl IconTheme {
     fn resolve_path(&self, relative: &str) -> PathBuf {
         self.root.join(relative.trim_start_matches("./"))
     }
+
+    pub(crate) fn validate_assets(&self) -> Result<(), String> {
+        let root = self.root.canonicalize().map_err(|e| e.to_string())?;
+        let directories = self
+            .directory_icons
+            .iter()
+            .chain(self.named_directory_icons.values());
+        let paths = self
+            .file_icons
+            .values()
+            .map(|icon| icon.path.as_str())
+            .chain(
+                directories.flat_map(|icons| [icons.collapsed.as_str(), icons.expanded.as_str()]),
+            );
+        for relative in paths {
+            let path = self
+                .resolve_path(relative)
+                .canonicalize()
+                .map_err(|e| format!("Missing icon asset {relative}: {e}"))?;
+            if !path.starts_with(&root) || !path.is_file() {
+                return Err(format!(
+                    "Icon asset must be a file inside the extension: {relative}"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

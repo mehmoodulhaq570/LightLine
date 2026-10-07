@@ -1,226 +1,164 @@
-# LightLine IDE — Open GitHub Issues Report
+# LightLine IDE — GitHub Issues Report
 
 Repo: [mehmoodulhaq570/LightLine](https://github.com/mehmoodulhaq570/LightLine)
-Generated: 2026-09-21 | Open issues: 37
+Updated: 2026-10-07 | Open issues: 16 | Closed issues: 35 (listed in section 3)
+
+The first version of this report (2026-09-21) listed 37 open issues. This update re-checks every issue that is still open against the code on `main`.
+
+**How the status was determined.** Each open issue's body and comment thread was read, then compared with the source. This was a code read only: the app was not run, so behavior that depends on live rendering (flicker, hover feel, logo alignment) is marked **unverified**. Eleven files had uncommitted local changes when the check was made (`workflow.rs`, `extensions/installer.rs`, `session.rs` and others), so verdicts that touch them may change once those are committed.
+
+Status key: **Resolved** · **Partly resolved** · **Open** · **Unverified** (needs a live run or the reporter) · **Not a code fix**
 
 ---
 
-## 1. All Open Issues (detailed)
+## 1. Summary
 
-### #42 — [ISSUES](https://github.com/mehmoodulhaq570/LightLine/issues/42)
-1. AI Assistant panel flickers but doesn't open.
-2. No "Add Files" option to import existing files into a project.
-3. Extensions can't be searched or installed (no results, Install does nothing).
-4. No way to discard/delete a created project.
-5. Terminal doesn't accept user input.
+No open issue is fully resolved. The closest to closeable are #48 and #52.
 
-### #38 — [Bugs in Lightline](https://github.com/mehmoodulhaq570/LightLine/issues/38) `bug`
-- Project can't be discarded once created.
-- Terminal doesn't take input.
-- AI Assistant unresponsive.
-
-### #37 — [Files undeletable](https://github.com/mehmoodulhaq570/LightLine/issues/37)
-- Once a folder is uploaded, its files can't be deleted.
-
-### #36 — [Multiple critical bugs: terminal input not working, AI assistant unresponsive](https://github.com/mehmoodulhaq570/LightLine/issues/36)
-- Terminal doesn't accept input for variables.
-- AI assistant not functional.
-
-### #35 — [Doesn't support Mac](https://github.com/mehmoodulhaq570/LightLine/issues/35) `enhancement`
-- No macOS support.
-
-### #34 — [Search issue](https://github.com/mehmoodulhaq570/LightLine/issues/34)
-- In-editor file search not working.
-
-### #33 — [Run-Debug and language issue](https://github.com/mehmoodulhaq570/LightLine/issues/33)
-1. Run and Debug inaccessible from home screen.
-2. Code doesn't run at all.
-3. Language selection dropdown inaccessible.
-
-### #32 — [Ai assistant and extension issue](https://github.com/mehmoodulhaq570/LightLine/issues/32)
-1. AI Assistant not working at all.
-2. No extension can be installed.
-
-### #31 — [No auto-indentation for python](https://github.com/mehmoodulhaq570/LightLine/issues/31)
-- Requests auto-indentation support for Python.
-
-### #30 — [Run and DEBUG issue](https://github.com/mehmoodulhaq570/LightLine/issues/30)
-- Can't select language to Run/Debug; code doesn't run.
-
-### #29 — [Issue in functionality and UI](https://github.com/mehmoodulhaq570/LightLine/issues/29)
-1. Scrollbar highlights on every click/button press.
-2. AI assistant doesn't work.
-3. No installed extensions.
-4. Can't select any language other than C/C++ for Run and Debug.
-5. Folder section UI misbehaves.
-
-### #28 — [AI Assisstant Issue](https://github.com/mehmoodulhaq570/LightLine/issues/28)
-- AI Assistant button not working.
-
-### #27 — [AI assisant option is not working](https://github.com/mehmoodulhaq570/LightLine/issues/27)
-- (No body) Title indicates AI Assistant not working.
-
-### #26 — [Run And Debug Options are Not properly Working](https://github.com/mehmoodulhaq570/LightLine/issues/26)
-- (No body) Title indicates Run/Debug malfunction.
-
-### #25 — [Extension Search bar not working](https://github.com/mehmoodulhaq570/LightLine/issues/25)
-- Can't search or install any extension.
-
-### #24 — [Extension Search Bar is inaccessible and Adding a New file Concern](https://github.com/mehmoodulhaq570/LightLine/issues/24)
-- (No body) Title indicates extension search bar inaccessible + new-file concern.
-
-### #23 — [unresponsive run button](https://github.com/mehmoodulhaq570/LightLine/issues/23)
-- Python file created but Run button doesn't respond.
-
-### #22 — [light_ide_issues](https://github.com/mehmoodulhaq570/LightLine/issues/22)
-1. Program doesn't close properly after running (inconsistent/unresponsive).
-2. Screen flickers with two white lines on right side during keyboard interaction.
-3. No syntax error feedback shown for bad code.
-4. AI Assistant doesn't open.
-5. Run and Debug command unresponsive when clicked.
-
-### #21 — [UI Bugs, Extension Failures, and Execution Errors](https://github.com/mehmoodulhaq570/LightLine/issues/21)
-- No "Back"/"Home" navigation button to return to welcome screen.
-- Missing environment dependency check: auto-runs `cargo test --offline`, fails with `CommandNotFoundException` if Rust/Cargo isn't installed/on PATH.
-- Extension/library install button does nothing.
-- UI misalignment/overlap in Debugger's VARIABLES section.
-- Variables tree (e.g. `self`, `index`) doesn't expand on click.
-
-### #20 — [System Error](https://github.com/mehmoodulhaq570/LightLine/issues/20)
-- A system error occurs when launching the IDE (screenshot attached).
-
-### #19 — [Add a "New File" option to the IDE](https://github.com/mehmoodulhaq570/LightLine/issues/19)
-- No visible "New File" option in Explorer.
-- Suggests: New File / New Folder buttons, right-click → New File, Ctrl+N shortcut, file-type-aware creation.
-
-### #18 — [Settings and AI Assistant options are not accessible](https://github.com/mehmoodulhaq570/LightLine/issues/18)
-- Settings and AI Assistant icons visible in sidebar but not clickable/functional.
-- Suggests Settings should include: editor prefs, theme/dark mode, font size, tab size, auto-save, keyboard shortcuts, language/runtime config, terminal prefs.
-- Suggests AI Assistant should support: code explanation, error explanation, completion, bug detection, optimization, generation.
-
-### #17 — [Unintended Scrollbar Movement While Typing](https://github.com/mehmoodulhaq570/LightLine/issues/17)
-- Side scrollbar moves/jumps while typing even when not needed.
-
-### #16 — [UI/UX improvements needed for better usability and navigation](https://github.com/mehmoodulhaq570/LightLine/issues/16)
-- Dense/confusing layout; narrow editor area (sidebar/debug panel take too much space).
-- Icons/buttons lack clear purpose; low interaction feedback.
-- Suggests: better spacing/hierarchy, hover tooltips, resizable/collapsible panels, more editor space, clearer active/inactive states, action feedback.
-
-### #15 — [Missing Taskbar Options](https://github.com/mehmoodulhaq570/LightLine/issues/15)
-- No bottom taskbar/panel (like VS Code) for Terminal, Problems, Output, Debug Console.
-
-### #14 — [ISSUES](https://github.com/mehmoodulhaq570/LightLine/issues/14)
-1. Terminal glitchy/very slow.
-2. Language switching doesn't work.
-3. Code doesn't compile/run.
-4. AI assistant not working.
-
-### #13 — [Lighline issue](https://github.com/mehmoodulhaq570/LightLine/issues/13)
-1. Windows Defender blocks the IDE from launching.
-2. AI Assistant unavailable.
-
-### #12 — [Open Project Displays Only Folders](https://github.com/mehmoodulhaq570/LightLine/issues/12)
-- Opening a project shows only folders; files inside them aren't listed.
-
-### #11 — [Issues in IDE](https://github.com/mehmoodulhaq570/LightLine/issues/11)
-- Can't add file extensions (.py, .cpp, etc.) to a file.
-- Can't run code.
-- Settings button not working.
-
-### #10 — [Terminal issue](https://github.com/mehmoodulhaq570/LightLine/issues/10)
-- Terminal doesn't accept input for running programs — keystrokes land in the code editor instead of the terminal.
-
-### #9 — [Core Functionality Issues](https://github.com/mehmoodulhaq570/LightLine/issues/9)
-- C++ code can be written but doesn't run.
-- Extensions "Install" buttons don't work.
-- AI Assistant doesn't open/trigger.
-
-### #8 — [Language drop down menu](https://github.com/mehmoodulhaq570/LightLine/issues/8)
-- Language selection dropdown doesn't respond to clicks.
-
-### #7 — [Extensions Tab & Switching in IDE](https://github.com/mehmoodulhaq570/LightLine/issues/7)
-1. Extensions tab doesn't show "0 extensions installed" when none are installed (no indication either way).
-2. Opening one file grants IDE access to the entire Downloads folder.
-3. Clicking in Run & Debug panel after opening a file causes the IDE to keep switching between multiple open files.
-
-### #6 — [LightLine IDE - Audit](https://github.com/mehmoodulhaq570/LightLine/issues/6)
-1. Explorer folder doesn't function: can only open multiple files, can't create/delete, can't collapse folder.
-2. Clicking Source Control or Run & Debug panels collapses and reopens the Explorer section instead.
-3. Extensions can't be downloaded.
-4. AI Assistant doesn't work.
-
-### #5 — [User Inconvenience](https://github.com/mehmoodulhaq570/LightLine/issues/5)
-1. Buttons don't highlight on hover, making the app feel laggy/broken.
-2. "Open a Project" doesn't specify file type to open, so no file can be opened.
-
-### #4 — [MISSING FUNCTIONALITIES](https://github.com/mehmoodulhaq570/LightLine/issues/4)
-- Most generic-IDE functionality missing; Settings and AI Assistant buttons not implemented/working.
-- No option to open a local code file/any file from the device.
-
-### #3 — [UI Bug](https://github.com/mehmoodulhaq570/LightLine/issues/3)
-1. "IDE" text in the purple box (top-left) misaligned/overflows the box.
-2. Left navbar buttons don't visually distinguish clickable vs. non-clickable.
-3. Clicking anything in "Getting Started" other than "Open Project Folder" does nothing, with no indication it's inactive.
-
-### #2 — [Multiple stubs on the screen](https://github.com/mehmoodulhaq570/LightLine/issues/2)
-- No way to navigate back to home screen once a file is opened (must close the app).
-- Can't close an opened file in the editor.
-- Multiple highlighted UI elements are non-functional stubs (screenshots attached).
-
-### #1 — [The close file button is not functional.](https://github.com/mehmoodulhaq570/LightLine/issues/1)
-- Clicking the "x" next to a file name doesn't close it — it just refreshes the page.
+| # | Title | Status | Notes |
+|---|-------|--------|-------|
+| 62 | Hover highlight and tooltips for rail, title bar and Welcome buttons | **Open** | Hover handling covers only the scrollbar, the tab-strip Run button hint, the editor hover card and menus. |
+| 59 | Own API key for OpenAI-compatible cloud services | **Open** | No `Authorization` header, credential storage or `OPENAI_API_KEY` fallback in `src/`. |
+| 52 | More languages and a language picker for Run/Debug | **Partly resolved** | Runners, missing-tool messages and the Run dropdown are done. The status-bar language picker is not. |
+| 48 | Prettier CLI extension and architecture | **Partly resolved** | Core pipeline is built; a few gaps remain (see below). |
+| 43 | Contributor onboarding | **Not a code fix** | CONTRIBUTING.md merged (#44). Kept open on purpose for CI and further docs. |
+| 35 | Doesn't support Mac | **Not a code fix** | Win32 app; needs a platform port. |
+| 29 | Issue in functionality and UI | **Partly resolved** | Items 2 and 3 fixed, item 4 partly (see #52). Items 1 and 5 unverified. |
+| 22 | light_ide_issues | **Partly resolved** | Syntax-error underlines and Run exist. Flicker and program-not-closing unverified. |
+| 20 | System Error | **Unverified** | Only a launch-error screenshot; no way to tell from the code. |
+| 16 | UI/UX improvements | **Open** | Umbrella issue. Tooltips and hover (#62) are still missing. |
+| 15 | Missing Taskbar Options | **Open** | Problems tab is a placeholder; there is no Debug Console. Mayuri-004 is working on it. |
+| 14 | ISSUES | **Partly resolved** | Compile/run fixed; language picker is the #52 gap; terminal slowness unverified. |
+| 13 | Lighline issue | **Partly resolved** | AI assistant fixed. Defender warning remains until the app is code-signed (SignPath application pending). |
+| 7 | Extensions Tab & Switching | **Partly resolved** | Item 1 fixed. Items 2 and 3 unverified. |
+| 5 | User Inconvenience | **Partly resolved** | Item 2 fixed. Item 1 (hover) is the #62 gap. |
+| 3 | UI Bug | **Open** | Hover and "what is clickable" are the #62 gap. IDE badge alignment unverified. |
 
 ---
 
-## 2. Merged / Deduplicated Issue List
+## 2. Open Issues (detail and code findings)
 
-Below, all 37 issues are consolidated into distinct problem areas, with the contributing issue numbers noted.
+### #62 — [Hover highlight and tooltips for rail, title bar and Welcome buttons](https://github.com/mehmoodulhaq570/LightLine/issues/62) `good first issue` — **Open**
+- Wants hover highlight on the activity rail, title-bar buttons and Welcome actions, plus hints for icon-only buttons. Closes the remaining parts of #3, #5 and #16.
+- Code: `mouse_hover_move` (`windows_app/language.rs`) handles the run-config panel, editor context menu, "..." menu, scrollbar, the tab-strip Run button hint (status bar) and the editor hover card. `WM_MOUSELEAVE` only clears the scrollbar hover. Nothing tracks hover for the rail, title bar or Welcome buttons.
+- Constraint from the issue: repaint only the old and new button rects, no polling timers (speed-first).
 
-### A. AI Assistant is non-functional
-Panel doesn't open, flickers, or button does nothing at all.
-**Issues:** #1(42), 38, 36, 32, 29, 28, 27, 22, 18, 14, 13, 9, 6, 4
+### #59 — [Use your own API key with OpenAI-compatible cloud services](https://github.com/mehmoodulhaq570/LightLine/issues/59) `enhancement` — **Open**
+- Taken by @RajDalvi08.
+- Code: no `Authorization`/`Bearer`, Credential Manager or `OPENAI_API_KEY` reference anywhere under `src/`. Pointing `aiEndpoint` at a cloud service still fails with 401.
 
-### B. Run & Debug / Code execution broken
-Code doesn't run, Run/Debug commands unresponsive, language dropdown broken or limited to C/C++, no dependency checks (e.g. missing Cargo/Rust causes crash), debugger variables panel misaligned and non-interactive, no syntax error feedback.
-**Issues:** 42, 33, 30, 29, 26, 23, 22, 21, 14, 11, 9, 8
+### #52 — [More languages and a language picker for Run/Debug](https://github.com/mehmoodulhaq570/LightLine/issues/52) `enhancement` — **Partly resolved**
+- Assigned to @janhavibhoir.
+- Done: JavaScript/TypeScript, Go and Rust runners alongside Python and C/C++ (`runner.rs`); clear missing-tool messages; the Run dropdown and saved configurations (`run_choice.rs`, `run_config*.rs`).
+- Not done: the status-bar language picker. `open_language_actions` (`windows_app/language.rs`) still only opens the command palette, filtered for Python, C/C++ or Rust. For any other language, including JS and Go, it reports "No run action is available".
+- Out of scope per the issue: debugger (DAP) support for new languages.
 
-### C. Terminal input broken
-Terminal doesn't accept keyboard input at all, or input leaks into the code editor instead; also reported as slow/glitchy.
-**Issues:** 42, 38, 36, 22, 14, 10
+### #48 — [Dedicated Prettier CLI extension and architecture](https://github.com/mehmoodulhaq570/LightLine/issues/48) `enhancement` — **Partly resolved**
+- Done: Prettier runs as a subprocess with the buffer on stdin and `--stdin-filepath`, under a timeout (`formatter.rs`). Format Document runs on a background thread. Format on save follows the `formatOnSave` setting. Extensions covered include JS/TS, JSON, CSS, HTML, Markdown and YAML. Rust, Python and C/C++ formatters were added alongside.
+- Gaps against the issue:
+  - Only PATH or `npx` is searched; workspace-local `node_modules/.bin/prettier` is not detected.
+  - Format on save runs on the UI thread (bounded by the timeout) and fails silently.
+  - Whether a "Prettier not found" message is clear, and whether cursor/scroll position survives formatting, were not confirmed.
 
-### D. Extensions marketplace non-functional
-Can't search extensions, Install button does nothing, no "0 installed" indicator when empty.
-**Issues:** 42, 32, 29, 25, 24, 21, 9, 7, 6
+### #43 — [Improve contributor onboarding](https://github.com/mehmoodulhaq570/LightLine/issues/43) `documentation` `enhancement` — **Not a code fix**
+- CONTRIBUTING.md merged in #44. Left open for CI checks and further onboarding work. @shubhayu-dev is assigned.
 
-### E. File/Project management gaps
-Can't delete/discard a project or file, can't close an open file (close button just refreshes page), no "New File"/"Add Files" option, Explorer can't create/delete/collapse folders, "Open Project" shows folders only (not files inside), no way to specify/filter file type when opening, opening one file grants access to entire Downloads folder (security/permissions concern), IDE keeps switching between open files unexpectedly.
-**Issues:** 42, 37, 24, 19, 12, 11, 7, 6, 5, 4, 2, 1
+### #35 — [Doesn't support Mac](https://github.com/mehmoodulhaq570/LightLine/issues/35) `enhancement` `help wanted` `platform` — **Not a code fix**
+- LightLine is a Win32 application. macOS support would be a port, not a fix.
 
-### F. Navigation & UI stability issues
-No Back/Home button to return to welcome screen, panels (Source Control / Run & Debug) collapse and reopen Explorer unexpectedly, scrollbar jumps/highlights during typing or clicks, screen flickering (white lines) during keyboard interaction, hover states don't indicate clickability, several UI elements are non-functional "stubs," misaligned welcome-screen branding box.
-**Issues:** 29, 22, 21, 17, 16, 6, 5, 3, 2
+### #29 — [Issue in functionality and UI](https://github.com/mehmoodulhaq570/LightLine/issues/29) — **Partly resolved**
+1. Scrollbar highlights on every click: **unverified** (owner asked the reporter to recheck on the latest release).
+2. AI assistant: **resolved** (Ollama-backed panel on `main`).
+3. No installed extensions: **resolved** (search/install work; the Installed tab shows its count and an empty-state message).
+4. Run/Debug limited to C/C++: **partly resolved** (see #52).
+5. Folder section UI: **unverified**; the reporter has not described a specific problem.
 
-### G. General UI/UX & layout
-Cramped/confusing layout, narrow editor area, unclear icon purposes, no tooltips, panels not resizable/collapsible, weak feedback on actions, missing bottom taskbar (Terminal/Problems/Output/Debug Console like VS Code), missing Settings panel entirely.
-**Issues:** 18, 16, 15, 11, 4
+### #22 — [light_ide_issues](https://github.com/mehmoodulhaq570/LightLine/issues/22) — **Partly resolved**
+1. Program does not close properly: **unverified**; not reproduced. Stop now ends the program and its child processes.
+2. Flicker and two white lines: **unverified**; several flicker fixes have landed since the report.
+3. No syntax error feedback: **resolved** (underlines in the editor, counts in the status bar).
+4. AI Assistant not opening: **resolved**.
+5. Run and Debug not responding: **resolved** (Run for Python, C/C++, Rust, JS/TS, Go; debugger for Rust and Python).
 
-### H. Platform / environment issues
-No macOS support; Windows Defender blocks the IDE from launching; a system error occurs on launch for some users.
-**Issues:** 35, 20, 13
+### #20 — [System Error](https://github.com/mehmoodulhaq570/LightLine/issues/20) `platform` — **Unverified**
+- Launch error shown only in a screenshot. No reply on the issue. Needs the error text or Windows version from the reporter.
 
-### I. Editor quality-of-life
-No Python auto-indentation.
-**Issues:** 31
+### #16 — [UI/UX improvements needed](https://github.com/mehmoodulhaq570/LightLine/issues/16) `navigation-ui` `ui-ux` — **Open**
+- Umbrella issue. Tooltips and hover feedback are tracked by #62. The bottom panel is partly addressed under #15.
 
-### J. Uncategorized / low-detail reports
-Titles/bodies too generic to map cleanly (largely duplicate the above themes).
-**Issues:** none remaining — all mapped above.
+### #15 — [Missing Taskbar Options](https://github.com/mehmoodulhaq570/LightLine/issues/15) `ui-ux` — **Open**
+- Mayuri-004 is working on the Problems tab first, then the Debug Console.
+- Done: collapsible bottom panel, Terminal tabs and shell picker, Output tab.
+- Not done: `TerminalTab` has only `Output` and `Terminal`. The Problems header is the fixed text `PROBLEMS  0`, and clicking it only sets a status-bar message. There is no Debug Console tab.
+
+### #14 — [ISSUES](https://github.com/mehmoodulhaq570/LightLine/issues/14) — **Partly resolved**
+1. Terminal glitchy/slow: **unverified**; speed fixes landed, reporter asked to retest.
+2. Language switching: the #52 picker gap.
+3. Code not compiling/running: **resolved**.
+4. AI assistant: **resolved**.
+
+### #13 — [Lighline issue](https://github.com/mehmoodulhaq570/LightLine/issues/13) `platform` — **Partly resolved**
+1. Windows Defender/SmartScreen warning: **open**. Not code-signed yet; SignPath application pending. README documents the SHA256 check and "Run anyway".
+2. AI Assistant: **resolved**.
+
+### #7 — [Extensions Tab & Switching in IDE](https://github.com/mehmoodulhaq570/LightLine/issues/7) — **Partly resolved**
+1. "0 extensions installed" indicator: **resolved** (`Installed (0)` and "No installed extensions").
+2. Opening one file exposes the whole Downloads folder: **unverified**.
+3. Files keep switching after clicking in Run & Debug: **unverified**.
+
+### #5 — [User Inconvenience](https://github.com/mehmoodulhaq570/LightLine/issues/5) — **Partly resolved**
+1. No hover highlight: **open** (#62).
+2. Open Project doesn't say what to open: **resolved**. It uses the folder picker (`IFileOpenDialog` with `FOS_PICKFOLDERS`).
+
+### #3 — [UI Bug](https://github.com/mehmoodulhaq570/LightLine/issues/3) — **Open**
+1. "IDE" text outside the purple box: **unverified**. The badge and label are drawn separately in `render/welcome.rs`; alignment needs a visual check.
+2. Rail buttons don't show what is clickable: **open** (#62).
+3. Getting Started items give no sign they are inactive: **open** (#62 covers non-clickable items looking clickable).
 
 ---
 
-## 3. Priority Recommendation (suggested, not from GitHub)
+## 3. Closed Since the First Report
 
-1. **Critical (blocks core usage):** B (code execution), C (terminal input), A (AI Assistant) — appear in the most issues and break the IDE's primary purpose.
-2. **High:** E (file/project management), D (extensions).
-3. **Medium:** F (navigation/UI stability), H (platform/launch issues).
-4. **Low:** G (UI/UX polish), I (editor QoL).
+Closed on GitHub between 2026-09-22 and 2026-10-03. Their themes are folded into section 4.
+
+| Closed | Issues |
+|--------|--------|
+| 2026-09-22 | #8, #10, #17, #23, #25, #26, #30, #31, #33 |
+| 2026-09-23 | #1, #2, #12, #19, #37 |
+| 2026-09-24 | #34 |
+| 2026-09-26 | #9, #24, #27, #32 |
+| 2026-09-27 | #28 |
+| 2026-09-28 | #18, #36, #38, #42, #45, #50, #55, #56, #57 |
+| 2026-10-03 | #4, #6, #11, #21, #58 |
+
+(#53, "Release v0.2.0", was also closed on 2026-09-26.)
+
+---
+
+## 4. Problem Areas (merged view)
+
+The original areas A–I, with the current state of each.
+
+| Area | Original problem | Current state | Still open |
+|------|------------------|---------------|------------|
+| A. AI Assistant | Panel didn't open or respond | Fixed. Chats with a local Ollama model; Explain / Fix This Error / Insert / Replace actions. | #59 (own API key / cloud services) |
+| B. Run & Debug | Code didn't run; language limited to C/C++; no tool checks | Run works for Python, C/C++, Rust, JS/TS and Go with saved configurations and missing-tool guidance. Debugger supports Rust and Python. | #52 (language picker), #22 item 1 |
+| C. Terminal | No input / slow | Input fixed; multiple tabs and shell picker; idle CPU reduced. | #14 item 1 (unverified) |
+| D. Extensions | Search/install broken, no empty state | Search, install and the "0 installed" state work. | None |
+| E. File/Project management | Can't close/delete/add files, Open Project problems | Close, delete, New File, Add File to Project and the folder picker are in. | #7 items 2–3 (unverified), #29 item 5 (unverified) |
+| F. Navigation & UI stability | Scrollbar jumps, flicker, no hover feedback | Scrollbar fixes landed. | #62 (hover), #3, #5 item 1, #22 item 2, #29 item 1 |
+| G. UI/UX & layout | Cramped layout, no tooltips, missing bottom panel tabs | Bottom panel, Settings and shell picker exist. | #16, #15, #62 |
+| H. Platform / environment | No macOS, Defender warning, launch error | No change. | #35, #13 item 1, #20 |
+| I. Editor QoL | No Python auto-indent | Fixed (#31 closed). | #48 gaps |
+
+---
+
+## 5. Priority Recommendation (suggested, not from GitHub)
+
+LightLine's goal is a fast IDE first, so performance-sensitive items rank above new features.
+
+1. **Close or update now:** #52 once the language picker exists, and #48 with a note on its gaps. Both are largely delivered by recent runner and formatter work.
+2. **High, unclaimed and well scoped:** #62 (hover and tooltips; also closes the remaining parts of #3, #5 and #16) and #59 (own API key).
+3. **Medium, already being worked on:** #15 (Problems tab, then Debug Console) by Mayuri-004.
+4. **Needs the reporter or a live run before acting:** #20, #22, #29, #14, #7 items 2–3 and the #3 badge alignment. Ask for v0.3.1 repro steps, as the owner's comments already do.
+5. **Longer term:** #13 (code signing), #35 (macOS port), #43 (CI and onboarding).

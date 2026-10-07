@@ -91,7 +91,9 @@ pub struct SessionView {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionTab {
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
+    pub recovery: Option<String>,
+    pub stamp: Option<(u64, u32, u64)>,
     pub views: [SessionView; 2],
 }
 
@@ -141,6 +143,10 @@ pub fn load_session() -> Session {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
         return Session::default();
     };
+    session_from_value(&value)
+}
+
+fn session_from_value(value: &Value) -> Session {
     let root = value
         .get("root")
         .and_then(Value::as_str)
@@ -154,11 +160,12 @@ pub fn load_session() -> Session {
             items
                 .iter()
                 .filter_map(|item| {
-                    let path = item
-                        .get("path")
+                    let path = item.get("path").and_then(Value::as_str).map(PathBuf::from);
+                    let recovery = item
+                        .get("recovery")
                         .and_then(Value::as_str)
-                        .map(PathBuf::from)?;
-                    if !path.is_file() {
+                        .map(str::to_owned);
+                    if recovery.is_none() && !path.as_ref().is_some_and(|p| p.is_file()) {
                         return None;
                     }
                     let views = item.get("views").and_then(Value::as_array);
@@ -180,34 +187,115 @@ pub fn load_session() -> Session {
                         ],
                         None => [default.clone(), default],
                     };
-                    Some(SessionTab { path, views })
+                    Some(SessionTab {
+                        path,
+                        recovery,
+                        stamp: item
+                            .get("stamp")
+                            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                        views,
+                    })
                 })
-                .take(64)
                 .collect()
         })
         .unwrap_or_default();
     Session { root, active, tabs }
 }
 
-pub fn save_session(session: &Session) {
-    let Some(path) = session_path() else { return };
-    let value = serde_json::json!({
+type SessionCompletion = std::sync::mpsc::Sender<Result<(), String>>;
+#[derive(Default)]
+struct SessionMailbox {
+    pending: Option<Session>,
+    completions: Vec<SessionCompletion>,
+    error: Option<String>,
+}
+type SessionWriter = std::sync::Arc<(std::sync::Mutex<SessionMailbox>, std::sync::Condvar)>;
+
+fn session_writer() -> &'static SessionWriter {
+    static WRITER: std::sync::OnceLock<SessionWriter> = std::sync::OnceLock::new();
+    WRITER.get_or_init(|| {
+        let state = std::sync::Arc::new((
+            std::sync::Mutex::new(SessionMailbox::default()),
+            std::sync::Condvar::new(),
+        ));
+        let worker = state.clone();
+        std::thread::spawn(move || {
+            loop {
+                let (lock, wake) = &*worker;
+                let mut mailbox = lock.lock().unwrap();
+                while mailbox.pending.is_none() {
+                    mailbox = wake.wait(mailbox).unwrap();
+                }
+                let session = mailbox.pending.take().unwrap();
+                let completions = std::mem::take(&mut mailbox.completions);
+                drop(mailbox);
+                let result = save_session(&session);
+                lock.lock().unwrap().error = result.as_ref().err().cloned();
+                for done in completions {
+                    let _ = done.send(result.clone());
+                }
+            }
+        });
+        state
+    })
+}
+
+pub fn queue_session(session: Session, flush: bool) -> Result<(), String> {
+    let (lock, wake) = &**session_writer();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut mailbox = lock.lock().map_err(|e| e.to_string())?;
+    mailbox.pending = Some(session);
+    if flush {
+        mailbox.completions.push(tx);
+    }
+    drop(mailbox);
+    wake.notify_one();
+    if flush {
+        rx.recv().map_err(|e| e.to_string())?
+    } else {
+        Ok(())
+    }
+}
+
+pub fn take_session_error() -> Option<String> {
+    session_writer().0.lock().ok()?.error.take()
+}
+
+pub fn save_session(session: &Session) -> Result<(), String> {
+    let path = session_path().ok_or("Could not determine session recovery directory")?;
+    save_session_at(&path, session).map_err(|e| e.to_string())
+}
+
+fn session_to_value(session: &Session) -> Value {
+    serde_json::json!({
         "root": session.root.as_ref().map(|root| root.to_string_lossy().to_string()),
         "active": session.active,
-        "tabs": session
-            .tabs
-            .iter()
-            .map(|tab| serde_json::json!({
-                "path": tab.path.to_string_lossy().to_string(),
-                "views": tab.views.iter().map(session_view_to_json).collect::<Vec<_>>(),
-            }))
-            .collect::<Vec<_>>(),
-    });
-    if let Some(parent) = path.parent()
-        && fs::create_dir_all(parent).is_ok()
-    {
-        let _ = fs::write(path, value.to_string());
+        "tabs": session.tabs.iter().map(|tab| serde_json::json!({
+            "path": tab.path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            "recovery": tab.recovery,
+            "stamp": tab.stamp,
+            "views": tab.views.iter().map(session_view_to_json).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn save_session_at(path: &Path, session: &Session) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Session path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(session_to_value(session).to_string().as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        crate::document::replace_file(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
     }
+    result
 }
 
 #[derive(Clone, Debug)]
@@ -338,7 +426,8 @@ impl GutterDiff {
     pub fn hunk_at_line(&self, line: usize) -> Option<&DiffHunk> {
         self.hunks.iter().find(|hunk| {
             if hunk.buffer_len == 0 {
-                line == hunk.buffer_start || (hunk.buffer_start > 0 && line == hunk.buffer_start - 1)
+                line == hunk.buffer_start
+                    || (hunk.buffer_start > 0 && line == hunk.buffer_start - 1)
             } else {
                 line >= hunk.buffer_start && line < hunk.buffer_start + hunk.buffer_len
             }
@@ -814,8 +903,13 @@ pub fn git_apply_patch(root: &Path, patch: &str, cached: bool) -> Result<(), Str
     }
     args.push("-");
     let mut command = git_command(root, &args);
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| format!("Could not start Git: {e}"))?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not start Git: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(patch.as_bytes())
@@ -878,8 +972,13 @@ pub fn unstage_hunk(root: &Path, relative_path: &Path, hunk: &DiffHunk) -> Resul
         "-",
     ];
     let mut command = git_command(root, &args);
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| format!("Could not start Git: {e}"))?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not start Git: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(patch.as_bytes())
@@ -1547,6 +1646,74 @@ fn diff_between(prefix: usize, old: &[&str], new: &[&str], m: usize) -> GutterDi
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_snapshot_roundtrips_untitled_missing_and_existing_files() {
+        let root = temp_dir("session-recovery");
+        let file = root.join("existing.txt");
+        fs::write(&file, "original").unwrap();
+        let view = SessionView {
+            cursor: (0, 3),
+            anchor: None,
+            first_line: 0,
+        };
+        let session = Session {
+            root: Some(root.clone()),
+            active: 2,
+            tabs: vec![
+                SessionTab {
+                    path: Some(file.clone()),
+                    recovery: None,
+                    stamp: None,
+                    views: [view.clone(), view.clone()],
+                },
+                SessionTab {
+                    path: Some(root.join("deleted.txt")),
+                    recovery: Some("recover deleted".into()),
+                    stamp: Some((1, 2, 3)),
+                    views: [view.clone(), view.clone()],
+                },
+                SessionTab {
+                    path: None,
+                    recovery: Some("untitled 👩‍💻\ntext".into()),
+                    stamp: None,
+                    views: [view.clone(), view],
+                },
+            ],
+        };
+        let path = root.join("session.json");
+        save_session_at(&path, &session).unwrap();
+        assert_eq!(
+            session_from_value(&serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()),
+            session
+        );
+        let mut newer = session.clone();
+        newer.tabs[2].recovery = Some("newer text".into());
+        save_session_at(&path, &newer).unwrap();
+        assert_eq!(
+            session_from_value(&serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap()),
+            newer
+        );
+        assert_eq!(fs::read_to_string(file).unwrap(), "original");
+        assert!(
+            !path
+                .with_extension(format!("{}.tmp", std::process::id()))
+                .exists()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn old_session_format_remains_readable() {
+        let root = temp_dir("old-session");
+        let file = root.join("existing.txt");
+        fs::write(&file, "original").unwrap();
+        let old = serde_json::json!({ "tabs": [{"path": file}], "active": 0 });
+        let session = session_from_value(&old);
+        assert_eq!(session.tabs.len(), 1);
+        assert!(session.tabs[0].recovery.is_none());
+        assert!(session.tabs[0].stamp.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     use std::sync::Arc;
     use std::sync::mpsc;
 
@@ -1677,8 +1844,20 @@ mod tests {
         let file = root.join("loose_script.py");
         fs::write(&file, "print('hi')\n").unwrap();
         let workspace = temp_dir("python-workspace");
-        assert_eq!(python_project_root(&file, Some(&workspace)), workspace);
-        assert_eq!(python_project_root(&file, None), root);
+        let enclosing_marker = file
+            .ancestors()
+            .skip(1)
+            .take(10)
+            .find(|dir| dir.join(".git").exists())
+            .map(Path::to_owned);
+        assert_eq!(
+            python_project_root(&file, Some(&workspace)),
+            enclosing_marker.clone().unwrap_or(workspace.clone())
+        );
+        assert_eq!(
+            python_project_root(&file, None),
+            enclosing_marker.unwrap_or(root.clone())
+        );
         fs::remove_dir_all(&root).unwrap();
         fs::remove_dir_all(&workspace).unwrap();
     }
@@ -2190,6 +2369,9 @@ mod tests {
         assert!(hunk.is_some());
         assert_eq!(hunk.unwrap().buffer_start, 1);
         assert_eq!(hunk.unwrap().head_lines, vec!["line2"]);
-        assert_eq!(hunk.unwrap().buffer_lines, vec!["line2 modified", "new line"]);
+        assert_eq!(
+            hunk.unwrap().buffer_lines,
+            vec!["line2 modified", "new line"]
+        );
     }
 }

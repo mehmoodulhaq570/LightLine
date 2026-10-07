@@ -1823,6 +1823,7 @@ impl App {
                     return;
                 } else if x >= editor_left - s(48) && x < editor_left - s(26) {
                     self.directory_cache.clear();
+                    self.directory_requests.clear();
                     self.load_directory(&root);
                     self.refresh(hwnd);
                     return;

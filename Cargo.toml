@@ -20,6 +20,8 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_System_Pipes",
+    "Win32_System_ProcessStatus",
+    "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_Graphics_Gdi",
@@ -48,6 +50,7 @@ ureq = "3.4.2"
 wait-timeout = "0.2.1"
 pulldown-cmark = { version = "0.13", default-features = false }
 unicode-width = "0.2"
+unicode-segmentation = "1.13.3"
 
 [profile.release]
 lto = "thin"

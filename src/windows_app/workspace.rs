@@ -2,7 +2,7 @@ use super::*;
 
 impl App {
     pub(super) fn load_directory(&mut self, path: &Path) {
-        if self.directory_cache.contains_key(path) {
+        if self.directory_cache.contains_key(path) || self.directory_requests.contains_key(path) {
             return;
         }
         // Watched before it is read, so a file created in between still
@@ -10,37 +10,48 @@ impl App {
         if let Some(watcher) = &self.watcher {
             watcher.watch_directory(path.to_path_buf());
         }
-        // Every entry: taking the first N in read_dir order (before sorting)
-        // used to show an arbitrary subset of a large folder.
-        let mut entries: Vec<ExplorerEntry> = std::fs::read_dir(path)
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                if entry.file_name().to_str() == Some(".git") {
-                    return None;
-                }
-                let is_dir = entry.file_type().ok()?.is_dir();
-                Some(ExplorerEntry {
-                    path: entry.path(),
-                    is_dir,
-                })
-            })
-            .collect();
-        // Folders first, then case-insensitive by name; the key is computed
-        // once per entry rather than twice per comparison.
-        entries.sort_by_cached_key(|entry| {
-            (
-                !entry.is_dir,
-                entry
-                    .path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase(),
-            )
+        self.directory_request_serial += 1;
+        let request = self.directory_request_serial;
+        self.directory_requests.insert(path.to_owned(), request);
+        let generation = self.workspace_generation;
+        let path = path.to_owned();
+        let tx = self.worker_tx.clone();
+        self.worker_started(self.hwnd);
+        std::thread::spawn(move || {
+            let result = (|| {
+                // Every entry: taking the first N in read_dir order (before sorting)
+                // used to show an arbitrary subset of a large folder.
+                let mut entries: Vec<ExplorerEntry> = std::fs::read_dir(&path)
+                    .map_err(|e| e.to_string())?
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| {
+                        if entry.file_name().to_str() == Some(".git") {
+                            return None;
+                        }
+                        let is_dir = entry.file_type().ok()?.is_dir();
+                        Some(ExplorerEntry {
+                            path: entry.path(),
+                            is_dir,
+                        })
+                    })
+                    .collect();
+                // Folders first, then case-insensitive by name; the key is computed
+                // once per entry rather than twice per comparison.
+                entries.sort_by_cached_key(|entry| {
+                    (
+                        !entry.is_dir,
+                        entry
+                            .path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_lowercase(),
+                    )
+                });
+                Ok(entries)
+            })();
+            let _ = tx.send(WorkerMessage::Directory(generation, request, path, result));
         });
-        self.directory_cache.insert(path.to_path_buf(), entries);
     }
 
     pub(super) fn set_workspace_from_file(&mut self, path: &Path) {
@@ -57,28 +68,13 @@ impl App {
                 .to_path_buf();
             self.workspace_root = Some(root.clone());
             self.workspace_generation += 1;
-            self.workspace_branch = Self::head_branch(&root);
+            self.workspace_branch = None;
+            self.refresh_git(self.hwnd);
             self.expanded_dirs.insert(root.clone());
             self.load_directory(&root);
             workflow::remember_workspace(&root);
             self.recent = workflow::recent_workspaces();
         }
-    }
-
-    /// Which commit is checked out. Reading `.git/HEAD` as text is wrong for
-    /// linked worktrees, submodules and detached HEAD, so ask Git instead.
-    pub(super) fn head_branch(root: &Path) -> Option<String> {
-        let root = workflow::repo_root(root)?;
-        if let Ok(branch) = workflow::git_output(&root, &["symbolic-ref", "--short", "-q", "HEAD"])
-        {
-            let branch = branch.trim();
-            if !branch.is_empty() {
-                return Some(branch.to_owned());
-            }
-        }
-        let sha = workflow::git_output(&root, &["rev-parse", "--short", "HEAD"]).ok()?;
-        let sha = sha.trim();
-        (!sha.is_empty()).then(|| sha.to_owned())
     }
 
     pub(super) fn set_workspace(&mut self, hwnd: HWND, root: PathBuf) {
@@ -93,8 +89,9 @@ impl App {
         if let Some(watcher) = &self.watcher {
             watcher.unwatch_directories();
         }
-        self.workspace_branch = Self::head_branch(&root);
+        self.workspace_branch = None;
         self.directory_cache.clear();
+        self.directory_requests.clear();
         self.expanded_dirs.clear();
         self.expanded_dirs.insert(root.clone());
         self.explorer_first_row = 0;
@@ -175,6 +172,7 @@ impl App {
             watcher.unwatch_directories();
         }
         self.directory_cache.clear();
+        self.directory_requests.clear();
         self.expanded_dirs.clear();
         self.explorer_first_row = 0;
         self.quick_files.clear();
@@ -300,6 +298,7 @@ impl App {
             .is_some_and(|root| parent.starts_with(root))
         {
             self.directory_cache.remove(&parent);
+            self.directory_requests.remove(&parent);
             if same_session {
                 self.expanded_dirs.insert(parent.clone());
             }
@@ -336,6 +335,7 @@ impl App {
         match std::fs::File::create(&target) {
             Ok(_) => {
                 self.directory_cache.remove(parent);
+                self.directory_requests.remove(parent);
                 self.load_directory(parent);
                 self.expanded_dirs.insert(parent.to_path_buf());
                 self.selected_explorer_path = Some(target.clone());
@@ -365,6 +365,7 @@ impl App {
         match std::fs::create_dir_all(&target) {
             Ok(_) => {
                 self.directory_cache.remove(parent);
+                self.directory_requests.remove(parent);
                 self.load_directory(parent);
                 self.expanded_dirs.insert(parent.to_path_buf());
                 self.expanded_dirs.insert(target.clone());
@@ -429,11 +430,13 @@ impl App {
             Ok(()) => {
                 if let Some(parent) = path.parent() {
                     self.directory_cache.remove(parent);
+                    self.directory_requests.remove(parent);
                     self.load_directory(parent);
                 }
                 if is_dir {
                     self.expanded_dirs.remove(path);
                     self.directory_cache.remove(path);
+                    self.directory_requests.remove(path);
                 }
                 if self.selected_explorer_path.as_deref() == Some(path) {
                     self.selected_explorer_path = None;
@@ -478,11 +481,13 @@ impl App {
                     }
                 }
                 self.directory_cache.remove(parent);
+                self.directory_requests.remove(parent);
                 self.load_directory(parent);
                 if old_path.is_dir() {
                     self.expanded_dirs.remove(old_path);
                     self.expanded_dirs.insert(new_path.clone());
                     self.directory_cache.remove(old_path);
+                    self.directory_requests.remove(old_path);
                 }
                 self.selected_explorer_path = Some(new_path.clone());
                 self.status = format!("Renamed to {}", new_name);

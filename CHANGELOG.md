@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Unsaved-work recovery**: Dirty documents and untitled buffers are checkpointed every five seconds when the session changes. On restart, choose Restore or Discard. Changed or missing originals recover as untitled buffers, and original files are untouched until explicitly saved.
+- **Editing measurements**: `cargo run --release --example measure_editing` reports insertion, undo/redo, snapshot and long-line navigation timings at multiple document sizes.
+- **Unsaved-work recovery**: Dirty documents and untitled buffers are checkpointed every five seconds when the session changes. On restart, choose Restore or Discard. Changed or missing originals recover as untitled buffers, and original files are untouched until explicitly saved.
+- **Editing measurements**: `cargo run --release --example measure_editing` reports insertion, undo/redo, snapshot and long-line navigation timings at multiple document sizes.
 - **Run Configuration Dropdown**: A themed selector beside Run shows Automatic or the selected saved configuration. Switch configurations directly, or choose Configure... to open the editor. Supports arrow keys, Home/End, Enter, Escape and the mouse wheel; selections are saved per workspace.
 - **Readable Missing-Tool Guidance**: Run errors appear in a LightLine message with installation guidance for Node.js/npm, tsx, Go, Rust, Python and C/C++ compilers, including interpreter selection and PATH/restart instructions.
 
@@ -20,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Additional Formatters**: Rust uses `rustfmt`, Python uses `ruff format` with a `black` fallback, and C/C++ uses `clang-format`. Formatter selection follows the file extension.
 
 #### Changed
+
+- Extension updates clone into staging, validate manifests and supported theme files/assets, then replace the installed copy with rollback on failure. IDs are validated before filesystem access, and Windows update locks prevent simultaneous replacement.
+- Explorer directory enumeration and sorting now run in background workers. Workspace generations and request IDs reject stale results; Git branch detection uses the existing background Git service.
+- Editor caret movement and Backspace/Delete operate on complete grapheme clusters, including combining marks, joined emoji and flags. Mouse/navigation caret positions snap to cluster boundaries; LSP byte/UTF-16 positions retain their precision.
+- Session checkpoints use atomic replacement and a latest-snapshot mailbox; unchanged sessions do not trigger repeated disk writes.
+
+- Extension updates clone into staging, validate manifests and supported theme files/assets, then replace the installed copy with rollback on failure. IDs are validated before filesystem access, and Windows update locks prevent simultaneous replacement.
+- Explorer directory enumeration and sorting now run in background workers. Workspace generations and request IDs reject stale results; Git branch detection uses the existing background Git service.
+- Editor caret movement and Backspace/Delete operate on complete grapheme clusters, including combining marks, joined emoji and flags. Mouse/navigation caret positions snap to cluster boundaries; LSP byte/UTF-16 positions retain their precision.
+- Session checkpoints use atomic replacement and a latest-snapshot mailbox; unchanged sessions do not trigger repeated disk writes.
 
 - **Run Configuration Panel Uses LightLine's UI**: Replaced the separate Windows form with a panel drawn inside the workbench. The configuration list, buttons, text inputs, selection highlights and scrollbar follow the active LightLine theme and UI font. Supports Tab/Shift+Tab, selection, copy/cut/paste, undo/redo, Unicode input, Ctrl+S/Ctrl+Enter to save and Esc to cancel. Smaller windows support mouse-wheel scrolling, a draggable scrollbar and automatic scrolling to the focused field.
 - **Managed Program Runs**: Runs use a dedicated Output session with keyboard input, preserved output and final exit status. **Stop Running Program** and the Output kill button stop the program and its children; a second run is blocked until the first ends. Rust tests remain separate under **Ctrl+Shift+B**.

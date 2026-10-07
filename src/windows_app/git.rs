@@ -96,12 +96,13 @@ impl App {
         };
         self.git_generation += 1;
         let generation = self.git_generation;
+        let workspace_generation = self.workspace_generation;
         self.review_loading = true;
         let tx = self.worker_tx.clone();
         self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = workflow::repo_state(&root);
-            let _ = tx.send(WorkerMessage::Repo(generation, result));
+            let _ = tx.send(WorkerMessage::Repo(generation, workspace_generation, result));
         });
     }
 

@@ -149,6 +149,7 @@ unsafe extern "system" fn wnd_proc(
                 InvalidateRect(hwnd, null(), 0);
             }
             app.poll_watcher(hwnd);
+            app.recovery_tick();
             // Coming back to the window is when an outside commit, pull or
             // branch switch is most likely to have happened.
             app.refresh_git(hwnd);
@@ -198,6 +199,7 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_TIMER if wparam == 7 => {
             app.poll_watcher(hwnd);
+            app.recovery_tick();
             0
         }
         WM_TIMER if wparam == GUTTER_DIFF_TIMER => {
@@ -610,7 +612,9 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_CLOSE => {
             if app.can_close_window(hwnd) {
-                app.save_session();
+                if !app.flush_session(hwnd) {
+                    return 0;
+                }
                 app.stop_terminal_for_close();
                 unsafe {
                     DestroyWindow(hwnd);
@@ -692,6 +696,9 @@ pub fn run() -> io::Result<()> {
         SetFocus(hwnd);
         SetTimer(hwnd, 7, 1000, None);
         if let Some(path) = std::env::args_os().nth(1) {
+            if workflow::load_session().tabs.iter().any(|tab| tab.recovery.is_some()) {
+                app.borrow_mut().restore_session(hwnd);
+            }
             app.borrow_mut().open(hwnd, Some(PathBuf::from(path)));
         } else {
             app.borrow_mut().restore_session(hwnd);

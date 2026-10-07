@@ -67,3 +67,17 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 - Updated README, Unreleased changelog and user guide.
 - Verification: 64 binary tests, 5 runner unit tests, binary Clippy and debug build passed. Live dropdown selection/launch, Automatic and Configure passed. Missing-executable message captured and visually verified separately because the synchronous UI automation blocked inside the modal message loop.
 - Screenshots: target/live-verification/run-config-lightline-ui/dropdown.png and missing-tool.png. Debug build verified; no release rebuild.
+
+## Follow-up: recovery, extension safety and workspace responsiveness
+
+- Added five-second checkpoints for changed sessions, including dirty files and untitled text. A dedicated writer uses a latest-snapshot mailbox and atomic replacement. Idle sessions are not rewritten. Startup offers Restore/Discard; changed or missing originals recover as untitled. Explicit No on close excludes discarded text, and final checkpoint errors keep the window open.
+- Extended the existing session format compatibly with optional recovery text and disk stamps. Command-line file launches first offer recovery when unsaved work exists. File-backed previews continue restoring without recovery text.
+- Extensions clone into staging, validate matching manifests, supported theme JSON and referenced icon assets, then promote with backup/rollback. IDs are validated before filesystem access. Stable backup names and Windows exclusive file handles protect replacement. Staging/backup copies are excluded from installed theme discovery.
+- Explorer enumeration/sorting runs in background workers with workspace generations and per-directory request IDs. Branch discovery reuses the existing Git service; Git status results also check the workspace generation.
+- Added unicode-segmentation 1.13.3 for grapheme-aware caret movement, placement and Backspace/Delete. LSP positions retain byte/UTF-16 precision. Rendering and the Vec<String> text buffer remain unchanged.
+- Added examples/measure_editing.rs for p50/p95 editing/undo/redo, snapshot cost, long-line navigation and Windows process memory measurements. Large snapshots still copy document text on the UI thread; the one-million-line fixture took about 33 ms for this copy.
+- Verification: standard `cargo test --offline --locked --all-targets` passed 250 tests (177 library, 64 binary, 9 integration), with 16 explicitly ignored live/network tests skipped. Standard all-target Clippy with warnings denied and debug app build passed. The benchmark alone was built in release mode.
+- Isolated native GUI smoke test passed periodic recovery, whole joined-emoji deletion, unchanged idle checkpoint timestamps, forced termination/restart, restored-cursor typing, No on close and Discard at startup. Its processes were closed; the user's profile was not used.
+- The Unicode registry archive was downloaded with Invoke-WebRequest after Cargo networking failed, SHA-256 verified against the registry index, and copied to Cargo's cache. Cargo.lock uses the standard registry source/checksum; temporary source override is only in ignored tmp/cached-unicode.toml.
+- Details: docs/RELIABILITY_VERIFICATION.md. Local results: target/live-verification/reliability/results.txt and measure-editing.txt. The smoke-test script is tmp/verify_reliability_ui.py.
+- Preserve concurrent changes to docs/LightLine_Issues_Report.md and .claude/settings.local.json; neither was edited for this task. Nothing was committed or published.

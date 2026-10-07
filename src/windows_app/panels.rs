@@ -191,6 +191,7 @@ impl App {
                 }
                 Some(24) => {
                     self.directory_cache.clear();
+                    self.directory_requests.clear();
                     if let Some(root) = self.workspace_root.clone() {
                         self.load_directory(&root);
                     }
@@ -587,6 +588,21 @@ impl App {
             only_gutter &= matches!(message, WorkerMessage::GutterComputed(..));
             self.pending_workers = self.pending_workers.saturating_sub(1);
             match message {
+                WorkerMessage::Directory(generation, request, path, result) => {
+                    if generation == self.workspace_generation
+                        && self.directory_requests.get(&path) == Some(&request)
+                    {
+                        self.directory_requests.remove(&path);
+                        match result {
+                            Ok(entries) => {
+                                self.directory_cache.insert(path, entries);
+                            }
+                            Err(error) => {
+                                self.status = format!("Could not read {}: {error}", path.display());
+                            }
+                        }
+                    }
+                }
                 WorkerMessage::Files(root, files)
                     if self.workspace_root.as_ref() == Some(&root) =>
                 {
@@ -611,8 +627,8 @@ impl App {
                     self.status = format!("{} results for {}", hits.len(), query);
                     self.search_results = hits;
                 }
-                WorkerMessage::Repo(generation, result) => {
-                    if generation == self.git_generation {
+                WorkerMessage::Repo(generation, workspace_generation, result) => {
+                    if generation == self.git_generation && workspace_generation == self.workspace_generation {
                         self.review_loading = false;
                         match result {
                             Ok(state) => self.apply_repo_state(hwnd, state),
@@ -791,23 +807,22 @@ impl App {
                     && self.view().cursor == pos =>
                 {
                     match text {
-                            Ok(suggestion) if !suggestion.trim().is_empty() => {
-                                self.ghost_text = Some(GhostText {
-                                    tab,
-                                    pos,
-                                    text: suggestion,
-                                });
-                                self.status =
-                                    "Tab to accept inline completion, Esc to dismiss".into();
-                            }
-                            Ok(_) => {
-                                self.ghost_text = None;
-                            }
-                            Err(error) => {
-                                self.ghost_text = None;
-                                self.status = format!("AI completion: {error}");
-                            }
+                        Ok(suggestion) if !suggestion.trim().is_empty() => {
+                            self.ghost_text = Some(GhostText {
+                                tab,
+                                pos,
+                                text: suggestion,
+                            });
+                            self.status = "Tab to accept inline completion, Esc to dismiss".into();
                         }
+                        Ok(_) => {
+                            self.ghost_text = None;
+                        }
+                        Err(error) => {
+                            self.ghost_text = None;
+                            self.status = format!("AI completion: {error}");
+                        }
+                    }
                 }
                 _ => {}
             }

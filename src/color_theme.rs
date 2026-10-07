@@ -158,6 +158,12 @@ pub fn installed(extensions_dir: &Path) -> Vec<(String, ZedColorTheme)> {
     let mut folders: Vec<_> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
+        // Staging and rollback copies are never selectable installed themes.
+        .filter(|path| {
+            !path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        })
         .filter(|path| crate::extensions::zed_manifest::is_color_theme(path))
         .collect();
     folders.sort();
@@ -208,6 +214,20 @@ fn parse_rgba(hex: &str) -> Option<Rgba> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installed_themes_exclude_staging_and_backup_copies() {
+        let root =
+            std::env::temp_dir().join(format!("lightline-theme-staging-{}", std::process::id()));
+        for name in ["theme", ".staging-theme", ".backup-theme"] {
+            let dir = root.join(name).join("themes");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("theme.json"), r##"{"name":"Theme","themes":[{"name":"Theme","appearance":"dark","style":{"editor.background":"#101010"}}]}"##).unwrap();
+        }
+        let themes = installed(&root);
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].0, "theme");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn real_theme() -> Option<ZedColorTheme> {
         let dir = std::env::var_os("APPDATA").map(|appdata| {

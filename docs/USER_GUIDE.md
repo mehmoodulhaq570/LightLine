@@ -4,6 +4,7 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Settings](#settings)
+- [Unsaved-work recovery](#unsaved-work-recovery)
 - [Languages, formatting and debugging](#languages-formatting-and-debugging)
 - [AI Assistant](#ai-assistant)
 - [Extensions and themes](#extensions-and-themes)
@@ -12,6 +13,16 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 ---
 
 ## Keyboard shortcuts
+
+### Unsaved-work recovery
+
+LightLine checkpoints modified documents and untitled text approximately every five seconds when the session changes. Checkpoints are stored in `%APPDATA%\LightLine\session.json`; they do not save over your original files. The next launch offers **Restore** or **Discard**, including when you launch LightLine with a file argument.
+
+If an original file changed or disappeared while LightLine was closed, its recovered text opens as an untitled buffer. Use **Save As** to choose where to keep it. An explicit **No** in a save-on-close prompt discards that document's unsaved text. Empty, untouched untitled tabs and generated previews have no recovery text.
+
+Recovery is a periodic checkpoint: edits made after the latest completed checkpoint can be lost in a crash. Recovery write failures appear in the status bar; a failed final checkpoint keeps the window open. Recovery is stored locally as plain text.
+
+Arrow movement, Backspace and Delete treat combining characters and joined emoji as complete characters. This does not add bidirectional layout or change the renderer's font shaping.
 
 ### Files and workspace
 
@@ -198,6 +209,8 @@ Inserted code is indented to fit where it lands, and one **Ctrl+Z** undoes it.
 ## Extensions and themes
 
 The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extension registry](https://github.com/zed-industries/extensions) into `%APPDATA%\LightLine\extensions`. Two kinds work today. Neither runs code inside LightLine.
+
+Updates download and validate a staged copy before replacing an installed theme. A failed download, invalid manifest, malformed theme or missing icon asset leaves the existing installation intact. If replacement fails, LightLine attempts to restore the previous copy; any backup it cannot restore is retained and its location is reported.
 
 - **Color themes** recolor all of LightLine, dark or light, including the terminal. Installing one, such as **Dracula**, switches to it at once and it's remembered. Themes with several variants (Catppuccin Latte, Frappé, Macchiato, Mocha) offer each in **Preferences: Color Theme**.
 - **Icon themes** change file and folder icons; **Material Icon Theme** is the popular one. Without one, LightLine uses its built-in icons.
