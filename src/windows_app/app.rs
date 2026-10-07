@@ -656,6 +656,7 @@ pub(super) struct App {
     pub(super) editor_context: Option<EditorContextMenu>,
     // The menu behind a pane's "..." button.
     pub(super) more_menu: Option<MoreMenu>,
+    pub(super) run_choice: Option<(lightline::run_config::Configurations, usize, usize)>,
     pub(super) run_config_panel: Option<run_config_ui::RunConfigPanel>,
     // How far the Settings view in the side panel is scrolled, in pixels.
     pub(super) settings_scroll: i32,
@@ -1184,6 +1185,7 @@ impl App {
             caret_on: true,
             editor_context: None,
             more_menu: None,
+            run_choice: None,
             run_config_panel: None,
             settings_scroll: 0,
             dragging: false,

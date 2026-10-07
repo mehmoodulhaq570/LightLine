@@ -134,7 +134,7 @@ fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Resul
                     {
                         return Ok(single(
                             root.clone(),
-                            require("npm", "Install Node.js, then restart LightLine.")?,
+                            require("npm", "Install Node.js from https://nodejs.org/ (includes node and npm), then restart LightLine.")?,
                             vec!["run".into(), task.into()],
                         ));
                     }
@@ -143,11 +143,11 @@ fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Resul
             if language == Language::JavaScript {
                 Ok(single(
                     cwd,
-                    require("node", "Install Node.js, then restart LightLine.")?,
+                    require("node", "Install Node.js from https://nodejs.org/ (includes node and npm), then restart LightLine.")?,
                     vec![file.into()],
                 ))
             } else {
-                require("node", "Install Node.js, then restart LightLine.")?;
+                require("node", "Install Node.js from https://nodejs.org/ (includes node and npm), then restart LightLine.")?;
                 // Search every enclosing package: a monorepo often hoists tsx.
                 let local =
                     file.parent()
@@ -165,7 +165,7 @@ fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Resul
             }
         }
         Language::Go => {
-            let go = require("go", "Install Go (go.dev/dl), then restart LightLine.")?;
+            let go = require("go", "Install Go from https://go.dev/dl/, then restart LightLine.")?;
             let target = if nearest(&file, &["go.mod", "go.work"]).is_some() {
                 OsString::from(".")
             } else {
@@ -222,12 +222,12 @@ fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Resul
                     arguments.extend(target);
                     return Ok(single(
                         root,
-                        require("cargo", "Install Rust (rustup.rs), then restart LightLine.")?,
+                        require("cargo", "Install Rust through https://rustup.rs/ (includes cargo and rustc), then restart LightLine.")?,
                         arguments,
                     ));
                 }
             }
-            let rustc = require("rustc", "Install Rust (rustup.rs), then restart LightLine.")?;
+            let rustc = require("rustc", "Install Rust through https://rustup.rs/ (includes cargo and rustc), then restart LightLine.")?;
             let directory = cwd.join(".lightline-run");
             std::fs::create_dir_all(&directory)
                 .map_err(|error| format!("Could not create run output directory: {error}"))?;

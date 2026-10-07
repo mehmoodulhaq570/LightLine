@@ -475,6 +475,10 @@ unsafe extern "system" fn wnd_proc(
             0
         }
         WM_MOUSEWHEEL => {
+            if app.run_choice.is_some() {
+                app.run_choice_key(hwnd, if (wparam >> 16) as i16 > 0 { VK_UP as u32 } else { VK_DOWN as u32 });
+                return 0;
+            }
             if app.run_config_panel.is_some() {
                 let mut point = POINT::default();
                 unsafe { GetCursorPos(&mut point); ScreenToClient(hwnd, &mut point); }

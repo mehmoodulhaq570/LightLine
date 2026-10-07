@@ -121,8 +121,7 @@ impl App {
                 true
             }
             Err(error) => {
-                self.status = error;
-                self.refresh(hwnd);
+                self.show_run_error(hwnd, error);
                 true
             }
         }

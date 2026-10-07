@@ -47,6 +47,7 @@ impl App {
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        if self.run_choice_key(hwnd, key) { return true; }
         if self.run_config_panel.is_some() {
             self.run_config_key(hwnd, key, ctrl, shift);
             return true;
@@ -959,6 +960,7 @@ impl App {
     }
 
     pub(super) fn character(&mut self, hwnd: HWND, unit: u16) {
+        if self.run_choice.is_some() { return; }
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
             return;
         }
@@ -1314,6 +1316,7 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+        if self.run_choice_click(hwnd, x, y) { return; }
         if self.run_config_panel.is_some() {
             self.run_config_click(hwnd, x, y, extend, false);
             return;

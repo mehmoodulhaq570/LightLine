@@ -82,6 +82,8 @@ Click **Run** or press **Ctrl+Shift+R**. No runner extension is needed; install 
 
 Open **... → Run Configurations...** in the editor, or **Run: Configure / Select Saved Configuration** in the Command Palette, to customize a run. Click **New**, fill in the fields, then **Save & Select**. Arguments use one line per argument; environment variables use one `NAME=value` per line. Paths are relative to the workspace. **Automatic** restores language detection.
 
+The dropdown beside **Run** shows the selected configuration and switches between saved configurations and **Automatic** without opening the full panel. Choose **Configure...** to edit configurations. Missing runtimes or compilers show a LightLine error message with setup guidance; install the tool, add it to PATH, and restart the editor.
+
 The panel uses LightLine's own controls, theme and fonts, with keyboard navigation, clipboard editing and scrolling in smaller windows. Configurations are saved in the workspace's `.lightline/run.json`; environment values apply only to the launched program and its children. See [Direct language runners](docs/USER_GUIDE.md#direct-language-runners) and [Saved Run configurations](docs/USER_GUIDE.md#saved-run-configurations) for setup and shortcuts.
 
 ## Documentation

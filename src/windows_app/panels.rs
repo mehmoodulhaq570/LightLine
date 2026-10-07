@@ -367,8 +367,7 @@ impl App {
             match lightline::runner::prepare(&file) {
                 Ok(plan) => self.run_language_plan(hwnd, plan),
                 Err(error) => {
-                    self.status = error;
-                    self.refresh(hwnd);
+                    self.show_run_error(hwnd, error);
                 }
             }
         } else {
@@ -419,12 +418,12 @@ impl App {
         };
         let is_cpp = Tab::is_cpp(self.doc());
         let Some(compiler) = workflow::detect_c_compiler(is_cpp) else {
-            self.status = if is_cpp {
-                "No C++ compiler found on PATH (install g++/MinGW or Clang)".into()
+            let error = if is_cpp {
+                "Missing C++ compiler: g++ or clang++. Install a MinGW-w64 toolchain or LLVM/Clang with Windows build tools.".into()
             } else {
-                "No C compiler found on PATH (install gcc/MinGW or Clang)".into()
+                "Missing C compiler: gcc or clang. Install a MinGW-w64 toolchain or LLVM/Clang with Windows build tools.".into()
             };
-            unsafe { InvalidateRect(hwnd, null(), 0) };
+            self.show_run_error(hwnd, error);
             return;
         };
         self.check_c_syntax(hwnd, file.clone(), compiler, is_cpp);
@@ -462,9 +461,7 @@ impl App {
         };
         let root = workflow::python_project_root(&file, self.workspace_root.as_deref());
         let Some(interpreter) = self.resolve_python_interpreter(&root) else {
-            self.status =
-                "Select a Python interpreter or virtual environment before running".into();
-            unsafe { InvalidateRect(hwnd, null(), 0) };
+            self.show_run_error(hwnd, "Python interpreter not found. Install Python from https://www.python.org/downloads/, or use Select Python interpreter / Select Python virtual environment in the Command Palette.".into());
             return;
         };
         self.run_language_plan(hwnd, lightline::runner::RunPlan {

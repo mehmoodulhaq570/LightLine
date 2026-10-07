@@ -15,6 +15,7 @@ use markdown_view::{MARKDOWN_TIMER, MarkdownPreview};
 mod panels;
 mod run_config_panel;
 mod run_config_ui;
+mod run_choice;
 mod session;
 mod settings_panel;
 mod terminal;

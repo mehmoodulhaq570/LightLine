@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Run Configuration Dropdown**: A themed selector beside Run shows Automatic or the selected saved configuration. Switch configurations directly, or choose Configure... to open the editor. Supports arrow keys, Home/End, Enter, Escape and the mouse wheel; selections are saved per workspace.
+- **Readable Missing-Tool Guidance**: Run errors appear in a LightLine message with installation guidance for Node.js/npm, tsx, Go, Rust, Python and C/C++ compilers, including interpreter selection and PATH/restart instructions.
+
 - **Direct Language Runners**: **Run** and **Ctrl+Shift+R** now support JavaScript, TypeScript/JSX/TSX, Go and Rust alongside Python and C/C++, without a runner extension. JavaScript uses Node.js, TypeScript uses project-local or global `tsx`, Go runs the current package or standalone file, and Rust selects a Cargo binary/example or compiles a loose file with `rustc`. JavaScript/TypeScript projects prefer their `start` or `dev` script. The runtime or compiler must be installed separately.
 - **Saved Run Configurations**: Each workspace can save an entry file or executable command, arguments, environment variables and working directory in `.lightline/run.json`. **Save & Select** makes a configuration the default for Run; **Automatic** restores language detection. Open **Run Configurations...** from the editor's **...** menu, or **Run: Configure / Select Saved Configuration** from the Command Palette. Create, edit, select and delete configurations, with selection remembered after restarting LightLine.
 - **Expanded Language Support**: Added Tree-sitter syntax colors for C, JavaScript, TypeScript/TSX and JSON, including fenced code snippets. Added C/C++ language support through `clangd`, JavaScript/TypeScript through `typescript-language-server`, and Go through `gopls`, with project-root detection and installation hints.

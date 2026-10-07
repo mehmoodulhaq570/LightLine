@@ -191,6 +191,7 @@ struct Layout {
 
 impl App {
     pub(super) fn show_run_configurations(&mut self, hwnd: HWND) {
+        self.run_choice = None;
         let Some(root) = self.run_configuration_root() else {
             self.status = "Open a folder or save a file before creating Run configurations".into();
             self.refresh(hwnd);
