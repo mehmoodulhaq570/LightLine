@@ -90,7 +90,7 @@ impl App {
 
     /// Ask Git for branch, changes and history without touching the UI thread.
     /// Called on open, on activation, after a save and after every write.
-    pub(super) fn refresh_git(&mut self, hwnd: HWND) {
+    pub(super) fn refresh_git(&mut self) {
         let Some(root) = self.git_root.clone().or(self.workspace_root.clone()) else {
             return;
         };
@@ -99,10 +99,9 @@ impl App {
         let workspace_generation = self.workspace_generation;
         self.review_loading = true;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = workflow::repo_state(&root);
-            let _ = tx.send(WorkerMessage::Repo(
+            tx.send(WorkerMessage::Repo(
                 generation,
                 workspace_generation,
                 result,
@@ -160,7 +159,7 @@ impl App {
         self.panel_selected = self.panel_selected.min(rows.saturating_sub(1));
         self.git_scroll_into_view(hwnd);
         if head_moved {
-            self.refresh_active_git_diff(hwnd);
+            self.refresh_active_git_diff();
         }
         // The status line belongs to whatever the user last asked for, so the
         // counts here stay in the section headers instead of overwriting it.
@@ -626,7 +625,6 @@ impl App {
         };
         self.git_busy = true;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = match &action {
                 GitAction::Stage(paths) => workflow::stage(&root, paths),
@@ -636,7 +634,7 @@ impl App {
                 }
                 GitAction::Commit => workflow::commit(&root, &message),
             };
-            let _ = tx.send(WorkerMessage::GitWrite(action, result));
+            tx.send(WorkerMessage::GitWrite(action, result));
         });
         unsafe { InvalidateRect(hwnd, null(), 0) };
         true
@@ -672,7 +670,7 @@ impl App {
                 self.error(hwnd, &error);
             }
         }
-        self.refresh_git(hwnd);
+        self.refresh_git();
     }
 
     /// Push, pull and fetch run in the terminal panel, where Git's own output

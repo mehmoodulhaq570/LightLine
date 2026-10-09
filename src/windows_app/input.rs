@@ -252,7 +252,7 @@ impl App {
                     self.set_sidebar_visible(hwnd, false);
                 }
                 x if x == VK_RETURN as u32 => {
-                    self.search_project(hwnd);
+                    self.search_project();
                 }
                 x if x == VK_BACK as u32 => {
                     self.project_query.pop();
@@ -1540,7 +1540,7 @@ impl App {
                     if !self.zed_registry_loading {
                         self.zed_registry_loaded = false;
                         self.status = "Refreshing extension registry...".into();
-                        self.ensure_zed_registry_loaded(hwnd);
+                        self.ensure_zed_registry_loaded();
                     }
                     return;
                 }
@@ -1612,7 +1612,7 @@ impl App {
                         self.commit_focus = false;
                         match hit {
                             GitHit::CommitButton => self.git_commit_pressed(hwnd),
-                            GitHit::Refresh => self.refresh_git(hwnd),
+                            GitHit::Refresh => self.refresh_git(),
                             GitHit::Push => self.git_remote(hwnd, workflow::RemoteAction::Push),
                             GitHit::Pull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
                             GitHit::Fetch => self.git_remote(hwnd, workflow::RemoteAction::Fetch),
@@ -1736,7 +1736,7 @@ impl App {
                         self.commit_focus = false;
                         self.panel_focus = true;
                         self.terminal_focus = false;
-                        self.ensure_zed_registry_loaded(hwnd);
+                        self.ensure_zed_registry_loaded();
                         self.refresh(hwnd);
                         return;
                     }

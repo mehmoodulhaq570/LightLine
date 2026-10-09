@@ -92,7 +92,9 @@ pub struct SessionView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionTab {
     pub path: Option<PathBuf>,
-    pub recovery: Option<String>,
+    // Shared with the tab that produced it, so an unchanged buffer isn't
+    // copied again for every snapshot.
+    pub recovery: Option<std::sync::Arc<str>>,
     pub stamp: Option<(u64, u32, u64)>,
     pub views: [SessionView; 2],
 }
@@ -164,7 +166,7 @@ fn session_from_value(value: &Value) -> Session {
                     let recovery = item
                         .get("recovery")
                         .and_then(Value::as_str)
-                        .map(str::to_owned);
+                        .map(std::sync::Arc::from);
                     if recovery.is_none() && !path.as_ref().is_some_and(|p| p.is_file()) {
                         return None;
                     }
@@ -272,7 +274,7 @@ fn session_to_value(session: &Session) -> Value {
         "active": session.active,
         "tabs": session.tabs.iter().map(|tab| serde_json::json!({
             "path": tab.path.as_ref().map(|p| p.to_string_lossy().to_string()),
-            "recovery": tab.recovery,
+            "recovery": tab.recovery.as_deref(),
             "stamp": tab.stamp,
             "views": tab.views.iter().map(session_view_to_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
@@ -290,7 +292,18 @@ fn save_session_at(path: &Path, session: &Session) -> std::io::Result<()> {
         file.write_all(session_to_value(session).to_string().as_bytes())?;
         file.sync_all()?;
         drop(file);
-        crate::document::replace_file(&temporary, path)
+        // Another program (a virus scanner, the search indexer) can hold the
+        // old file open for a moment; that passes, so try again shortly.
+        let mut attempt = 0;
+        loop {
+            match crate::document::replace_file(&temporary, path) {
+                Err(error) if attempt < 5 && matches!(error.raw_os_error(), Some(5 | 32)) => {
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                result => break result,
+            }
+        }
     })();
     if result.is_err() {
         let _ = fs::remove_file(temporary);
@@ -500,6 +513,10 @@ pub fn search_workspace(root: &Path, query: &str) -> Vec<SearchHit> {
     search_workspace_with_cancel(root, query, &AtomicBool::new(false))
 }
 
+/// The first `MAX_RESULTS` lines containing `query`, in file order. Files
+/// are read on several threads; each takes the next file in order, and none
+/// starts a new one once enough lines are found, so the files read are
+/// always a leading run of the list.
 pub fn search_workspace_with_cancel(
     root: &Path,
     query: &str,
@@ -508,48 +525,86 @@ pub fn search_workspace_with_cancel(
     if query.is_empty() {
         return Vec::new();
     }
+    let files = workspace_files_inner(root, Some(cancel));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let found = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(4, |count| count.get().min(8));
+    let mut per_file: Vec<(usize, Vec<SearchHit>)> = std::thread::scope(|scope| {
+        let searches: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut hits = Vec::new();
+                    while !cancel.load(Ordering::Relaxed)
+                        && found.load(Ordering::Relaxed) < MAX_RESULTS
+                    {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(path) = files.get(index) else {
+                            break;
+                        };
+                        let file_hits = search_file(path, query, cancel);
+                        if !file_hits.is_empty() {
+                            found.fetch_add(file_hits.len(), Ordering::Relaxed);
+                            hits.push((index, file_hits));
+                        }
+                    }
+                    hits
+                })
+            })
+            .collect();
+        searches
+            .into_iter()
+            .flat_map(|search| search.join().unwrap_or_default())
+            .collect()
+    });
+    per_file.sort_by_key(|(index, _)| *index);
+    per_file
+        .into_iter()
+        .flat_map(|(_, hits)| hits)
+        .take(MAX_RESULTS)
+        .collect()
+}
+
+fn search_file(path: &Path, query: &str, cancel: &AtomicBool) -> Vec<SearchHit> {
+    if !fs::metadata(path).is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES) {
+        return Vec::new();
+    }
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    // Most files have no match; one scan of the whole text rules them out.
+    if !content.contains(query) {
+        return Vec::new();
+    }
+    let lines: Vec<&str> = content.lines().collect();
     let mut hits = Vec::new();
-    for path in workspace_files_inner(root, Some(cancel)) {
-        if cancel.load(Ordering::Relaxed) {
+    for (line_index, line) in lines.iter().enumerate() {
+        if line_index % 128 == 0 && cancel.load(Ordering::Relaxed) {
             break;
         }
-        if !fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES) {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let lines: Vec<&str> = content.lines().collect();
-        for (line_index, line) in lines.iter().enumerate() {
-            if line_index % 128 == 0 && cancel.load(Ordering::Relaxed) {
-                return hits;
-            }
-            if let Some(byte) = line.find(query) {
-                hits.push(SearchHit {
-                    path: path.clone(),
-                    line: line_index,
-                    byte,
-                    preview: line.trim().chars().take(110).collect(),
-                    context: lines[line_index.saturating_sub(2)..(line_index + 3).min(lines.len())]
-                        .iter()
-                        .enumerate()
-                        .map(|(offset, text)| {
-                            (
-                                line_index.saturating_sub(2) + offset + 1,
-                                text.chars().take(130).collect(),
-                            )
-                        })
-                        .collect(),
-                });
-                if hits.len() >= MAX_RESULTS {
-                    return hits;
-                }
+        if let Some(byte) = line.find(query) {
+            hits.push(SearchHit {
+                path: path.to_path_buf(),
+                line: line_index,
+                byte,
+                preview: line.trim().chars().take(110).collect(),
+                context: lines[line_index.saturating_sub(2)..(line_index + 3).min(lines.len())]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, text)| {
+                        (
+                            line_index.saturating_sub(2) + offset + 1,
+                            text.chars().take(130).collect(),
+                        )
+                    })
+                    .collect(),
+            });
+            if hits.len() >= MAX_RESULTS {
+                break;
             }
         }
     }
     hits
 }
-
 pub fn run_tests_stream(
     root: &Path,
     lines: Sender<String>,
@@ -2050,6 +2105,22 @@ mod tests {
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].byte, 0);
         assert!(search_workspace_with_cancel(&root, "find", &AtomicBool::new(true)).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parallel_search_returns_the_first_matches_in_file_order() {
+        let root = temp_dir("search-order");
+        for index in 0..300 {
+            fs::write(root.join(format!("{index:03}.txt")), "a\nhit\nb\nhit\n").unwrap();
+        }
+        let hits = search_workspace(&root, "hit");
+        assert_eq!(hits.len(), MAX_RESULTS);
+        // Two per file, from the first files on.
+        for (number, hit) in hits.iter().enumerate() {
+            assert_eq!(hit.path, root.join(format!("{:03}.txt", number / 2)));
+            assert_eq!(hit.line, if number % 2 == 0 { 1 } else { 3 });
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

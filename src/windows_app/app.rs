@@ -84,6 +84,31 @@ pub(super) enum WorkerMessage {
     },
 }
 
+// A document's text as of its (id, change_serial); see Tab::recovery_text.
+pub(super) type RecoveryText = ((u64, u64), Arc<str>);
+
+// Posted when a background job has sent its result (see `WorkerSender`).
+pub(super) const WORKER_EVENT_MESSAGE: u32 = WM_APP + 11;
+// Posted when the file watcher has events waiting (see poll_watcher).
+pub(super) const WATCHER_EVENT_MESSAGE: u32 = WM_APP + 12;
+
+// The background jobs' side of the worker channel: sending a result also
+// wakes the window to apply it, so nothing has to check on a timer.
+#[derive(Clone)]
+pub(super) struct WorkerSender {
+    tx: Sender<WorkerMessage>,
+    hwnd: isize,
+}
+
+impl WorkerSender {
+    // Fails only once the window is gone, when the result has nowhere to go.
+    pub(super) fn send(&self, message: WorkerMessage) {
+        if self.tx.send(message).is_ok() {
+            unsafe { PostMessageW(self.hwnd as HWND, WORKER_EVENT_MESSAGE, 0, 0) };
+        }
+    }
+}
+
 // A pending source-control write. Each one runs on the shared worker channel
 // and re-reads the repository when it finishes, so the panel never drifts
 // ahead of what Git actually did.
@@ -263,6 +288,8 @@ pub(super) struct Tab {
     pub(super) lsp_serial: u64,
     pub(super) lsp_opened: bool,
     pub(super) lsp_language: Option<LspLanguage>,
+    // The project root of the server the file was opened with.
+    pub(super) lsp_root: Option<PathBuf>,
     // Some for a read-only raster image preview; `document` is then an empty,
     // unsaved placeholder that must never actually be written to disk.
     pub(super) image: Option<image_view::ImageAsset>,
@@ -285,6 +312,8 @@ pub(super) struct Tab {
     // never be edited or saved over the real file; `views` holds the saved
     // cursor and scroll positions.
     pub(super) unloaded: bool,
+    // The last session snapshot of `document`'s text, by (id, change_serial).
+    pub(super) recovery_cache: RefCell<Option<RecoveryText>>,
 }
 
 #[derive(Clone)]
@@ -374,12 +403,30 @@ impl Tab {
             lsp_serial: 0,
             lsp_opened: false,
             lsp_language: None,
+            lsp_root: None,
             image: None,
             binary_preview: false,
             placeholder: false,
             markdown: None,
             word_wrap: None,
             unloaded: false,
+            recovery_cache: RefCell::new(None),
+        }
+    }
+
+    // The document's text for a session snapshot. Copying a large buffer
+    // takes tens of milliseconds, so it's done once per change, not once per
+    // snapshot: those also follow caret moves and other tabs' edits.
+    pub(super) fn recovery_text(&self) -> Arc<str> {
+        let key = (self.document.id(), self.document.change_serial());
+        let mut cache = self.recovery_cache.borrow_mut();
+        match &*cache {
+            Some((cached, text)) if *cached == key => text.clone(),
+            _ => {
+                let text: Arc<str> = self.document.text().into();
+                *cache = Some((key, text.clone()));
+                text
+            }
         }
     }
 
@@ -446,12 +493,14 @@ impl Tab {
             lsp_serial: 0,
             lsp_opened: false,
             lsp_language: None,
+            lsp_root: None,
             image: None,
             binary_preview: true,
             placeholder: false,
             markdown: None,
             word_wrap: None,
             unloaded: false,
+            recovery_cache: RefCell::new(None),
         }
     }
 
@@ -720,7 +769,8 @@ pub(super) struct App {
     pub(super) directory_cache: HashMap<PathBuf, Vec<ExplorerEntry>>,
     pub(super) directory_requests: HashMap<PathBuf, u64>,
     pub(super) directory_request_serial: u64,
-    pub(super) recovery_last: Instant,
+    // A RECOVERY_TIMER is pending (see arm_recovery).
+    pub(super) recovery_armed: std::cell::Cell<bool>,
     pub(super) recovery_key: RefCell<Option<session::RecoveryKey>>,
     pub(super) welcome: bool,
     pub(super) ai_assistant_visible: bool,
@@ -795,13 +845,13 @@ pub(super) struct App {
     pub(super) panel_selected: usize,
     pub(super) panel_focus: bool,
     pub(super) recent: Vec<PathBuf>,
-    pub(super) worker_tx: Sender<WorkerMessage>,
+    pub(super) worker_tx: WorkerSender,
     pub(super) worker_rx: Receiver<WorkerMessage>,
-    pub(super) pending_workers: usize,
-    pub(super) lsp: HashMap<LspLanguage, LspClient>,
+    // One per language and project root (see ensure_lsp).
+    pub(super) lsp: Vec<LspClient>,
     pub(super) lsp_event_tx: Sender<LspEvent>,
     pub(super) lsp_events: Receiver<LspEvent>,
-    pub(super) lsp_failed_at: HashMap<LspLanguage, Instant>,
+    pub(super) lsp_failed_at: HashMap<(LspLanguage, PathBuf), Instant>,
     pub(super) python_interpreter: Option<PathBuf>,
     pub(super) hover_mouse: Option<(i32, i32)>,
     pub(super) hover_target: Option<HoverTarget>,
@@ -1245,7 +1295,7 @@ impl App {
             directory_cache: HashMap::new(),
             directory_requests: HashMap::new(),
             directory_request_serial: 0,
-            recovery_last: Instant::now(),
+            recovery_armed: std::cell::Cell::new(false),
             recovery_key: RefCell::new(None),
             welcome: true,
             ai_assistant_visible: false,
@@ -1309,10 +1359,12 @@ impl App {
             panel_selected: 0,
             panel_focus: false,
             recent: workflow::recent_workspaces(),
-            worker_tx,
+            worker_tx: WorkerSender {
+                tx: worker_tx,
+                hwnd: hwnd as isize,
+            },
             worker_rx,
-            pending_workers: 0,
-            lsp: HashMap::new(),
+            lsp: Vec::new(),
             lsp_event_tx: lsp_tx,
             lsp_events: lsp_rx,
             lsp_failed_at: HashMap::new(),
@@ -1328,7 +1380,12 @@ impl App {
             completion_request: None,
             completion: None,
             restoring: false,
-            watcher: Some(lightline::watcher::FileWatcher::start()),
+            watcher: Some({
+                let hwnd = hwnd as isize;
+                lightline::watcher::FileWatcher::start(move || unsafe {
+                    PostMessageW(hwnd as HWND, WATCHER_EVENT_MESSAGE, 0, 0);
+                })
+            }),
             settings,
             git_diff_cache: HashMap::new(),
             git_head_cache: HashMap::new(),
@@ -1452,16 +1509,15 @@ impl App {
     // Kicks off a one-time fetch of every id/version in the Zed registry, so
     // the search box has something beyond the two curated entries to match
     // against. Idempotent: does nothing once loaded or while already loading.
-    pub(super) fn ensure_zed_registry_loaded(&mut self, hwnd: HWND) {
+    pub(super) fn ensure_zed_registry_loaded(&mut self) {
         if self.zed_registry_loaded || self.zed_registry_loading {
             return;
         }
         self.zed_registry_loading = true;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = lightline::extensions::zed_registry::list_ids();
-            let _ = tx.send(WorkerMessage::ZedRegistryList(result));
+            tx.send(WorkerMessage::ZedRegistryList(result));
         });
     }
 
@@ -1512,7 +1568,6 @@ impl App {
             self.status = format!("Resolving {name} from the Zed registry...");
             let tx = self.worker_tx.clone();
             let worker_id = id.to_string();
-            self.worker_started(hwnd);
             std::thread::spawn(move || {
                 let outcome = lightline::extensions::zed_registry::resolve(&registry_id).and_then(
                     |resolved| {
@@ -1542,7 +1597,7 @@ impl App {
                         )
                     },
                 );
-                let _ = tx.send(WorkerMessage::ZedExtensionInstalled(worker_id, outcome));
+                tx.send(WorkerMessage::ZedExtensionInstalled(worker_id, outcome));
             });
             self.refresh(hwnd);
             return;
@@ -1573,7 +1628,6 @@ impl App {
             self.extensions[idx].installing = true;
             self.status = "Checking for Prettier...".into();
             let tx = self.worker_tx.clone();
-            self.worker_started(hwnd);
             std::thread::spawn(move || {
                 #[cfg(windows)]
                 use std::os::windows::process::CommandExt;
@@ -1593,7 +1647,7 @@ impl App {
                 };
                 let found = probe("prettier", &["--version"])
                     || probe("npx", &["--yes", "prettier", "--version"]);
-                let _ = tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), found));
+                tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), found));
             });
             self.refresh(hwnd);
         }
@@ -1924,7 +1978,7 @@ impl App {
             self.panel_focus = false;
             self.set_sidebar_visible(hwnd, true);
             if view == SideView::Extensions {
-                self.ensure_zed_registry_loaded(hwnd);
+                self.ensure_zed_registry_loaded();
             }
         }
         self.show_active_tab(hwnd);
@@ -2103,7 +2157,7 @@ impl App {
         self.update_title(hwnd);
         self.advance_syntax(hwnd);
         self.ensure_lsp(hwnd);
-        self.refresh_active_git_diff(hwnd);
+        self.refresh_active_git_diff();
         unsafe {
             InvalidateRect(hwnd, null(), 0);
         }
@@ -2831,14 +2885,14 @@ impl App {
         // they finish) staged, committed or checked out -- e.g. in the
         // built-in terminal, where the window never loses focus.
         if git_changed && !self.git_busy {
-            self.refresh_git(hwnd);
+            self.refresh_git();
         }
     }
 
     /// Gutter change marks for the visible file, read with `git diff HEAD`.
     /// This runs on the worker channel: doing it inline spawned two Git
     /// processes per repaint, and repaints follow every keystroke.
-    pub(super) fn refresh_active_git_diff(&mut self, hwnd: HWND) {
+    pub(super) fn refresh_active_git_diff(&mut self) {
         let Some(path) = self.doc().path.clone() else {
             return;
         };
@@ -2861,11 +2915,10 @@ impl App {
         }
         self.gutter_request = Some(path.clone());
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let head_text = workflow::git_head_text(&root, &relative).ok();
             let result = workflow::git_diff(&root, &relative, DiffScope::Head);
-            let _ = tx.send(WorkerMessage::GutterDiff(path, relative, head_text, result));
+            tx.send(WorkerMessage::GutterDiff(path, relative, head_text, result));
         });
     }
 
@@ -2972,10 +3025,9 @@ impl App {
                 workflow::GutterWork::Job(job) => {
                     let generation = self.gutter_generation;
                     let tx = self.worker_tx.clone();
-                    self.worker_started(self.hwnd);
                     std::thread::spawn(move || {
                         let diff = job.run();
-                        let _ = tx.send(WorkerMessage::GutterComputed(generation, path, diff));
+                        tx.send(WorkerMessage::GutterComputed(generation, path, diff));
                     });
                     return;
                 }
@@ -3038,7 +3090,7 @@ impl App {
         match workflow::stage_hunk(&root, &path, &hunk) {
             Ok(()) => {
                 self.status = format!("Staged hunk at line {}", hunk.buffer_start + 1);
-                self.refresh_git(hwnd);
+                self.refresh_git();
                 self.start_gutter_diff();
             }
             Err(err) => {
@@ -3168,7 +3220,6 @@ impl App {
             .to_string();
 
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         self.status = "AI completing inline...".into();
         unsafe { InvalidateRect(hwnd, null(), 0) };
 
@@ -3176,7 +3227,7 @@ impl App {
             let res = lightline::ai::complete_inline(
                 &endpoint, &model, &prefix, &suffix, &language, &cancel,
             );
-            let _ = tx.send(WorkerMessage::GhostSuggestion {
+            tx.send(WorkerMessage::GhostSuggestion {
                 tab,
                 pos,
                 serial,
@@ -3314,7 +3365,7 @@ impl App {
             Ok(()) => {
                 self.lsp_after_save(hwnd, old_path.as_deref());
                 self.tab_mut().update_syntax_language();
-                self.check_c_syntax_on_save(hwnd, &path);
+                self.check_c_syntax_on_save(&path);
                 self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
@@ -3337,10 +3388,10 @@ impl App {
                     self.status = "Settings saved and applied".into();
                 }
                 self.gutter_done = None;
-                self.refresh_active_git_diff(hwnd);
+                self.refresh_active_git_diff();
                 // A save is the moment a change appears or disappears, so the
                 // panel and the branch chip ask Git again rather than guessing.
-                self.refresh_git(hwnd);
+                self.refresh_git();
                 self.refresh(hwnd);
                 true
             }
@@ -3490,7 +3541,7 @@ impl App {
                     watcher.watch_file(path.clone());
                 }
                 self.gutter_done = None;
-                self.refresh_active_git_diff(hwnd);
+                self.refresh_active_git_diff();
                 self.save_session();
             }
             Err(error) => self.error(hwnd, &error),
@@ -3501,6 +3552,28 @@ impl App {
 #[cfg(test)]
 mod split_tests {
     use super::*;
+
+    #[test]
+    fn snapshot_text_is_copied_once_per_change_and_never_reused_across_documents() {
+        let mut tab = Tab::new(Document::new());
+        tab.document
+            .replace(Pos::default(), Pos::default(), "first");
+        let text = tab.recovery_text();
+        assert_eq!(&*text, "first");
+        assert!(
+            Arc::ptr_eq(&text, &tab.recovery_text()),
+            "unchanged: shared"
+        );
+        tab.document.replace(Pos::default(), Pos::default(), "x");
+        assert_eq!(&*tab.recovery_text(), "xfirst");
+        // A reloaded file's new document can reach the same change_serial.
+        let mut replaced = Document::new();
+        replaced.replace(Pos::default(), Pos::default(), "o");
+        replaced.replace(Pos::default(), Pos::default(), "t");
+        assert_eq!(replaced.change_serial(), tab.document.change_serial());
+        tab.document = replaced;
+        assert_eq!(&*tab.recovery_text(), "to");
+    }
 
     #[test]
     fn edits_remap_the_other_panes_cursor_across_lines() {

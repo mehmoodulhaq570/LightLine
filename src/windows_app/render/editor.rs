@@ -188,6 +188,7 @@ impl App {
     }
 
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
+        self.arm_recovery();
         unsafe {
             // The update region itself, read before BeginPaint validates it.
             let update = CreateRectRgn(0, 0, 0, 0);

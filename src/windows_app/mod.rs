@@ -23,7 +23,8 @@ mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
     ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, FileAction, GhostText, GitAction,
-    SideView, Tab, TerminalPane, TerminalTab, WorkerMessage, is_c_family_path, is_cpp_path,
+    SideView, Tab, TerminalPane, TerminalTab, WATCHER_EVENT_MESSAGE, WORKER_EVENT_MESSAGE,
+    WorkerMessage, is_c_family_path, is_cpp_path,
 };
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
 use more_menu::MoreMenu;
@@ -128,6 +129,8 @@ const AI_HEADER: i32 = 52;
 const CARD_GAP: i32 = 1;
 const CARD_RADIUS: i32 = 4;
 const TRANSITION_MS: u128 = 150;
+// WM_TIMER id for the next session snapshot (see arm_recovery).
+const RECOVERY_TIMER: usize = 7;
 // WM_TIMER id for the debounced gutter diff (see schedule_gutter_diff).
 const GUTTER_DIFF_TIMER: usize = 8;
 // WM_TIMER id that repaints once a status message expires (see fresh_status).

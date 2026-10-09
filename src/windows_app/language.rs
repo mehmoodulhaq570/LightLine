@@ -54,20 +54,22 @@ impl App {
             return;
         }
         let path = path.to_path_buf();
-        let root = self.lsp_root(language, &path);
-        if self
-            .lsp
-            .get(&language)
-            .is_none_or(|client| client.root() != root)
-        {
+        // Opened files carry canonicalize()'s `\\?\` form and restored ones
+        // don't; one spelling keeps them on the same server.
+        let root = PathBuf::from(display_path(&self.lsp_root(language, &path)));
+        // One server per project, kept while other projects' files are
+        // edited: switching tabs between two crates or packages used to
+        // restart the server, and rust-analyzer then re-indexed everything.
+        let running = |client: &LspClient| client.language() == language && client.root() == root;
+        if !self.lsp.iter().any(running) {
+            let key = (language, root.clone());
             if self
                 .lsp_failed_at
-                .get(&language)
+                .get(&key)
                 .is_some_and(|when| when.elapsed() < Duration::from_secs(3))
             {
                 return;
             }
-            self.reset_language_client(language);
             if language == LspLanguage::Python && self.python_interpreter.is_none() {
                 self.python_interpreter = workflow::detect_python_interpreter(Some(&root));
             }
@@ -77,44 +79,57 @@ impl App {
             });
             let client = LspClient::start(
                 language,
-                root,
+                root.clone(),
                 (language == LspLanguage::Python)
                     .then(|| self.python_interpreter.clone())
                     .flatten(),
                 self.lsp_event_tx.clone(),
                 wake,
             );
-            self.lsp.insert(language, client);
-            self.lsp_failed_at.remove(&language);
+            self.lsp.push(client);
+            self.lsp_failed_at.remove(&key);
         }
-        if !self.tab().lsp_opened || self.tab().lsp_language != Some(language) {
+        let tab = self.tab();
+        if !tab.lsp_opened
+            || tab.lsp_language != Some(language)
+            || tab.lsp_root.as_deref() != Some(root.as_path())
+        {
+            self.close_lsp_tab(self.active);
             let uri = lsp::file_uri(&path);
             let text = self.doc().text();
             let version = 1;
             if self
                 .lsp
-                .get(&language)
+                .iter()
+                .find(|client| client.language() == language && client.root() == root)
                 .is_some_and(|client| client.send(LspCommand::Open { uri, text, version }))
             {
                 let tab = self.tab_mut();
                 tab.lsp_opened = true;
                 tab.lsp_language = Some(language);
+                tab.lsp_root = Some(root);
                 tab.lsp_version = version;
                 tab.lsp_serial = tab.document.change_serial();
             }
         }
     }
 
+    // The language server the file in tab `index` was opened with.
+    pub(super) fn tab_lsp(&self, index: usize) -> Option<&LspClient> {
+        let tab = &self.tabs[index];
+        let (language, root) = (tab.lsp_language?, tab.lsp_root.as_deref()?);
+        self.lsp
+            .iter()
+            .find(|client| client.language() == language && client.root() == root)
+    }
+
     fn lsp_root(&self, language: LspLanguage, path: &Path) -> PathBuf {
         match language {
-            LspLanguage::Rust => path
-                .ancestors()
-                .skip(1)
-                .take(10)
-                .find(|folder| folder.join("Cargo.toml").is_file())
-                .or_else(|| path.parent())
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
+            // The Cargo workspace a crate belongs to, so all its crates share
+            // one rust-analyzer, which indexes the whole workspace anyway.
+            LspLanguage::Rust => cargo_root(path)
+                .or_else(|| path.parent().map(Path::to_path_buf))
+                .unwrap_or_else(|| PathBuf::from(".")),
             LspLanguage::Python => path
                 .ancestors()
                 .skip(1)
@@ -175,12 +190,19 @@ impl App {
         }
     }
 
-    fn reset_language_client(&mut self, language: LspLanguage) {
-        self.lsp.remove(&language);
+    // Drops the `language` server for `root`, or every `language` server
+    // when `root` is None; its tabs reopen with a new one when next shown.
+    fn reset_language_client(&mut self, language: LspLanguage, root: Option<&Path>) {
+        let matches = |other: Option<LspLanguage>, other_root: Option<&Path>| {
+            other == Some(language) && root.is_none_or(|root| other_root == Some(root))
+        };
+        self.lsp
+            .retain(|client| !matches(Some(client.language()), Some(client.root())));
         for tab in &mut self.tabs {
-            if tab.lsp_language == Some(language) {
+            if matches(tab.lsp_language, tab.lsp_root.as_deref()) {
                 tab.lsp_opened = false;
                 tab.lsp_language = None;
+                tab.lsp_root = None;
                 tab.diagnostics.clear();
             }
         }
@@ -191,9 +213,6 @@ impl App {
         if !tab.lsp_opened || tab.lsp_serial == tab.document.change_serial() {
             return;
         }
-        let Some(language) = tab.lsp_language else {
-            return;
-        };
         let Some(path) = tab.document.path.as_deref() else {
             return;
         };
@@ -221,7 +240,7 @@ impl App {
                 character: change.end_utf16 as u32,
             },
         };
-        let sent = self.lsp.get(&language).is_some_and(|client| {
+        let sent = self.tab_lsp(self.active).is_some_and(|client| {
             client.send(LspCommand::Change {
                 uri,
                 version,
@@ -241,25 +260,28 @@ impl App {
     }
 
     pub(super) fn close_lsp_tab(&mut self, index: usize) {
-        let tab = &mut self.tabs[index];
-        if tab.lsp_opened {
-            if let (Some(language), Some(path)) = (tab.lsp_language, tab.document.path.as_deref()) {
-                let uri = lsp::file_uri(path);
-                if let Some(client) = self.lsp.get(&language) {
-                    client.send(LspCommand::Close { uri });
-                }
-            }
-            tab.lsp_opened = false;
-            tab.lsp_language = None;
+        if !self.tabs[index].lsp_opened {
+            return;
         }
+        if let (Some(client), Some(path)) = (
+            self.tab_lsp(index),
+            self.tabs[index].document.path.as_deref(),
+        ) {
+            client.send(LspCommand::Close {
+                uri: lsp::file_uri(path),
+            });
+        }
+        let tab = &mut self.tabs[index];
+        tab.lsp_opened = false;
+        tab.lsp_language = None;
+        tab.lsp_root = None;
     }
 
     pub(super) fn lsp_after_save(&mut self, hwnd: HWND, old_path: Option<&Path>) {
         let changed_path = old_path != self.doc().path.as_deref();
         if changed_path {
             if self.tab().lsp_opened
-                && let (Some(language), Some(path)) = (self.tab().lsp_language, old_path)
-                && let Some(client) = self.lsp.get(&language)
+                && let (Some(client), Some(path)) = (self.tab_lsp(self.active), old_path)
             {
                 client.send(LspCommand::Close {
                     uri: lsp::file_uri(path),
@@ -268,13 +290,13 @@ impl App {
             let tab = self.tab_mut();
             tab.lsp_opened = false;
             tab.lsp_language = None;
+            tab.lsp_root = None;
             tab.diagnostics.clear();
         }
         self.ensure_lsp(hwnd);
         if self.tab().lsp_opened
-            && let (Some(language), Some(path)) =
-                (self.tab().lsp_language, self.doc().path.as_deref())
-            && let Some(client) = self.lsp.get(&language)
+            && let (Some(client), Some(path)) =
+                (self.tab_lsp(self.active), self.doc().path.as_deref())
         {
             client.send(LspCommand::Save {
                 uri: lsp::file_uri(path),
@@ -336,9 +358,13 @@ impl App {
                         });
                     }
                 }
-                LspEvent::Stopped { language, message } => {
-                    self.reset_language_client(language);
-                    self.lsp_failed_at.insert(language, Instant::now());
+                LspEvent::Stopped {
+                    language,
+                    root,
+                    message,
+                } => {
+                    self.reset_language_client(language, Some(&root));
+                    self.lsp_failed_at.insert((language, root), Instant::now());
                     self.hover_target = None;
                     self.hover_card = None;
                     self.definition_target = None;
@@ -635,8 +661,9 @@ impl App {
 
     fn set_python_interpreter(&mut self, hwnd: HWND, interpreter: PathBuf) {
         self.python_interpreter = Some(interpreter.clone());
-        self.reset_language_client(LspLanguage::Python);
-        self.lsp_failed_at.remove(&LspLanguage::Python);
+        self.reset_language_client(LspLanguage::Python, None);
+        self.lsp_failed_at
+            .retain(|(language, _), _| *language != LspLanguage::Python);
         self.status = format!("Python interpreter: {}", interpreter.to_string_lossy());
         self.ensure_lsp(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -777,7 +804,7 @@ impl App {
         };
         self.hover_request_id += 1;
         let id = self.hover_request_id;
-        if self.lsp.get(&language).is_some_and(|client| {
+        if self.tab_lsp(index).is_some_and(|client| {
             client.send(LspCommand::Hover {
                 id,
                 uri: uri.clone(),
@@ -824,7 +851,7 @@ impl App {
         };
         self.request_id += 1;
         let id = self.request_id;
-        if self.lsp.get(&language).is_some_and(|client| {
+        if self.tab_lsp(index).is_some_and(|client| {
             client.send(LspCommand::Definition {
                 id,
                 uri: uri.clone(),
@@ -869,7 +896,7 @@ impl App {
         };
         self.request_id += 1;
         let id = self.request_id;
-        if self.lsp.get(&language).is_some_and(|client| {
+        if self.tab_lsp(index).is_some_and(|client| {
             client.send(LspCommand::References {
                 id,
                 uri: uri.clone(),
@@ -926,12 +953,11 @@ impl App {
         let serial = self.doc().change_serial();
         self.status = format!("Formatting with {}...", formatter.name());
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = formatter
                 .format(&code, &path)
                 .map_err(|error| error.to_string());
-            let _ = tx.send(WorkerMessage::Formatted(
+            tx.send(WorkerMessage::Formatted(
                 path,
                 formatter.name(),
                 serial,
@@ -1038,7 +1064,7 @@ impl App {
         let version = tab.lsp_version;
         self.request_id += 1;
         let id = self.request_id;
-        if self.lsp.get(&language).is_some_and(|client| {
+        if self.tab_lsp(index).is_some_and(|client| {
             client.send(LspCommand::Format {
                 id,
                 uri: uri.clone(),
@@ -1105,7 +1131,7 @@ impl App {
         };
         self.request_id += 1;
         let id = self.request_id;
-        if self.lsp.get(&language).is_some_and(|client| {
+        if self.tab_lsp(index).is_some_and(|client| {
             client.send(LspCommand::Completion {
                 id,
                 uri: uri.clone(),
@@ -1208,6 +1234,23 @@ fn problem_counts<'a>(diagnostics: impl Iterator<Item = &'a LspDiagnostic>) -> (
     })
 }
 
+// The folder of the Cargo workspace `file`'s package belongs to, or of the
+// package itself when it is in none.
+fn cargo_root(file: &Path) -> Option<PathBuf> {
+    let package = file
+        .ancestors()
+        .skip(1)
+        .take(10)
+        .find(|folder| folder.join("Cargo.toml").is_file())?;
+    let workspace = package.ancestors().take(10).find(|folder| {
+        std::fs::read_to_string(folder.join("Cargo.toml"))
+            .ok()
+            .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
+            .is_some_and(|manifest| manifest.contains_key("workspace"))
+    });
+    Some(workspace.unwrap_or(package).to_path_buf())
+}
+
 // The single edit turning `old` into `new`: the byte range in `old` past
 // their common start and end, and the text of `new` that replaces it. None
 // when they are equal.
@@ -1279,6 +1322,29 @@ fn formatted_offset(old: &str, span: (usize, usize, &str), offset: usize) -> usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crates_in_a_cargo_workspace_share_its_root() {
+        let root =
+            std::env::temp_dir().join(format!("lightline-cargo-root-{}", std::process::id()));
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write("ws/Cargo.toml", "[workspace]\nmembers = [\"a\", \"b\"]\n");
+        write("ws/a/Cargo.toml", "[package]\nname = \"a\"\n");
+        write("ws/b/Cargo.toml", "[package]\nname = \"b\"\n");
+        write("solo/Cargo.toml", "[package]\nname = \"solo\"\n");
+        let ws = root.join("ws");
+        assert_eq!(cargo_root(&root.join("ws/a/src/lib.rs")), Some(ws.clone()));
+        assert_eq!(cargo_root(&root.join("ws/b/src/lib.rs")), Some(ws));
+        assert_eq!(
+            cargo_root(&root.join("solo/src/main.rs")),
+            Some(root.join("solo"))
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn positions_follow_their_code_through_formatting() {

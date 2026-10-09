@@ -16,7 +16,6 @@ impl App {
         let generation = self.workspace_generation;
         let path = path.to_owned();
         let tx = self.worker_tx.clone();
-        self.worker_started(self.hwnd);
         std::thread::spawn(move || {
             let result = (|| {
                 // Every entry: taking the first N in read_dir order (before sorting)
@@ -50,7 +49,7 @@ impl App {
                 });
                 Ok(entries)
             })();
-            let _ = tx.send(WorkerMessage::Directory(generation, request, path, result));
+            tx.send(WorkerMessage::Directory(generation, request, path, result));
         });
     }
 
@@ -69,7 +68,7 @@ impl App {
             self.workspace_root = Some(root.clone());
             self.workspace_generation += 1;
             self.workspace_branch = None;
-            self.refresh_git(self.hwnd);
+            self.refresh_git();
             self.expanded_dirs.insert(root.clone());
             self.load_directory(&root);
             workflow::remember_workspace(&root);
@@ -141,7 +140,7 @@ impl App {
         }
         self.load_directory(&root);
         workflow::remember_workspace(&root);
-        self.refresh_git(hwnd);
+        self.refresh_git();
         self.recent = workflow::recent_workspaces();
         self.status = format!(
             "Workspace: {}",
@@ -257,7 +256,6 @@ impl App {
         let parent = parent.to_path_buf();
         let generation = self.workspace_generation;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = copy_new_file(&source, &target).map_err(|error| {
                 if error.kind() == io::ErrorKind::AlreadyExists {
@@ -266,7 +264,7 @@ impl App {
                     format!("Failed to add {}: {}", file_name_str, error)
                 }
             });
-            let _ = tx.send(WorkerMessage::FileAdded(generation, parent, target, result));
+            tx.send(WorkerMessage::FileAdded(generation, parent, target, result));
         });
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -306,7 +304,7 @@ impl App {
             {
                 self.load_directory(&parent);
             }
-            self.refresh_git(hwnd);
+            self.refresh_git();
         }
         if same_session {
             let name = target

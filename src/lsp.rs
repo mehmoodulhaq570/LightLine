@@ -199,8 +199,10 @@ pub enum Event {
         version: i32,
         items: Vec<CompletionItem>,
     },
+    // `root` tells apart servers of one language started for different projects.
     Stopped {
         language: Language,
+        root: PathBuf,
         message: String,
     },
     Status {
@@ -415,9 +417,10 @@ fn emit(event: Event, events: &Sender<Event>, wake: &Arc<dyn Fn() + Send + Sync>
     }
 }
 
-fn stopped(language: Language, message: impl Into<String>) -> Event {
+fn stopped(language: Language, root: &Path, message: impl Into<String>) -> Event {
     Event::Stopped {
         language,
+        root: root.to_path_buf(),
         message: message.into(),
     }
 }
@@ -660,6 +663,7 @@ fn run_server(
                         emit(
                             stopped(
                                 config.language,
+                                &root,
                                 format!(
                                     "Could not set up Pyright automatically: {error}. You can still install it manually with `npm.cmd install -g pyright`."
                                 ),
@@ -672,7 +676,7 @@ fn run_server(
                 }
             }
             PyrightLaunch::Missing(message) => {
-                emit(stopped(config.language, message), &events, &wake);
+                emit(stopped(config.language, &root, message), &events, &wake);
                 return;
             }
         }
@@ -713,6 +717,7 @@ fn run_server(
             emit(
                 stopped(
                     config.language,
+                    &root,
                     format!("Could not start {}: {error}{hint}", config.display_name),
                 ),
                 &events,
@@ -800,6 +805,7 @@ fn run_server(
         emit(
             stopped(
                 config.language,
+                &root,
                 format!("Could not initialize {}", config.display_name),
             ),
             &events,
@@ -1047,7 +1053,11 @@ fn run_server(
     if let Some(error) = failure {
         let stderr_text = stderr.lock().map(|saved| saved.clone()).unwrap_or_default();
         emit(
-            stopped(config.language, stop_message(&config, &error, &stderr_text)),
+            stopped(
+                config.language,
+                &root,
+                stop_message(&config, &error, &stderr_text),
+            ),
             &events,
             &wake,
         );

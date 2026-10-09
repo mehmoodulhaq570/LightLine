@@ -240,10 +240,9 @@ impl App {
         self.debug_pending_root = Some(root.clone());
         self.debug_pending_breakpoints = breakpoints;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = build_debug_binary(&root);
-            let _ = tx.send(WorkerMessage::DebugBuild(result));
+            tx.send(WorkerMessage::DebugBuild(result));
         });
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }

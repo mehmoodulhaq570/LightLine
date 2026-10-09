@@ -53,7 +53,7 @@ impl App {
             }
             let recovery =
                 (!tab.read_only() && !tab.unloaded && (tab.document.is_dirty() || path.is_none()))
-                    .then(|| tab.document.text());
+                    .then(|| tab.recovery_text());
             if index == self.active {
                 active = tabs.len();
             }
@@ -72,16 +72,29 @@ impl App {
         }
     }
 
-    pub(super) fn save_session(&self) {
+    // Queues a snapshot if anything it records changed; true if one was.
+    pub(super) fn save_session(&self) -> bool {
         if self.restoring {
-            return;
+            return false;
         }
         let key = self.recovery_key();
         if self.recovery_key.borrow().as_ref() == Some(&key) {
-            return;
+            return false;
         }
         if workflow::queue_session(self.capture_session(), false).is_ok() {
             *self.recovery_key.borrow_mut() = Some(key);
+            return true;
+        }
+        false
+    }
+
+    // Takes a snapshot five seconds from now unless one is already due.
+    // Called on every paint, since whatever a snapshot records (text, caret,
+    // scroll, tabs) is drawn when it changes; an idle window then sets no
+    // timer at all.
+    pub(super) fn arm_recovery(&self) {
+        if !self.recovery_armed.replace(true) {
+            unsafe { SetTimer(self.hwnd, RECOVERY_TIMER, 5000, None) };
         }
     }
 
@@ -101,9 +114,9 @@ impl App {
             *self.recovery_key.borrow_mut() = None;
             unsafe { InvalidateRect(self.hwnd, null(), 0) };
         }
-        if self.recovery_last.elapsed() >= Duration::from_secs(5) {
-            self.recovery_last = Instant::now();
-            self.save_session();
+        // Looked at again shortly after a write, to report it if it failed.
+        if self.save_session() {
+            self.arm_recovery();
         }
     }
 

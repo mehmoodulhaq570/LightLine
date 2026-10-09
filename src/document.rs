@@ -42,7 +42,15 @@ struct Edit {
     after: u64,
 }
 
+// Hands each Document its `id`.
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct Document {
+    id: u64,
     lines: Vec<String>,
     pub path: Option<PathBuf>,
     eol: &'static str,
@@ -71,6 +79,7 @@ impl Default for Document {
 impl Document {
     pub fn new() -> Self {
         Self {
+            id: next_id(),
             lines: vec![String::new()],
             path: None,
             eol: "\n",
@@ -120,6 +129,7 @@ impl Document {
         let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
         let normalized = text.replace("\r\n", "\n");
         Ok(Self {
+            id: next_id(),
             lines: normalized.split('\n').map(str::to_owned).collect(),
             path: Some(path),
             eol,
@@ -635,6 +645,12 @@ impl Document {
 
     pub fn change_serial(&self) -> u64 {
         self.change_serial
+    }
+
+    /// Unique to this document in this process: unlike `change_serial`, it
+    /// tells a reloaded file's new document from the one it replaced.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn last_change(&self) -> Option<&TextChange> {

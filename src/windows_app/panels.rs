@@ -1,11 +1,6 @@
 use super::*;
 
 impl App {
-    pub(super) fn worker_started(&mut self, hwnd: HWND) {
-        self.pending_workers += 1;
-        unsafe { SetTimer(hwnd, 4, 60, None) };
-    }
-
     pub(super) fn show_quick_open(&mut self, hwnd: HWND) {
         self.quick_open = true;
         self.panel_focus = false;
@@ -15,10 +10,10 @@ impl App {
         self.quick_first = 0;
         self.quick_loading = false;
         if let Some(root) = self.workspace_root.clone() {
-            self.quick_files.clear();
-            self.quick_loading = true;
+            // The last list (cleared when the workspace changes) shows at
+            // once; a fresh one replaces it when it's read.
+            self.quick_loading = self.quick_files.is_empty();
             let tx = self.worker_tx.clone();
-            self.worker_started(hwnd);
             std::thread::spawn(move || {
                 // Each file's lowercase relative path is computed here once,
                 // so filtering per keystroke doesn't allocate for every file.
@@ -33,7 +28,7 @@ impl App {
                         (path, key)
                     })
                     .collect();
-                let _ = tx.send(WorkerMessage::Files(root, files));
+                tx.send(WorkerMessage::Files(root, files));
             });
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -313,7 +308,7 @@ impl App {
             .collect()
     }
 
-    pub(super) fn search_project(&mut self, hwnd: HWND) {
+    pub(super) fn search_project(&mut self) {
         let Some(root) = self.workspace_root.clone() else {
             self.status = "Open a workspace to search files".into();
             return;
@@ -335,10 +330,9 @@ impl App {
         self.panel_selected = 0;
         self.panel_first = 0;
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let hits = workflow::search_workspace_with_cancel(&root, &query, &cancel);
-            let _ = tx.send(WorkerMessage::Search(root, query, cancel, hits));
+            tx.send(WorkerMessage::Search(root, query, cancel, hits));
         });
     }
 
@@ -454,7 +448,7 @@ impl App {
             self.show_run_error(hwnd, error);
             return;
         };
-        self.check_c_syntax(hwnd, file.clone(), compiler, is_cpp);
+        self.check_c_syntax(file.clone(), compiler, is_cpp);
         let mut output = file.clone();
         output.set_extension("exe");
         let output = PathBuf::from(display_path(&output));
@@ -549,13 +543,13 @@ impl App {
     // Runs the same syntax check as run_c_file, but on every save instead of
     // only on Run, so a C/C++ error shows up as soon as VS Code-style LSP
     // diagnostics would for Rust/Python, not only once the user tries to run.
-    pub(super) fn check_c_syntax_on_save(&mut self, hwnd: HWND, path: &Path) {
+    pub(super) fn check_c_syntax_on_save(&mut self, path: &Path) {
         if !is_c_family_path(path) {
             return;
         }
         let is_cpp = is_cpp_path(path);
         if let Some(compiler) = workflow::detect_c_compiler(is_cpp) {
-            self.check_c_syntax(hwnd, path.to_path_buf(), compiler, is_cpp);
+            self.check_c_syntax(path.to_path_buf(), compiler, is_cpp);
         }
     }
 
@@ -563,12 +557,11 @@ impl App {
     // source of the same squiggly-underline error/warning feedback Rust and
     // Python get: a quick `-fsyntax-only` compile, off the UI thread, whose
     // diagnostics land in tab.diagnostics exactly like an LSP response would.
-    fn check_c_syntax(&mut self, hwnd: HWND, file: PathBuf, compiler: &'static str, is_cpp: bool) {
+    fn check_c_syntax(&mut self, file: PathBuf, compiler: &'static str, is_cpp: bool) {
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let diagnostics = workflow::c_syntax_diagnostics(&file, compiler, is_cpp);
-            let _ = tx.send(WorkerMessage::CDiagnostics(file, diagnostics));
+            tx.send(WorkerMessage::CDiagnostics(file, diagnostics));
         });
     }
 
@@ -588,7 +581,7 @@ impl App {
         self.panel_focus = true;
         self.panel_selected = 0;
         self.panel_first = 0;
-        self.refresh_git(hwnd);
+        self.refresh_git();
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
@@ -607,10 +600,9 @@ impl App {
         self.status = format!("Reviewing {}", path.display());
         let scope = App::git_diff_scope(staged);
         let tx = self.worker_tx.clone();
-        self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = workflow::git_diff(&root, &path, scope);
-            let _ = tx.send(WorkerMessage::Diff(root, path, result));
+            tx.send(WorkerMessage::Diff(root, path, result));
         });
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -623,7 +615,6 @@ impl App {
         while let Ok(message) = self.worker_rx.try_recv() {
             received = true;
             only_gutter &= matches!(message, WorkerMessage::GutterComputed(..));
-            self.pending_workers = self.pending_workers.saturating_sub(1);
             match message {
                 WorkerMessage::Directory(generation, request, path, result) => {
                     if generation == self.workspace_generation
@@ -651,6 +642,10 @@ impl App {
                         );
                     }
                     self.quick_files = files;
+                    // The list can change under a selection made from the last one.
+                    self.quick_selected = self
+                        .quick_selected
+                        .min(self.quick_count().saturating_sub(1));
                 }
                 WorkerMessage::Search(root, query, cancel, hits)
                     if self.workspace_root.as_ref() == Some(&root)
@@ -859,9 +854,6 @@ impl App {
                 }
                 _ => {}
             }
-        }
-        if self.pending_workers == 0 {
-            unsafe { KillTimer(hwnd, 4) };
         }
         if received && only_gutter {
             let panes = self.editor_area(hwnd, false);

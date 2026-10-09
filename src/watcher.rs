@@ -1,214 +1,348 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
-use std::time::Duration;
+//! Tells the UI thread when an open file changes on disk or a folder the
+//! Explorer shows gains or loses entries. Each watched folder has a thread
+//! blocked in `ReadDirectoryChangesW`, so nothing runs until Windows reports
+//! a change; the UI is woken once per burst and reads the events with `poll`.
+
+use std::collections::{HashMap, HashSet};
+use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::ptr::null;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_ACTION_ADDED, FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME,
+    FILE_ACTION_RENAMED_OLD_NAME, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED,
+    FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
+    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_INFORMATION,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadDirectoryChangesW,
+};
+use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+use windows_sys::Win32::System::Threading::{
+    CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects,
+};
 
 /// Events emitted by the file watcher to the UI thread.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WatchEvent {
-    /// A file that is open in the editor was modified externally.
+    /// A watched file was written, replaced or deleted.
     FileChanged(PathBuf),
-    /// A directory's contents changed (files added/removed).
+    /// A watched folder gained, lost or renamed an entry.
     DirectoryChanged(PathBuf),
 }
 
-/// Commands the UI thread sends to the watcher thread.
-enum WatchCommand {
-    /// Start watching the given directory tree.
-    WatchDirectory(PathBuf),
-    /// Add a specific file to the watch set.
-    WatchFile(PathBuf),
-    /// Remove a file from the watch set.
-    UnwatchFile(PathBuf),
-    /// Stop watching every directory (the workspace was closed or replaced).
-    UnwatchDirectories,
-    /// Shut down the watcher thread.
-    Shutdown,
+type Wake = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Default)]
+struct State {
+    // Lowercase path -> the path as the caller gave it: Windows names are
+    // case-insensitive and change notifications use the case on disk.
+    files: HashMap<String, PathBuf>,
+    // Folders whose entries the caller lists.
+    listed: HashSet<PathBuf>,
+    pending: Vec<WatchEvent>,
 }
 
-/// A handle to the background file watcher. Drop this to stop watching.
+impl State {
+    fn push(&mut self, event: WatchEvent) {
+        if !self.pending.contains(&event) {
+            self.pending.push(event);
+        }
+    }
+}
+
+fn key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
+}
+
+/// A handle to the watcher. Dropping it stops every watch thread.
 pub struct FileWatcher {
-    commands: Sender<WatchCommand>,
-    events: Receiver<WatchEvent>,
-    alive: Arc<AtomicBool>,
+    state: Arc<Mutex<State>>,
+    wake: Wake,
+    watches: Mutex<HashMap<PathBuf, DirectoryWatch>>,
 }
 
 impl FileWatcher {
-    /// Start the watcher on a background thread. The returned handle can be
-    /// used to send commands and poll for events.
-    pub fn start() -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel();
-        let (evt_tx, evt_rx) = mpsc::channel();
-        let alive = Arc::new(AtomicBool::new(true));
-        let thread_alive = alive.clone();
-
-        thread::Builder::new()
-            .name("file-watcher".into())
-            .spawn(move || {
-                watcher_thread(cmd_rx, evt_tx, thread_alive);
-            })
-            .ok();
-
+    /// `wake` is called (from a watch thread) when events become available
+    /// to `poll` after none were waiting.
+    pub fn start(wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
-            commands: cmd_tx,
-            events: evt_rx,
-            alive,
+            state: Arc::default(),
+            wake: Arc::new(wake),
+            watches: Mutex::default(),
         }
     }
 
-    /// Begin watching a workspace directory for changes.
+    /// Reports entries added to, removed from or renamed in `path`.
     pub fn watch_directory(&self, path: PathBuf) {
-        let _ = self.commands.send(WatchCommand::WatchDirectory(path));
+        self.state.lock().unwrap().listed.insert(path.clone());
+        self.ensure_watch(path);
     }
 
-    /// Stop watching all directories, e.g. when the workspace changes.
+    /// Stops listing every folder (the workspace was closed or replaced).
     pub fn unwatch_directories(&self) {
-        let _ = self.commands.send(WatchCommand::UnwatchDirectories);
+        self.state.lock().unwrap().listed.clear();
+        self.drop_unneeded_watches();
     }
 
-    /// Track an open file for external modification detection.
+    /// Reports changes to `path`, such as an edit made outside LightLine.
     pub fn watch_file(&self, path: PathBuf) {
-        let _ = self.commands.send(WatchCommand::WatchFile(path));
+        let Some(parent) = path.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        self.state.lock().unwrap().files.insert(key(&path), path);
+        self.ensure_watch(parent);
     }
 
-    /// Stop tracking a file (e.g. when the tab is closed).
+    /// Stops reporting changes to `path` (e.g. when its tab is closed).
     pub fn unwatch_file(&self, path: PathBuf) {
-        let _ = self.commands.send(WatchCommand::UnwatchFile(path));
+        self.state.lock().unwrap().files.remove(&key(&path));
+        self.drop_unneeded_watches();
     }
 
-    /// Poll for any pending watch events. Non-blocking.
+    /// The events since the last call, oldest first. Non-blocking.
     pub fn poll(&self) -> Vec<WatchEvent> {
-        let mut events = Vec::new();
-        while let Ok(event) = self.events.try_recv() {
-            events.push(event);
+        std::mem::take(&mut self.state.lock().unwrap().pending)
+    }
+
+    fn ensure_watch(&self, directory: PathBuf) {
+        let mut watches = self.watches.lock().unwrap();
+        if watches.contains_key(&directory) {
+            return;
         }
-        events
+        if let Some(watch) =
+            DirectoryWatch::start(directory.clone(), self.state.clone(), self.wake.clone())
+        {
+            watches.insert(directory, watch);
+        }
+    }
+
+    // Stops the threads of folders that are neither listed nor hold a
+    // watched file.
+    fn drop_unneeded_watches(&self) {
+        let needed: HashSet<PathBuf> = {
+            let state = self.state.lock().unwrap();
+            state
+                .files
+                .values()
+                .filter_map(|path| path.parent().map(Path::to_path_buf))
+                .chain(state.listed.iter().cloned())
+                .collect()
+        };
+        let stopped: Vec<DirectoryWatch> = {
+            let mut watches = self.watches.lock().unwrap();
+            let gone: Vec<PathBuf> = watches
+                .keys()
+                .filter(|directory| !needed.contains(*directory))
+                .cloned()
+                .collect();
+            gone.iter()
+                .filter_map(|directory| watches.remove(directory))
+                .collect()
+        };
+        drop(stopped);
     }
 }
 
 impl Drop for FileWatcher {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::Relaxed);
-        let _ = self.commands.send(WatchCommand::Shutdown);
+        // Signal every thread first, then wait for them together.
+        let watches = std::mem::take(&mut *self.watches.lock().unwrap());
+        for watch in watches.values() {
+            watch.stop.signal();
+        }
+        drop(watches);
     }
 }
 
-/// The background watcher thread. Uses polling (stat-based) rather than
-/// `ReadDirectoryChangesW` for simplicity and reliability across network
-/// drives and edge cases. Checks every 2 seconds.
-fn watcher_thread(
-    commands: Receiver<WatchCommand>,
-    events: Sender<WatchEvent>,
-    alive: Arc<AtomicBool>,
-) {
-    let mut watched_files: HashSet<PathBuf> = HashSet::new();
-    let mut watched_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut file_stamps: std::collections::HashMap<PathBuf, std::time::SystemTime> =
-        std::collections::HashMap::new();
-    let mut dir_stamps: std::collections::HashMap<PathBuf, std::time::SystemTime> =
-        std::collections::HashMap::new();
-    let poll_interval = Duration::from_secs(2);
+struct OwnedHandle(HANDLE);
+// The kernel handles here are owned and only closed once.
+unsafe impl Send for OwnedHandle {}
+unsafe impl Sync for OwnedHandle {}
 
-    while alive.load(Ordering::Relaxed) {
-        // Process any pending commands.
-        loop {
-            match commands.try_recv() {
-                Ok(WatchCommand::WatchDirectory(path)) => {
-                    if let Ok(meta) = std::fs::metadata(&path) {
-                        dir_stamps.insert(
-                            path.clone(),
-                            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
-                        );
-                    }
-                    watched_dirs.insert(path);
-                }
-                Ok(WatchCommand::WatchFile(path)) => {
-                    if let Ok(meta) = std::fs::metadata(&path) {
-                        file_stamps.insert(
-                            path.clone(),
-                            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
-                        );
-                    }
-                    watched_files.insert(path);
-                }
-                Ok(WatchCommand::UnwatchFile(path)) => {
-                    watched_files.remove(&path);
-                    file_stamps.remove(&path);
-                }
-                Ok(WatchCommand::UnwatchDirectories) => {
-                    watched_dirs.clear();
-                    dir_stamps.clear();
-                }
-                Ok(WatchCommand::Shutdown) => return,
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            }
+impl OwnedHandle {
+    fn signal(&self) {
+        unsafe { SetEvent(self.0) };
+    }
+}
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+struct DirectoryWatch {
+    stop: Arc<OwnedHandle>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl DirectoryWatch {
+    fn start(directory: PathBuf, state: Arc<Mutex<State>>, wake: Wake) -> Option<Self> {
+        let stop = unsafe { CreateEventW(null(), 1, 0, null()) };
+        if stop.is_null() {
+            return None;
         }
+        let stop = Arc::new(OwnedHandle(stop));
+        let thread_stop = stop.clone();
+        let thread = thread::Builder::new()
+            .name("file-watcher".into())
+            .spawn(move || watch_directory(&directory, &state, &wake, &thread_stop))
+            .ok()?;
+        Some(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+}
 
-        // Check watched files for modifications.
-        let files: Vec<PathBuf> = watched_files.iter().cloned().collect();
+impl Drop for DirectoryWatch {
+    fn drop(&mut self) {
+        self.stop.signal();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn wide(path: &Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+// Waits for changes in `directory` until `stop` is signalled or the folder
+// can no longer be read (deleted, or its drive removed).
+fn watch_directory(directory: &Path, state: &Mutex<State>, wake: &Wake, stop: &OwnedHandle) {
+    let handle = unsafe {
+        CreateFileW(
+            wide(directory).as_ptr(),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return;
+    }
+    let handle = OwnedHandle(handle);
+    let ready = unsafe { CreateEventW(null(), 1, 0, null()) };
+    if ready.is_null() {
+        return;
+    }
+    let ready = OwnedHandle(ready);
+    // u32s keep the records DWORD-aligned, as ReadDirectoryChangesW requires.
+    let mut buffer = vec![0u32; 16 * 1024];
+    let filter = FILE_NOTIFY_CHANGE_FILE_NAME
+        | FILE_NOTIFY_CHANGE_DIR_NAME
+        | FILE_NOTIFY_CHANGE_LAST_WRITE
+        | FILE_NOTIFY_CHANGE_SIZE;
+    loop {
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        overlapped.hEvent = ready.0;
+        let started = unsafe {
+            ReadDirectoryChangesW(
+                handle.0,
+                buffer.as_mut_ptr().cast(),
+                (buffer.len() * 4) as u32,
+                0,
+                filter,
+                std::ptr::null_mut(),
+                &mut overlapped,
+                None,
+            )
+        };
+        if started == 0 {
+            return;
+        }
+        let handles = [ready.0, stop.0];
+        let woke = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) };
+        let mut bytes = 0;
+        if woke != WAIT_OBJECT_0 {
+            // Stopping: the buffer and `overlapped` must outlive the read.
+            unsafe {
+                CancelIoEx(handle.0, &overlapped);
+                GetOverlappedResult(handle.0, &overlapped, &mut bytes, 1);
+            }
+            return;
+        }
+        if unsafe { GetOverlappedResult(handle.0, &overlapped, &mut bytes, 0) } == 0 {
+            return;
+        }
+        let changes = if bytes == 0 {
+            // More changes than the buffer holds: treat everything as changed.
+            None
+        } else {
+            Some(parse_changes(&buffer, bytes as usize))
+        };
+        let mut state = state.lock().unwrap();
+        let was_empty = state.pending.is_empty();
+        record(&mut state, directory, changes);
+        if was_empty && !state.pending.is_empty() {
+            drop(state);
+            wake();
+        }
+    }
+}
+
+// (action, name) for each record in the first `bytes` of `buffer`.
+fn parse_changes(buffer: &[u32], bytes: usize) -> Vec<(u32, String)> {
+    let base = buffer.as_ptr().cast::<u8>();
+    let mut changes = Vec::new();
+    let mut offset = 0;
+    let header = std::mem::offset_of!(FILE_NOTIFY_INFORMATION, FileName);
+    while offset + header <= bytes {
+        // Each record starts on a DWORD boundary inside `buffer`.
+        let record = unsafe { &*base.add(offset).cast::<FILE_NOTIFY_INFORMATION>() };
+        let length = record.FileNameLength as usize / 2;
+        if offset + header + length * 2 > bytes {
+            break;
+        }
+        let name =
+            unsafe { std::slice::from_raw_parts(base.add(offset + header).cast::<u16>(), length) };
+        changes.push((record.Action, String::from_utf16_lossy(name)));
+        if record.NextEntryOffset == 0 {
+            break;
+        }
+        offset += record.NextEntryOffset as usize;
+    }
+    changes
+}
+
+// Turns the changes in `directory` into events for the files and folders
+// being watched; `None` means the changes were lost and anything may differ.
+fn record(state: &mut State, directory: &Path, changes: Option<Vec<(u32, String)>>) {
+    let listed = state.listed.contains(directory);
+    let Some(changes) = changes else {
+        let files: Vec<PathBuf> = state
+            .files
+            .values()
+            .filter(|path| path.parent() == Some(directory))
+            .cloned()
+            .collect();
         for path in files {
-            if let Ok(meta) = std::fs::metadata(&path) {
-                let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-                let previous = file_stamps.get(&path).copied();
-                if previous.is_some_and(|prev| modified > prev) {
-                    file_stamps.insert(path.clone(), modified);
-                    let _ = events.send(WatchEvent::FileChanged(path));
-                } else if previous.is_none() {
-                    file_stamps.insert(path, modified);
-                }
-            }
+            state.push(WatchEvent::FileChanged(path));
         }
-
-        // Check watched directories for changes.
-        let dirs: Vec<PathBuf> = watched_dirs.iter().cloned().collect();
-        for dir in dirs {
-            if let Ok(meta) = std::fs::metadata(&dir) {
-                let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-                let previous = dir_stamps.get(&dir).copied();
-                if previous.is_some_and(|prev| modified > prev) {
-                    dir_stamps.insert(dir.clone(), modified);
-                    let _ = events.send(WatchEvent::DirectoryChanged(dir));
-                } else if previous.is_none() {
-                    dir_stamps.insert(dir, modified);
-                }
-            }
+        if listed {
+            state.push(WatchEvent::DirectoryChanged(directory.to_path_buf()));
         }
-
-        // Sleep for the polling interval, waking early if a command arrives.
-        match commands.recv_timeout(poll_interval) {
-            Ok(WatchCommand::Shutdown) => return,
-            Ok(WatchCommand::WatchDirectory(path)) => {
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    dir_stamps.insert(
-                        path.clone(),
-                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
-                    );
-                }
-                watched_dirs.insert(path);
-            }
-            Ok(WatchCommand::WatchFile(path)) => {
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    file_stamps.insert(
-                        path.clone(),
-                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
-                    );
-                }
-                watched_files.insert(path);
-            }
-            Ok(WatchCommand::UnwatchFile(path)) => {
-                watched_files.remove(&path);
-                file_stamps.remove(&path);
-            }
-            Ok(WatchCommand::UnwatchDirectories) => {
-                watched_dirs.clear();
-                dir_stamps.clear();
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        return;
+    };
+    for (action, name) in changes {
+        let path = directory.join(&name);
+        if let Some(file) = state.files.get(&key(&path)).cloned() {
+            state.push(WatchEvent::FileChanged(file));
+        }
+        let entries_changed = matches!(
+            action,
+            FILE_ACTION_ADDED
+                | FILE_ACTION_REMOVED
+                | FILE_ACTION_RENAMED_OLD_NAME
+                | FILE_ACTION_RENAMED_NEW_NAME
+        );
+        if listed && entries_changed {
+            state.push(WatchEvent::DirectoryChanged(directory.to_path_buf()));
         }
     }
 }
@@ -216,43 +350,97 @@ fn watcher_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lightline-watcher-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // Polls until `want` shows up, collecting everything seen.
+    fn wait_for(watcher: &FileWatcher, want: &WatchEvent) -> Vec<WatchEvent> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut seen = Vec::new();
+        while Instant::now() < deadline {
+            seen.extend(watcher.poll());
+            if seen.contains(want) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        seen
+    }
 
     #[test]
-    fn watcher_detects_file_modification() {
-        let dir =
-            std::env::temp_dir().join(format!("lightline-watcher-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("test.txt");
+    fn file_edits_and_folder_entries_are_reported_and_wake_once() {
+        let dir = temp_dir("events");
+        let file = dir.join("Test.txt");
         std::fs::write(&file, "initial").unwrap();
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let counter = wakes.clone();
+        let watcher = FileWatcher::start(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        // Registered with different case than on disk.
+        let registered = dir.join("test.TXT");
+        watcher.watch_file(registered.clone());
+        watcher.watch_directory(dir.clone());
+        thread::sleep(Duration::from_millis(100));
 
-        let watcher = FileWatcher::start();
-        watcher.watch_file(file.clone());
-
-        // Wait for the initial stamp to be recorded.
-        thread::sleep(Duration::from_millis(200));
-
-        // Modify the file after a delay so the timestamp changes.
-        thread::sleep(Duration::from_secs(1));
         std::fs::write(&file, "modified").unwrap();
+        let seen = wait_for(&watcher, &WatchEvent::FileChanged(registered.clone()));
+        assert!(
+            seen.contains(&WatchEvent::FileChanged(registered.clone())),
+            "{seen:?}"
+        );
+        // An edit isn't an entry change.
+        assert!(
+            !seen.contains(&WatchEvent::DirectoryChanged(dir.clone())),
+            "{seen:?}"
+        );
+        assert!(wakes.load(Ordering::SeqCst) >= 1);
 
-        // Wait for the poller to detect the change.
-        thread::sleep(Duration::from_secs(3));
-
-        let events = watcher.poll();
-        let changed = events
-            .iter()
-            .any(|e| matches!(e, WatchEvent::FileChanged(p) if p == &file));
-        assert!(changed, "Expected FileChanged event for {:?}", file);
+        // Many entries at once: one wake until the events are read. (A write
+        // can arrive as two notifications; let the second land first.)
+        thread::sleep(Duration::from_millis(200));
+        watcher.poll();
+        let before = wakes.load(Ordering::SeqCst);
+        for index in 0..20 {
+            std::fs::write(dir.join(format!("new-{index}.txt")), "x").unwrap();
+        }
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(wakes.load(Ordering::SeqCst), before + 1);
+        let seen = watcher.poll();
+        assert_eq!(seen, [WatchEvent::DirectoryChanged(dir.clone())]);
 
         drop(watcher);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn watcher_stops_on_drop() {
-        let watcher = FileWatcher::start();
-        watcher.watch_file(PathBuf::from("nonexistent.txt"));
+    fn unwatched_paths_stay_quiet_and_drop_stops_threads() {
+        let dir = temp_dir("quiet");
+        let watcher = FileWatcher::start(|| {});
+        watcher.watch_file(dir.join("open.txt"));
+        watcher.unwatch_file(dir.join("open.txt"));
+        assert!(watcher.watches.lock().unwrap().is_empty());
+        watcher.watch_directory(dir.clone());
+        watcher.unwatch_directories();
+        std::fs::write(dir.join("other.txt"), "x").unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert!(watcher.poll().is_empty());
+        // A folder that doesn't exist is simply not watched.
+        watcher.watch_file(dir.join("missing").join("file.txt"));
         drop(watcher);
-        // No panic or hang = success.
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

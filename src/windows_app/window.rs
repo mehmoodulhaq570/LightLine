@@ -152,7 +152,7 @@ unsafe extern "system" fn wnd_proc(
             app.recovery_tick();
             // Coming back to the window is when an outside commit, pull or
             // branch switch is most likely to have happened.
-            app.refresh_git(hwnd);
+            app.refresh_git();
             0
         }
         WM_KILLFOCUS => {
@@ -185,7 +185,7 @@ unsafe extern "system" fn wnd_proc(
             unsafe { InvalidateRect(hwnd, null(), 0) };
             0
         }
-        WM_TIMER if wparam == 4 => {
+        WORKER_EVENT_MESSAGE => {
             app.poll_workers(hwnd);
             0
         }
@@ -197,8 +197,13 @@ unsafe extern "system" fn wnd_proc(
             app.begin_mouse_hover(hwnd);
             0
         }
-        WM_TIMER if wparam == 7 => {
+        WATCHER_EVENT_MESSAGE => {
             app.poll_watcher(hwnd);
+            0
+        }
+        WM_TIMER if wparam == RECOVERY_TIMER => {
+            unsafe { KillTimer(hwnd, RECOVERY_TIMER) };
+            app.recovery_armed.set(false);
             app.recovery_tick();
             0
         }
@@ -704,7 +709,6 @@ pub fn run() -> io::Result<()> {
         app.borrow().update_title(hwnd);
         ShowWindow(hwnd, SW_SHOW);
         SetFocus(hwnd);
-        SetTimer(hwnd, 7, 1000, None);
         if let Some(path) = std::env::args_os().nth(1) {
             if workflow::load_session()
                 .tabs

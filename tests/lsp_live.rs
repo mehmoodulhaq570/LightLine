@@ -249,6 +249,7 @@ fn pyright_publishes_diagnostics_and_hover() {
             Ok(Event::Stopped {
                 language: Language::Python,
                 message,
+                ..
             }) => panic!("Pyright stopped: {message}"),
             _ => {}
         }
