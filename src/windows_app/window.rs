@@ -478,12 +478,22 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_MOUSEWHEEL => {
             if app.run_choice.is_some() {
-                app.run_choice_key(hwnd, if (wparam >> 16) as i16 > 0 { VK_UP as u32 } else { VK_DOWN as u32 });
+                app.run_choice_key(
+                    hwnd,
+                    if (wparam >> 16) as i16 > 0 {
+                        VK_UP as u32
+                    } else {
+                        VK_DOWN as u32
+                    },
+                );
                 return 0;
             }
             if app.run_config_panel.is_some() {
                 let mut point = POINT::default();
-                unsafe { GetCursorPos(&mut point); ScreenToClient(hwnd, &mut point); }
+                unsafe {
+                    GetCursorPos(&mut point);
+                    ScreenToClient(hwnd, &mut point);
+                }
                 app.run_config_scroll(hwnd, (wparam >> 16) as i16 as i32, point.x);
                 return 0;
             }
@@ -696,7 +706,11 @@ pub fn run() -> io::Result<()> {
         SetFocus(hwnd);
         SetTimer(hwnd, 7, 1000, None);
         if let Some(path) = std::env::args_os().nth(1) {
-            if workflow::load_session().tabs.iter().any(|tab| tab.recovery.is_some()) {
+            if workflow::load_session()
+                .tabs
+                .iter()
+                .any(|tab| tab.recovery.is_some())
+            {
                 app.borrow_mut().restore_session(hwnd);
             }
             app.borrow_mut().open(hwnd, Some(PathBuf::from(path)));

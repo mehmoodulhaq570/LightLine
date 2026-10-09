@@ -218,10 +218,10 @@ mod tests {
         for icon in icons {
             let svg = icon.svg_str();
             assert!(
-                resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default()).is_ok(),
+                resvg::usvg::Tree::from_data(svg.as_bytes(), &resvg::usvg::Options::default())
+                    .is_ok(),
                 "Failed to parse SVG for icon: {icon:?}"
             );
         }
     }
 }
-

@@ -13,17 +13,17 @@ mod more_menu;
 mod wrap;
 use markdown_view::{MARKDOWN_TIMER, MarkdownPreview};
 mod panels;
+mod run_choice;
 mod run_config_panel;
 mod run_config_ui;
-mod run_choice;
 mod session;
 mod settings_panel;
 mod terminal;
 mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
-    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, FileAction, GitAction, SideView, Tab,
-    TerminalPane, TerminalTab, WorkerMessage, GhostText, is_c_family_path, is_cpp_path,
+    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, FileAction, GhostText, GitAction,
+    SideView, Tab, TerminalPane, TerminalTab, WorkerMessage, is_c_family_path, is_cpp_path,
 };
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
 use more_menu::MoreMenu;

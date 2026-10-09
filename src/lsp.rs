@@ -42,8 +42,12 @@ impl Language {
 
     fn document_language_id(self, uri: &str) -> &'static str {
         let path = uri_to_path(uri);
-        let extension = path.as_deref().and_then(Path::extension)
-            .and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+        let extension = path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         match (self, extension.as_str()) {
             (Self::C, "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "ino") => "cpp",
             (Self::TypeScript, "js" | "mjs" | "cjs") => "javascript",
@@ -464,10 +468,19 @@ const NODE_MISSING: &str = "Pyright setup needs Node.js. Install it once from no
 fn clangd_fallback_flags() -> Vec<String> {
     use std::os::windows::process::CommandExt;
     fn latest_directory(root: &Path) -> Option<PathBuf> {
-        std::fs::read_dir(root).ok()?.filter_map(Result::ok)
-            .map(|entry| entry.path()).filter(|path| path.is_dir())
-            .max_by_key(|path| path.file_name().unwrap_or_default().to_string_lossy()
-                .split('.').map(|part| part.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>())
+        std::fs::read_dir(root)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .max_by_key(|path| {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .split('.')
+                    .map(|part| part.parse::<u32>().unwrap_or(0))
+                    .collect::<Vec<_>>()
+            })
     }
     let mut includes = Vec::new();
     if let Some(value) = std::env::var_os("INCLUDE") {
@@ -476,14 +489,23 @@ fn clangd_fallback_flags() -> Vec<String> {
         let program_files = PathBuf::from(program_files);
         let vswhere = program_files.join("Microsoft Visual Studio/Installer/vswhere.exe");
         if let Ok(output) = ProcessCommand::new(vswhere)
-            .args(["-latest", "-products", "*", "-requires",
-                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"])
-            .creation_flags(0x0800_0000).output()
+            .args([
+                "-latest",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ])
+            .creation_flags(0x0800_0000)
+            .output()
             && output.status.success()
         {
             let installation = String::from_utf8_lossy(&output.stdout);
             if !installation.trim().is_empty()
-                && let Some(version) = latest_directory(&Path::new(installation.trim()).join("VC/Tools/MSVC"))
+                && let Some(version) =
+                    latest_directory(&Path::new(installation.trim()).join("VC/Tools/MSVC"))
             {
                 includes.push(version.join("include"));
             }
@@ -492,8 +514,11 @@ fn clangd_fallback_flags() -> Vec<String> {
             includes.extend(["ucrt", "shared", "um", "winrt"].map(|name| sdk.join(name)));
         }
     }
-    includes.into_iter().filter(|path| path.is_dir())
-        .flat_map(|path| ["-isystem".to_string(), path.to_string_lossy().into_owned()]).collect()
+    includes
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .flat_map(|path| ["-isystem".to_string(), path.to_string_lossy().into_owned()])
+        .collect()
 }
 
 /// Resolve a program by looking for any of `file_names` in each PATH folder.
@@ -679,15 +704,11 @@ fn run_server(
                 Language::Rust => {
                     ". Install rust-analyzer with `rustup component add rust-analyzer rust-src`"
                 }
-                Language::C => {
-                    ". Install LLVM/clangd (e.g. `winget install LLVM.LLVM`)"
-                }
+                Language::C => ". Install LLVM/clangd (e.g. `winget install LLVM.LLVM`)",
                 Language::TypeScript => {
                     ". Install typescript-language-server with `npm install -g typescript-language-server typescript`"
                 }
-                Language::Go => {
-                    ". Install gopls with `go install golang.org/x/tools/gopls@latest`"
-                }
+                Language::Go => ". Install gopls with `go install golang.org/x/tools/gopls@latest`",
             };
             emit(
                 stopped(
@@ -1751,7 +1772,12 @@ mod tests {
             (Language::Rust, "rust-analyzer", "rust", "Rust"),
             (Language::Python, "Pyright", "python", "Python"),
             (Language::C, "clangd", "c", "C/C++"),
-            (Language::TypeScript, "typescript-language-server", "typescript", "TypeScript/JavaScript"),
+            (
+                Language::TypeScript,
+                "typescript-language-server",
+                "typescript",
+                "TypeScript/JavaScript",
+            ),
             (Language::Go, "gopls", "go", "Go"),
         ];
         for (lang, expected_server, expected_id, expected_name) in cases {
@@ -1774,8 +1800,10 @@ mod tests {
             (Language::TypeScript, "main.ts", "typescript"),
             (Language::TypeScript, "main.tsx", "typescriptreact"),
         ] {
-            assert_eq!(language.document_language_id(&file_uri(Path::new(file))), expected);
+            assert_eq!(
+                language.document_language_id(&file_uri(Path::new(file))),
+                expected
+            );
         }
     }
 }
-

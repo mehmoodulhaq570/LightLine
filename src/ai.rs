@@ -11,7 +11,8 @@
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::{Duration, Instant};
 
 /// Ollama's address on this PC.
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
@@ -20,6 +21,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
 // The first answer can wait while the server loads the model into memory.
 const FIRST_TOKEN_TIMEOUT: Duration = Duration::from_secs(300);
+// An answer that goes quiet this long once it has started is stuck.
+const STALL_TIMEOUT: Duration = Duration::from_secs(120);
+// How often a quiet answer checks whether it was stopped.
+const CANCEL_CHECK: Duration = Duration::from_millis(100);
 // An answer longer than this is cut off.
 const MAX_ANSWER_BYTES: usize = 512 * 1024;
 
@@ -256,14 +261,38 @@ pub fn stream_chat(
             .unwrap_or_default();
         return Err(server_error(status, &text));
     }
+    // Read on a thread of its own, so that a server that goes quiet can
+    // still be stopped. Once nobody is listening, the reader stops at the
+    // next line and drops the connection, which ends the answer server-side.
+    let (lines_tx, lines) = std::sync::mpsc::sync_channel(64);
+    std::thread::spawn(move || {
+        for line in BufReader::new(body.into_reader()).lines() {
+            let failed = line.is_err();
+            if lines_tx.send(line).is_err() || failed {
+                break;
+            }
+        }
+    });
     let mut received = 0;
-    for line in BufReader::new(body.into_reader()).lines() {
+    let mut quiet_limit = FIRST_TOKEN_TIMEOUT;
+    let mut last_line = Instant::now();
+    loop {
         if cancel.load(Ordering::Relaxed) {
             return Ok(());
         }
+        let line = match lines.recv_timeout(CANCEL_CHECK) {
+            Ok(line) => line,
+            Err(RecvTimeoutError::Timeout) if last_line.elapsed() >= quiet_limit => {
+                return Err("The server stopped answering".into());
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        last_line = Instant::now();
         let line = line.map_err(|error| format!("The answer was cut off ({error})"))?;
         match parse_event(&line) {
             Event::Text(text) => {
+                quiet_limit = STALL_TIMEOUT;
                 received += text.len();
                 on_text(&text);
                 if received > MAX_ANSWER_BYTES {
@@ -527,6 +556,44 @@ mod tests {
     }
 
     #[test]
+    fn a_server_that_goes_quiet_can_still_be_stopped() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+                  data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n",
+            );
+            let _ = stream.flush();
+            // Keep the connection open without sending anything more.
+            std::thread::sleep(std::time::Duration::from_secs(10));
+        });
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let stopper = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            stopper.store(true, Ordering::Relaxed);
+        });
+        let started = Instant::now();
+        let mut pieces = Vec::new();
+        stream_chat(
+            &endpoint,
+            "m",
+            &[Message::new(Role::User, "hi")],
+            &cancel,
+            |text| pieces.push(text.to_string()),
+        )
+        .unwrap();
+        assert_eq!(pieces, ["Hel"]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    #[test]
     fn a_missing_model_reports_the_servers_message() {
         let endpoint = serve_once(
             "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\n\
@@ -558,7 +625,8 @@ mod tests {
              data: [DONE]\n\n",
         );
         let cancel = AtomicBool::new(false);
-        let completion = complete_inline(&endpoint, "m", "let x = 10;\n", "", "rust", &cancel).unwrap();
+        let completion =
+            complete_inline(&endpoint, "m", "let x = 10;\n", "", "rust", &cancel).unwrap();
         assert_eq!(completion, "let y = 42;");
     }
 }

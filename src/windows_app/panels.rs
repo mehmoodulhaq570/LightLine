@@ -353,18 +353,27 @@ impl App {
     // which previously made Run silently no-op (or run the wrong thing) for
     // Python and C/C++ files.
     pub(super) fn run_active_file(&mut self, hwnd: HWND) {
-        if self.run_selected_configuration(hwnd) { return; }
+        if self.run_selected_configuration(hwnd) {
+            return;
+        }
         if Tab::is_python(self.doc()) {
             self.run_python_file(hwnd);
         } else if Tab::is_c_family(self.doc()) {
             self.run_c_file(hwnd);
-        } else if self.doc().path.as_deref().is_some_and(|path| lightline::runner::Language::for_path(path).is_some()) {
+        } else if self
+            .doc()
+            .path
+            .as_deref()
+            .is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
+        {
             if self.doc().is_dirty() && !self.save(hwnd, false) {
                 self.status = "Save the file before running it".into();
                 self.refresh(hwnd);
                 return;
             }
-            let Some(file) = self.doc().path.clone() else { return; };
+            let Some(file) = self.doc().path.clone() else {
+                return;
+            };
             match lightline::runner::prepare(&file) {
                 Ok(plan) => self.run_language_plan(hwnd, plan),
                 Err(error) => {
@@ -372,16 +381,29 @@ impl App {
                 }
             }
         } else {
-            self.status = "Open a Python, C/C++, JavaScript, TypeScript, Go, or Rust file to run it".into();
+            self.status =
+                "Open a Python, C/C++, JavaScript, TypeScript, Go, or Rust file to run it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
 
     pub(super) fn run_project(&mut self, hwnd: HWND) {
-        let root = self.doc().path.as_deref().and_then(|file| file.parent())
-            .and_then(|folder| folder.ancestors().find(|folder| folder.join("Cargo.toml").is_file()))
+        let root = self
+            .doc()
+            .path
+            .as_deref()
+            .and_then(|file| file.parent())
+            .and_then(|folder| {
+                folder
+                    .ancestors()
+                    .find(|folder| folder.join("Cargo.toml").is_file())
+            })
             .map(Path::to_path_buf)
-            .or_else(|| self.workspace_root.clone().filter(|root| root.join("Cargo.toml").is_file()));
+            .or_else(|| {
+                self.workspace_root
+                    .clone()
+                    .filter(|root| root.join("Cargo.toml").is_file())
+            });
         let Some(root) = root else {
             self.status = "Open a Rust workspace to run tests".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -394,11 +416,16 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        self.run_language_plan(hwnd, lightline::runner::RunPlan {
-            cwd: PathBuf::from(display_path(&root)),
-            commands: vec![lightline::runner::RunCommand { program: cargo,
-                arguments: vec!["test".into(), "--offline".into()] }],
-        });
+        self.run_language_plan(
+            hwnd,
+            lightline::runner::RunPlan {
+                cwd: PathBuf::from(display_path(&root)),
+                commands: vec![lightline::runner::RunCommand {
+                    program: cargo,
+                    arguments: vec!["test".into(), "--offline".into()],
+                }],
+            },
+        );
     }
 
     pub(super) fn run_c_file(&mut self, hwnd: HWND) {
@@ -432,16 +459,23 @@ impl App {
         output.set_extension("exe");
         let output = PathBuf::from(display_path(&output));
         let source = PathBuf::from(display_path(&file));
-        self.run_language_plan(hwnd, lightline::runner::RunPlan {
-            cwd: source.parent().unwrap_or(Path::new(".")).to_path_buf(),
-            commands: vec![
-                lightline::runner::RunCommand {
-                    program: workflow::resolve_command(compiler).unwrap_or_else(|| compiler.into()),
-                    arguments: vec![source.into(), "-o".into(), output.clone().into()],
-                },
-                lightline::runner::RunCommand { program: output, arguments: Vec::new() },
-            ],
-        });
+        self.run_language_plan(
+            hwnd,
+            lightline::runner::RunPlan {
+                cwd: source.parent().unwrap_or(Path::new(".")).to_path_buf(),
+                commands: vec![
+                    lightline::runner::RunCommand {
+                        program: workflow::resolve_command(compiler)
+                            .unwrap_or_else(|| compiler.into()),
+                        arguments: vec![source.into(), "-o".into(), output.clone().into()],
+                    },
+                    lightline::runner::RunCommand {
+                        program: output,
+                        arguments: Vec::new(),
+                    },
+                ],
+            },
+        );
     }
 
     pub(super) fn run_python_file(&mut self, hwnd: HWND) {
@@ -465,13 +499,16 @@ impl App {
             self.show_run_error(hwnd, "Python interpreter not found. Install Python from https://www.python.org/downloads/, or use Select Python interpreter / Select Python virtual environment in the Command Palette.".into());
             return;
         };
-        self.run_language_plan(hwnd, lightline::runner::RunPlan {
-            cwd: PathBuf::from(display_path(&root)),
-            commands: vec![lightline::runner::RunCommand {
-                program: PathBuf::from(display_path(&interpreter)),
-                arguments: vec!["-u".into(), display_path(&file).into()],
-            }],
-        });
+        self.run_language_plan(
+            hwnd,
+            lightline::runner::RunPlan {
+                cwd: PathBuf::from(display_path(&root)),
+                commands: vec![lightline::runner::RunCommand {
+                    program: PathBuf::from(display_path(&interpreter)),
+                    arguments: vec!["-u".into(), display_path(&file).into()],
+                }],
+            },
+        );
     }
 
     // The interpreter Run Python File and Python debugging use: the one the
@@ -628,7 +665,9 @@ impl App {
                     self.search_results = hits;
                 }
                 WorkerMessage::Repo(generation, workspace_generation, result) => {
-                    if generation == self.git_generation && workspace_generation == self.workspace_generation {
+                    if generation == self.git_generation
+                        && workspace_generation == self.workspace_generation
+                    {
                         self.review_loading = false;
                         match result {
                             Ok(state) => self.apply_repo_state(hwnd, state),
@@ -664,7 +703,12 @@ impl App {
                         ext.installing = false;
                         ext.installed = found;
                         self.status = if found {
-                            format!("{} found — ready to format code", ext.name)
+                            let ready = format!("{} found — ready to format code", ext.name);
+                            self.settings.prettier_enabled = true;
+                            match self.settings.save() {
+                                Ok(()) => ready,
+                                Err(error) => format!("{ready} (not saved: {error})"),
+                            }
                         } else {
                             format!(
                                 "{} isn't available. Install it with \"npm install -g prettier\" \
@@ -775,22 +819,11 @@ impl App {
                     }
                     match result {
                         Ok(formatted) => {
-                            let formatted_clean =
-                                formatted.replace("\r\n", "\n").replace('\r', "\n");
-                            let current_clean =
-                                self.doc().text().replace("\r\n", "\n").replace('\r', "\n");
-                            if formatted_clean == current_clean {
-                                self.status = format!("Already formatted with {formatter_name}");
+                            self.status = if self.apply_formatted(&formatted) {
+                                format!("Document formatted with {formatter_name}")
                             } else {
-                                let doc = self.doc();
-                                let last_line = doc.line_count().saturating_sub(1);
-                                let end = Pos {
-                                    line: last_line,
-                                    byte: doc.line(last_line).len(),
-                                };
-                                self.replace_range(Pos::default(), end, &formatted_clean);
-                                self.status = format!("Document formatted with {formatter_name}");
-                            }
+                                format!("Already formatted with {formatter_name}")
+                            };
                         }
                         Err(error) => {
                             self.status = format!("{formatter_name} formatting failed: {error}");

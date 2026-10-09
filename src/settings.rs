@@ -16,6 +16,9 @@ pub struct Settings {
     pub auto_close_pairs: bool,
     pub auto_indent: bool,
     pub format_on_save: bool,
+    /// False once the user turns Prettier off in the Extensions panel; its
+    /// file types are then left to the language server.
+    pub prettier_enabled: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
@@ -48,6 +51,7 @@ impl Default for Settings {
             auto_close_pairs: true,
             auto_indent: true,
             format_on_save: false,
+            prettier_enabled: true,
             bracket_matching: true,
             indent_guides: true,
             minimap: true,
@@ -160,6 +164,9 @@ impl Settings {
         if let Some(b) = value.get("formatOnSave").and_then(|v| v.as_bool()) {
             settings.format_on_save = b;
         }
+        if let Some(b) = value.get("prettierEnabled").and_then(|v| v.as_bool()) {
+            settings.prettier_enabled = b;
+        }
         if let Some(b) = value.get("bracketMatching").and_then(|v| v.as_bool()) {
             settings.bracket_matching = b;
         }
@@ -264,6 +271,10 @@ impl Settings {
             serde_json::Value::Bool(self.format_on_save),
         );
         obj.insert(
+            "prettierEnabled".into(),
+            serde_json::Value::Bool(self.prettier_enabled),
+        );
+        obj.insert(
             "bracketMatching".into(),
             serde_json::Value::Bool(self.bracket_matching),
         );
@@ -312,6 +323,7 @@ const OWN_KEYS: &[&str] = &[
     "autoClosePairs",
     "autoIndent",
     "formatOnSave",
+    "prettierEnabled",
     "bracketMatching",
     "indentGuides",
     "minimap",
@@ -372,6 +384,16 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert!(loaded.format_on_save);
+    }
+
+    #[test]
+    fn prettier_is_on_until_turned_off() {
+        assert!(Settings::default().prettier_enabled);
+        let s = Settings {
+            prettier_enabled: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().prettier_enabled);
     }
 
     #[test]

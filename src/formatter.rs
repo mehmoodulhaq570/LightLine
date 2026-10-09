@@ -221,11 +221,57 @@ impl Formatter for RustfmtFormatter {
             .unwrap_or(false)
     }
 
-    fn command(&self, _path: &Path) -> Command {
+    // Reading stdin, rustfmt can't see Cargo.toml and parses as Rust 2015,
+    // which rejects `async fn` and `let ... else`. It finds rustfmt.toml from
+    // its working directory.
+    fn command(&self, path: &Path) -> Command {
         let mut command = tool_command("rustfmt");
-        command.arg("--emit").arg("stdout");
+        command
+            .args(["--emit", "stdout", "--edition"])
+            .arg(rust_edition(path));
+        if let Some(folder) = path.parent().filter(|folder| folder.is_dir()) {
+            command.current_dir(folder);
+        }
         command
     }
+}
+
+/// The edition Cargo builds `path` with: its package's, or the workspace's
+/// when the package inherits it. Cargo's own default for a package that
+/// names none is 2015; a file outside any package gets 2021.
+fn rust_edition(path: &Path) -> String {
+    let mut inherited = false;
+    for folder in path.ancestors().skip(1) {
+        let Ok(text) = std::fs::read_to_string(folder.join("Cargo.toml")) else {
+            continue;
+        };
+        let Ok(manifest) = toml::from_str::<toml::Table>(&text) else {
+            continue;
+        };
+        let workspace_edition = manifest
+            .get("workspace")
+            .and_then(|workspace| workspace.get("package"))
+            .and_then(|package| package.get("edition"))
+            .and_then(toml::Value::as_str);
+        if inherited {
+            if let Some(edition) = workspace_edition {
+                return edition.to_owned();
+            }
+            continue;
+        }
+        let Some(package) = manifest.get("package") else {
+            continue;
+        };
+        match package.get("edition") {
+            Some(toml::Value::String(edition)) => return edition.clone(),
+            Some(_) => match workspace_edition {
+                Some(edition) => return edition.to_owned(),
+                None => inherited = true,
+            },
+            None => return "2015".into(),
+        }
+    }
+    "2021".into()
 }
 
 /// Runs `ruff format -` on Python files, falling back to `black -`.
@@ -245,7 +291,10 @@ impl Formatter for PythonFormatter {
 
     fn command(&self, path: &Path) -> Command {
         let mut command = tool_command("ruff");
-        command.args(["format", "--stdin-filename"]).arg(path).arg("-");
+        command
+            .args(["format", "--stdin-filename"])
+            .arg(path)
+            .arg("-");
         command
     }
 
@@ -909,6 +958,52 @@ mod tests {
                 eprintln!("skipped: prettier didn't finish in time (npx may be downloading it)");
             }
             Err(other) => panic!("unexpected formatting error: {other}"),
+        }
+    }
+
+    #[test]
+    fn rust_edition_comes_from_the_package_or_its_workspace() {
+        let root = std::env::temp_dir().join(format!(
+            "lightline-edition-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "Cargo.toml",
+            "[workspace]\nmembers=['own','inherits']\n[workspace.package]\nedition='2024'\n",
+        );
+        write("own/Cargo.toml", "[package]\nname='own'\nedition='2018'\n");
+        write(
+            "inherits/Cargo.toml",
+            "[package]\nname='inherits'\nedition.workspace=true\n",
+        );
+        write("old/Cargo.toml", "[package]\nname='old'\n");
+        assert_eq!(rust_edition(&root.join("own/src/lib.rs")), "2018");
+        assert_eq!(rust_edition(&root.join("inherits/src/main.rs")), "2024");
+        assert_eq!(rust_edition(&root.join("old/src/main.rs")), "2015");
+        std::fs::remove_dir_all(&root).unwrap();
+        let outside = std::env::temp_dir()
+            .join("lightline-no-such-crate")
+            .join("a.rs");
+        assert_eq!(rust_edition(&outside), "2021");
+    }
+
+    // Live test: only runs if rustfmt is on PATH.
+    #[test]
+    fn rustfmt_formats_modern_rust_if_installed() {
+        let source = "async fn f() { let Some(x) = g() else { return }; }";
+        match RustfmtFormatter.format(source, Path::new("main.rs")) {
+            Ok(formatted) => assert!(formatted.contains("let Some(x) = g() else"), "{formatted}"),
+            Err(FormatError::NotAvailable) => eprintln!("skipped: rustfmt not found on PATH"),
+            Err(other) => panic!("rustfmt rejected modern Rust: {other}"),
         }
     }
 

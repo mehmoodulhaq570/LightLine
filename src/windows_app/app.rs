@@ -492,7 +492,10 @@ impl Tab {
     }
 
     pub(super) fn is_c_family_or_header(document: &Document) -> bool {
-        document.path.as_deref().is_some_and(is_c_family_or_header_path)
+        document
+            .path
+            .as_deref()
+            .is_some_and(is_c_family_or_header_path)
     }
 
     pub(super) fn is_javascript(document: &Document) -> bool {
@@ -501,12 +504,21 @@ impl Tab {
             .as_deref()
             .and_then(Path::extension)
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "js" | "jsx" | "mjs" | "cjs"))
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "js" | "jsx" | "mjs" | "cjs"
+                )
+            })
     }
 
     fn is_tsx(document: &Document) -> bool {
-        document.path.as_deref().and_then(Path::extension)
-            .and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
+        document
+            .path
+            .as_deref()
+            .and_then(Path::extension)
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
     }
 
     pub(super) fn is_typescript(document: &Document) -> bool {
@@ -515,7 +527,12 @@ impl Tab {
             .as_deref()
             .and_then(Path::extension)
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "ts" | "tsx" | "mts" | "cts"))
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "ts" | "tsx" | "mts" | "cts"
+                )
+            })
     }
 
     pub(super) fn is_json(document: &Document) -> bool {
@@ -538,8 +555,12 @@ impl Tab {
 
     // True for any file the Run action knows how to execute on its own.
     pub(super) fn is_runnable(document: &Document) -> bool {
-        Self::is_python(document) || Self::is_c_family(document)
-            || document.path.as_deref().is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
+        Self::is_python(document)
+            || Self::is_c_family(document)
+            || document
+                .path
+                .as_deref()
+                .is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
     }
 
     pub(super) fn is_cpp(document: &Document) -> bool {
@@ -1460,16 +1481,29 @@ impl App {
                 // A real uninstall (deletes the local files), not just a
                 // preference flip -- IconSet already handles "no theme
                 // loaded" gracefully, so this is a safe, meaningful action.
-                let _ = lightline::extensions::installer::uninstall(&registry_id);
-                self.extensions[idx].installed = false;
                 let name = self.extensions[idx].name.clone();
+                let removed = lightline::extensions::installer::uninstall(&registry_id);
+                // A failed removal (a file in use) can leave the extension
+                // whole, or with its manifest already gone, which is no
+                // longer usable and counts as removed.
+                if let Err(error) = &removed
+                    && lightline::extensions::installer::is_installed(&registry_id)
+                {
+                    self.status = format!("Could not remove {name}: {error}");
+                    self.refresh(hwnd);
+                    return;
+                }
+                self.extensions[idx].installed = false;
                 if registry_id == "material-icon-theme" {
                     self.icons = IconSet::new(self.dpi, self.zoom);
                 }
                 if self.active_color_theme.as_deref() == Some(registry_id.as_str()) {
                     self.set_color_theme(hwnd, None);
                 }
-                self.status = format!("{name} removed");
+                self.status = match removed {
+                    Ok(()) => format!("{name} removed"),
+                    Err(error) => format!("{name} removed, but some files remain: {error}"),
+                };
                 self.refresh(hwnd);
                 return;
             }
@@ -1519,7 +1553,11 @@ impl App {
                 // Turning this off is just a preference flip: LightLine never
                 // owned an install to undo, so there's nothing to uninstall.
                 self.extensions[idx].installed = false;
-                self.status = "Prettier formatting disabled".into();
+                self.settings.prettier_enabled = false;
+                self.status = match self.settings.save() {
+                    Ok(()) => "Prettier formatting disabled".into(),
+                    Err(error) => format!("Prettier formatting disabled (not saved: {error})"),
+                };
                 self.refresh(hwnd);
                 return;
             }
@@ -2978,14 +3016,20 @@ impl App {
             return None;
         }
         let cursor_line = self.view().cursor.line;
-        self.active_gutter_diff()?.hunk_at_line(cursor_line).cloned()
+        self.active_gutter_diff()?
+            .hunk_at_line(cursor_line)
+            .cloned()
     }
 
     pub(super) fn stage_cursor_hunk(&mut self, hwnd: HWND) {
         let Some(hunk) = self.active_hunk_at_cursor() else {
             return;
         };
-        let Some(root) = self.git_root.clone().or_else(|| self.workspace_root.clone()) else {
+        let Some(root) = self
+            .git_root
+            .clone()
+            .or_else(|| self.workspace_root.clone())
+        else {
             return;
         };
         let Some(path) = self.doc().path.clone() else {
@@ -3024,7 +3068,14 @@ impl App {
             (start, start, text)
         } else if hunk.head_lines.is_empty() {
             if end_line < total_lines {
-                (start, Pos { line: end_line, byte: 0 }, String::new())
+                (
+                    start,
+                    Pos {
+                        line: end_line,
+                        byte: 0,
+                    },
+                    String::new(),
+                )
             } else if hunk.buffer_start > 0 {
                 let prev_line = hunk.buffer_start - 1;
                 (
@@ -3041,13 +3092,21 @@ impl App {
         } else {
             let text = hunk.head_lines.join("\n");
             if end_line < total_lines {
-                (start, Pos { line: end_line, byte: 0 }, format!("{text}\n"))
+                (
+                    start,
+                    Pos {
+                        line: end_line,
+                        byte: 0,
+                    },
+                    format!("{text}\n"),
+                )
             } else {
                 (start, doc.end(), text)
             }
         };
 
-        self.doc_mut().replace(actual_start, actual_end, &replacement);
+        self.doc_mut()
+            .replace(actual_start, actual_end, &replacement);
         self.view_mut().cursor = self.doc().clamp(actual_start);
         self.view_mut().selection_anchor = None;
         self.start_gutter_diff();
@@ -3085,7 +3144,13 @@ impl App {
         let total_lines = doc.line_count();
         let start_line = pos.line.saturating_sub(40);
         let end_line = (pos.line + 40).min(total_lines);
-        let prefix = doc.text_range(Pos { line: start_line, byte: 0 }, pos);
+        let prefix = doc.text_range(
+            Pos {
+                line: start_line,
+                byte: 0,
+            },
+            pos,
+        );
         let suffix = doc.text_range(
             pos,
             Pos {
@@ -3125,15 +3190,13 @@ impl App {
             && self.active == ghost.tab
             && self.view().cursor == ghost.pos
         {
-
-                let end = self.doc_mut().replace(ghost.pos, ghost.pos, &ghost.text);
-                self.view_mut().cursor = end;
-                self.view_mut().selection_anchor = None;
-                self.start_gutter_diff();
-                self.status = "Accepted inline completion".into();
-                unsafe { InvalidateRect(hwnd, null(), 0) };
-                return true;
-
+            let end = self.doc_mut().replace(ghost.pos, ghost.pos, &ghost.text);
+            self.view_mut().cursor = end;
+            self.view_mut().selection_anchor = None;
+            self.start_gutter_diff();
+            self.status = "Accepted inline completion".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return true;
         }
         false
     }
@@ -3681,9 +3744,16 @@ mod split_tests {
             let mut doc = Document::new();
             doc.path = Some(PathBuf::from(filename));
             let tab = Tab::new(doc);
-            assert_eq!(tab.syntax.is_some(), has_syntax, "Syntax check failed for {filename}");
-            assert_eq!(Tab::lsp_language(&tab.document), expected_lsp, "LSP check failed for {filename}");
+            assert_eq!(
+                tab.syntax.is_some(),
+                has_syntax,
+                "Syntax check failed for {filename}"
+            );
+            assert_eq!(
+                Tab::lsp_language(&tab.document),
+                expected_lsp,
+                "LSP check failed for {filename}"
+            );
         }
     }
 }
-

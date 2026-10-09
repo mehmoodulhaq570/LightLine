@@ -1362,7 +1362,10 @@ impl App {
     pub(super) fn run_language_plan(&mut self, hwnd: HWND, plan: lightline::runner::RunPlan) {
         match plan.powershell_command() {
             Ok(command) => self.start_language_run(hwnd, plan.cwd, command),
-            Err(error) => { self.status = error; self.refresh(hwnd); }
+            Err(error) => {
+                self.status = error;
+                self.refresh(hwnd);
+            }
         }
     }
 
@@ -1374,9 +1377,11 @@ impl App {
             return;
         }
         let size = self.terminal_size_for(hwnd);
-        match self.terminal.start(SessionKind::ManagedRun,
-            LaunchRequest::Run { cwd, command }, size)
-        {
+        match self.terminal.start(
+            SessionKind::ManagedRun,
+            LaunchRequest::Run { cwd, command },
+            size,
+        ) {
             Ok(id) => {
                 self.welcome = false;
                 self.terminal_visible = true;

@@ -649,6 +649,27 @@ impl Document {
         self.lines.join("\n")
     }
 
+    /// Where `pos` is in `text()`, in bytes; the inverse of `pos_at`.
+    pub fn offset_of(&self, pos: Pos) -> usize {
+        let pos = self.clamp(pos);
+        self.lines[..pos.line]
+            .iter()
+            .map(|line| line.len() + 1)
+            .sum::<usize>()
+            + pos.byte
+    }
+
+    /// The position `offset` bytes into `text()`, clamped to the document.
+    pub fn pos_at(&self, mut offset: usize) -> Pos {
+        for (line, text) in self.lines.iter().enumerate() {
+            if offset <= text.len() {
+                return self.clamp(Pos { line, byte: offset });
+            }
+            offset -= text.len() + 1;
+        }
+        self.end()
+    }
+
     pub fn utf16_column(&self, pos: Pos) -> usize {
         let pos = self.clamp(pos);
         self.lines[pos.line][..pos.byte].encode_utf16().count()
@@ -867,7 +888,33 @@ impl Document {
         let new_end = start.line + new_lines.len() - 1;
         self.lines.splice(start.line..=end.line, new_lines);
         self.shift_folds(start.line, end.line, new_end);
+        self.shift_breakpoints(start, end, new_end);
         cursor
+    }
+
+    // Keeps breakpoints on their code across an edit that replaced `start..end`
+    // and now ends on line `new_end`. A breakpoint stays on the first line if
+    // text before the edit is left there, follows the last line's remaining
+    // text, moves with lines after the edit, and goes away with lines the edit
+    // removed whole.
+    fn shift_breakpoints(&mut self, start: Pos, end: Pos, new_end: usize) {
+        if self.breakpoints.is_empty() || (start.line == end.line && end.line == new_end) {
+            return;
+        }
+        self.breakpoints = std::mem::take(&mut self.breakpoints)
+            .into_iter()
+            .filter_map(|line| {
+                if line < start.line || (line == start.line && start.byte > 0) {
+                    Some(line)
+                } else if line == end.line {
+                    Some(new_end)
+                } else if line > end.line {
+                    Some(line - end.line + new_end)
+                } else {
+                    None
+                }
+            })
+            .collect();
     }
 
     pub fn replace(&mut self, start: Pos, end: Pos, replacement: &str) -> Pos {
@@ -1330,6 +1377,50 @@ mod tests {
         // An edit that reaches into the folded block drops the fold.
         doc.replace(Pos { line: 2, byte: 0 }, Pos { line: 4, byte: 0 }, "");
         assert!(!doc.has_folds());
+    }
+
+    #[test]
+    fn breakpoints_follow_their_lines_through_edits() {
+        let mut doc = doc_with("a.py", "a\nb\nc\nd\n");
+        doc.toggle_breakpoint(2);
+        // A line inserted above moves it down; undoing moves it back.
+        doc.replace(Pos::default(), Pos::default(), "new\n");
+        assert_eq!(doc.breakpoints().iter().copied().collect::<Vec<_>>(), [3]);
+        doc.undo();
+        assert_eq!(doc.breakpoints().iter().copied().collect::<Vec<_>>(), [2]);
+        // Enter at the end of its line leaves it; Enter at the start moves it.
+        doc.replace(Pos { line: 2, byte: 1 }, Pos { line: 2, byte: 1 }, "\n");
+        assert!(doc.has_breakpoint(2));
+        doc.undo();
+        doc.replace(Pos { line: 2, byte: 0 }, Pos { line: 2, byte: 0 }, "\n");
+        assert!(doc.has_breakpoint(3) && !doc.has_breakpoint(2));
+        doc.undo();
+        // Joining it onto the line above takes it along.
+        doc.replace(Pos { line: 1, byte: 1 }, Pos { line: 2, byte: 0 }, "");
+        assert_eq!(doc.breakpoints().iter().copied().collect::<Vec<_>>(), [1]);
+        doc.undo();
+        assert!(doc.has_breakpoint(1));
+        // Deleting its whole line (and the ones around it) removes it.
+        let mut doc = doc_with("a.py", "a\nb\nc\nd\n");
+        doc.toggle_breakpoint(2);
+        doc.toggle_breakpoint(3);
+        doc.replace(Pos { line: 1, byte: 0 }, Pos { line: 3, byte: 0 }, "");
+        assert_eq!(doc.breakpoints().iter().copied().collect::<Vec<_>>(), [1]);
+        assert_eq!(doc.line(1), "d");
+    }
+
+    #[test]
+    fn offsets_map_to_positions() {
+        let doc = doc_with("a.txt", "ab\n\ncd");
+        assert_eq!(doc.pos_at(0), Pos { line: 0, byte: 0 });
+        assert_eq!(doc.pos_at(2), Pos { line: 0, byte: 2 });
+        assert_eq!(doc.pos_at(3), Pos { line: 1, byte: 0 });
+        assert_eq!(doc.pos_at(4), Pos { line: 2, byte: 0 });
+        assert_eq!(doc.pos_at(6), Pos { line: 2, byte: 2 });
+        assert_eq!(doc.pos_at(99), doc.end());
+        for offset in 0..=6 {
+            assert_eq!(doc.offset_of(doc.pos_at(offset)), offset);
+        }
     }
 
     #[test]

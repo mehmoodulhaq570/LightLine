@@ -870,8 +870,20 @@ mod tests {
         );
 
         let hunk_menu = EditorContextMenu::new(0, 0, None, false, true);
-        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::StageHunk));
-        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::DiscardHunk));
-        assert!(hunk_menu.enabled_actions().contains(&EditorContextAction::OpenDiffView));
+        assert!(
+            hunk_menu
+                .enabled_actions()
+                .contains(&EditorContextAction::StageHunk)
+        );
+        assert!(
+            hunk_menu
+                .enabled_actions()
+                .contains(&EditorContextAction::DiscardHunk)
+        );
+        assert!(
+            hunk_menu
+                .enabled_actions()
+                .contains(&EditorContextAction::OpenDiffView)
+        );
     }
 }

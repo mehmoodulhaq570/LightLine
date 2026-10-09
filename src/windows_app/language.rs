@@ -888,6 +888,18 @@ impl App {
         }
     }
 
+    // formatter::formatter_for(), minus Prettier once it's turned off in the
+    // Extensions panel.
+    pub(super) fn formatter_for(
+        &self,
+        path: &Path,
+    ) -> Option<Box<dyn lightline::formatter::Formatter>> {
+        use lightline::formatter::{Formatter, PrettierFormatter};
+        lightline::formatter::formatter_for(path).filter(|formatter| {
+            self.settings.prettier_enabled || formatter.name() != PrettierFormatter.name()
+        })
+    }
+
     // Runs whichever formatter::formatter_for() picks for the active file
     // (Prettier today; the one place a second formatter -- rustfmt, black,
     // clang-format -- plugs in later) on a background thread, so a slow or
@@ -908,7 +920,7 @@ impl App {
             self.refresh(hwnd);
             return;
         };
-        let Some(formatter) = lightline::formatter::formatter_for(&path) else {
+        let Some(formatter) = self.formatter_for(&path) else {
             return;
         };
         let serial = self.doc().change_serial();
@@ -939,7 +951,7 @@ impl App {
         if !self.settings.format_on_save {
             return;
         }
-        let Some(formatter) = lightline::formatter::formatter_for(path) else {
+        let Some(formatter) = self.formatter_for(path) else {
             return;
         };
         let code = self.doc().text();
@@ -949,18 +961,46 @@ impl App {
         let Ok(formatted) = formatter.format(&code, path) else {
             return;
         };
-        let formatted_clean = formatted.replace("\r\n", "\n").replace('\r', "\n");
-        let current_clean = code.replace("\r\n", "\n").replace('\r', "\n");
-        if formatted_clean == current_clean {
-            return;
+        self.apply_formatted(&formatted);
+    }
+
+    // Puts a formatter's output into the active document as the one edit
+    // spanning everything that changed, so text, folds and breakpoints
+    // outside it are untouched. The caret, selection and scroll stay with
+    // the code they were on (see `formatted_offset`). Returns false when the
+    // output matches the document.
+    pub(super) fn apply_formatted(&mut self, formatted: &str) -> bool {
+        let formatted = formatted.replace("\r\n", "\n").replace('\r', "\n");
+        let current = self.doc().text();
+        let Some((from, to, replacement)) = changed_span(&current, &formatted) else {
+            return false;
+        };
+        let start = self.doc().pos_at(from);
+        let end = self.doc().pos_at(to);
+        let view = self.view().clone();
+        let cursor = self.doc().offset_of(view.cursor);
+        let anchor = view.selection_anchor.map(|pos| self.doc().offset_of(pos));
+        let serial = self.doc().change_serial();
+        self.replace_range(start, end, replacement);
+        if self.doc().change_serial() == serial {
+            return false;
         }
         let doc = self.doc();
-        let last_line = doc.line_count().saturating_sub(1);
-        let end = Pos {
-            line: last_line,
-            byte: doc.line(last_line).len(),
+        let remap = |offset: usize| {
+            doc.grapheme_position(doc.pos_at(formatted_offset(
+                &current,
+                (from, to, replacement),
+                offset,
+            )))
         };
-        self.replace_range(Pos::default(), end, &formatted_clean);
+        let cursor = remap(cursor);
+        let anchor = anchor.map(remap);
+        let first_line = view.first_line.min(doc.line_count().saturating_sub(1));
+        let restored = self.view_mut();
+        restored.cursor = cursor;
+        restored.selection_anchor = anchor;
+        restored.first_line = first_line;
+        true
     }
 
     pub(super) fn format_document(&mut self, hwnd: HWND) {
@@ -974,7 +1014,7 @@ impl App {
         // (rustfmt, black, clang-format) is picked up automatically, with
         // nothing to keep in sync in this file.
         if let Some(path) = path.as_deref()
-            && lightline::formatter::formatter_for(path).is_some()
+            && self.formatter_for(path).is_some()
         {
             self.format_with_external_formatter(hwnd);
             return;
@@ -1168,9 +1208,123 @@ fn problem_counts<'a>(diagnostics: impl Iterator<Item = &'a LspDiagnostic>) -> (
     })
 }
 
+// The single edit turning `old` into `new`: the byte range in `old` past
+// their common start and end, and the text of `new` that replaces it. None
+// when they are equal.
+fn changed_span<'a>(old: &str, new: &'a str) -> Option<(usize, usize, &'a str)> {
+    if old == new {
+        return None;
+    }
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let mut suffix = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take(old.len().min(new.len()) - prefix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    Some((prefix, old.len() - suffix, &new[prefix..new.len() - suffix]))
+}
+
+// Where `offset` in `old` ends up once `span` (from `changed_span`) is
+// applied. Formatters move whitespace and add or drop punctuation (`;`, `,`)
+// but keep names and numbers, so inside the span it lands after as many
+// word characters as preceded it there, then past the punctuation that
+// stood between the last of them and `offset` (the `(` in `log(|`).
+fn formatted_offset(old: &str, span: (usize, usize, &str), offset: usize) -> usize {
+    let (from, to, replacement) = span;
+    if offset <= from {
+        return offset;
+    }
+    if offset >= to {
+        return offset - to + from + replacement.len();
+    }
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let before = &old[from..offset];
+    let words = before.chars().filter(|c| is_word(*c)).count();
+    let tail_start = before
+        .char_indices()
+        .rev()
+        .find(|(_, c)| is_word(*c))
+        .map_or(0, |(index, c)| index + c.len_utf8());
+    let mut at = match words {
+        0 => 0,
+        _ => replacement
+            .char_indices()
+            .filter(|(_, c)| is_word(*c))
+            .nth(words - 1)
+            .map_or(replacement.len(), |(index, c)| index + c.len_utf8()),
+    };
+    for expected in before[tail_start..].chars().filter(|c| !c.is_whitespace()) {
+        let rest = &replacement[at..];
+        let skipped = rest.len() - rest.trim_start().len();
+        if !rest[skipped..].starts_with(expected) {
+            break;
+        }
+        at += skipped + expected.len_utf8();
+    }
+    from + at
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn positions_follow_their_code_through_formatting() {
+        let old = "let   y=[1,2 ,3]\nend";
+        let new = "let y = [1, 2, 3];\nend";
+        let span = changed_span(old, new).unwrap();
+        let at = |offset| formatted_offset(old, span, offset);
+        // Inside the change: after "y", and after "3".
+        assert_eq!(&new[..at(7)], "let y");
+        assert_eq!(&new[..at(15)], "let y = [1, 2, 3");
+        // The end of the changed line, and positions outside the change.
+        assert_eq!(&new[..at(16)], "let y = [1, 2, 3];");
+        assert_eq!(at(0), 0);
+        assert_eq!(&new[at(17)..], "end");
+        assert_eq!(at(old.len()), new.len());
+
+        // Punctuation the formatter adds earlier (the `;`) doesn't shift it,
+        // and punctuation just before the caret is kept.
+        let old = "function f( ){return x}\nconsole.log(f())";
+        let new = "function f() {\n  return x;\n}\nconsole.log(f());";
+        let span = changed_span(old, new).unwrap();
+        let at = |text: &str| {
+            let offset = old.find(text).unwrap() + text.len();
+            &new[..formatted_offset(old, span, offset)]
+        };
+        assert!(at("console.lo").ends_with("\nconsole.lo"));
+        assert!(at("console.log(").ends_with("\nconsole.log("));
+        assert!(at("return x").ends_with("return x"));
+    }
+
+    #[test]
+    fn changed_span_covers_only_what_differs() {
+        assert_eq!(changed_span("same", "same"), None);
+        assert_eq!(
+            changed_span("fn a(){x}\nfn b(){}", "fn a() { x }\nfn b(){}"),
+            Some((6, 8, " { x "))
+        );
+        // Growing or shrinking at either end.
+        assert_eq!(changed_span("ab", "abc"), Some((2, 2, "c")));
+        assert_eq!(changed_span("abc", "bc"), Some((0, 1, "")));
+        // Repeated text can't be counted as both prefix and suffix.
+        assert_eq!(changed_span("aa", "aaa"), Some((2, 2, "a")));
+        // Never splits a character: é and è share their first byte.
+        assert_eq!(changed_span("xé", "xè"), Some((1, 3, "è")));
+        assert_eq!(changed_span("éy", "èy"), Some((0, 2, "è")));
+    }
 
     fn diagnostic(severity: u8) -> LspDiagnostic {
         let at = LspPosition {

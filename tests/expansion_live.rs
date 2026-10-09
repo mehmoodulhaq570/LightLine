@@ -1,5 +1,5 @@
 use lightline::document::{Document, Pos};
-use lightline::formatter::{Formatter, RustfmtFormatter, PrettierFormatter, formatter_for};
+use lightline::formatter::{Formatter, PrettierFormatter, RustfmtFormatter, formatter_for};
 use lightline::lsp::{Language, server_config};
 use lightline::syntax::{Color, Syntax};
 use std::path::Path;
@@ -40,15 +40,24 @@ int calculate_total(int count, double rate) {
 
     // Line 3: typedef struct { -> should contain Keyword
     let l3_spans = syntax.spans(&doc, 3);
-    assert!(l3_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword in struct def");
+    assert!(
+        l3_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword in struct def"
+    );
 
     // Line 4: int id; -> should contain Type
     let l4_spans = syntax.spans(&doc, 4);
-    assert!(l4_spans.iter().any(|s| s.color == Color::Type), "Expected Type for int");
+    assert!(
+        l4_spans.iter().any(|s| s.color == Color::Type),
+        "Expected Type for int"
+    );
 
     // Line 12: // Calculate total amount -> should contain Comment
     let l12_spans = syntax.spans(&doc, 12);
-    assert!(l12_spans.iter().any(|s| s.color == Color::Comment), "Expected Comment for // line");
+    assert!(
+        l12_spans.iter().any(|s| s.color == Color::Comment),
+        "Expected Comment for // line"
+    );
 
     println!("✓ Live C syntax highlighting verified successfully");
 }
@@ -82,21 +91,39 @@ class DataService {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(settled, "JS syntax highlighter worker should complete parse");
+    assert!(
+        settled,
+        "JS syntax highlighter worker should complete parse"
+    );
 
     // Line 1: import { helper } from './utils.js'; -> Keyword and String
     let l1_spans = syntax.spans(&doc, 1);
-    assert!(l1_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword in import");
-    assert!(l1_spans.iter().any(|s| s.color == Color::String), "Expected String in module path");
+    assert!(
+        l1_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword in import"
+    );
+    assert!(
+        l1_spans.iter().any(|s| s.color == Color::String),
+        "Expected String in module path"
+    );
 
     // Line 3: class DataService { -> Keyword and Type
     let l3_spans = syntax.spans(&doc, 3);
-    assert!(l3_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for class");
-    assert!(l3_spans.iter().any(|s| s.color == Color::Type), "Expected Type for class name");
+    assert!(
+        l3_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for class"
+    );
+    assert!(
+        l3_spans.iter().any(|s| s.color == Color::Type),
+        "Expected Type for class name"
+    );
 
     // Line 8: async fetchData(url) { -> Keyword and Function
     let l8_spans = syntax.spans(&doc, 8);
-    assert!(l8_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for async");
+    assert!(
+        l8_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for async"
+    );
 
     println!("✓ Live JavaScript syntax highlighting verified successfully");
 }
@@ -130,21 +157,39 @@ export const executeTask = async (opts: ConfigOptions): Promise<void> => {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(settled, "TS syntax highlighter worker should complete parse");
+    assert!(
+        settled,
+        "TS syntax highlighter worker should complete parse"
+    );
 
     // Line 1: interface ConfigOptions { -> Keyword and Type
     let l1_spans = syntax.spans(&doc, 1);
-    assert!(l1_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for interface");
-    assert!(l1_spans.iter().any(|s| s.color == Color::Type), "Expected Type for ConfigOptions");
+    assert!(
+        l1_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for interface"
+    );
+    assert!(
+        l1_spans.iter().any(|s| s.color == Color::Type),
+        "Expected Type for ConfigOptions"
+    );
 
     // Line 2: retries: number; -> Type for number
     let l2_spans = syntax.spans(&doc, 2);
-    assert!(l2_spans.iter().any(|s| s.color == Color::Type), "Expected Type for number");
+    assert!(
+        l2_spans.iter().any(|s| s.color == Color::Type),
+        "Expected Type for number"
+    );
 
     // Line 7: export const executeTask = ... -> Keyword and Type
     let l7_spans = syntax.spans(&doc, 7);
-    assert!(l7_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for export/const/async");
-    assert!(l7_spans.iter().any(|s| s.color == Color::Type), "Expected Type for ConfigOptions/Promise");
+    assert!(
+        l7_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for export/const/async"
+    );
+    assert!(
+        l7_spans.iter().any(|s| s.color == Color::Type),
+        "Expected Type for ConfigOptions/Promise"
+    );
 
     println!("✓ Live TypeScript syntax highlighting verified successfully");
 }
@@ -172,23 +217,38 @@ fn live_verify_json_syntax_highlighting() {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(settled, "JSON syntax highlighter worker should complete parse");
+    assert!(
+        settled,
+        "JSON syntax highlighter worker should complete parse"
+    );
 
     // Line 1: "name": "lightline", -> Strings
     let l1_spans = syntax.spans(&doc, 1);
-    assert!(l1_spans.iter().any(|s| s.color == Color::String), "Expected String in JSON key/value");
+    assert!(
+        l1_spans.iter().any(|s| s.color == Color::String),
+        "Expected String in JSON key/value"
+    );
 
     // Line 3: "port": 8080, -> Number
     let l3_spans = syntax.spans(&doc, 3);
-    assert!(l3_spans.iter().any(|s| s.color == Color::Number), "Expected Number in JSON value");
+    assert!(
+        l3_spans.iter().any(|s| s.color == Color::Number),
+        "Expected Number in JSON value"
+    );
 
     // Line 4: "enabled": true, -> Keyword for boolean
     let l4_spans = syntax.spans(&doc, 4);
-    assert!(l4_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for true");
+    assert!(
+        l4_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for true"
+    );
 
     // Line 5: "metadata": null -> Keyword for null
     let l5_spans = syntax.spans(&doc, 5);
-    assert!(l5_spans.iter().any(|s| s.color == Color::Keyword), "Expected Keyword for null");
+    assert!(
+        l5_spans.iter().any(|s| s.color == Color::Keyword),
+        "Expected Keyword for null"
+    );
 
     println!("✓ Live JSON syntax highlighting verified successfully");
 }
@@ -204,7 +264,11 @@ fn live_verify_large_python_file_parses_above_128kb() {
     for i in 0..6000 {
         code.push_str(&format!("value_{i} = calculate({i})\n"));
     }
-    assert!(code.len() > 150 * 1024, "File size must be > 128 KB (was {} bytes)", code.len());
+    assert!(
+        code.len() > 150 * 1024,
+        "File size must be > 128 KB (was {} bytes)",
+        code.len()
+    );
 
     doc.replace(Pos::default(), Pos::default(), &code);
     let mut syntax = Syntax::new_python();
@@ -218,7 +282,10 @@ fn live_verify_large_python_file_parses_above_128kb() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(settled, "Tree-sitter worker should parse large >128KB Python file");
+    assert!(
+        settled,
+        "Tree-sitter worker should parse large >128KB Python file"
+    );
 
     let l0_spans = syntax.spans(&doc, 0);
     assert!(
@@ -243,8 +310,14 @@ fn live_verify_rustfmt_formatter() {
     match formatted {
         Ok(text) => {
             let normalized = text.replace("\r\n", "\n");
-            assert!(normalized.contains("fn main() {\n"), "rustfmt should format function block");
-            assert!(normalized.contains("let x = 1 + 2;"), "rustfmt should space out operators");
+            assert!(
+                normalized.contains("fn main() {\n"),
+                "rustfmt should format function block"
+            );
+            assert!(
+                normalized.contains("let x = 1 + 2;"),
+                "rustfmt should space out operators"
+            );
             println!("✓ Live rustfmt formatted successfully:\n{}", text.trim());
         }
         Err(e) => {
@@ -259,8 +332,14 @@ fn live_verify_prettier_formatter() {
     let formatted = PrettierFormatter.format(unformatted_json, Path::new("test.json"));
     match formatted {
         Ok(text) => {
-            assert!(text.contains("\"a\": 1"), "prettier should format keys and values");
-            assert!(text.contains("\"b\": [2, 3, 4]"), "prettier should format arrays");
+            assert!(
+                text.contains("\"a\": 1"),
+                "prettier should format keys and values"
+            );
+            assert!(
+                text.contains("\"b\": [2, 3, 4]"),
+                "prettier should format arrays"
+            );
             println!("✓ Live prettier formatted successfully:\n{}", text.trim());
         }
         Err(e) => {
@@ -301,7 +380,12 @@ fn live_verify_lsp_server_configs() {
         (Language::Rust, "rust-analyzer", "rust", "Rust"),
         (Language::Python, "Pyright", "python", "Python"),
         (Language::C, "clangd", "c", "C/C++"),
-        (Language::TypeScript, "typescript-language-server", "typescript", "TypeScript/JavaScript"),
+        (
+            Language::TypeScript,
+            "typescript-language-server",
+            "typescript",
+            "TypeScript/JavaScript",
+        ),
         (Language::Go, "gopls", "go", "Go"),
     ];
 
@@ -313,5 +397,7 @@ fn live_verify_lsp_server_configs() {
         assert_eq!(lang.name(), expected_name);
     }
 
-    println!("✓ Live LSP server configuration verified for Rust, Python, C/C++, TypeScript, and Go");
+    println!(
+        "✓ Live LSP server configuration verified for Rust, Python, C/C++, TypeScript, and Go"
+    );
 }

@@ -47,7 +47,9 @@ impl App {
         let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
-        if self.run_choice_key(hwnd, key) { return true; }
+        if self.run_choice_key(hwnd, key) {
+            return true;
+        }
         if self.run_config_panel.is_some() {
             self.run_config_key(hwnd, key, ctrl, shift);
             return true;
@@ -442,9 +444,8 @@ impl App {
                     }
                 }
                 x if x == VK_F7 as u32 => {
-                    let next_hunk = ((self.diff_first + 1)..self.diff_rows.len()).find(|&i| {
-                        self.diff_rows[i].changed && !self.diff_rows[i - 1].changed
-                    });
+                    let next_hunk = ((self.diff_first + 1)..self.diff_rows.len())
+                        .find(|&i| self.diff_rows[i].changed && !self.diff_rows[i - 1].changed);
                     if let Some(target) = next_hunk {
                         self.diff_first = target;
                     }
@@ -763,11 +764,12 @@ impl App {
         }
         let cursor = self.view().cursor;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
-        // Shift+Alt+F formats the current document through the language server.
+        // Alt+\ asks the AI model for an inline completion at the caret.
         if alt && !shift && !ctrl && (key == VK_OEM_5 as u32 || key == 0xDC) {
             self.trigger_inline_ai(hwnd);
             return true;
         }
+        // Shift+Alt+F formats the current document.
         if shift && alt && !ctrl && key == 0x46 {
             self.format_document(hwnd);
             return true;
@@ -960,7 +962,9 @@ impl App {
     }
 
     pub(super) fn character(&mut self, hwnd: HWND, unit: u16) {
-        if self.run_choice.is_some() { return; }
+        if self.run_choice.is_some() {
+            return;
+        }
         if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
             return;
         }
@@ -1316,7 +1320,9 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
-        if self.run_choice_click(hwnd, x, y) { return; }
+        if self.run_choice_click(hwnd, x, y) {
+            return;
+        }
         if self.run_config_panel.is_some() {
             self.run_config_click(hwnd, x, y, extend, false);
             return;
@@ -2149,7 +2155,9 @@ impl App {
     }
 
     pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
-        if self.run_config_panel.is_some() { return; }
+        if self.run_config_panel.is_some() {
+            return;
+        }
         self.dismiss_editor_context(hwnd);
         if self.terminal_visible {
             let mut rect = RECT::default();

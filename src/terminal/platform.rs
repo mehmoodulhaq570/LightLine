@@ -27,8 +27,8 @@ use windows_sys::Win32::System::Threading::{
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentThreadId,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
     OpenThread, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, SetEvent, THREAD_TERMINATE, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForMultipleObjects, WaitForSingleObject,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, SetEvent, THREAD_TERMINATE, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForMultipleObjects, WaitForSingleObject,
 };
 
 struct Handle(HANDLE);

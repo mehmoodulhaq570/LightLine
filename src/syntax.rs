@@ -1703,7 +1703,12 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(syntax.spans(0).iter().any(|span| span.color == Color::Type));
-        assert!(syntax.spans(1).iter().any(|span| span.color == Color::Keyword));
+        assert!(
+            syntax
+                .spans(1)
+                .iter()
+                .any(|span| span.color == Color::Keyword)
+        );
     }
 
     #[test]
@@ -1721,9 +1726,24 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(syntax.spans(0).iter().any(|span| span.color == Color::String));
-        assert!(syntax.spans(0).iter().any(|span| span.color == Color::Number));
-        assert!(syntax.spans(0).iter().any(|span| span.color == Color::Keyword));
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::String)
+        );
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::Number)
+        );
+        assert!(
+            syntax
+                .spans(0)
+                .iter()
+                .any(|span| span.color == Color::Keyword)
+        );
     }
 
     #[test]

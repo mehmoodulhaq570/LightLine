@@ -224,7 +224,7 @@ pub fn uninstall(id: &str) -> Result<(), String> {
         return Ok(());
     }
     std::fs::remove_dir_all(&target)
-        .map_err(|error| format!("could not remove {target:?}: {error}"))
+        .map_err(|error| format!("could not remove {}: {error}", target.display()))
 }
 
 /// True when `id` has already been installed locally (regardless of type).

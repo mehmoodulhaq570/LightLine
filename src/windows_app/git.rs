@@ -102,7 +102,11 @@ impl App {
         self.worker_started(hwnd);
         std::thread::spawn(move || {
             let result = workflow::repo_state(&root);
-            let _ = tx.send(WorkerMessage::Repo(generation, workspace_generation, result));
+            let _ = tx.send(WorkerMessage::Repo(
+                generation,
+                workspace_generation,
+                result,
+            ));
         });
     }
 

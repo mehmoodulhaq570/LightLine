@@ -44,10 +44,16 @@ impl App {
                 continue;
             }
             let path = tab.document.path.clone();
-            if path.is_none() && !tab.document.is_dirty() && tab.document.line_count() == 1
-                && tab.document.line(0).is_empty() { continue; }
-            let recovery = (!tab.read_only() && !tab.unloaded && (tab.document.is_dirty() || path.is_none()))
-                .then(|| tab.document.text());
+            if path.is_none()
+                && !tab.document.is_dirty()
+                && tab.document.line_count() == 1
+                && tab.document.line(0).is_empty()
+            {
+                continue;
+            }
+            let recovery =
+                (!tab.read_only() && !tab.unloaded && (tab.document.is_dirty() || path.is_none()))
+                    .then(|| tab.document.text());
             if index == self.active {
                 active = tabs.len();
             }
