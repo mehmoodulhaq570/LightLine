@@ -800,7 +800,13 @@ impl App {
                         }
                     }
                 }
-                WorkerMessage::Formatted(path, formatter_name, serial, result) => {
+                WorkerMessage::Formatted {
+                    path,
+                    formatter,
+                    serial,
+                    result,
+                    then_save,
+                } => {
                     // Only apply to the tab the format request was actually
                     // made against, and only if its content hasn't changed
                     // since -- the user may have kept typing (or switched
@@ -812,16 +818,32 @@ impl App {
                     if !still_current {
                         continue;
                     }
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
                     match result {
                         Ok(formatted) => {
-                            self.status = if self.apply_formatted(&formatted) {
-                                format!("Document formatted with {formatter_name}")
+                            let changed = self.apply_formatted(&formatted);
+                            if changed && then_save {
+                                if self.save_with(hwnd, false, false) {
+                                    self.status =
+                                        format!("Saved {name}, formatted with {formatter}");
+                                }
                             } else {
-                                format!("Already formatted with {formatter_name}")
-                            };
+                                self.status = match (changed, then_save) {
+                                    (true, _) => format!("Document formatted with {formatter}"),
+                                    (false, true) => format!("Saved {name}"),
+                                    (false, false) => {
+                                        format!("Already formatted with {formatter}")
+                                    }
+                                };
+                            }
+                        }
+                        Err(error) if then_save => {
+                            self.status = format!(
+                                "Saved {name}, but {formatter} couldn't format it: {error}"
+                            );
                         }
                         Err(error) => {
-                            self.status = format!("{formatter_name} formatting failed: {error}");
+                            self.status = format!("{formatter} formatting failed: {error}");
                         }
                     }
                 }

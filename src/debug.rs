@@ -375,7 +375,12 @@ fn run_adapter(
         process.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let mut child = match process.spawn() {
-        Ok(child) => child,
+        Ok(child) => {
+            // The program being debugged is started by the adapter later on,
+            // so it ends with LightLine too.
+            crate::jobs::adopt(&child);
+            child
+        }
         Err(error) => {
             emit(
                 Event::Failed {

@@ -178,8 +178,7 @@ fn install_in(dir: &Path, id: &str, git_url: &str, tag: Option<&str>) -> Result<
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
-        let status = command
-            .status()
+        let status = crate::jobs::status(&mut command)
             .map_err(|error| format!("could not run git: {error}"))?;
         Ok(status.success())
     };

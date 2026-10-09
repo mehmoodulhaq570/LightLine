@@ -932,14 +932,18 @@ impl App {
     // clang-format -- plugs in later) on a background thread, so a slow or
     // stuck process (bounded by formatter::DEFAULT_TIMEOUT either way) never
     // blocks the UI thread the way the old synchronous implementation did.
-    pub(super) fn format_with_external_formatter(&mut self, hwnd: HWND) {
+    // `then_save` is format-on-save: the file was just saved, and is saved
+    // again with the result unless it was edited in the meantime.
+    pub(super) fn format_with_external_formatter(&mut self, hwnd: HWND, then_save: bool) {
         if self.tab().read_only() {
             return;
         }
         let code = self.doc().text();
         if code.trim().is_empty() {
-            self.status = "Nothing to format".into();
-            self.refresh(hwnd);
+            if !then_save {
+                self.status = "Nothing to format".into();
+                self.refresh(hwnd);
+            }
             return;
         }
         let Some(path) = self.doc().path.clone() else {
@@ -951,43 +955,48 @@ impl App {
             return;
         };
         let serial = self.doc().change_serial();
-        self.status = format!("Formatting with {}...", formatter.name());
+        self.status = if then_save {
+            format!("{}; formatting with {}...", self.status, formatter.name())
+        } else {
+            format!("Formatting with {}...", formatter.name())
+        };
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
             let result = formatter
                 .format(&code, &path)
                 .map_err(|error| error.to_string());
-            tx.send(WorkerMessage::Formatted(
+            tx.send(WorkerMessage::Formatted {
                 path,
-                formatter.name(),
+                formatter: formatter.name(),
                 serial,
                 result,
-            ));
+                then_save,
+            });
         });
         self.refresh(hwnd);
     }
 
-    // Formats the active buffer in place, synchronously, before it's written
-    // to disk -- called from save() when settings.format_on_save is on.
-    // Bounded by the same formatter::DEFAULT_TIMEOUT as the async path
-    // above, so a stuck formatter delays a save by at most that long rather
-    // than hanging it; a failure here doesn't block the save; the file just
-    // saves unformatted, same as if the setting were off.
-    pub(super) fn apply_format_on_save(&mut self, path: &Path) {
+    // Format-on-save's part before the file is written. Built-in formatters
+    // take microseconds and run here; true means an external tool applies,
+    // which runs after the write instead (format_with_external_formatter),
+    // so a slow or stuck one never holds up the save.
+    pub(super) fn format_before_save(&mut self, path: &Path) -> bool {
         if !self.settings.format_on_save {
-            return;
+            return false;
         }
         let Some(formatter) = self.formatter_for(path) else {
-            return;
+            return false;
         };
-        let code = self.doc().text();
-        if code.trim().is_empty() {
-            return;
+        if !formatter.is_builtin() {
+            return true;
         }
-        let Ok(formatted) = formatter.format(&code, path) else {
-            return;
-        };
-        self.apply_formatted(&formatted);
+        let code = self.doc().text();
+        if !code.trim().is_empty()
+            && let Ok(formatted) = formatter.format(&code, path)
+        {
+            self.apply_formatted(&formatted);
+        }
+        false
     }
 
     // Puts a formatter's output into the active document as the one edit
@@ -1042,7 +1051,7 @@ impl App {
         if let Some(path) = path.as_deref()
             && self.formatter_for(path).is_some()
         {
-            self.format_with_external_formatter(hwnd);
+            self.format_with_external_formatter(hwnd, false);
             return;
         }
 

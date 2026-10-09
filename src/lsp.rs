@@ -614,7 +614,7 @@ fn install_pyright() -> Result<PathBuf, String> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = crate::jobs::output(&mut command).map_err(|error| error.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("`npm install pyright` failed: {stderr}"));
@@ -699,7 +699,10 @@ fn run_server(
         process.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let mut child = match process.spawn() {
-        Ok(child) => child,
+        Ok(child) => {
+            crate::jobs::adopt(&child);
+            child
+        }
         Err(error) => {
             let hint = match config.language {
                 Language::Python => {

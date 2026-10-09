@@ -697,8 +697,7 @@ fn build_debug_binary(root: &Path) -> Result<PathBuf, String> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let output = command
-        .output()
+    let output = lightline::jobs::output(&mut command)
         .map_err(|error| format!("Could not run cargo build: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {

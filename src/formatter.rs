@@ -83,17 +83,22 @@ fn run_formatter(mut command: Command, source: &str) -> Result<String, FormatErr
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let mut child = command.spawn().map_err(|_| FormatError::NotAvailable)?;
+    // npm's prettier.cmd is cmd.exe running node: killing the tree, not just
+    // the child, is what stops node on a timeout.
+    let tree = crate::jobs::ProcessTree::new(&child);
 
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(source.as_bytes());
-        // Dropping `stdin` here closes it, signaling EOF to the child; it
-        // won't finish reading until this happens.
-    }
-
-    // Drain stdout/stderr on their own threads *before* blocking on the
-    // child's exit: a large formatted file can fill the pipe buffer, and
-    // without a concurrent reader the child would block on its own write
-    // and never exit, regardless of the timeout below.
+    // Feed stdin and drain stdout/stderr on their own threads, all before
+    // waiting: a formatter may write (an error, or output) before it has
+    // read everything, and with nobody reading, both sides would block on
+    // full pipes past any timeout.
+    let stdin_pipe = child.stdin.take();
+    let source = source.to_owned();
+    let stdin_thread = std::thread::spawn(move || {
+        if let Some(mut stdin) = stdin_pipe {
+            let _ = stdin.write_all(source.as_bytes());
+            // Dropping `stdin` closes it: the formatter's end of input.
+        }
+    });
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
     let stdout_thread = std::thread::spawn(move || {
@@ -111,16 +116,20 @@ fn run_formatter(mut command: Command, source: &str) -> Result<String, FormatErr
         buffer
     });
 
-    let status = match child.wait_timeout(DEFAULT_TIMEOUT) {
+    let waited = child.wait_timeout(DEFAULT_TIMEOUT);
+    // Done or not, nothing it started may keep the pipes open: the threads
+    // below finish once every holder of them has ended.
+    tree.kill();
+    let status = match waited {
         Ok(Some(status)) => status,
         Ok(None) => {
-            let _ = child.kill();
             let _ = child.wait();
             return Err(FormatError::Timeout);
         }
         Err(error) => return Err(FormatError::Failed(error.to_string())),
     };
 
+    let _ = stdin_thread.join();
     let stdout = stdout_thread.join().unwrap_or_default();
     let stderr = stderr_thread.join().unwrap_or_default();
 
@@ -138,17 +147,33 @@ fn run_formatter(mut command: Command, source: &str) -> Result<String, FormatErr
     Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
-/// A command for a tool on PATH, by full path so npm's `prettier.cmd` and
-/// `npx.cmd` launchers are found. A missing tool keeps its bare name, whose
+/// A command for a tool on PATH, by full path so launchers npm installs as
+/// `.cmd` files are found. A missing tool keeps its bare name, whose
 /// spawn failure then reports `NotAvailable`.
 fn tool_command(name: &str) -> Command {
     Command::new(crate::workflow::resolve_command(name).unwrap_or_else(|| name.into()))
 }
 
-/// Runs `prettier` directly, falling back to `npx --yes prettier` if the
-/// bare command isn't on PATH (mirrors how Prettier is probed elsewhere in
-/// LightLine, e.g. the Extensions panel's detect-only toggle).
+/// Runs the project's own Prettier (`node_modules/.bin`) if it has one,
+/// otherwise the one on PATH. Never `npx`: even `npx --no` asks the npm
+/// registry first, which took 14 s for a missing package, and `npx --yes`
+/// downloads Prettier without asking.
 pub struct PrettierFormatter;
+
+/// The Prettier `file` should be formatted with: the nearest project's
+/// `node_modules/.bin` copy, else the one on PATH. None when neither exists.
+pub fn prettier_for(file: &Path) -> Option<std::path::PathBuf> {
+    let launcher = if cfg!(windows) {
+        "prettier.cmd"
+    } else {
+        "prettier"
+    };
+    file.ancestors()
+        .skip(1)
+        .map(|folder| folder.join("node_modules").join(".bin").join(launcher))
+        .find(|candidate| candidate.is_file())
+        .or_else(|| crate::workflow::resolve_command("prettier"))
+}
 
 impl Formatter for PrettierFormatter {
     fn name(&self) -> &'static str {
@@ -187,22 +212,12 @@ impl Formatter for PrettierFormatter {
     }
 
     fn command(&self, path: &Path) -> Command {
-        let mut command = tool_command("prettier");
+        let mut command = match prettier_for(path) {
+            Some(prettier) => Command::new(prettier),
+            None => tool_command("prettier"),
+        };
         command.arg("--stdin-filepath").arg(path);
         command
-    }
-
-    fn format(&self, source: &str, path: &Path) -> Result<String, FormatError> {
-        match run_formatter(self.command(path), source) {
-            Err(FormatError::NotAvailable) => {
-                let mut fallback = tool_command("npx");
-                fallback
-                    .args(["--yes", "prettier", "--stdin-filepath"])
-                    .arg(path);
-                run_formatter(fallback, source)
-            }
-            other => other,
-        }
     }
 }
 
@@ -936,8 +951,8 @@ mod tests {
         assert!(matches!(result, Err(FormatError::NotAvailable)));
     }
 
-    // Live test: only runs if `prettier` (or `npx`) is actually on this
-    // machine's PATH, same spirit as the LSP/registry live tests elsewhere.
+    // Live test: only runs if `prettier` is actually on this machine's PATH,
+    // same spirit as the LSP/registry live tests elsewhere.
     #[test]
     fn real_prettier_formats_messy_json_if_installed() {
         let prettier = PrettierFormatter;
@@ -949,16 +964,29 @@ mod tests {
                 );
             }
             Err(FormatError::NotAvailable) => {
-                eprintln!("skipped: prettier/npx not found on PATH");
-            }
-            // Without prettier installed, `npx --yes prettier` downloads it
-            // first, which on a fresh machine (GitHub's runners) takes longer
-            // than the timeout. The timeout itself is tested below.
-            Err(FormatError::Timeout) => {
-                eprintln!("skipped: prettier didn't finish in time (npx may be downloading it)");
+                eprintln!("skipped: prettier not found on PATH");
             }
             Err(other) => panic!("unexpected formatting error: {other}"),
         }
+    }
+
+    #[test]
+    fn a_projects_own_prettier_comes_first() {
+        let root = std::env::temp_dir().join(format!("lightline-prettier-{}", std::process::id()));
+        let launcher = if cfg!(windows) {
+            "prettier.cmd"
+        } else {
+            "prettier"
+        };
+        let bin = root.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(bin.join(launcher), "").unwrap();
+        assert_eq!(
+            prettier_for(&root.join("src").join("app.ts")),
+            Some(bin.join(launcher))
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

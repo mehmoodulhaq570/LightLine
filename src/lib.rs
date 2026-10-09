@@ -8,6 +8,7 @@ pub mod extensions;
 pub mod formatter;
 pub mod icon_theme;
 pub mod image_cache;
+pub mod jobs;
 pub mod lsp;
 pub mod markdown;
 pub mod markdown_syntax;

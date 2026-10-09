@@ -622,6 +622,7 @@ pub fn run_tests_stream(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start cargo: {error}"))?;
+    let tree = crate::jobs::ProcessTree::new(&child);
     pid.store(child.id(), Ordering::Relaxed);
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -637,7 +638,7 @@ pub fn run_tests_stream(
             let _ = err_tx.send(format!("{line}\n"));
         }
     });
-    let status = wait_for_child(&mut child, "cargo", cancel)?;
+    let status = wait_for_child(&mut child, &tree, "cargo", cancel)?;
     let _ = out_reader.join();
     let _ = err_reader.join();
     pid.store(0, Ordering::Relaxed);
@@ -677,6 +678,7 @@ pub fn run_python_file_stream(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start Python: {error}"))?;
+    let tree = crate::jobs::ProcessTree::new(&child);
     pid.store(child.id(), Ordering::Relaxed);
     let mut stdin = child.stdin.take().unwrap();
     let stdin_writer = std::thread::spawn(move || {
@@ -690,7 +692,7 @@ pub fn run_python_file_stream(
     let stderr = child.stderr.take().unwrap();
     let out_reader = stream_reader(stdout, output.clone());
     let err_reader = stream_reader(stderr, output);
-    let status = wait_for_child(&mut child, "Python", cancel)?;
+    let status = wait_for_child(&mut child, &tree, "Python", cancel)?;
     let _ = out_reader.join();
     let _ = err_reader.join();
     drop(stdin_writer);
@@ -725,18 +727,14 @@ fn stream_reader(
 
 fn wait_for_child(
     child: &mut std::process::Child,
+    tree: &crate::jobs::ProcessTree,
     name: &str,
     cancel: &AtomicBool,
 ) -> Result<std::process::ExitStatus, String> {
     loop {
         if cancel.load(Ordering::Relaxed) {
-            #[cfg(windows)]
-            let _ = background_command("taskkill")
-                .args(["/T", "/F", "/PID", &child.id().to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-            let _ = child.kill();
+            // Everything the run started, not just the program itself.
+            tree.kill();
             return child
                 .wait()
                 .map_err(|error| format!("Could not stop {name}: {error}"));

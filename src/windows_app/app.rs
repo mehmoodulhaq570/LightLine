@@ -72,10 +72,16 @@ pub(super) enum WorkerMessage {
     ZedExtensionInstalled(String, Result<ExtensionInstallKind, String>),
     DebugBuild(Result<PathBuf, String>),
     CDiagnostics(PathBuf, Vec<LspDiagnostic>),
-    // path, the formatter's display name, the document's change_serial() at
-    // request time (so a stale result from a buffer the user kept editing is
-    // discarded instead of clobbering newer text), and the outcome.
-    Formatted(PathBuf, &'static str, u64, Result<String, String>),
+    // `serial` is the document's change_serial() at request time, so a stale
+    // result from a buffer the user kept editing is discarded instead of
+    // clobbering newer text. `then_save` marks format-on-save.
+    Formatted {
+        path: PathBuf,
+        formatter: &'static str,
+        serial: u64,
+        result: Result<String, String>,
+        then_save: bool,
+    },
     GhostSuggestion {
         tab: usize,
         pos: Pos,
@@ -1616,37 +1622,34 @@ impl App {
                 self.refresh(hwnd);
                 return;
             }
-            // This used to run `npm install -g prettier`, mutating the
-            // user's global npm state from a toggle in the editor, and would
-            // still mark the extension "installed" via an npx fallback even
-            // when that global install failed — an install state that wasn't
-            // true and that LightLine didn't actually own. Detect instead:
-            // format_with_prettier already tries `prettier` directly and
-            // falls back to `npx --yes prettier`, so this only needs to
-            // confirm one of those paths is actually usable before turning
-            // the feature on.
+            // Detect, don't install: LightLine doesn't own a Prettier install
+            // to manage. The same lookup as formatting (the project's
+            // node_modules, then PATH) decides whether it can be turned on.
             self.extensions[idx].installing = true;
             self.status = "Checking for Prettier...".into();
             let tx = self.worker_tx.clone();
+            let near = self
+                .doc()
+                .path
+                .clone()
+                .or_else(|| self.workspace_root.as_ref().map(|root| root.join("_")));
             std::thread::spawn(move || {
                 #[cfg(windows)]
                 use std::os::windows::process::CommandExt;
-                let probe = |program: &str, args: &[&str]| {
-                    // By full path: npm installs prettier and npx as .cmd files.
-                    let Some(program) = workflow::resolve_command(program) else {
-                        return false;
-                    };
-                    let mut cmd = std::process::Command::new(program);
-                    cmd.args(args)
+                let prettier = near
+                    .as_deref()
+                    .and_then(lightline::formatter::prettier_for)
+                    .or_else(|| workflow::resolve_command("prettier"));
+                let found = prettier.is_some_and(|prettier| {
+                    let mut cmd = std::process::Command::new(prettier);
+                    cmd.arg("--version")
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null());
                     #[cfg(windows)]
                     cmd.creation_flags(0x08000000);
-                    cmd.status().map(|status| status.success()).unwrap_or(false)
-                };
-                let found = probe("prettier", &["--version"])
-                    || probe("npx", &["--yes", "prettier", "--version"]);
+                    cmd.status().is_ok_and(|status| status.success())
+                });
                 tx.send(WorkerMessage::ExtensionInstalled("prettier".into(), found));
             });
             self.refresh(hwnd);
@@ -3322,6 +3325,11 @@ impl App {
     }
 
     pub(super) fn save(&mut self, hwnd: HWND, save_as: bool) -> bool {
+        self.save_with(hwnd, save_as, true)
+    }
+
+    // `format` is false for the save that follows format-on-save.
+    pub(super) fn save_with(&mut self, hwnd: HWND, save_as: bool, format: bool) -> bool {
         // No file is open; Ctrl+S has nothing to write. A tab whose file
         // hasn't been read has only an empty stand-in, which must never be
         // written over the file (it's read whenever the tab is shown).
@@ -3360,7 +3368,7 @@ impl App {
             self.error(hwnd, &"That file is already open in another tab");
             return false;
         }
-        self.apply_format_on_save(&path);
+        let format_after = format && self.format_before_save(&path);
         match self.doc_mut().save(&path) {
             Ok(()) => {
                 self.lsp_after_save(hwnd, old_path.as_deref());
@@ -3392,6 +3400,9 @@ impl App {
                 // A save is the moment a change appears or disappears, so the
                 // panel and the branch chip ask Git again rather than guessing.
                 self.refresh_git();
+                if format_after {
+                    self.format_with_external_formatter(hwnd, true);
+                }
                 self.refresh(hwnd);
                 true
             }
