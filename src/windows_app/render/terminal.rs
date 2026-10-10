@@ -41,16 +41,33 @@ impl App {
         let layout = self.terminal_header_layout(left, right, top);
         let header_bottom = layout.header_bottom;
 
+        let (errors, warnings) = self.problem_counts();
         Self::label(
             hdc,
-            "PROBLEMS  0",
+            &format!("PROBLEMS  {}", errors + warnings),
             layout.problems.left,
             top + self.scale(9),
-            self.theme.muted,
+            if self.problems_shown {
+                self.theme.text
+            } else {
+                self.theme.muted
+            },
             layout.problems,
         );
+        if self.problems_shown {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: layout.problems.left,
+                    top: header_bottom - self.scale(2),
+                    right: layout.problems.right - self.scale(14),
+                    bottom: header_bottom,
+                },
+                self.theme.violet,
+            );
+        }
 
-        let output_active = self.terminal_tab == TerminalTab::Output;
+        let output_active = self.terminal_tab == TerminalTab::Output && !self.problems_shown;
         Self::label(
             hdc,
             "OUTPUT",
@@ -90,8 +107,9 @@ impl App {
             } else {
                 format!("{shell_tag} {title}")
             };
-            let active =
-                self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
+            let active = self.terminal_tab == TerminalTab::Terminal
+                && index == self.terminal_active
+                && !self.problems_shown;
             let clip = RECT {
                 left: rect.left,
                 top: rect.top,
@@ -170,6 +188,21 @@ impl App {
             layout.kill,
         );
 
+        if self.problems_shown {
+            Self::label(
+                hdc,
+                "\u{d7}",
+                layout.hide.left + self.scale(6),
+                top + self.scale(6),
+                self.theme.muted,
+                layout.hide,
+            );
+            self.paint_problems(hdc, self.hwnd);
+            if self.terminal_profile_menu_open {
+                self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
+            }
+            return;
+        }
         let active_snapshot: Option<Arc<Snapshot>> = match self.terminal_tab {
             TerminalTab::Output => self.run_snapshot.clone(),
             TerminalTab::Terminal => self

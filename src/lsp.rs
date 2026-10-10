@@ -92,6 +92,22 @@ pub struct Symbol {
     pub position: Position,
 }
 
+/// Text the server shows inside a line without it being in the file, such
+/// as a variable's type (textDocument/inlayHint).
+#[derive(Clone, Debug, PartialEq)]
+pub struct InlayHint {
+    pub position: Position,
+    /// The text, with its padding spaces included.
+    pub label: String,
+}
+
+/// A symbol found in the whole project (workspace/symbol).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkspaceSymbol {
+    pub symbol: Symbol,
+    pub uri: String,
+}
+
 /// The signature of the call the caret is in (textDocument/signatureHelp).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SignatureHelp {
@@ -222,6 +238,18 @@ pub enum Command {
         version: i32,
         position: Position,
     },
+    /// Inlay hints for `range` of the file.
+    InlayHints {
+        id: u64,
+        uri: String,
+        version: i32,
+        range: Range,
+    },
+    /// Symbols matching `query` anywhere in the project.
+    WorkspaceSymbols {
+        id: u64,
+        query: String,
+    },
     /// The file's functions, types and so on, for Go to Symbol.
     DocumentSymbols {
         id: u64,
@@ -303,6 +331,24 @@ pub enum Event {
         version: i32,
         result: Result<Vec<Symbol>, String>,
     },
+    WorkspaceSymbols {
+        language: Language,
+        id: u64,
+        result: Result<Vec<WorkspaceSymbol>, String>,
+    },
+    InlayHints {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        /// None when the server answered with an error.
+        hints: Option<Vec<InlayHint>>,
+    },
+    /// The server's hints changed (rust-analyzer says so once it has
+    /// loaded the project): ask again for the files that are open.
+    InlayHintsStale {
+        language: Language,
+    },
     /// None when the caret isn't in a call.
     SignatureHelp {
         language: Language,
@@ -381,6 +427,8 @@ struct Pending {
     code_actions: HashMap<u64, PendingHover>,
     symbols: HashMap<u64, PendingHover>,
     signatures: HashMap<u64, PendingHover>,
+    workspace_symbols: std::collections::HashSet<u64>,
+    inlay_hints: HashMap<u64, PendingHover>,
     // The commands the server runs (executeCommandProvider), and the next
     // id for running one; nothing waits for their answers.
     server_commands: Vec<String>,
@@ -510,7 +558,11 @@ pub fn server_config(language: Language, python_interpreter: Option<&Path>) -> S
             display_name: "rust-analyzer",
             command: "rust-analyzer".into(),
             args: Vec::new(),
-            settings: Value::Null,
+            // Go to Symbol in Workspace finds functions and the rest too, not
+            // only types (its default).
+            settings: json!({"rust-analyzer": {"workspace": {"symbol": {"search": {
+                "kind": "all_symbols"
+            }}}}}),
         },
         Language::Python => ServerConfig {
             language,
@@ -982,7 +1034,8 @@ fn run_server(
                 "workspaceFolders":true,
                 "workspaceEdit": {"documentChanges":true},
                 "applyEdit":true,
-                "executeCommand": {}
+                "executeCommand": {},
+                "inlayHint": {"refreshSupport":true}
             },
             "textDocument": {
                 "synchronization": {"didSave":true},
@@ -991,6 +1044,7 @@ fn run_server(
                 "formatting": {},
                 "rename": {"prepareSupport":false},
                 "documentSymbol": {"hierarchicalDocumentSymbolSupport":true},
+                "inlayHint": {},
                 "signatureHelp": {
                     "signatureInformation": {
                         "parameterInformation": {"labelOffsetSupport":true},
@@ -1020,6 +1074,10 @@ fn run_server(
     });
     if !config.settings.is_null() {
         params["initializationOptions"] = json!({"settings": config.settings.clone()});
+    }
+    // rust-analyzer takes its own section as the options themselves.
+    if config.language == Language::Rust {
+        params["initializationOptions"] = config.settings["rust-analyzer"].clone();
     }
     #[cfg(windows)]
     if config.language == Language::C {
@@ -1136,6 +1194,16 @@ fn run_server(
                             );
                             answer
                         }
+                        "workspace/inlayHint/refresh" => {
+                            emit(
+                                Event::InlayHintsStale {
+                                    language: config.language,
+                                },
+                                &events,
+                                &wake,
+                            );
+                            Value::Null
+                        }
                         _ => Value::Null,
                     };
                     if write_packet(
@@ -1234,6 +1302,28 @@ fn run_server(
                             uri: request.uri,
                             version: request.version,
                             items,
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.inlay_hints.remove(&id) {
+                    emit(
+                        Event::InlayHints {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            hints: parse_inlay_hints(&message),
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if pending.workspace_symbols.remove(&id) {
+                    emit(
+                        Event::WorkspaceSymbols {
+                            language: config.language,
+                            id,
+                            result: parse_workspace_symbols(&message),
                         },
                         &events,
                         &wake,
@@ -1533,6 +1623,34 @@ fn send_command(
                 },
             );
             request
+        }
+        Command::InlayHints {
+            id,
+            uri,
+            version,
+            range,
+        } => {
+            let at =
+                |position: Position| json!({"line":position.line,"character":position.character});
+            let request = json!({"jsonrpc":"2.0","id":id,"method":"textDocument/inlayHint",
+            "params":{
+                "textDocument":{"uri":uri},
+                "range":{"start":at(range.start),"end":at(range.end)}
+            }});
+            pending.inlay_hints.insert(
+                id,
+                PendingHover {
+                    uri,
+                    version,
+                    position: range.start,
+                    retries: 0,
+                },
+            );
+            request
+        }
+        Command::WorkspaceSymbols { id, query } => {
+            pending.workspace_symbols.insert(id);
+            json!({"jsonrpc":"2.0","id":id,"method":"workspace/symbol","params":{"query":query}})
         }
         Command::DocumentSymbols { id, uri, version } => {
             let request = json!({"jsonrpc":"2.0","id":id,"method":"textDocument/documentSymbol",
@@ -1844,6 +1962,94 @@ fn parse_workspace_edit(result: &Value) -> Result<Vec<FileEdit>, String> {
     }
     files.retain(|file| !file.edits.is_empty());
     Ok(files)
+}
+
+// textDocument/inlayHint answers with hints whose label is a string or a list
+// of parts; padding asks for a space on that side. Null gives none; an error
+// (rust-analyzer's "content modified" while it loads) gives None, so the
+// hints already shown stay.
+fn parse_inlay_hints(message: &Value) -> Option<Vec<InlayHint>> {
+    if message.get("error").is_some() {
+        return None;
+    }
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Some(Vec::new());
+    };
+    let mut hints: Vec<InlayHint> = items
+        .iter()
+        .filter_map(|item| {
+            let position = parse_position(item.get("position")?)?;
+            let label = match item.get("label")? {
+                Value::String(text) => text.clone(),
+                Value::Array(parts) => parts
+                    .iter()
+                    .filter_map(|part| part.get("value").and_then(Value::as_str))
+                    .collect(),
+                _ => return None,
+            };
+            let label = label.replace(['\n', '\r'], " ");
+            if label.trim().is_empty() {
+                return None;
+            }
+            let pad = |side: &str| item.get(side).and_then(Value::as_bool).unwrap_or(false);
+            let label = format!(
+                "{}{label}{}",
+                if pad("paddingLeft") { " " } else { "" },
+                if pad("paddingRight") { " " } else { "" }
+            );
+            Some(InlayHint { position, label })
+        })
+        .take(20_000)
+        .collect();
+    hints.sort_by_key(|hint| (hint.position.line, hint.position.character));
+    Some(hints)
+}
+
+// workspace/symbol answers with SymbolInformation or WorkspaceSymbol items;
+// a WorkspaceSymbol's location may be just a file.
+fn parse_workspace_symbols(message: &Value) -> Result<Vec<WorkspaceSymbol>, String> {
+    if let Some(error) = message.get("error") {
+        let text = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the language server refused");
+        return Err(text.to_owned());
+    }
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .iter()
+        .filter_map(|item| {
+            let name = item.get("name")?.as_str()?.to_owned();
+            let uri = item.pointer("/location/uri")?.as_str()?.to_owned();
+            let position = item
+                .pointer("/location/range/start")
+                .and_then(parse_position)
+                .unwrap_or(Position {
+                    line: 0,
+                    character: 0,
+                });
+            Some(WorkspaceSymbol {
+                symbol: Symbol {
+                    name,
+                    kind: item
+                        .get("kind")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        .min(26) as u8,
+                    container: item
+                        .get("containerName")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    position,
+                },
+                uri,
+            })
+        })
+        .take(500)
+        .collect())
 }
 
 // A SignatureHelp result: the active signature, and where in its label the
@@ -2425,6 +2631,58 @@ mod tests {
                 .is_empty()
         );
         assert!(parse_code_actions(&json!({"error":{"message":"busy"}})).is_err());
+    }
+
+    #[test]
+    fn inlay_hints_parse_labels_padding_and_order() {
+        let at = |line, character| json!({"line":line,"character":character});
+        let message = json!({"result":[
+            {"position":at(3, 9),"label":": i32","kind":1},
+            {"position":at(1, 4),"label":[{"value":"left"},{"value":":"}],"kind":2,"paddingRight":true},
+            {"position":at(5, 0),"label":"  "},
+            {"position":at(6, 1),"label":"// fn main","paddingLeft":true}
+        ]});
+        let hints = parse_inlay_hints(&message).unwrap();
+        let found: Vec<(u32, &str)> = hints
+            .iter()
+            .map(|hint| (hint.position.line, hint.label.as_str()))
+            .collect();
+        assert_eq!(found, [(1, "left: "), (3, ": i32"), (6, " // fn main")]);
+        assert_eq!(parse_inlay_hints(&json!({"result":null})), Some(Vec::new()));
+        assert_eq!(
+            parse_inlay_hints(&json!({"error":{"code":-32801,"message":"content modified"}})),
+            None
+        );
+    }
+
+    #[test]
+    fn workspace_symbols_parse_with_and_without_ranges() {
+        let message = json!({"result":[
+            {"name":"Point","kind":23,"containerName":"geometry",
+             "location":{"uri":"file:///a.rs","range":{"start":{"line":4,"character":11},"end":{"line":4,"character":16}}}},
+            {"name":"helper","kind":12,"location":{"uri":"file:///b.py"}},
+            {"kind":12,"location":{"uri":"file:///no-name.rs"}}
+        ]});
+        let found = parse_workspace_symbols(&message).unwrap();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].symbol.container, "geometry");
+        assert_eq!(found[0].symbol.position.line, 4);
+        assert_eq!(found[1].uri, "file:///b.py");
+        assert_eq!(found[1].symbol.position.character, 0);
+        assert!(
+            parse_workspace_symbols(&json!({"result":null}))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn rust_analyzer_gets_its_settings_as_its_options() {
+        let config = server_config(Language::Rust, None);
+        assert_eq!(
+            config.settings["rust-analyzer"]["workspace"]["symbol"]["search"]["kind"],
+            "all_symbols"
+        );
     }
 
     #[test]

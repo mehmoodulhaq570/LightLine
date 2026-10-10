@@ -114,8 +114,10 @@ impl App {
                 tab.lsp_root = Some(root);
                 tab.lsp_version = version;
                 tab.lsp_serial = tab.document.change_serial();
+                tab.inlay_version = None;
             }
         }
+        self.request_inlay_hints();
     }
 
     // The language server the file in tab `index` was opened with.
@@ -245,6 +247,8 @@ impl App {
             },
         };
         let lines_added = change.new_end().line as i64 - change.end.line as i64;
+        let active = self.active;
+        super::inlay::shift_inlay_hints(&mut self.tabs[active].inlay_hints, &change);
         let sent = self.tab_lsp(self.active).is_some_and(|client| {
             client.send(LspCommand::Change {
                 uri,
@@ -266,6 +270,7 @@ impl App {
             tab.lsp_opened = false;
             tab.lsp_language = None;
         }
+        self.schedule_inlay_hints();
     }
 
     pub(super) fn close_lsp_tab(&mut self, index: usize) {
@@ -329,7 +334,10 @@ impl App {
         for event in events {
             repaint_all |= !matches!(
                 event,
-                LspEvent::Diagnostics { .. } | LspEvent::SignatureHelp { .. }
+                LspEvent::Diagnostics { .. }
+                    | LspEvent::SignatureHelp { .. }
+                    | LspEvent::InlayHints { .. }
+                    | LspEvent::InlayHintsStale { .. }
             );
             match event {
                 LspEvent::Ready { language } => {
@@ -361,6 +369,29 @@ impl App {
                         tab.diagnostics = items;
                         diagnostics_changed = true;
                     }
+                    // The server has looked at the file: its hints are ready.
+                    self.request_inlay_hints();
+                    continue;
+                }
+                LspEvent::InlayHints {
+                    id,
+                    uri,
+                    version,
+                    hints,
+                    ..
+                } => {
+                    // It redraws just the editor showing that file.
+                    self.finish_inlay_hints(hwnd, id, &uri, version, hints);
+                    continue;
+                }
+                LspEvent::InlayHintsStale { language } => {
+                    for tab in &mut self.tabs {
+                        if tab.lsp_language == Some(language) {
+                            tab.inlay_version = None;
+                        }
+                    }
+                    self.inlay_request = None;
+                    self.request_inlay_hints();
                     continue;
                 }
                 LspEvent::Hover {
@@ -402,6 +433,7 @@ impl App {
                     self.code_action_request = None;
                     self.code_actions = None;
                     self.symbols_request = None;
+                    self.inlay_request = None;
                     self.signature_request = None;
                     self.signature = None;
                     self.completion_request = None;
@@ -583,6 +615,9 @@ impl App {
                     version,
                     result,
                 } => self.finish_symbols(language, id, &uri, version, result),
+                LspEvent::WorkspaceSymbols { id, result, .. } => {
+                    self.finish_workspace_symbols(id, result)
+                }
                 LspEvent::SignatureHelp {
                     language,
                     id,
@@ -667,6 +702,10 @@ impl App {
                     });
                 }
             }
+        }
+        if diagnostics_changed {
+            self.problems_first = self.problems_first.min(self.problem_rows().len());
+            self.invalidate_problems(hwnd);
         }
         if repaint_all {
             unsafe { InvalidateRect(hwnd, null(), 0) };

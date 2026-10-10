@@ -1,9 +1,24 @@
 // Go to Symbol: `@` in Quick Open (Ctrl+P) lists the active file's
 // functions, types, fields and so on; Enter jumps to one. The language
 // server is asked when `@` is typed, once per version of the file.
+//
+// `#` (or Ctrl+T) searches the whole project instead: every running
+// language server is asked for what matches the text typed after it.
 
 use super::*;
-use lightline::lsp::{Command as LspCommand, Symbol};
+use lightline::lsp::{Command as LspCommand, Symbol, WorkspaceSymbol};
+
+/// The project-wide search behind `#`.
+#[derive(Default)]
+pub(super) struct WorkspaceSearch {
+    // The text it's for, and the request's id.
+    query: String,
+    id: u64,
+    // Servers that haven't answered yet.
+    waiting: usize,
+    found: Vec<WorkspaceSymbol>,
+    error: Option<String>,
+}
 
 pub(super) struct FileSymbols {
     // The document's `id` and LSP version the list is for.
@@ -159,6 +174,131 @@ impl App {
         let byte = lsp::utf16_to_byte(doc.line(line), position.character);
         self.move_cursor(Pos { line, byte }, false);
         self.keep_cursor_visible(hwnd);
+    }
+}
+
+impl App {
+    /// Ctrl+T: Quick Open on the project-wide search.
+    pub(super) fn show_workspace_symbols(&mut self, hwnd: HWND) {
+        self.show_quick_open(hwnd);
+        self.quick_query = "#".into();
+        self.ensure_workspace_symbols();
+    }
+
+    /// Asks every running language server for the symbols matching what's
+    /// typed after `#`, when that changed.
+    pub(super) fn ensure_workspace_symbols(&mut self) {
+        if !self.quick_open || !self.quick_query.starts_with('#') {
+            return;
+        }
+        let query = self.quick_query[1..].trim().to_owned();
+        if query == self.workspace_search.query && self.workspace_search.id != 0 {
+            return;
+        }
+        self.request_id += 1;
+        let id = self.request_id;
+        let mut waiting = 0;
+        if !query.is_empty() {
+            for client in &self.lsp {
+                if client.send(LspCommand::WorkspaceSymbols {
+                    id,
+                    query: query.clone(),
+                }) {
+                    waiting += 1;
+                }
+            }
+        }
+        self.workspace_search = WorkspaceSearch {
+            query,
+            id,
+            waiting,
+            found: Vec::new(),
+            error: None,
+        };
+    }
+
+    pub(super) fn finish_workspace_symbols(
+        &mut self,
+        id: u64,
+        result: Result<Vec<WorkspaceSymbol>, String>,
+    ) {
+        let search = &mut self.workspace_search;
+        if id != search.id {
+            return;
+        }
+        search.waiting = search.waiting.saturating_sub(1);
+        match result {
+            Ok(found) => search.found.extend(found),
+            Err(reason) => search.error = Some(reason),
+        }
+        search.found.truncate(500);
+        self.quick_select(self.quick_selected);
+    }
+
+    pub(super) fn quick_workspace_symbols(&self) -> &[WorkspaceSymbol] {
+        &self.workspace_search.found
+    }
+
+    /// What the `#` list shows when it's empty.
+    pub(super) fn workspace_symbols_message(&self) -> String {
+        let search = &self.workspace_search;
+        if self.lsp.is_empty() {
+            "No language server is running yet: open one of the project's source files".into()
+        } else if search.query.is_empty() {
+            "Type a name to search the whole project".into()
+        } else if search.waiting > 0 {
+            "Searching...".into()
+        } else if let Some(reason) = &search.error {
+            format!("No symbols: {reason}")
+        } else {
+            "No matching symbols".into()
+        }
+    }
+
+    pub(super) fn jump_to_workspace_symbol(&mut self, hwnd: HWND, index: usize) {
+        let Some(found) = self.workspace_search.found.get(index).cloned() else {
+            return;
+        };
+        let Some(path) = lsp::uri_to_path(&found.uri) else {
+            return;
+        };
+        self.open(hwnd, Some(path));
+        let position = found.symbol.position;
+        let doc = self.doc();
+        let line = (position.line as usize).min(doc.line_count().saturating_sub(1));
+        let byte = lsp::utf16_to_byte(doc.line(line), position.character);
+        self.move_cursor(Pos { line, byte }, false);
+        self.keep_cursor_visible(hwnd);
+    }
+
+    /// "Point  ·  struct  —  src/geometry.rs:12".
+    pub(super) fn workspace_symbol_label(&self, found: &WorkspaceSymbol) -> String {
+        let place = lsp::uri_to_path(&found.uri)
+            .map(|path| {
+                let path = path.display().to_string();
+                // Within the workspace, relative to it. Windows paths differ
+                // in case (servers send the drive letter in lowercase).
+                let root = self
+                    .workspace_root
+                    .as_deref()
+                    .map(|root| display_path(root).trim_end_matches('\\').to_owned());
+                match root {
+                    Some(root)
+                        if path.len() > root.len()
+                            && path.is_char_boundary(root.len())
+                            && path[..root.len()].eq_ignore_ascii_case(&root) =>
+                    {
+                        path[root.len()..].trim_start_matches('\\').to_owned()
+                    }
+                    _ => path,
+                }
+            })
+            .unwrap_or_default();
+        format!(
+            "{}  —  {place}:{}",
+            symbol_label(&found.symbol),
+            found.symbol.position.line + 1
+        )
     }
 }
 

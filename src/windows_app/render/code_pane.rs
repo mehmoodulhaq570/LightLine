@@ -154,8 +154,10 @@ impl App {
                 },
                 self.theme.edge,
             );
+            let hint_bg = blend(self.theme.editor_bg, self.theme.text, 0.07);
             'lines: while screen_row < visible {
                 let source = doc.line(index);
+                let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
                 let rows = super::super::wrap::layout_line(source, columns, self.settings.tab_size);
                 // Lines and rows outside the area being redrawn are skipped:
                 // the backbuffer still shows them. Dragging a selection
@@ -222,9 +224,69 @@ impl App {
                     let row_end = rows.end(row, source.len());
                     let last_row = rows.is_last(row);
                     let text_left = code_left + rows.indent(row, self.char_width);
-                    // Where `byte` of this row is drawn.
+                    // This row's inlay hints: at its end only on the line's
+                    // last row, since the next row starts there.
+                    let row_hints: Vec<&InlayHintAt> = line_hints
+                        .iter()
+                        .filter(|hint| {
+                            hint.byte >= row_start
+                                && (hint.byte < row_end || (last_row && hint.byte == row_end))
+                        })
+                        .collect();
+                    let hint_widths: Vec<i32> = row_hints
+                        .iter()
+                        .map(|hint| self.text_width(hdc, &hint.label))
+                        .collect();
+                    let hints_before = |byte: usize, at: bool| -> i32 {
+                        row_hints
+                            .iter()
+                            .zip(&hint_widths)
+                            .filter(|(hint, _)| hint.byte < byte || (at && hint.byte == byte))
+                            .map(|(_, width)| width)
+                            .sum()
+                    };
+                    // Where `byte` of this row is drawn: before any hint at
+                    // it (the caret, the end of a range)...
                     let x_of = |byte: usize| {
-                        text_left + self.text_width(hdc, safe_slice_range(source, row_start, byte))
+                        text_left
+                            + self.text_width(hdc, safe_slice_range(source, row_start, byte))
+                            + hints_before(byte, false)
+                    };
+                    // ...and after it (text from `byte`).
+                    let x_after = |byte: usize| {
+                        text_left
+                            + self.text_width(hdc, safe_slice_range(source, row_start, byte))
+                            + hints_before(byte, true)
+                    };
+                    // Draws `from..to` of this row in `color`, in pieces
+                    // that leave room for the hints inside it.
+                    let draw_text = |from: usize, to: usize, color: u32, clip: &RECT| {
+                        SetTextColor(hdc, color);
+                        let mut piece_start = from;
+                        let cuts = row_hints
+                            .iter()
+                            .map(|hint| hint.byte)
+                            .filter(|&byte| byte > from && byte < to)
+                            .chain(std::iter::once(to));
+                        for cut in cuts {
+                            if cut <= piece_start {
+                                continue;
+                            }
+                            let text = safe_slice_range(source, piece_start, cut)
+                                .replace('\t', &" ".repeat(self.settings.tab_size));
+                            let chars: Vec<u16> = text.encode_utf16().collect();
+                            ExtTextOutW(
+                                hdc,
+                                x_after(piece_start),
+                                y,
+                                ETO_CLIPPED,
+                                clip,
+                                chars.as_ptr(),
+                                chars.len() as u32,
+                                null(),
+                            );
+                            piece_start = cut;
+                        }
                     };
                     let row_bottom = (y + self.line_height).min(bottom);
                     if paused_here || index == view.cursor.line {
@@ -392,7 +454,7 @@ impl App {
                         let to = to.min(row_end);
                         let past_end = continues && last_row;
                         if from < to || (past_end && from <= to) {
-                            let x1 = x_of(from);
+                            let x1 = x_after(from);
                             let x2 = x_of(to) + if past_end { self.scale(8) } else { 0 };
                             if x2 > x1 && x1 < right {
                                 FillRect(
@@ -408,28 +470,38 @@ impl App {
                             }
                         }
                     }
-                    let row_text = safe_slice_range(source, row_start, row_end)
-                        .replace('\t', &" ".repeat(self.settings.tab_size));
-                    let chars: Vec<u16> = row_text.encode_utf16().collect();
-                    SetTextColor(hdc, self.theme.text);
                     let clip = RECT {
                         left: code_left,
                         top: y,
                         right,
                         bottom,
                     };
-                    ExtTextOutW(
-                        hdc,
-                        text_left,
-                        y,
-                        ETO_CLIPPED,
-                        &clip,
-                        chars.as_ptr(),
-                        chars.len() as u32,
-                        null(),
-                    );
+                    draw_text(row_start, row_end, self.theme.text, &clip);
+                    // The hints themselves, muted on a faint background.
+                    let mut drawn_at: Option<(usize, i32)> = None;
+                    for (hint, width) in row_hints.iter().zip(&hint_widths) {
+                        // Hints at one byte go side by side.
+                        let x = match drawn_at {
+                            Some((byte, end)) if byte == hint.byte => end,
+                            _ => x_of(hint.byte),
+                        };
+                        if x < right {
+                            Self::fill(
+                                hdc,
+                                RECT {
+                                    left: x,
+                                    top: y + self.scale(2),
+                                    right: (x + width).min(right),
+                                    bottom: (y + self.line_height - self.scale(2)).min(bottom),
+                                },
+                                hint_bg,
+                            );
+                            Self::label(hdc, &hint.label, x, y, self.theme.muted, clip);
+                        }
+                        drawn_at = Some((hint.byte, x + width));
+                    }
                     if last_row && doc.is_folded_start(index).is_some() {
-                        let pill_x = x_of(row_end) + self.scale(6);
+                        let pill_x = x_after(row_end) + self.scale(6);
                         let pill_w = self.scale(22);
                         let pill_h = self.scale(13);
                         let pill_y = y + (self.line_height - pill_h) / 2;
@@ -469,20 +541,7 @@ impl App {
                         // settings.json "colors" override once, at startup,
                         // instead of re-checking a HashMap on every span of
                         // every repaint.
-                        SetTextColor(hdc, self.theme.syntax(span.color));
-                        let text = safe_slice_range(source, from, to)
-                            .replace('\t', &" ".repeat(self.settings.tab_size));
-                        let chars: Vec<u16> = text.encode_utf16().collect();
-                        ExtTextOutW(
-                            hdc,
-                            x_of(from),
-                            y,
-                            ETO_CLIPPED,
-                            &clip,
-                            chars.as_ptr(),
-                            chars.len() as u32,
-                            null(),
-                        );
+                        draw_text(from, to, self.theme.syntax(span.color), &clip);
                     }
                     for diagnostic in tab
                         .diagnostics
@@ -528,7 +587,7 @@ impl App {
                         if !on_row {
                             continue;
                         }
-                        let x1 = x_of(start_byte.max(row_start));
+                        let x1 = x_after(start_byte.max(row_start));
                         let x2 = x_of(end_byte.min(row_end));
                         if x1 < right {
                             Self::fill(
@@ -576,9 +635,11 @@ impl App {
                         return;
                     }
                     let text = doc.line(line_idx);
+                    let hints = self.hints_on_line(self.tab_for_pane(pane), line_idx);
                     let x = code_left
                         + indent
-                        + self.text_width(hdc, safe_slice_range(text, row_start, b));
+                        + self.text_width(hdc, safe_slice_range(text, row_start, b))
+                        + self.hint_shift(hdc, hints, row_start, b, true);
                     let rest = if b < text.len() && text.is_char_boundary(b) {
                         &text[b..]
                     } else {
@@ -636,9 +697,11 @@ impl App {
                         continue;
                     };
                     let line = doc.line(cursor.line);
+                    let hints = self.hints_on_line(self.tab_for_pane(pane), cursor.line);
                     let x = code_left
                         + indent
-                        + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte));
+                        + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte))
+                        + self.hint_shift(hdc, hints, row_start, cursor.byte, false);
                     let y = self.editor_top() + row as i32 * self.line_height;
                     if y < bottom && x < right {
                         FillRect(
@@ -673,7 +736,14 @@ impl App {
                     Some((row, row_start, indent)) => (
                         code_left
                             + indent
-                            + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte)),
+                            + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte))
+                            + self.hint_shift(
+                                hdc,
+                                self.hints_on_line(self.tab_for_pane(pane), cursor.line),
+                                row_start,
+                                cursor.byte,
+                                false,
+                            ),
                         self.editor_top() + row as i32 * self.line_height,
                     ),
                     None => (right, bottom),

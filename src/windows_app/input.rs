@@ -255,6 +255,7 @@ impl App {
                     self.quick_query.pop();
                     self.quick_selected = 0;
                     self.quick_first = 0;
+                    self.ensure_workspace_symbols();
                 }
                 x if x == VK_RETURN as u32 => {
                     self.activate_quick_item(hwnd, self.quick_selected);
@@ -579,6 +580,20 @@ impl App {
                 }
                 x if x == VK_SPACE as u32 && shift => {
                     self.request_signature(hwnd);
+                    return true;
+                }
+                0x54 if !shift => {
+                    self.show_workspace_symbols(hwnd);
+                    return true;
+                }
+                // Ctrl+Shift+M, as in VS Code.
+                0x4D if shift => {
+                    if self.problems_shown && self.terminal_visible {
+                        self.problems_shown = false;
+                        self.hide_terminal(hwnd);
+                    } else {
+                        self.show_problems(hwnd);
+                    }
                     return true;
                 }
                 x if x == VK_SPACE as u32 => {
@@ -1096,6 +1111,7 @@ impl App {
                     self.quick_selected = 0;
                     self.quick_first = 0;
                     self.ensure_symbols(hwnd);
+                    self.ensure_workspace_symbols();
                 } else if self.search_input {
                     self.project_query.push(ch);
                     self.search_results.clear();
@@ -1283,13 +1299,31 @@ impl App {
         unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
-            let byte = self.nearest_byte(
-                hdc,
-                text,
-                (layout.start(row), layout.end(row, text.len())),
-                layout.is_last(row),
-                (x - row_left).max(0),
-            );
+            let (row_start, row_end) = (layout.start(row), layout.end(row, text.len()));
+            // Inlay hints before the click aren't text: their widths come
+            // off, and a click on one is at its place.
+            let mut x = (x - row_left).max(0);
+            let mut on_hint = None;
+            let mut shift = 0;
+            for hint in self.hints_on_line(self.tab_for_pane(pane), line) {
+                if hint.byte < row_start || hint.byte > row_end {
+                    continue;
+                }
+                let left = self.text_width(hdc, &text[row_start..hint.byte]) + shift;
+                if x < left {
+                    break;
+                }
+                let width = self.text_width(hdc, &hint.label);
+                if x < left + width {
+                    on_hint = Some(hint.byte);
+                    break;
+                }
+                shift += width;
+            }
+            x -= shift;
+            let byte = on_hint.unwrap_or_else(|| {
+                self.nearest_byte(hdc, text, (row_start, row_end), layout.is_last(row), x)
+            });
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             Pos { line, byte }
@@ -1928,19 +1962,7 @@ impl App {
                     // The far-right close hides the panel but keeps every
                     // shell session running, exactly like dismissing a dock.
                     TerminalHeaderHit::Hide => self.close_terminal(hwnd),
-                    TerminalHeaderHit::Problems => {
-                        let (errors, warnings) = self.problem_counts();
-                        self.status = if errors + warnings == 0 {
-                            "No problems in open files".into()
-                        } else {
-                            format!(
-                                "{errors} error{}, {warnings} warning{} in open files",
-                                if errors == 1 { "" } else { "s" },
-                                if warnings == 1 { "" } else { "s" }
-                            )
-                        };
-                        self.refresh(hwnd);
-                    }
+                    TerminalHeaderHit::Problems => self.show_problems(hwnd),
                     TerminalHeaderHit::OutputTab => {
                         self.switch_terminal_tab(hwnd, TerminalTab::Output);
                     }
@@ -1953,6 +1975,9 @@ impl App {
                         self.start_terminal_selection(hwnd, x, y);
                     }
                 }
+                return;
+            }
+            if self.problems_click(hwnd, x, y) {
                 return;
             }
             self.focus_terminal(hwnd);

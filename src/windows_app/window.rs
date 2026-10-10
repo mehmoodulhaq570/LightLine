@@ -196,6 +196,11 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.advance_syntax(hwnd);
             0
         }
+        WM_TIMER if wparam == INLAY_TIMER => {
+            unsafe { KillTimer(hwnd, INLAY_TIMER) };
+            app.request_inlay_hints();
+            0
+        }
         WM_TIMER if wparam == 3 => {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             0
@@ -543,6 +548,9 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             }
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
+            if app.scroll_problems(hwnd, point.x, point.y, if delta > 0 { -3 } else { 3 }) {
+                return 0;
+            }
             if app.terminal_visible
                 && point.x >= app.editor_left()
                 && point.y >= app.terminal_top(hwnd)

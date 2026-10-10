@@ -300,6 +300,10 @@ pub(super) struct Tab {
     pub(super) views: [EditorView; 2],
     pub(super) syntax: Option<Syntax>,
     pub(super) diagnostics: Vec<LspDiagnostic>,
+    // Inlay hints shown in the text (inlay.rs), by position, and the LSP
+    // version they were asked for.
+    pub(super) inlay_hints: Vec<InlayHintAt>,
+    pub(super) inlay_version: Option<i32>,
     pub(super) lsp_version: i32,
     pub(super) lsp_serial: u64,
     pub(super) lsp_opened: bool,
@@ -415,6 +419,8 @@ impl Tab {
             views: [EditorView::default(), EditorView::default()],
             syntax,
             diagnostics: Vec::new(),
+            inlay_hints: Vec::new(),
+            inlay_version: None,
             lsp_version: 1,
             lsp_serial: 0,
             lsp_opened: false,
@@ -505,6 +511,8 @@ impl Tab {
             views: [EditorView::default(), EditorView::default()],
             syntax: None,
             diagnostics: Vec::new(),
+            inlay_hints: Vec::new(),
+            inlay_version: None,
             lsp_version: 1,
             lsp_serial: 0,
             lsp_opened: false,
@@ -890,6 +898,10 @@ pub(super) struct App {
     // Go to Symbol (`@` in Quick Open): the active file's list, and the request.
     pub(super) file_symbols: Option<FileSymbols>,
     pub(super) symbols_request: Option<SymbolsRequest>,
+    // `#` in Quick Open: symbols in the whole project.
+    pub(super) workspace_search: WorkspaceSearch,
+    // The inlay hints asked for (inlay.rs), until they come.
+    pub(super) inlay_request: Option<InlayRequest>,
     // Parameter hints: the card shown, and the latest request.
     pub(super) signature: Option<SignatureCard>,
     pub(super) signature_request: Option<SignatureRequest>,
@@ -898,6 +910,10 @@ pub(super) struct App {
     pub(super) multi_editing: bool,
     // The button under the mouse (see hot.rs).
     pub(super) hot: Option<Hot>,
+    // The bottom panel shows the Problems list (problems.rs) instead of the
+    // Output or terminal tab, scrolled to `problems_first`.
+    pub(super) problems_shown: bool,
+    pub(super) problems_first: usize,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1423,10 +1439,14 @@ impl App {
             code_actions: None,
             file_symbols: None,
             symbols_request: None,
+            workspace_search: WorkspaceSearch::default(),
+            inlay_request: None,
             signature: None,
             signature_request: None,
             multi_editing: false,
             hot: None,
+            problems_shown: false,
+            problems_first: 0,
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;

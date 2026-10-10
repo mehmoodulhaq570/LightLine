@@ -591,6 +591,11 @@ impl App {
                 .into_iter()
                 .map(crate::windows_app::symbols::symbol_label)
                 .collect()
+        } else if self.quick_query.starts_with('#') {
+            self.quick_workspace_symbols()
+                .iter()
+                .map(|found| self.workspace_symbol_label(found))
+                .collect()
         } else {
             self.quick_matches()
                 .iter()
@@ -642,6 +647,9 @@ impl App {
                 if self.quick_query.starts_with('@') {
                     symbols_message = self.symbols_empty_message();
                     &symbols_message
+                } else if self.quick_query.starts_with('#') {
+                    symbols_message = self.workspace_symbols_message();
+                    &symbols_message
                 } else if self.quick_query.starts_with('>') {
                     "No matching commands"
                 } else if self.quick_loading {
@@ -663,8 +671,8 @@ impl App {
             );
         }
         let mut hints = Vec::new();
-        if !self.quick_query.starts_with(['>', '@']) {
-            hints.push("Type > for commands, @ for symbols in this file".to_string());
+        if !self.quick_query.starts_with(['>', '@', '#']) {
+            hints.push("> commands  ·  @ symbols in this file  ·  # in the project".to_string());
         }
         if items.len() > QUICK_ROWS {
             let last = (self.quick_first + QUICK_ROWS).min(items.len());

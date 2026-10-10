@@ -19,6 +19,8 @@ pub struct Settings {
     /// False once the user turns Prettier off in the Extensions panel; its
     /// file types are then left to the language server.
     pub prettier_enabled: bool,
+    /// Show the language server's inlay hints (types, parameter names).
+    pub inlay_hints: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
@@ -52,6 +54,7 @@ impl Default for Settings {
             auto_indent: true,
             format_on_save: false,
             prettier_enabled: true,
+            inlay_hints: true,
             bracket_matching: true,
             indent_guides: true,
             minimap: true,
@@ -167,6 +170,9 @@ impl Settings {
         if let Some(b) = value.get("prettierEnabled").and_then(|v| v.as_bool()) {
             settings.prettier_enabled = b;
         }
+        if let Some(b) = value.get("inlayHints").and_then(|v| v.as_bool()) {
+            settings.inlay_hints = b;
+        }
         if let Some(b) = value.get("bracketMatching").and_then(|v| v.as_bool()) {
             settings.bracket_matching = b;
         }
@@ -275,6 +281,10 @@ impl Settings {
             serde_json::Value::Bool(self.prettier_enabled),
         );
         obj.insert(
+            "inlayHints".into(),
+            serde_json::Value::Bool(self.inlay_hints),
+        );
+        obj.insert(
             "bracketMatching".into(),
             serde_json::Value::Bool(self.bracket_matching),
         );
@@ -324,6 +334,7 @@ const OWN_KEYS: &[&str] = &[
     "autoIndent",
     "formatOnSave",
     "prettierEnabled",
+    "inlayHints",
     "bracketMatching",
     "indentGuides",
     "minimap",
@@ -384,6 +395,16 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert!(loaded.format_on_save);
+    }
+
+    #[test]
+    fn inlay_hints_are_on_until_turned_off() {
+        assert!(Settings::default().inlay_hints);
+        let s = Settings {
+            inlay_hints: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().inlay_hints);
     }
 
     #[test]

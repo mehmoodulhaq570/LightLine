@@ -48,6 +48,8 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `F2` | Rename the symbol at the cursor everywhere it's used (see [Rename Symbol](#rename-symbol)) |
 | `Ctrl+.` | Quick fixes and refactorings at the cursor or selection (see [Quick Fixes](#quick-fixes-and-refactorings)) |
 | `Ctrl+P`, then `@` | Go to a function, type or other symbol in this file; type to filter, `Enter` jumps |
+| `Ctrl+T` (or `Ctrl+P`, then `#`) | Search the whole project's symbols by name; `Enter` opens the file at the symbol |
+| `Ctrl+Shift+M` | Show or hide the **Problems** panel: every error and warning in the open files; click one to jump to it (a click on the counts in the status bar opens it too) |
 | `Ctrl+Shift+Space` | Show the parameters of the call at the cursor (they also show as you type `(` and `,`) |
 | `Shift+Alt+O` | Organize imports (**Source Action...** in the Command Palette lists the other whole-file actions) |
 | `Alt+Click` | Add a cursor there, or remove one (see [Multiple cursors](#multiple-cursors)) |
@@ -146,6 +148,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "autoClosePairs": true,
   "autoIndent": true,
   "formatOnSave": false,
+  "inlayHints": true,
   "bracketMatching": true,
   "indentGuides": true,
   "markdownLoadRemoteImages": false,
@@ -171,6 +174,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `autoClosePairs` | Type closing brackets and quotes for you |
 | `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides |
 | `formatOnSave` | Format the file before each save |
+| `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `markdownLoadRemoteImages` | Load web images in Markdown previews without asking |
 | `colorTheme` | An installed color theme, such as `"Catppuccin Mocha"`; leave it out for LightLine's own. **Preferences: Color Theme** sets it for you |
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |

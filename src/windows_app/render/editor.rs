@@ -105,26 +105,27 @@ impl App {
             return;
         }
         let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-        let language_rect = unsafe {
+        let (health_left, health_right, language_rect) = unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.ui_font);
             let branch = self.git_head_label();
             let left_branch = format!("\u{2442}  {branch}");
             let (errors, warnings) = self.problem_counts();
             let health = format!("⊗ {errors}    ⚠ {warnings}");
-            let left_info_right = self.scale(16)
-                + self.text_width(hdc, &left_branch)
-                + self.scale(24)
-                + self.text_width(hdc, &health);
+            let health_left = self.scale(16) + self.text_width(hdc, &left_branch) + self.scale(24);
+            let left_info_right = health_left + self.text_width(hdc, &health);
             let ready_width = self.text_width(hdc, "\u{25cf}  Ready");
             let ready_x = rect.right - ready_width - self.scale(16);
             let (_, _, _, language_rect) =
                 self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
-            language_rect
+            (health_left, left_info_right, language_rect)
         };
-        if x >= language_rect.left && x < language_rect.right && y >= language_rect.top {
+        // The error and warning counts open the Problems list.
+        if x >= health_left - self.scale(6) && x < health_right + self.scale(6) {
+            self.show_problems(hwnd);
+        } else if x >= language_rect.left && x < language_rect.right && y >= language_rect.top {
             self.open_language_actions(hwnd);
         }
     }

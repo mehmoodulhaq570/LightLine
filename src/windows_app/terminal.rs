@@ -337,6 +337,7 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
+        self.problems_shown = false;
         if self
             .spawn_terminal_pane(hwnd, shell_kind, no_profile)
             .is_some()
@@ -367,6 +368,7 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
+        self.problems_shown = false;
         self.terminal_active = self.terminal_active.min(self.terminals.len() - 1);
         self.focus_active_shell(hwnd);
         self.update_title(hwnd);
@@ -434,6 +436,7 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Terminal;
+        self.problems_shown = false;
         self.terminal_active = index;
         self.focus_active_shell(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -474,6 +477,7 @@ impl App {
             // Python's input()) can be answered; a finished run is read-only.
             TerminalTab::Output => {
                 self.terminal_tab = tab;
+                self.problems_shown = false;
                 self.terminal_focus = self.run_session.is_some();
                 if self.terminal_focus {
                     self.caret_on = true;
@@ -509,6 +513,7 @@ impl App {
         self.welcome = false;
         self.terminal_visible = true;
         self.terminal_tab = TerminalTab::Output;
+        self.problems_shown = false;
         if let Some(id) = self.run_session
             && self
                 .run_snapshot
@@ -603,13 +608,14 @@ impl App {
     ) -> TerminalHeaderLayout {
         let header_bottom = top + self.scale(TERMINAL_HEADER);
         let mut x = left + self.scale(16);
+        // Room for "PROBLEMS" and a count of up to three digits.
         let problems = RECT {
             left: x,
             top,
-            right: x + self.scale(92),
+            right: x + self.scale(112),
             bottom: header_bottom,
         };
-        x += self.scale(92);
+        x += self.scale(112);
         let output = RECT {
             left: x,
             top,

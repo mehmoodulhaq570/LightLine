@@ -84,6 +84,8 @@ impl App {
             ("Rename Symbol (F2)", 51),
             ("Quick Fix (Ctrl+.)", 52),
             ("Go to Symbol in File (@)", 53),
+            ("Go to Symbol in Workspace (Ctrl+T, #)", 56),
+            ("View: Problems (Ctrl+Shift+M)", 57),
             ("Source Action...", 54),
             ("Organize Imports (Shift+Alt+O)", 55),
             ("Close Workspace", 21),
@@ -115,6 +117,8 @@ impl App {
             self.quick_commands().len()
         } else if self.quick_query.starts_with('@') {
             self.quick_symbols().len()
+        } else if self.quick_query.starts_with('#') {
+            self.quick_workspace_symbols().len()
         } else {
             self.quick_matches().len()
         }
@@ -175,6 +179,8 @@ impl App {
                 Some(20) => self.find_references(hwnd),
                 Some(51) => self.start_rename(hwnd),
                 Some(52) => self.request_code_actions(hwnd),
+                Some(56) => self.show_workspace_symbols(hwnd),
+                Some(57) => self.show_problems(hwnd),
                 Some(54) => self.request_source_actions(hwnd),
                 Some(55) => self.organize_imports(hwnd),
                 Some(53) => {
@@ -251,6 +257,10 @@ impl App {
             self.quick_open = false;
             self.backbuffer = None;
             self.jump_to_symbol(hwnd, index);
+        } else if self.quick_query.starts_with('#') {
+            self.quick_open = false;
+            self.backbuffer = None;
+            self.jump_to_workspace_symbol(hwnd, index);
         } else {
             let path = self.quick_matches().get(index).cloned();
             self.quick_open = false;

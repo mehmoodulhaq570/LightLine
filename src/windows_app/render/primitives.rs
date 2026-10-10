@@ -209,7 +209,11 @@ impl App {
             let old = SelectObject(hdc, self.font);
             let line = self.doc().line(cursor.line);
             let prefix = safe_slice_range(line, row_start, cursor.byte);
-            let x = self.code_left(hwnd) + indent + self.text_width(hdc, prefix);
+            let hints = self.hints_on_line(self.tab_for_pane(self.focused_pane), cursor.line);
+            let x = self.code_left(hwnd)
+                + indent
+                + self.text_width(hdc, prefix)
+                + self.hint_shift(hdc, hints, row_start, cursor.byte, false);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             let y = self.editor_top() + row * self.line_height;
