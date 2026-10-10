@@ -47,10 +47,20 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `F12` / `Shift+F12` | Go to definition / find all references |
 | `F2` | Rename the symbol at the cursor everywhere it's used (see [Rename Symbol](#rename-symbol)) |
 | `Ctrl+.` | Quick fixes and refactorings at the cursor or selection (see [Quick Fixes](#quick-fixes-and-refactorings)) |
+| `Ctrl+P`, then `@` | Go to a function, type or other symbol in this file; type to filter, `Enter` jumps |
+| `Ctrl+Shift+Space` | Show the parameters of the call at the cursor (they also show as you type `(` and `,`) |
+| `Shift+Alt+O` | Organize imports (**Source Action...** in the Command Palette lists the other whole-file actions) |
+| `Alt+Click` | Add a cursor there, or remove one (see [Multiple cursors](#multiple-cursors)) |
+| `Ctrl+Alt+Up` / `Ctrl+Alt+Down` | Add a cursor on the line above / below |
+| `Ctrl+D` | Select the word at the cursor; again, add the next match of the selection |
 | `Shift+Alt+F` | Format the document |
 | `Alt+Z` | Toggle word wrap for this file (on by default for Markdown) |
 | `Ctrl+Shift+V` | Preview a Markdown file (`>Markdown: Open Preview to the Side` shows it beside the file) |
 | Gutter chevron | Fold or unfold a block (`⌄` / `›`) |
+
+#### Multiple cursors
+
+Add cursors with `Alt+Click`, `Ctrl+Alt+Up` / `Ctrl+Alt+Down` or `Ctrl+D`. Typing, `Enter`, `Tab`, `Backspace`, `Delete` (with `Ctrl` for whole words), the arrow keys, `Home` and `End` (with `Shift` to select) then act at every cursor, and one `Ctrl+Z` undoes an edit at all of them. `Ctrl+C` copies each cursor's selection on its own line; pasting as many lines as there are cursors puts one line at each, otherwise the whole text goes at every cursor. `Esc` or a click goes back to one cursor; so does any other edit, such as formatting or undo.
 
 ### Layout
 

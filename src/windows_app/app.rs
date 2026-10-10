@@ -143,6 +143,16 @@ pub(super) struct EditorView {
     pub(super) first_line: usize,
     // With word wrap, which of first_line's screen rows is at the top.
     pub(super) first_row: usize,
+    // Multiple cursors: the carets besides `cursor`, in no order. Empty
+    // almost always; see multi_cursor.rs.
+    pub(super) extra: Vec<Caret>,
+}
+
+/// A caret of several (multiple cursors), and where its selection began.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Caret {
+    pub(super) cursor: Pos,
+    pub(super) anchor: Option<Pos>,
 }
 
 pub(super) fn remap_position(pos: Pos, start: Pos, end: Pos, inserted_end: Pos) -> Pos {
@@ -877,6 +887,15 @@ pub(super) struct App {
     // Quick fixes (Ctrl+.): the request, then the list.
     pub(super) code_action_request: Option<CodeActionRequest>,
     pub(super) code_actions: Option<CodeActionMenu>,
+    // Go to Symbol (`@` in Quick Open): the active file's list, and the request.
+    pub(super) file_symbols: Option<FileSymbols>,
+    pub(super) symbols_request: Option<SymbolsRequest>,
+    // Parameter hints: the card shown, and the latest request.
+    pub(super) signature: Option<SignatureCard>,
+    pub(super) signature_request: Option<SignatureRequest>,
+    // True while an edit is made at every caret (multiple cursors); any
+    // other edit drops the extra carets, whose places it doesn't track.
+    pub(super) multi_editing: bool,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1400,6 +1419,11 @@ impl App {
             rename_target: None,
             code_action_request: None,
             code_actions: None,
+            file_symbols: None,
+            symbols_request: None,
+            signature: None,
+            signature_request: None,
+            multi_editing: false,
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;
@@ -2639,6 +2663,7 @@ impl App {
     }
 
     pub(super) fn move_cursor(&mut self, pos: Pos, extend: bool) {
+        self.drop_extra_carets();
         let cursor = self.view().cursor;
         if extend {
             self.view_mut().selection_anchor.get_or_insert(cursor);
@@ -2670,6 +2695,9 @@ impl App {
         if self.tab().read_only() || self.tab().is_placeholder() {
             return;
         }
+        if !self.multi_editing {
+            self.drop_extra_carets();
+        }
         self.ghost_text = None;
         self.ghost_cancel.store(true, Ordering::Relaxed);
 
@@ -2695,6 +2723,7 @@ impl App {
     /// (a rename's places in this file) one by one, so the highlighter and
     /// the language server follow each.
     pub(super) fn undo_or_redo(&mut self, redo: bool) {
+        self.drop_extra_carets();
         self.view_mut().selection_anchor = None;
         loop {
             let lines_before = self.doc().line_count();
@@ -3626,6 +3655,7 @@ impl App {
                     selection_anchor: view.selection_anchor.map(|anchor| doc.clamp(anchor)),
                     first_line: view.first_line.min(doc.line_count().saturating_sub(1)),
                     first_row: 0,
+                    extra: Vec::new(),
                 });
                 loaded.views = views;
                 self.tabs[index] = loaded;

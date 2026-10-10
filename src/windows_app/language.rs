@@ -320,13 +320,17 @@ impl App {
         }
         // Diagnostics arrive after nearly every edit, and are often the same
         // as before: they redraw only when they changed, and only what shows
-        // them. Everything else is rarer and redraws the window.
+        // them. Parameter hints redraw just their card. Everything else is
+        // rarer and redraws the window.
         let mut repaint_all = false;
         let mut diagnostics_changed = false;
         // (tab, lines) whose problems appeared, went or changed.
         let mut diagnostic_lines: Vec<(usize, (usize, usize))> = Vec::new();
         for event in events {
-            repaint_all |= !matches!(event, LspEvent::Diagnostics { .. });
+            repaint_all |= !matches!(
+                event,
+                LspEvent::Diagnostics { .. } | LspEvent::SignatureHelp { .. }
+            );
             match event {
                 LspEvent::Ready { language } => {
                     if Tab::lsp_language(self.doc()) == Some(language) {
@@ -397,6 +401,9 @@ impl App {
                     self.rename_target = None;
                     self.code_action_request = None;
                     self.code_actions = None;
+                    self.symbols_request = None;
+                    self.signature_request = None;
+                    self.signature = None;
                     self.completion_request = None;
                     self.completion = None;
                     self.status = message;
@@ -569,6 +576,24 @@ impl App {
                     version,
                     result,
                 } => self.finish_code_actions(language, id, &uri, version, result),
+                LspEvent::DocumentSymbols {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    result,
+                } => self.finish_symbols(language, id, &uri, version, result),
+                LspEvent::SignatureHelp {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    help,
+                } => {
+                    self.finish_signature(hwnd, language, id, &uri, version, help);
+                    // It redraws just itself; typing goes on underneath.
+                    continue;
+                }
                 LspEvent::ApplyEdit { language, result } => {
                     self.apply_server_edit(language, result)
                 }

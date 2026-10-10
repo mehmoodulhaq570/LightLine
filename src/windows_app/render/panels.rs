@@ -608,6 +608,11 @@ impl App {
                 .iter()
                 .map(|(name, _)| format!(">  {name}"))
                 .collect()
+        } else if self.quick_query.starts_with('@') {
+            self.quick_symbols()
+                .into_iter()
+                .map(crate::windows_app::symbols::symbol_label)
+                .collect()
         } else {
             self.quick_matches()
                 .iter()
@@ -653,14 +658,20 @@ impl App {
             );
         }
         if items.is_empty() {
+            let symbols_message;
             Self::label(
                 hdc,
-                if self.quick_loading {
+                if self.quick_query.starts_with('@') {
+                    symbols_message = self.symbols_empty_message();
+                    &symbols_message
+                } else if self.quick_query.starts_with('>') {
+                    "No matching commands"
+                } else if self.quick_loading {
                     "Loading workspace files..."
                 } else if self.workspace_root.is_none() {
                     "Open a workspace first (Ctrl+Shift+O)"
                 } else {
-                    "No matching files or commands"
+                    "No matching files"
                 },
                 left + self.scale(18),
                 top + self.scale(80),
@@ -674,8 +685,8 @@ impl App {
             );
         }
         let mut hints = Vec::new();
-        if !self.quick_query.starts_with('>') {
-            hints.push("Type > for commands".to_string());
+        if !self.quick_query.starts_with(['>', '@']) {
+            hints.push("Type > for commands, @ for symbols in this file".to_string());
         }
         if items.len() > QUICK_ROWS {
             let last = (self.quick_first + QUICK_ROWS).min(items.len());

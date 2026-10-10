@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Multiple Cursors**: `Alt+Click` adds a cursor, `Ctrl+Alt+Up`/`Down` adds one on the line above or below, and `Ctrl+D` selects the word at the cursor, then each next match. Typing, `Enter`, `Backspace`, `Delete`, arrows, `Home`/`End`, cut, copy and paste then act at every cursor, and one `Ctrl+Z` undoes the edit at all of them. `Esc` goes back to one cursor.
+- **Go to Symbol**: Type `@` in Quick Open (`Ctrl+P`) to list the current file's functions, types, methods and fields from its language server; type to filter and press `Enter` to jump. Also **Go to Symbol in File** in the Command Palette.
+- **Parameter Hints**: Typing `(` or `,` in a call shows the function's signature above the cursor, with the parameter being typed highlighted; it follows along as you type and closes when you leave the call. `Ctrl+Shift+Space` shows it by hand, `Esc` hides it. Only the hint itself is redrawn, so typing stays as fast.
+- **Organize Imports and Source Actions**: `Shift+Alt+O` organizes imports through the language server; **Source Action...** in the Command Palette lists the other whole-file actions, such as removing unused imports.
 - **Quick Fixes and Refactorings**: Press `Ctrl+.` (or right-click → **Quick fix...**) for the language server's fixes and refactorings at the cursor or selection, such as adding a missing import or extracting an expression. Pick one from the list to apply it; `Ctrl+Z` undoes it. Actions that run on the server and send their changes back (TypeScript's refactorings, for example) work too. The server is asked only when you press `Ctrl+.`, so typing and moving the cursor cost nothing extra.
 - **Rename Symbol**: Press `F2` on a name (or right-click → **Rename symbol**) to rename it everywhere the language server finds it, across the project. Open files change in the editor as one undo step each and are saved unless they had unsaved changes; files that aren't open are changed on disk. Works with rust-analyzer, Pyright, clangd, typescript-language-server and gopls.
 - **Crash Safety Net**: If LightLine hits an internal error, it saves your unsaved work, says so, writes the details to `%APPDATA%\LightLine\crash.log`, and then closes. The next start offers the work back with **Restore**. Before, it vanished with no message and lost anything typed in the last few seconds.
@@ -28,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 
+- **Faster Startup**: The first time LightLine drew a symbol its interface font lacks (the split-editor icon, the branch mark, ✓), Windows spent about 14 ms finding a fallback font, in the middle of the first paint. That now happens on a background thread while the window is created. From LightLine's start to the first finished frame: Welcome screen 59 → 31 ms, a session with a 3,000-line file 78 → 51 ms (release build).
 - **Much Faster Typing**: Each keystroke used to cause about three repaints: every line on screen, then the whole editor again when syntax colors arrived, then the whole window for each message from the language server. Now only the lines that changed are redrawn, plus the status bar. In a 3,000-line Rust file with rust-analyzer running (release build), a keystroke reaches the screen in about 4.5 ms instead of 16–18 ms (95% within 8–9 ms instead of 32–36 ms), and the editor's work on its UI thread per keystroke went from about 35 ms of CPU to 7.5 ms.
 - **Errors Stay Put While Typing**: Error underlines no longer blink off on every keystroke until the language server answers. They stay, moving with their lines, until the new list arrives, and an unchanged list redraws nothing.
 - **Nothing Runs When Idle**: With LightLine in the background, it no longer wakes about 3 times a second. Watching files for outside changes now uses Windows change notifications instead of checking every 2 seconds, so new files and outside edits also show up at once. Background jobs and unsaved-work checkpoints no longer use polling timers.
@@ -52,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Fixed
 
+- **Saving Through a Symbolic Link**: Saving a file opened through a symbolic link replaced the link with a plain copy. It now saves into the file the link points at, and the link stays.
+- **Mixed Line Endings Are Kept**: A file mixing Windows (CRLF) and Unix (LF) line endings was saved with one kind throughout, changing every other line in a diff. Each line now keeps its ending; new lines use the file's more common one, and pressing Enter at the end of a line leaves that line's ending alone.
 - **F2 Renames in the Explorer**: The User Guide listed `F2` for renaming the selected file or folder in the Explorer, but the key did nothing. It now opens the rename field, as the right-click **Rename** does.
 - **Formatting Keeps Your Place**: Format Document and format-on-save moved the caret to the end of the file and scrolled there. The caret, selection and scroll position now stay with the code they were on, and folds outside the changed text stay folded.
 - **Rust Formatting Works on Modern Code**: `rustfmt` read the buffer as Rust 2015 and rejected `async fn`, `let … else` and similar. It now uses the edition from the project's `Cargo.toml`, including one inherited from the workspace.

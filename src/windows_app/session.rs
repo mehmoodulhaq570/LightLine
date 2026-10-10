@@ -179,6 +179,7 @@ impl App {
             selection_anchor: saved.anchor.map(|(line, byte)| Pos { line, byte }),
             first_line: saved.first_line,
             first_row: 0,
+            extra: Vec::new(),
         };
         let shown = session.active.min(session.tabs.len().saturating_sub(1));
         let mut active = None;
@@ -234,6 +235,7 @@ impl App {
                         selection_anchor: restored.selection_anchor.map(|pos| doc.clamp(pos)),
                         first_line: restored.first_line.min(doc.line_count().saturating_sub(1)),
                         first_row: 0,
+                        extra: Vec::new(),
                     }
                 });
                 self.tabs[index].views = views;

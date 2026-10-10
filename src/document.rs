@@ -56,6 +56,11 @@ pub struct Document {
     lines: Vec<String>,
     pub path: Option<PathBuf>,
     eol: &'static str,
+    // Which lines end in CRLF, kept only for a file that mixes CRLF and LF
+    // (one entry per line; the last line's is unused). Otherwise every line
+    // ends in `eol`, which for a mixed file is the more common ending, used
+    // for new line breaks.
+    crlf: Option<Vec<bool>>,
     bom: bool,
     last_saved: Option<(SystemTime, u64)>,
     undo: Vec<Edit>,
@@ -87,6 +92,7 @@ impl Document {
             lines: vec![String::new()],
             path: None,
             eol: "\n",
+            crlf: None,
             bom: false,
             last_saved: None,
             undo: Vec::new(),
@@ -131,13 +137,13 @@ impl Document {
         let text = std::str::from_utf8(if bom { &bytes[3..] } else { &bytes }).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidData, "Only UTF-8 files are supported")
         })?;
-        let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
-        let normalized = text.replace("\r\n", "\n");
+        let (lines, eol, crlf) = split_lines(text);
         Ok(Self {
             id: next_id(),
-            lines: normalized.split('\n').map(str::to_owned).collect(),
+            lines,
             path: Some(path),
             eol,
+            crlf,
             bom,
             last_saved: Some((metadata.modified()?, metadata.len())),
             undo: Vec::new(),
@@ -158,6 +164,7 @@ impl Document {
     // meaningful before any real edit has happened.
     pub fn seed(&mut self, text: &str) {
         self.lines = text.split('\n').map(str::to_owned).collect();
+        self.crlf = None;
     }
 
     pub fn line_count(&self) -> usize {
@@ -908,6 +915,21 @@ impl Document {
         new_lines[0].insert_str(0, &prefix);
         new_lines.last_mut().unwrap().push_str(&suffix);
         let new_end = start.line + new_lines.len() - 1;
+        if let Some(crlf) = &mut self.crlf {
+            // The line holding what followed the edit keeps its ending, and
+            // line breaks the edit made use the file's usual one. Enter at
+            // the end of a line leaves that line as it was and ends the new
+            // one the usual way, so only the new line shows in a diff.
+            let usual = self.eol == "\r\n";
+            let mut endings = vec![usual; new_lines.len()];
+            let keeper = if suffix.is_empty() && !prefix.is_empty() {
+                0
+            } else {
+                endings.len() - 1
+            };
+            endings[keeper] = crlf[end.line];
+            crlf.splice(start.line..=end.line, endings);
+        }
         self.lines.splice(start.line..=end.line, new_lines);
         self.shift_folds(start.line, end.line, new_end);
         self.shift_breakpoints(start, end, new_end);
@@ -1065,7 +1087,10 @@ impl Document {
     /// Like `save`, but writes even if the file changed on disk since it was
     /// read: for when the user chose to keep their version over that change.
     pub fn save_over_disk_changes(&mut self, path: &Path) -> io::Result<()> {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        // Written next to the file a symbolic link points at, then moved over
+        // that file: moving it over the link replaced the link with a copy.
+        let target = resolve_links(path);
+        let parent = target.parent().unwrap_or_else(|| Path::new("."));
         let mut temporary = None;
         for n in 0..100 {
             let name = format!(".lightline-{}-{n}.tmp", std::process::id());
@@ -1098,7 +1123,13 @@ impl Document {
             }
             for (i, line) in self.lines.iter().enumerate() {
                 if i > 0 {
-                    writer.write_all(self.eol.as_bytes())?;
+                    let crlf = self.crlf.as_ref().map(|crlf| crlf[i - 1]);
+                    let ending = match crlf {
+                        Some(true) => "\r\n",
+                        Some(false) => "\n",
+                        None => self.eol,
+                    };
+                    writer.write_all(ending.as_bytes())?;
                 }
                 writer.write_all(line.as_bytes())?;
             }
@@ -1107,7 +1138,7 @@ impl Document {
                 .map_err(|error| error.into_error())?
                 .sync_all()
         })();
-        let result = write_result.and_then(|_| replace_file(&temp_path, path));
+        let result = write_result.and_then(|_| replace_file(&temp_path, &target));
         if result.is_err() {
             let _ = fs::remove_file(&temp_path);
         }
@@ -1118,6 +1149,44 @@ impl Document {
         self.saved_revision = self.revision;
         Ok(())
     }
+}
+
+// A file's text as lines without their endings, the ending to use, and, when
+// it mixes CRLF and LF, which lines end in CRLF.
+fn split_lines(text: &str) -> (Vec<String>, &'static str, Option<Vec<bool>>) {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
+    let mut crlf = Vec::with_capacity(lines.len());
+    let last = lines.len() - 1;
+    for (index, line) in lines.iter_mut().enumerate() {
+        let ends_crlf = index < last && line.ends_with('\r');
+        if ends_crlf {
+            line.pop();
+        }
+        crlf.push(ends_crlf);
+    }
+    let with_crlf = crlf.iter().filter(|crlf| **crlf).count();
+    let eol = if with_crlf * 2 > last { "\r\n" } else { "\n" };
+    // Only a file with both endings keeps the list.
+    let mixed = with_crlf > 0 && with_crlf < last;
+    (lines, eol, mixed.then_some(crlf))
+}
+
+// Where the file at `path` really is, following symbolic links.
+fn resolve_links(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    for _ in 0..32 {
+        let is_link =
+            fs::symlink_metadata(&current).is_ok_and(|meta| meta.file_type().is_symlink());
+        let Some(target) = is_link.then(|| fs::read_link(&current).ok()).flatten() else {
+            break;
+        };
+        current = if target.is_absolute() {
+            target
+        } else {
+            current.parent().unwrap_or(Path::new(".")).join(target)
+        };
+    }
+    current
 }
 
 #[cfg(windows)]
@@ -1255,6 +1324,79 @@ mod tests {
         assert_eq!(doc.lines, ["alpha", "beta", "gamma"]);
         assert_eq!(doc.redo(), Some((Pos { line: 1, byte: 1 }, 0)));
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
+    }
+
+    fn temp_file(name: &str, bytes: &[u8]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lightline-doc-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn line_endings_survive_saving_mixed_and_uniform_files() {
+        for original in [
+            &b"a\r\nb\nc\r\nd"[..],
+            b"a\r\nb\r\n",
+            b"a\nb\n",
+            b"one line",
+        ] {
+            let path = temp_file("eol-roundtrip", original);
+            let mut doc = Document::open(path.clone()).unwrap();
+            doc.save(&path).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), original);
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn edits_keep_each_lines_ending_in_a_mixed_file() {
+        let path = temp_file("eol-mixed", b"a\r\nb\nc\r\nd");
+        let mut doc = Document::open(path.clone()).unwrap();
+        assert_eq!(doc.text(), "a\nb\nc\nd");
+        // A break typed at the end of the LF line: that line keeps its LF,
+        // the new one takes the file's usual ending (CRLF, 2 of 3).
+        doc.replace(Pos { line: 1, byte: 1 }, Pos { line: 1, byte: 1 }, "X\nY");
+        doc.save(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"a\r\nbX\nY\r\nc\r\nd");
+        // Mid-line, the text after the break keeps the line's ending.
+        doc.replace(Pos { line: 0, byte: 0 }, Pos { line: 0, byte: 0 }, "\n");
+        doc.save(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"\r\na\r\nbX\nY\r\nc\r\nd");
+        // Joining lines keeps the ending of the last one joined.
+        doc.replace(Pos { line: 1, byte: 1 }, Pos { line: 3, byte: 0 }, "");
+        doc.save(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"\r\naY\r\nc\r\nd");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn saving_through_a_symbolic_link_keeps_the_link() {
+        let target = temp_file("symlink", b"old\n");
+        let link = target.with_file_name("link.txt");
+        // Creating links needs Developer Mode or elevation.
+        if std::os::windows::fs::symlink_file(&target, &link).is_err() {
+            eprintln!("skipped: can't create symbolic links here");
+            return;
+        }
+        let mut doc = Document::open(link.clone()).unwrap();
+        doc.replace(Pos::default(), Pos { line: 0, byte: 3 }, "new");
+        doc.save(&link).unwrap();
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"new\n");
+        // Saved again without a "changed on disk" complaint.
+        doc.replace(Pos::default(), Pos { line: 0, byte: 3 }, "end");
+        doc.save(&link).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"end\n");
+        fs::remove_dir_all(target.parent().unwrap()).unwrap();
     }
 
     #[test]

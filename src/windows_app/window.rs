@@ -365,7 +365,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             let key = wparam as u32;
             let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
             let routed = key == VK_F10 as u32
-                || (shift && key == 0x46)
+                // Shift+Alt+F (Format Document), Shift+Alt+O (Organize Imports).
+                || (shift && (key == 0x46 || key == 0x4F))
                 // Alt+Enter: Replace All in the find box.
                 || (key == VK_RETURN as u32 && app.find_mode)
                 // Alt+Z: toggle word wrap, as in VS Code.
@@ -513,6 +514,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             }
             app.cancel_rename(hwnd);
             app.dismiss_code_actions(hwnd);
+            app.hide_signature(hwnd);
             let delta = (wparam >> 16) as i16;
             let mut point = POINT::default();
             unsafe {
@@ -652,8 +654,39 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
     }
 }
 
+// The first character drawn that Segoe UI lacks (the split icon's │, the
+// branch ⑂, ✓, ▾...) makes Windows find and load a fallback font, which
+// took 14 ms of the first paint. Drawn here first, on another thread, that
+// happens while the window is being created and activated instead.
+fn warm_font_fallback() {
+    unsafe {
+        let dc = CreateCompatibleDC(null_mut());
+        if dc.is_null() {
+            return;
+        }
+        let face = wide("Segoe UI");
+        let font = CreateFontW(-14, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr());
+        let old = SelectObject(dc, font);
+        let text: Vec<u16> = "\u{2502}\u{2442}\u{2713}\u{25be}".encode_utf16().collect();
+        ExtTextOutW(
+            dc,
+            0,
+            0,
+            0,
+            null(),
+            text.as_ptr(),
+            text.len() as u32,
+            null(),
+        );
+        SelectObject(dc, old);
+        DeleteObject(font);
+        DeleteDC(dc);
+    }
+}
+
 pub fn run() -> io::Result<()> {
     crash::install_hook();
+    std::thread::spawn(warm_font_fallback);
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         dialog::enable_native_dark_mode();

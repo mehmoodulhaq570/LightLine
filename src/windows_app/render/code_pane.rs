@@ -96,15 +96,26 @@ impl App {
             let doc = &tab.document;
             let view = self.view_for_pane(pane);
             let code_left = left + self.scale(GUTTER + PAD);
-            let selection = view.selection_anchor.and_then(|anchor| {
-                if anchor == view.cursor {
-                    None
-                } else if anchor < view.cursor {
-                    Some((anchor, view.cursor))
-                } else {
-                    Some((view.cursor, anchor))
-                }
-            });
+            let ordered = |cursor: Pos, anchor: Option<Pos>| {
+                anchor.and_then(|anchor| {
+                    if anchor == cursor {
+                        None
+                    } else if anchor < cursor {
+                        Some((anchor, cursor))
+                    } else {
+                        Some((cursor, anchor))
+                    }
+                })
+            };
+            // The main caret's selection, and those of any other carets.
+            let selections: Vec<(Pos, Pos)> = ordered(view.cursor, view.selection_anchor)
+                .into_iter()
+                .chain(
+                    view.extra
+                        .iter()
+                        .filter_map(|caret| ordered(caret.cursor, caret.anchor)),
+                )
+                .collect();
             let visible = self.visible_lines(hwnd) + 1;
             SelectObject(hdc, self.font);
             let space_width = self.text_width(hdc, " ").max(1);
@@ -166,9 +177,10 @@ impl App {
                     }
                     _ => Vec::new(),
                 };
-                // The selected byte range of this line, and whether the
+                // The selected byte ranges of this line, and whether each
                 // selection carries on past its end.
-                let line_selection = selection
+                let line_selections: Vec<(usize, usize, bool)> = selections
+                    .iter()
                     .filter(|(start, end)| {
                         index >= start.line
                             && index <= end.line
@@ -184,7 +196,8 @@ impl App {
                             },
                             index < end.line,
                         )
-                    });
+                    })
+                    .collect();
                 let paused_here = paused_line == Some(index);
                 for row in first_row..rows.count() {
                     let y = self.editor_top() + screen_row as i32 * self.line_height;
@@ -374,7 +387,7 @@ impl App {
                             SelectObject(hdc, old_brush);
                         }
                     }
-                    if let Some((from, to, continues)) = line_selection {
+                    for &(from, to, continues) in &line_selections {
                         let from = from.max(row_start);
                         let to = to.min(row_end);
                         let past_end = continues && last_row;
@@ -602,6 +615,45 @@ impl App {
                     draw_bracket_bg(other.line, other.byte);
                 }
                 DeleteObject(match_brush);
+            }
+            // Other carets (multiple cursors) don't blink: the caret-only
+            // repaint reaches just the main one.
+            if self.focused
+                && !self.terminal_focus
+                && !self.search_input
+                && !self.panel_focus
+                && pane == self.focused_pane
+                && !view.extra.is_empty()
+            {
+                let caret_brush = CreateSolidBrush(self.theme.cursor);
+                for caret in &view.extra {
+                    let cursor = doc.clamp(caret.cursor);
+                    if doc.is_line_hidden(cursor.line) {
+                        continue;
+                    }
+                    let Some((row, row_start, indent)) = self.locate(hwnd, pane, cursor, visible)
+                    else {
+                        continue;
+                    };
+                    let line = doc.line(cursor.line);
+                    let x = code_left
+                        + indent
+                        + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte));
+                    let y = self.editor_top() + row as i32 * self.line_height;
+                    if y < bottom && x < right {
+                        FillRect(
+                            hdc,
+                            &RECT {
+                                left: x,
+                                top: y,
+                                right: x + self.scale(2).max(2),
+                                bottom: (y + self.line_height).min(bottom),
+                            },
+                            caret_brush,
+                        );
+                    }
+                }
+                DeleteObject(caret_brush);
             }
             if self.focused
                 && self.caret_on

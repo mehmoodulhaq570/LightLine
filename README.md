@@ -20,14 +20,14 @@
 
 ---
 
-LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth: in our tests a keystroke reaches the screen in about 5 ms, and LightLine idling in the background doesn't wake up at all.
+LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth: in our tests it starts in under a tenth of a second, a keystroke reaches the screen in about 3 ms, and LightLine idling in the background doesn't wake up at all.
 
 ## Features
 
-- **Smart editing**: syntax colors, code folding, bracket matching, find and replace, word wrap, and a split editor.
+- **Smart editing**: syntax colors, code folding, bracket matching, find and replace, multiple cursors, word wrap, and a split editor.
 - **Unsaved-work recovery**: periodic local checkpoints for modified files and untitled text, with a Restore/Discard choice after restarting. If LightLine ever crashes, it saves your unsaved work first. Cursor movement and deletion preserve combined characters and joined emoji.
 - **Stays in step with your files**: files changed by another program reload by themselves; if you have unsaved edits, saving asks whether to keep your version or reload.
-- **Language support**: errors as you type, completions, go to definition, rename across files, quick fixes, and hover docs for Rust, Python, C/C++, JavaScript/TypeScript and Go, through their language servers.
+- **Language support**: errors as you type, completions, parameter hints, go to definition and to symbols, rename across files, quick fixes, organize imports, and hover docs for Rust, Python, C/C++, JavaScript/TypeScript and Go, through their language servers.
 - **Run and debug**: run Python, C/C++, JavaScript, TypeScript, Go or Rust with one key, and debug Rust and Python with breakpoints, stepping and variables.
 - **Saved Run configurations**: choose an entry file or command, arguments, environment variables and working directory in a panel that follows LightLine's theme. Each workspace remembers its configurations and selected default.
 - **Git built in**: see changed lines in the margin, then stage, commit, push and review diffs without leaving the editor.

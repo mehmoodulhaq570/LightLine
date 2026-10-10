@@ -14,8 +14,20 @@ const ROW: i32 = 28;
 const PADDING: i32 = 6;
 const WIDTH: i32 = 460;
 
+// What's asked for.
+#[derive(Clone, Copy, PartialEq)]
+enum Kinds {
+    // Ctrl+.: fixes and refactorings.
+    Fixes,
+    // Source Action...: whole-file actions, such as organize imports.
+    Source,
+    // Shift+Alt+O: organize imports, made at once when it's the only one.
+    OrganizeImports,
+}
+
 pub(super) struct CodeActionRequest {
     language: LspLanguage,
+    kinds: Kinds,
     id: u64,
     uri: String,
     version: i32,
@@ -36,12 +48,24 @@ pub(super) struct CodeActionMenu {
 
 impl App {
     pub(super) fn request_code_actions(&mut self, hwnd: HWND) {
+        self.ask_code_actions(hwnd, Kinds::Fixes);
+    }
+
+    pub(super) fn request_source_actions(&mut self, hwnd: HWND) {
+        self.ask_code_actions(hwnd, Kinds::Source);
+    }
+
+    pub(super) fn organize_imports(&mut self, hwnd: HWND) {
+        self.ask_code_actions(hwnd, Kinds::OrganizeImports);
+    }
+
+    fn ask_code_actions(&mut self, hwnd: HWND, kinds: Kinds) {
         self.dismiss_code_actions(hwnd);
         if self.welcome || self.tab().read_only() || self.tab().is_placeholder() {
             return;
         }
         if Tab::lsp_language(self.doc()).is_none() {
-            self.status = "Quick fixes need a language server, and this file type has none".into();
+            self.status = "Code actions need a language server, and this file type has none".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         }
@@ -72,7 +96,8 @@ impl App {
         };
         // A caret elsewhere on a line with a problem asks about the
         // problem: servers offer a fix only where it is.
-        if start == end
+        if kinds == Kinds::Fixes
+            && start == end
             && !tab
                 .diagnostics
                 .iter()
@@ -95,6 +120,11 @@ impl App {
             .collect();
         let uri = lsp::file_uri(path);
         let version = tab.lsp_version;
+        let only = match kinds {
+            Kinds::Fixes => Vec::new(),
+            Kinds::Source => vec!["source".to_owned()],
+            Kinds::OrganizeImports => vec!["source.organizeImports".to_owned()],
+        };
         self.request_id += 1;
         let id = self.request_id;
         let sent = self.tab_lsp(self.active).is_some_and(|client| {
@@ -104,19 +134,26 @@ impl App {
                 version,
                 range,
                 diagnostics,
+                only,
             })
         });
         if sent {
             let caret = self.caret_rect(hwnd);
             self.code_action_request = Some(CodeActionRequest {
                 language,
+                kinds,
                 id,
                 uri,
                 version,
                 x: caret.left,
                 y: caret.bottom,
             });
-            self.status = "Looking for fixes...".into();
+            self.status = match kinds {
+                Kinds::Fixes => "Looking for fixes...",
+                Kinds::Source => "Looking for source actions...",
+                Kinds::OrganizeImports => "Organizing imports...",
+            }
+            .into();
         } else {
             self.status = "Language server not ready yet".into();
         }
@@ -146,17 +183,27 @@ impl App {
             self.status.clear();
             return;
         }
+        let none = match request.kinds {
+            Kinds::Fixes => "No quick fixes here",
+            Kinds::Source => "No source actions for this file",
+            Kinds::OrganizeImports => "The language server can't organize imports here",
+        };
         let mut actions = match result {
             Ok(actions) if actions.is_empty() => {
-                self.status = "No quick fixes here".into();
+                self.status = none.into();
                 return;
             }
             Ok(actions) => actions,
             Err(reason) => {
-                self.status = format!("No quick fixes: {reason}");
+                self.status = format!("{none}: {reason}");
                 return;
             }
         };
+        if request.kinds == Kinds::OrganizeImports && actions.len() == 1 {
+            let action = actions.remove(0);
+            self.run_code_action(language, action);
+            return;
+        }
         // The server's preferred fix first, then fixes, then refactorings.
         actions.sort_by_key(|action| (!action.preferred, !action.kind.starts_with("quickfix")));
         self.status = format!(
@@ -342,12 +389,16 @@ impl App {
             return;
         };
         unsafe { InvalidateRect(hwnd, null(), 0) };
-        let Some(action) = menu.actions.into_iter().nth(index) else {
-            return;
-        };
+        if let Some(action) = menu.actions.into_iter().nth(index) {
+            self.run_code_action(menu.language, action);
+        }
+    }
+
+    // Makes the action's edit, then has the server run its command.
+    fn run_code_action(&mut self, language: LspLanguage, action: CodeAction) {
         let mut status = format!("Applied: {}", action.title);
         if !action.edit.is_empty() {
-            match self.apply_workspace_edit(action.edit, menu.language, false) {
+            match self.apply_workspace_edit(action.edit, language, false) {
                 Ok(applied) => {
                     if applied.files > 1 {
                         status = format!("{status} ({} files)", applied.files);

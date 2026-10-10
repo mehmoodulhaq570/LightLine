@@ -80,6 +80,27 @@ pub struct Diagnostic {
     pub raw: Value,
 }
 
+/// A function, type, field... in a file (textDocument/documentSymbol).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Symbol {
+    pub name: String,
+    /// LSP SymbolKind: 5 class, 6 method, 12 function, 23 struct...
+    pub kind: u8,
+    /// What it's inside, such as its `impl` or class; empty at the top.
+    pub container: String,
+    /// Where its name is.
+    pub position: Position,
+}
+
+/// The signature of the call the caret is in (textDocument/signatureHelp).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignatureHelp {
+    /// Such as `fn add(left: i32, right: i32) -> i32`.
+    pub label: String,
+    /// The byte range in `label` of the parameter being typed.
+    pub active: Option<(usize, usize)>,
+}
+
 /// A fix or refactoring the server offers at a place (textDocument/codeAction).
 #[derive(Clone, Debug)]
 pub struct CodeAction {
@@ -184,13 +205,28 @@ pub enum Command {
     FilesChanged {
         uris: Vec<String>,
     },
-    /// Fixes and refactorings for `range`, given the problems in it.
+    /// Fixes and refactorings for `range`, given the problems in it; with
+    /// `only`, just those kinds (such as "source").
     CodeActions {
         id: u64,
         uri: String,
         version: i32,
         range: Range,
         diagnostics: Vec<Diagnostic>,
+        only: Vec<String>,
+    },
+    /// The signature of the call at `position`.
+    SignatureHelp {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
+    },
+    /// The file's functions, types and so on, for Go to Symbol.
+    DocumentSymbols {
+        id: u64,
+        uri: String,
+        version: i32,
     },
     /// Runs a command from a code action, if the server offers it.
     ExecuteCommand {
@@ -260,6 +296,21 @@ pub enum Event {
         version: i32,
         result: Result<Vec<CodeAction>, String>,
     },
+    DocumentSymbols {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        result: Result<Vec<Symbol>, String>,
+    },
+    /// None when the caret isn't in a call.
+    SignatureHelp {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        help: Option<SignatureHelp>,
+    },
     /// Edits the server asked for itself (workspace/applyEdit), usually
     /// while running a code action's command, or why they can't be made.
     ApplyEdit {
@@ -328,6 +379,8 @@ struct Pending {
     completions: HashMap<u64, PendingHover>,
     renames: HashMap<u64, PendingHover>,
     code_actions: HashMap<u64, PendingHover>,
+    symbols: HashMap<u64, PendingHover>,
+    signatures: HashMap<u64, PendingHover>,
     // The commands the server runs (executeCommandProvider), and the next
     // id for running one; nothing waits for their answers.
     server_commands: Vec<String>,
@@ -376,6 +429,7 @@ fn code_action_request(
     request: &PendingHover,
     range: Range,
     diagnostics: &[Diagnostic],
+    only: &[String],
 ) -> Value {
     let position = |at: Position| json!({"line":at.line,"character":at.character});
     let range_json =
@@ -391,10 +445,14 @@ fn code_action_request(
             raw
         })
         .collect();
+    let mut context = json!({"diagnostics":diagnostics,"triggerKind":1});
+    if !only.is_empty() {
+        context["only"] = json!(only);
+    }
     json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{
         "textDocument":{"uri":request.uri},
         "range":range_json(range),
-        "context":{"diagnostics":diagnostics,"triggerKind":1}
+        "context":context
     }})
 }
 
@@ -932,6 +990,13 @@ fn run_server(
                 "definition": {"linkSupport":false},
                 "formatting": {},
                 "rename": {"prepareSupport":false},
+                "documentSymbol": {"hierarchicalDocumentSymbolSupport":true},
+                "signatureHelp": {
+                    "signatureInformation": {
+                        "parameterInformation": {"labelOffsetSupport":true},
+                        "activeParameterSupport":true
+                    }
+                },
                 "codeAction": {
                     "codeActionLiteralSupport": {"codeActionKind": {"valueSet": [
                         "", "quickfix", "refactor", "refactor.extract", "refactor.inline",
@@ -1173,6 +1238,30 @@ fn run_server(
                         &events,
                         &wake,
                     );
+                } else if let Some(request) = pending.signatures.remove(&id) {
+                    emit(
+                        Event::SignatureHelp {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            help: message.get("result").and_then(parse_signature),
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.symbols.remove(&id) {
+                    emit(
+                        Event::DocumentSymbols {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            result: parse_symbols(&message),
+                        },
+                        &events,
+                        &wake,
+                    );
                 } else if let Some(request) = pending.code_actions.remove(&id) {
                     emit(
                         Event::CodeActions {
@@ -1410,6 +1499,7 @@ fn send_command(
             version,
             range,
             diagnostics,
+            only,
         } => {
             let request_state = PendingHover {
                 uri,
@@ -1417,8 +1507,48 @@ fn send_command(
                 position: range.start,
                 retries: 0,
             };
-            let request = code_action_request(id, &request_state, range, &diagnostics);
+            let request = code_action_request(id, &request_state, range, &diagnostics, &only);
             pending.code_actions.insert(id, request_state);
+            request
+        }
+        Command::SignatureHelp {
+            id,
+            uri,
+            version,
+            position,
+        } => {
+            let request = json!({"jsonrpc":"2.0","id":id,"method":"textDocument/signatureHelp",
+            "params":{
+                "textDocument":{"uri":uri},
+                "position":{"line":position.line,"character":position.character},
+                "context":{"triggerKind":1,"isRetrigger":false}
+            }});
+            pending.signatures.insert(
+                id,
+                PendingHover {
+                    uri,
+                    version,
+                    position,
+                    retries: 0,
+                },
+            );
+            request
+        }
+        Command::DocumentSymbols { id, uri, version } => {
+            let request = json!({"jsonrpc":"2.0","id":id,"method":"textDocument/documentSymbol",
+                "params":{"textDocument":{"uri":uri}}});
+            pending.symbols.insert(
+                id,
+                PendingHover {
+                    uri,
+                    version,
+                    position: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    retries: 0,
+                },
+            );
             request
         }
         Command::ExecuteCommand { command, arguments } => {
@@ -1714,6 +1844,101 @@ fn parse_workspace_edit(result: &Value) -> Result<Vec<FileEdit>, String> {
     }
     files.retain(|file| !file.edits.is_empty());
     Ok(files)
+}
+
+// A SignatureHelp result: the active signature, and where in its label the
+// active parameter is (given as text to find, or UTF-16 offsets).
+fn parse_signature(result: &Value) -> Option<SignatureHelp> {
+    let signatures = result.get("signatures")?.as_array()?;
+    let index = result
+        .get("activeSignature")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let signature = signatures.get(index).or_else(|| signatures.first())?;
+    let label = signature.get("label")?.as_str()?.to_owned();
+    let parameter = signature
+        .get("activeParameter")
+        .or_else(|| result.get("activeParameter"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let active = signature
+        .get("parameters")
+        .and_then(Value::as_array)
+        .and_then(|parameters| parameters.get(parameter))
+        .and_then(|parameter| {
+            let name = parameter.get("label")?;
+            if let Some(text) = name.as_str() {
+                // After the opening parenthesis: the function's name may
+                // contain the parameter's.
+                let from = label.find('(').map_or(0, |open| open + 1);
+                let start = from + label.get(from..)?.find(text)?;
+                Some((start, start + text.len()))
+            } else {
+                let offsets = name.as_array()?;
+                let start = offsets.first()?.as_u64()? as u32;
+                let end = offsets.get(1)?.as_u64()? as u32;
+                Some((utf16_to_byte(&label, start), utf16_to_byte(&label, end)))
+            }
+        })
+        .filter(|(start, end)| start < end && *end <= label.len());
+    Some(SignatureHelp { label, active })
+}
+
+// textDocument/documentSymbol answers with a tree of DocumentSymbols, or a
+// flat list of SymbolInformation; either way, a list in file order.
+fn parse_symbols(message: &Value) -> Result<Vec<Symbol>, String> {
+    if let Some(error) = message.get("error") {
+        let text = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the language server refused");
+        return Err(text.to_owned());
+    }
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    fn walk(items: &[Value], container: &str, out: &mut Vec<Symbol>) {
+        for item in items {
+            if out.len() >= 5000 {
+                return;
+            }
+            let Some(name) = item.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let kind = item
+                .get("kind")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(26) as u8;
+            // DocumentSymbol: selectionRange is the name. SymbolInformation:
+            // location.range, and its containerName.
+            let position = item
+                .pointer("/selectionRange/start")
+                .or_else(|| item.pointer("/range/start"))
+                .or_else(|| item.pointer("/location/range/start"))
+                .and_then(parse_position);
+            let Some(position) = position else {
+                continue;
+            };
+            let container = item
+                .get("containerName")
+                .and_then(Value::as_str)
+                .unwrap_or(container);
+            out.push(Symbol {
+                name: name.to_owned(),
+                kind,
+                container: container.to_owned(),
+                position,
+            });
+            if let Some(children) = item.get("children").and_then(Value::as_array) {
+                walk(children, name, out);
+            }
+        }
+    }
+    let mut symbols = Vec::new();
+    walk(items, "", &mut symbols);
+    symbols.sort_by_key(|symbol| (symbol.position.line, symbol.position.character));
+    Ok(symbols)
 }
 
 // textDocument/codeAction answers with Commands and CodeActions. Those that
@@ -2203,6 +2428,74 @@ mod tests {
     }
 
     #[test]
+    fn signatures_find_the_active_parameter() {
+        let label = "fn add(left: i32, right: i32) -> i32";
+        // Offsets, as rust-analyzer sends them.
+        let offsets = json!({"signatures":[{"label":label,
+            "parameters":[{"label":[7, 16]},{"label":[18, 28]}],"activeParameter":1}]});
+        let help = parse_signature(&offsets).unwrap();
+        let (start, end) = help.active.unwrap();
+        assert_eq!(&help.label[start..end], "right: i32");
+        // Text, with the active parameter given for the whole result.
+        let text = json!({"activeParameter":0,"signatures":[{"label":"add(add_to, n)",
+            "parameters":[{"label":"add_to"},{"label":"n"}]}]});
+        let help = parse_signature(&text).unwrap();
+        let (start, end) = help.active.unwrap();
+        assert_eq!((start, &help.label[start..end]), (4, "add_to"));
+        // UTF-16 offsets past non-ASCII text.
+        let wide =
+            json!({"signatures":[{"label":"größe(a: u8)","parameters":[{"label":[6, 11]}]}]});
+        let help = parse_signature(&wide).unwrap();
+        let (start, end) = help.active.unwrap();
+        assert_eq!(&help.label[start..end], "a: u8");
+        // No parameters, and no signatures.
+        let none = json!({"signatures":[{"label":"now()","parameters":[]}]});
+        assert_eq!(parse_signature(&none).unwrap().active, None);
+        assert!(parse_signature(&json!({"signatures":[]})).is_none());
+    }
+
+    #[test]
+    fn symbols_parse_trees_and_flat_lists_in_file_order() {
+        let at = |line, character| json!({"line":line,"character":character});
+        let range = |line| json!({"start":at(line, 0),"end":at(line + 3, 1)});
+        let tree = json!({"result":[
+            {"name":"Point","kind":23,"range":range(0),"selectionRange":{"start":at(0, 11),"end":at(0, 16)},
+             "children":[{"name":"x","kind":8,"range":range(1),"selectionRange":{"start":at(1, 4),"end":at(1, 5)}}]},
+            {"name":"main","kind":12,"range":range(9),"selectionRange":{"start":at(9, 3),"end":at(9, 7)}},
+            {"name":"impl Point","kind":19,"range":range(5),"selectionRange":{"start":at(5, 5),"end":at(5, 10)},
+             "children":[{"name":"new","kind":6,"range":range(6),"selectionRange":{"start":at(6, 11),"end":at(6, 14)}}]}
+        ]});
+        let symbols = parse_symbols(&tree).unwrap();
+        let names: Vec<(&str, &str, u32)> = symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.container.as_str(), s.position.line))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Point", "", 0),
+                ("x", "Point", 1),
+                ("impl Point", "", 5),
+                ("new", "impl Point", 6),
+                ("main", "", 9)
+            ]
+        );
+        assert_eq!(symbols[0].position.character, 11);
+        assert_eq!(symbols[4].kind, 12);
+
+        let flat = json!({"result":[
+            {"name":"helper","kind":12,"containerName":"utils",
+             "location":{"uri":"file:///a.py","range":{"start":at(4, 4),"end":at(6, 0)}}}
+        ]});
+        let symbols = parse_symbols(&flat).unwrap();
+        assert_eq!(
+            (symbols[0].container.as_str(), symbols[0].position.line),
+            ("utils", 4)
+        );
+        assert!(parse_symbols(&json!({"result":null})).unwrap().is_empty());
+    }
+
+    #[test]
     fn code_action_requests_send_problems_where_they_are_now() {
         let request = PendingHover {
             uri: "file:///a.rs".into(),
@@ -2228,7 +2521,13 @@ mod tests {
             raw: Value::Null,
             ..from_server.clone()
         };
-        let sent = code_action_request(8, &request, at(9), &[from_server, from_compiler]);
+        let sent = code_action_request(8, &request, at(9), &[from_server, from_compiler], &[]);
+        assert!(sent.pointer("/params/context/only").is_none());
+        let only = code_action_request(9, &request, at(9), &[], &["source".into()]);
+        assert_eq!(
+            only.pointer("/params/context/only").unwrap(),
+            &json!(["source"])
+        );
         let diagnostics = sent.pointer("/params/context/diagnostics").unwrap();
         assert_eq!(diagnostics.as_array().unwrap().len(), 1);
         assert_eq!(diagnostics[0]["range"]["start"]["line"], 9);

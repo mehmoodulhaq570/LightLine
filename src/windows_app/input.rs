@@ -563,9 +563,24 @@ impl App {
         if ctrl && self.panel_focus && is_editor_ctrl_key(key, shift) {
             return true;
         }
+        if !self.panel_focus && self.multi_cursor_key(hwnd, key, ctrl, shift) {
+            return true;
+        }
         if ctrl {
             let cursor = self.view().cursor;
             match key {
+                0x44 if !shift && !alt && !self.panel_focus => {
+                    self.add_next_match(hwnd);
+                    return true;
+                }
+                x if alt && !self.panel_focus && (x == VK_UP as u32 || x == VK_DOWN as u32) => {
+                    self.add_caret_vertically(hwnd, x == VK_DOWN as u32);
+                    return true;
+                }
+                x if x == VK_SPACE as u32 && shift => {
+                    self.request_signature(hwnd);
+                    return true;
+                }
                 x if x == VK_SPACE as u32 => {
                     self.trigger_completion(hwnd);
                     return true;
@@ -772,6 +787,10 @@ impl App {
             self.format_document(hwnd);
             return true;
         }
+        if shift && alt && !ctrl && key == 0x4F {
+            self.organize_imports(hwnd);
+            return true;
+        }
         // A completion popup, when open, captures navigation and commit keys
         // before they reach the editor; any other key dismisses it first.
         if self.completion_active() {
@@ -824,6 +843,10 @@ impl App {
                 return true;
             }
             x if x == VK_ESCAPE as u32 => {
+                if self.signature.is_some() || self.signature_request.is_some() {
+                    self.hide_signature(hwnd);
+                    return true;
+                }
                 if self.clear_ghost_text(hwnd) {
                     return true;
                 }
@@ -940,6 +963,7 @@ impl App {
             _ => return false,
         }
         self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
+        self.follow_signature(hwnd, None);
         true
     }
 
@@ -1071,6 +1095,7 @@ impl App {
                     self.quick_query.push(ch);
                     self.quick_selected = 0;
                     self.quick_first = 0;
+                    self.ensure_symbols(hwnd);
                 } else if self.search_input {
                     self.project_query.push(ch);
                     self.search_results.clear();
@@ -1121,6 +1146,9 @@ impl App {
                 }
                 return;
             }
+            if self.multi_cursor_char(hwnd, ch) {
+                return;
+            }
             // Auto-closing pairs: when typing an opening bracket or quote,
             // insert the closing counterpart and leave the cursor between them.
             let closing = if self.settings.auto_close_pairs {
@@ -1156,6 +1184,7 @@ impl App {
                     let next = self.doc().next(self.view().cursor);
                     self.view_mut().cursor = next;
                     self.refresh(hwnd);
+                    self.follow_signature(hwnd, Some(ch));
                     return;
                 }
             }
@@ -1188,6 +1217,7 @@ impl App {
                 self.view_mut().cursor = pos;
             }
             self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
+            self.follow_signature(hwnd, Some(ch));
         }
     }
 
@@ -1337,6 +1367,7 @@ impl App {
         if self.rename_click(hwnd, x, y) || self.code_action_click(hwnd, x, y) {
             return;
         }
+        self.hide_signature(hwnd);
         self.clear_hover(hwnd);
         let mut rect = RECT::default();
         unsafe {
@@ -2045,6 +2076,16 @@ impl App {
             return;
         }
         let pos = self.position_at(hwnd, x, y);
+        // Alt+Click adds a caret there (multiple cursors).
+        if unsafe { GetKeyState(VK_MENU as i32) } < 0 && !self.tab().read_only() {
+            self.panel_focus = false;
+            self.terminal_focus = false;
+            self.search_input = false;
+            self.find_mode = false;
+            self.toggle_caret_at(hwnd, pos);
+            unsafe { SetFocus(hwnd) };
+            return;
+        }
         // Only the editor and the status bar change, unless this click takes
         // the keyboard from a box elsewhere, whose caret or outline goes.
         let stays_in_editor = self.keystroke_stays_in_editor()
@@ -2377,7 +2418,7 @@ impl App {
 // newline with that text's indentation, one `unit` deeper after a `{` or `:`
 // when auto-indent is on. Only the text before the caret counts: Enter at
 // the start of `def f():` moves the line down as it is.
-fn newline_text(before: &str, auto_indent: bool, unit: &str) -> String {
+pub(super) fn newline_text(before: &str, auto_indent: bool, unit: &str) -> String {
     let indent: String = before
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')

@@ -83,6 +83,9 @@ impl App {
             ("Find All References", 20),
             ("Rename Symbol (F2)", 51),
             ("Quick Fix (Ctrl+.)", 52),
+            ("Go to Symbol in File (@)", 53),
+            ("Source Action...", 54),
+            ("Organize Imports (Shift+Alt+O)", 55),
             ("Close Workspace", 21),
             ("New File in Workspace", 22),
             ("New Folder in Workspace", 23),
@@ -110,6 +113,8 @@ impl App {
     pub(super) fn quick_count(&self) -> usize {
         if self.quick_query.starts_with('>') {
             self.quick_commands().len()
+        } else if self.quick_query.starts_with('@') {
+            self.quick_symbols().len()
         } else {
             self.quick_matches().len()
         }
@@ -170,6 +175,13 @@ impl App {
                 Some(20) => self.find_references(hwnd),
                 Some(51) => self.start_rename(hwnd),
                 Some(52) => self.request_code_actions(hwnd),
+                Some(54) => self.request_source_actions(hwnd),
+                Some(55) => self.organize_imports(hwnd),
+                Some(53) => {
+                    self.show_quick_open(hwnd);
+                    self.quick_query = "@".into();
+                    self.ensure_symbols(hwnd);
+                }
                 Some(13) => self.format_document(hwnd),
                 Some(14) => self.trigger_completion(hwnd),
                 Some(16) => self.open_settings(hwnd),
@@ -235,6 +247,10 @@ impl App {
                 }
                 _ => {}
             }
+        } else if self.quick_query.starts_with('@') {
+            self.quick_open = false;
+            self.backbuffer = None;
+            self.jump_to_symbol(hwnd, index);
         } else {
             let path = self.quick_matches().get(index).cloned();
             self.quick_open = false;
