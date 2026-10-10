@@ -161,6 +161,60 @@ impl Syntax {
             Syntax::Markdown(syntax) => syntax.spans(document, line),
         }
     }
+
+    /// Which lines' colors `advance_to` changed since the last call, so
+    /// only those are redrawn.
+    pub fn take_recolored(&mut self) -> Recolored {
+        let recolored = match self {
+            Syntax::Rust(syntax) => &mut syntax.recolored,
+            Syntax::Python(syntax) => &mut syntax.inner.recolored,
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
+            | Syntax::Json(syntax) => &mut syntax.recolored,
+            Syntax::Markdown(syntax) => &mut syntax.recolored,
+        };
+        std::mem::replace(recolored, Recolored::Nothing)
+    }
+}
+
+/// Lines whose colors changed: none, `Lines(first, last)` inclusive, or
+/// possibly any of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recolored {
+    Nothing,
+    Lines(usize, usize),
+    Unknown,
+}
+
+impl Recolored {
+    pub fn and(self, other: Recolored) -> Recolored {
+        match (self, other) {
+            (Recolored::Nothing, other) | (other, Recolored::Nothing) => other,
+            (Recolored::Lines(a, b), Recolored::Lines(c, d)) => {
+                Recolored::Lines(a.min(c), b.max(d))
+            }
+            _ => Recolored::Unknown,
+        }
+    }
+
+    // The lines whose colors differ between two parses of the same text.
+    fn between(old: &Option<Vec<Vec<Span>>>, new: &Option<Vec<Vec<Span>>>) -> Recolored {
+        let (Some(old), Some(new)) = (old, new) else {
+            return Recolored::Unknown;
+        };
+        let Some(first) =
+            (0..old.len().max(new.len())).find(|&line| old.get(line) != new.get(line))
+        else {
+            return Recolored::Nothing;
+        };
+        let last = (first..old.len().max(new.len()))
+            .rev()
+            .find(|&line| old.get(line) != new.get(line))
+            .unwrap_or(first);
+        Recolored::Lines(first, last)
+    }
 }
 
 // Code longer than this is shown without colors outside the editor.
@@ -690,6 +744,7 @@ pub struct RustSyntax {
     // previous result, remapped through every edit made since.
     pending: bool,
     revision: u64,
+    recolored: Recolored,
 }
 
 // Work for the parser thread. Edits must reach it in order, each one after
@@ -801,6 +856,7 @@ fn poll_worker(
     pending: &mut bool,
     revision: u64,
     document: &Document,
+    recolored: &mut Recolored,
 ) {
     let mut failed = false;
     if *reset {
@@ -819,6 +875,7 @@ fn poll_worker(
                 Ok(result) if result.revision == revision => {
                     *pending = false;
                     failed = result.spans.is_none();
+                    *recolored = recolored.and(Recolored::between(tree_spans, &result.spans));
                     *tree_spans = result.spans;
                     break;
                 }
@@ -832,6 +889,9 @@ fn poll_worker(
         }
     }
     if failed {
+        if tree_spans.is_some() {
+            *recolored = Recolored::Unknown;
+        }
         *worker = None;
         *tree_spans = None;
         *pending = false;
@@ -854,6 +914,7 @@ impl RustSyntax {
             reset: false,
             pending: false,
             revision: 0,
+            recolored: Recolored::Nothing,
         }
     }
 
@@ -899,6 +960,7 @@ impl RustSyntax {
                 &mut self.pending,
                 self.revision,
                 document,
+                &mut self.recolored,
             );
             if self.tree_spans.is_some() {
                 return !self.pending;
@@ -906,6 +968,7 @@ impl RustSyntax {
         }
         let target = target.min(document.line_count().saturating_sub(1));
         let mut scanned_bytes = 0;
+        let scanned_before = self.states.len();
         for _ in 0..budget {
             if self.states.len() > target {
                 break;
@@ -918,6 +981,9 @@ impl RustSyntax {
             scanned_bytes += source.len();
             let next = scan(source, self.states[line], None);
             self.states.push(next);
+        }
+        if self.states.len() != scanned_before {
+            self.recolored = Recolored::Unknown;
         }
         self.states.len() > target && self.worker.is_none()
     }
@@ -943,6 +1009,7 @@ pub struct TreeSitterSyntax {
     reset: bool,
     pending: bool,
     revision: u64,
+    recolored: Recolored,
 }
 
 impl TreeSitterSyntax {
@@ -955,6 +1022,7 @@ impl TreeSitterSyntax {
             reset: false,
             pending: false,
             revision: 0,
+            recolored: Recolored::Nothing,
         }
     }
 
@@ -998,6 +1066,7 @@ impl TreeSitterSyntax {
                 &mut self.pending,
                 self.revision,
                 document,
+                &mut self.recolored,
             );
         }
         self.worker.is_none() || (self.tree_spans.is_some() && !self.pending)

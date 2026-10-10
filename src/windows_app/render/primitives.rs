@@ -280,6 +280,7 @@ impl App {
             start,
             end,
             brackets: self.bracket_pair(pane),
+            dirty: doc.is_dirty(),
         }
     }
 
@@ -294,13 +295,24 @@ impl App {
         before: &CaretFrame,
     ) -> Vec<RECT> {
         let after = self.caret_frame(hwnd);
-        if after.scene != before.scene || !after.scene.stays || !after.scene.text {
-            return vec![self.editor_area(hwnd, true), self.status_area(hwnd)];
+        let everything = || vec![self.editor_area(hwnd, true), self.status_area(hwnd)];
+        if !after.scene.stays || !after.scene.text {
+            return everything();
         }
         let mut lines = vec![
             (before.cursor.line, before.cursor.line),
             (after.cursor.line, after.cursor.line),
         ];
+        let mut scrollbar = false;
+        if after.scene != before.scene {
+            // Typing changes the text, but only on the lines it edited: each
+            // keystroke used to redraw every line on screen.
+            let Some(edited) = self.edited_lines(&before.scene, &after.scene) else {
+                return everything();
+            };
+            lines.push(edited);
+            scrollbar = after.scene.lines != before.scene.lines;
+        }
         // A selection edge that moved changes the lines between its places.
         for (old, new) in [(before.start, after.start), (before.end, after.end)] {
             if old != new {
@@ -315,12 +327,61 @@ impl App {
         }
         let mut areas = self.rows_showing(hwnd, self.focused_pane, &lines);
         areas.push(self.status_area(hwnd));
+        if scrollbar && let Some((track, _)) = self.scrollbar(hwnd, self.focused_pane) {
+            areas.push(track);
+        }
+        // The tab and the breadcrumb mark unsaved changes with `*`.
+        if after.dirty != before.dirty {
+            areas.push(RECT {
+                bottom: self.editor_top(),
+                ..self.editor_area(hwnd, true)
+            });
+        }
         areas
+    }
+
+    /// The lines (first, last) to redraw for an edit that took the focused
+    /// pane from `before` to `after`, when that is all that changed: the
+    /// edited lines, or from the first of them down when lines were added or
+    /// removed or the text wraps, since everything below then moves. None
+    /// when anything else changed too (a scroll, a fold, another tab).
+    fn edited_lines(&self, before: &CaretScene, after: &CaretScene) -> Option<(usize, usize)> {
+        let same_view = CaretScene {
+            serial: before.serial,
+            lines: before.lines,
+            shown_lines: before.shown_lines,
+            ..*after
+        } == *before;
+        let lines_added = after.lines as isize - before.lines as isize;
+        // A fold opened or dropped by the edit changes more than the edit.
+        let folds_kept = after.shown_lines as isize - before.shown_lines as isize == lines_added;
+        let doc = &self.tabs[after.tab].document;
+        let change = doc.last_change()?;
+        if !same_view
+            || !folds_kept
+            || change.serial != after.serial
+            || after.serial != before.serial + 1
+        {
+            return None;
+        }
+        // The line above too: its fold chevron can depend on this one's
+        // indentation.
+        let first = change.start.line.saturating_sub(1);
+        if lines_added != 0 || self.wraps(after.tab) {
+            Some((first, usize::MAX))
+        } else {
+            Some((first, change.new_end().line))
+        }
     }
 
     /// The rows of `pane` showing any of `lines` (inclusive ranges), one
     /// rectangle per run of adjacent rows, across the gutter and the text.
-    fn rows_showing(&self, hwnd: HWND, pane: usize, lines: &[(usize, usize)]) -> Vec<RECT> {
+    pub(in crate::windows_app) fn rows_showing(
+        &self,
+        hwnd: HWND,
+        pane: usize,
+        lines: &[(usize, usize)],
+    ) -> Vec<RECT> {
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
         // A line inside a fold shows on the fold's row.
         let lines: Vec<(usize, usize)> = lines
@@ -328,7 +389,10 @@ impl App {
             .map(|&(first, last)| (doc.visible_line_for(first), last))
             .collect();
         let columns = self.wrap_columns(hwnd, pane);
-        let (left, right) = (self.pane_left(hwnd, pane), self.pane_right(hwnd, pane));
+        // Inside the card's left border and clear of the scrollbar strip,
+        // neither of which shows the text: what paint's fast path redraws.
+        let left = self.pane_left(hwnd, pane) + self.scale(1).max(1);
+        let right = self.pane_right(hwnd, pane) - self.scale(SCROLLBAR);
         let bottom = self.editor_area(hwnd, false).bottom;
         let (mut line, mut first_row) = self.view_top(hwnd, pane);
         let mut top = self.editor_top();
@@ -955,13 +1019,14 @@ pub(in crate::windows_app) struct CaretFrame {
     start: Pos,
     end: Pos,
     brackets: Option<(Pos, Option<Pos>)>,
+    dirty: bool,
 }
 
 /// Everything besides the caret, the selection and the bracket highlight
 /// that decides what the focused pane shows: the file, where it's scrolled
 /// to, its text and folds, and what has the keyboard. When any of it
 /// changes, the whole editor is redrawn.
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 struct CaretScene {
     pane: usize,
     tab: usize,

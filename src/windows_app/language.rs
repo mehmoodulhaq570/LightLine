@@ -244,6 +244,7 @@ impl App {
                 character: change.end_utf16 as u32,
             },
         };
+        let lines_added = change.new_end().line as i64 - change.end.line as i64;
         let sent = self.tab_lsp(self.active).is_some_and(|client| {
             client.send(LspCommand::Change {
                 uri,
@@ -253,7 +254,11 @@ impl App {
             })
         });
         let tab = self.tab_mut();
-        tab.diagnostics.clear();
+        // Problems stay shown, those below the edit moving with their text,
+        // until the server sends the new list. Clearing them made squiggles
+        // flicker off on every keystroke, and the same list coming back then
+        // counted as a change to repaint.
+        shift_diagnostics(&mut tab.diagnostics, range.end.line, lines_added);
         if sent {
             tab.lsp_version = version;
             tab.lsp_serial = change.serial;
@@ -313,7 +318,15 @@ impl App {
         if events.is_empty() {
             return;
         }
+        // Diagnostics arrive after nearly every edit, and are often the same
+        // as before: they redraw only when they changed, and only what shows
+        // them. Everything else is rarer and redraws the window.
+        let mut repaint_all = false;
+        let mut diagnostics_changed = false;
+        // (tab, lines) whose problems appeared, went or changed.
+        let mut diagnostic_lines: Vec<(usize, (usize, usize))> = Vec::new();
         for event in events {
+            repaint_all |= !matches!(event, LspEvent::Diagnostics { .. });
             match event {
                 LspEvent::Ready { language } => {
                     if Tab::lsp_language(self.doc()) == Some(language) {
@@ -326,7 +339,7 @@ impl App {
                     version,
                     items,
                 } => {
-                    if let Some(tab) = self.tabs.iter_mut().find(|tab| {
+                    if let Some(index) = self.tabs.iter().position(|tab| {
                         tab.lsp_opened
                             && tab.lsp_language == Some(language)
                             && tab
@@ -334,10 +347,17 @@ impl App {
                                 .path
                                 .as_deref()
                                 .is_some_and(|p| lsp::same_file_uri(&lsp::file_uri(p), &uri))
-                    }) && version.is_none_or(|number| number == tab.lsp_version)
+                    }) && version.is_none_or(|number| number == self.tabs[index].lsp_version)
+                        && self.tabs[index].diagnostics != items
                     {
+                        let tab = &mut self.tabs[index];
+                        if let Some(lines) = changed_diagnostic_lines(&tab.diagnostics, &items) {
+                            diagnostic_lines.push((index, lines));
+                        }
                         tab.diagnostics = items;
+                        diagnostics_changed = true;
                     }
+                    continue;
                 }
                 LspEvent::Hover {
                     language,
@@ -635,7 +655,25 @@ impl App {
                 }
             }
         }
-        unsafe { InvalidateRect(hwnd, null(), 0) };
+        if repaint_all {
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        } else if diagnostics_changed {
+            // Underlines and gutter dots on the lines whose problems changed,
+            // and the counts in the status bar.
+            let panes = if self.split_visible { 0..2 } else { 0..1 };
+            let mut areas = vec![self.status_area(hwnd)];
+            for pane in panes {
+                for (_, lines) in diagnostic_lines
+                    .iter()
+                    .filter(|(tab, _)| *tab == self.tab_for_pane(pane))
+                {
+                    areas.extend(self.rows_showing(hwnd, pane, &[*lines]));
+                }
+            }
+            for area in areas {
+                unsafe { InvalidateRect(hwnd, &area, 0) };
+            }
+        }
     }
 
     fn ask_to_install_pyright(&self, hwnd: HWND) -> bool {
@@ -1289,6 +1327,44 @@ fn problem_counts<'a>(diagnostics: impl Iterator<Item = &'a LspDiagnostic>) -> (
     })
 }
 
+// The lines (first, last) covered by problems in only one of the lists: what
+// to redraw when `old` is replaced by `new`. None when nothing differs.
+fn changed_diagnostic_lines(
+    old: &[LspDiagnostic],
+    new: &[LspDiagnostic],
+) -> Option<(usize, usize)> {
+    let only_in = |these: &'_ [LspDiagnostic], those: &'_ [LspDiagnostic]| {
+        these
+            .iter()
+            .filter(|problem| !those.contains(problem))
+            .map(|problem| {
+                let start = problem.range.start.line as usize;
+                (start, (problem.range.end.line as usize).max(start))
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut changed = only_in(old, new);
+    changed.extend(only_in(new, old));
+    let first = changed.iter().map(|(start, _)| *start).min()?;
+    let last = changed.iter().map(|(_, end)| *end).max()?;
+    Some((first, last))
+}
+
+// Moves problems that start after line `edited_end` by `lines_added` (which
+// is negative when lines were removed); those on the edited lines stay.
+fn shift_diagnostics(diagnostics: &mut [LspDiagnostic], edited_end: u32, lines_added: i64) {
+    if lines_added == 0 {
+        return;
+    }
+    let shift = |line: &mut u32| *line = (i64::from(*line) + lines_added).max(0) as u32;
+    for diagnostic in diagnostics {
+        if diagnostic.range.start.line > edited_end {
+            shift(&mut diagnostic.range.start.line);
+            shift(&mut diagnostic.range.end.line);
+        }
+    }
+}
+
 // The folder of the Cargo workspace `file`'s package belongs to, or of the
 // package itself when it is in none.
 fn cargo_root(file: &Path) -> Option<PathBuf> {
@@ -1457,6 +1533,44 @@ mod tests {
             severity,
             message: String::new(),
         }
+    }
+
+    #[test]
+    fn only_lines_whose_problems_changed_are_redrawn() {
+        let at = |line, message: &str| {
+            let mut problem = diagnostic(1);
+            problem.range.start.line = line;
+            problem.range.end.line = line;
+            problem.message = message.into();
+            problem
+        };
+        let old = vec![at(3, "a"), at(10, "b"), at(20, "c")];
+        assert_eq!(changed_diagnostic_lines(&old, &old.clone()), None);
+        // One changed message: only its line.
+        let new = vec![at(3, "a"), at(10, "b2"), at(20, "c")];
+        assert_eq!(changed_diagnostic_lines(&old, &new), Some((10, 10)));
+        // One gone and one new: both lines and those between.
+        let new = vec![at(10, "b"), at(20, "c"), at(25, "d")];
+        assert_eq!(changed_diagnostic_lines(&old, &new), Some((3, 25)));
+    }
+
+    #[test]
+    fn problems_below_an_edit_move_with_their_lines() {
+        let at = |line| {
+            let mut problem = diagnostic(1);
+            problem.range.start.line = line;
+            problem.range.end.line = line;
+            problem
+        };
+        let mut problems = vec![at(2), at(5), at(9)];
+        // Two lines added by an edit ending on line 5.
+        shift_diagnostics(&mut problems, 5, 2);
+        let lines: Vec<u32> = problems.iter().map(|p| p.range.start.line).collect();
+        assert_eq!(lines, [2, 5, 11]);
+        // Three removed.
+        shift_diagnostics(&mut problems, 3, -3);
+        let lines: Vec<u32> = problems.iter().map(|p| p.range.start.line).collect();
+        assert_eq!(lines, [2, 2, 8]);
     }
 
     #[test]

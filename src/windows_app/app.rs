@@ -2100,11 +2100,32 @@ impl App {
             .syntax
             .as_mut()
             .is_some_and(|syntax| !syntax.advance_to(&tab.document, target, 2048));
+        let recolored = tab
+            .syntax
+            .as_mut()
+            .map_or(lightline::syntax::Recolored::Nothing, |syntax| {
+                syntax.take_recolored()
+            });
         unsafe {
             if pending {
                 SetTimer(hwnd, 2, 16, None);
             } else {
                 KillTimer(hwnd, 2);
+            }
+        }
+        // Only lines whose colors changed are redrawn: while a parse was
+        // pending, every 16 ms poll redrew the whole editor.
+        let panes = if self.split_visible { 0..2 } else { 0..1 };
+        for pane in panes.filter(|&pane| self.tab_for_pane(pane) == self.active) {
+            let areas = match recolored {
+                lightline::syntax::Recolored::Nothing => Vec::new(),
+                lightline::syntax::Recolored::Lines(first, last) => {
+                    self.rows_showing(hwnd, pane, &[(first, last)])
+                }
+                lightline::syntax::Recolored::Unknown => vec![self.editor_area(hwnd, false)],
+            };
+            for area in areas {
+                unsafe { InvalidateRect(hwnd, &area, 0) };
             }
         }
     }

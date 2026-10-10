@@ -2,6 +2,28 @@ use super::super::*;
 
 // The status bar names the language the way an editor does ("Rust", not "RS"),
 // falling back to the bare extension for types we have no display name for.
+// Whether all of `region` lies inside `areas`.
+fn region_within(region: HRGN, areas: &[RECT]) -> bool {
+    unsafe {
+        let allowed = CreateRectRgn(0, 0, 0, 0);
+        let outside = CreateRectRgn(0, 0, 0, 0);
+        if allowed.is_null() || outside.is_null() {
+            DeleteObject(allowed);
+            DeleteObject(outside);
+            return false;
+        }
+        for area in areas {
+            let part = CreateRectRgnIndirect(area);
+            CombineRgn(allowed, allowed, part, RGN_OR);
+            DeleteObject(part);
+        }
+        let left_over = CombineRgn(outside, region, allowed, RGN_DIFF);
+        DeleteObject(allowed);
+        DeleteObject(outside);
+        left_over == NULLREGION
+    }
+}
+
 pub(in crate::windows_app) fn language_label(path: Option<&Path>) -> String {
     let extension = path
         .and_then(Path::extension)
@@ -134,12 +156,21 @@ impl App {
         }
     }
 
-    // When everything to redraw lies inside the focused pane's text area (in
-    // practice a caret blink), draws only that: its background, the code
-    // pane and whatever floats over it. A full frame took 3–5 ms per blink,
+    // When everything to redraw lies inside the focused pane's code (a caret
+    // blink, or the rows a keystroke changed) and the status bar, draws only
+    // those: the code pane and whatever floats over it, and the status bar.
+    // A full frame took 3–5 ms per blink, and about as long per keystroke,
     // nearly all of it on panels outside the redrawn area, which the
-    // backbuffer still holds unchanged. False when the full frame is needed.
-    fn paint_code_area_only(&self, hwnd: HWND, hdc: HDC, dirty: RECT, window: RECT) -> bool {
+    // backbuffer still holds unchanged. `update` is the region to redraw, if
+    // known. False when the full frame is needed.
+    fn paint_code_area_only(
+        &self,
+        hwnd: HWND,
+        hdc: HDC,
+        dirty: RECT,
+        window: RECT,
+        update: HRGN,
+    ) -> bool {
         let pane = self.focused_pane;
         let editor_bottom = (window.bottom - self.scale(STATUS)).max(0);
         let code_bottom = editor_bottom
@@ -154,13 +185,27 @@ impl App {
             right: self.pane_right(hwnd, pane),
             bottom: code_bottom,
         };
-        // The scrollbar is left out: the card's border, drawn only in the
-        // full frame, runs down its right edge.
-        let inside = dirty.right > dirty.left
-            && dirty.left >= self.code_left(hwnd)
-            && dirty.top >= bounds.top
-            && dirty.right <= bounds.right - self.scale(SCROLLBAR)
-            && dirty.bottom <= bounds.bottom;
+        // The card's border and rounded corners are drawn only in the full
+        // frame: its left edge, the scrollbar strip along its right edge and
+        // its bottom corners are left out.
+        let code = RECT {
+            left: bounds.left + self.scale(1).max(1),
+            top: bounds.top,
+            right: bounds.right - self.scale(SCROLLBAR),
+            bottom: bounds.bottom - self.scale(CARD_RADIUS) - self.chrome_gap(),
+        };
+        let status = self.status_area(hwnd);
+        // The rows a keystroke changed and the status bar have a bounding
+        // box that takes in the side panel, so the region itself is checked.
+        let inside = if update.is_null() {
+            dirty.right > dirty.left
+                && dirty.left >= self.code_left(hwnd)
+                && dirty.top >= bounds.top
+                && dirty.right <= code.right
+                && dirty.bottom <= bounds.bottom
+        } else {
+            region_within(update, &[code, status])
+        };
         // A crossfade or a diff view draws over this area differently.
         if !inside
             || self.run_choice.is_some()
@@ -176,6 +221,9 @@ impl App {
             self.paint_code_pane(hdc, hwnd, pane, bounds, selection_bg);
             DeleteObject(selection_bg);
             SelectObject(hdc, self.ui_font);
+            if RectVisible(hdc, &status) != 0 {
+                self.paint_status_bar(hdc, window, editor_bottom);
+            }
         }
         self.paint_search_preview(hdc, bounds.left, bounds.right, code_bottom);
         self.paint_quick_open(hdc, window);
@@ -187,14 +235,191 @@ impl App {
         true
     }
 
+    // The status bar along the bottom of the window, from `editor_bottom`
+    // down: background, branch, problem counts, position and the last
+    // status message.
+    fn paint_status_bar(&self, hdc: HDC, rect: RECT, editor_bottom: i32) {
+        unsafe {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: editor_bottom,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+                self.theme.status_bg,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: editor_bottom,
+                    right: rect.right,
+                    bottom: editor_bottom + self.scale(1).max(1),
+                },
+                self.theme.edge,
+            );
+            SelectObject(hdc, self.ui_font);
+            // The status bar's contents; its background is filled above.
+            if RectVisible(
+                hdc,
+                &RECT {
+                    left: 0,
+                    top: editor_bottom,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+            ) != 0
+            {
+                // Durable repository health stays on the left; editor-specific
+                // details sit on the right beside the Ready indicator.
+                let branch = self.git_head_label();
+                let left_branch = format!("\u{2442}  {branch}");
+                let left_x = self.scale(16);
+                Self::label(
+                    hdc,
+                    &left_branch,
+                    left_x,
+                    editor_bottom + self.scale(5),
+                    self.theme.text,
+                    rect,
+                );
+                let health_x = left_x + self.text_width(hdc, &left_branch) + self.scale(24);
+                let (errors, warnings) = self.problem_counts();
+                let health = format!("⊗ {errors}    ⚠ {warnings}");
+                Self::label(
+                    hdc,
+                    &health,
+                    health_x,
+                    editor_bottom + self.scale(5),
+                    self.theme.muted,
+                    rect,
+                );
+                let left_info_right = health_x + self.text_width(hdc, &health);
+
+                let right_ready = "\u{25cf}  Ready";
+                let ready_width = self.text_width(hdc, right_ready);
+                let ready_x = rect.right - ready_width - self.scale(16);
+                Self::label(
+                    hdc,
+                    "\u{25cf}",
+                    ready_x,
+                    editor_bottom + self.scale(5),
+                    ui(52, 211, 153),
+                    rect,
+                );
+                Self::label(
+                    hdc,
+                    "Ready",
+                    ready_x + self.scale(14),
+                    editor_bottom + self.scale(5),
+                    self.theme.text,
+                    rect,
+                );
+
+                // Middle info: Ln, Col, Spaces, Encoding, Language. The language
+                // name is a real clickable control (see status_language_control),
+                // so it's drawn in the accent color used for other clickable
+                // labels instead of blending into the plain muted text.
+                // With no file open there is no document to describe, so the
+                // status message may use the space up to the Ready indicator.
+                let mid_x = if self.tab().is_placeholder() || self.tab().markdown.is_some() {
+                    ready_x
+                } else {
+                    let (mid_x, clip_right, prefix, language_rect) = self.status_language_control(
+                        hdc,
+                        rect,
+                        editor_bottom,
+                        left_info_right,
+                        ready_x,
+                    );
+                    let label_clip = RECT {
+                        left: mid_x,
+                        top: editor_bottom,
+                        right: clip_right,
+                        bottom: rect.bottom,
+                    };
+                    Self::label(
+                        hdc,
+                        &prefix,
+                        mid_x,
+                        editor_bottom + self.scale(5),
+                        self.theme.muted,
+                        label_clip,
+                    );
+                    let language = language_label(self.doc().path.as_deref());
+                    Self::label(
+                        hdc,
+                        &language,
+                        language_rect.left,
+                        editor_bottom + self.scale(5),
+                        ui(80, 160, 220),
+                        label_clip,
+                    );
+                    mid_x
+                };
+                // What the last action reported ("Formatted with ...", "WSL is not
+                // available ..."), shown for a few seconds in the free space
+                // between the problem counts and the cursor info.
+                if let Some(message) = self.fresh_status() {
+                    let left = left_info_right + self.scale(24);
+                    let right = mid_x - self.scale(16);
+                    if right > left + self.scale(40) {
+                        let lower = message.to_ascii_lowercase();
+                        let failed = [
+                            "fail",
+                            "error",
+                            "not available",
+                            "could not",
+                            "skipped",
+                            "invalid",
+                        ]
+                        .iter()
+                        .any(|word| lower.contains(word));
+                        Self::label(
+                            hdc,
+                            message,
+                            left,
+                            editor_bottom + self.scale(5),
+                            if failed {
+                                self.theme.error
+                            } else {
+                                self.theme.muted
+                            },
+                            RECT {
+                                left,
+                                top: editor_bottom,
+                                right,
+                                bottom: rect.bottom,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
         self.arm_recovery();
         unsafe {
             // The update region itself, read before BeginPaint validates it.
             let update = CreateRectRgn(0, 0, 0, 0);
-            let has_update = !update.is_null() && GetUpdateRgn(hwnd, update, 0) != 0;
+            let region = if update.is_null() {
+                ERROR
+            } else {
+                GetUpdateRgn(hwnd, update, 0)
+            };
+            let has_update = region == SIMPLEREGION || region == COMPLEXREGION;
             let mut ps = PAINTSTRUCT::default();
             let window_dc = BeginPaint(hwnd, &mut ps);
+            // Nothing to redraw (an empty update region): the whole frame's
+            // logic would run only to be clipped away.
+            if region == NULLREGION {
+                DeleteObject(update);
+                EndPaint(hwnd, &ps);
+                return;
+            }
             let mut rect = RECT::default();
             GetClientRect(hwnd, &mut rect);
             // Only the invalid area is drawn and copied to the screen: a caret
@@ -229,9 +454,17 @@ impl App {
             } else {
                 IntersectClipRect(hdc, dirty.left, dirty.top, dirty.right, dirty.bottom);
             }
-            if !update.is_null() {
-                DeleteObject(update);
-            }
+            // Kept for the fast path's check below, then freed.
+            let fast_region = if has_update && !fresh {
+                update
+            } else {
+                null_mut()
+            };
+            let free_update = || {
+                if !update.is_null() {
+                    DeleteObject(update);
+                }
+            };
             // Whether any of `area` is being redrawn.
             let shows = |area: RECT| RectVisible(hdc, &area) != 0;
             let present = |hdc: HDC| {
@@ -260,9 +493,12 @@ impl App {
                 SelectObject(hdc, old_font);
                 present(hdc);
                 EndPaint(hwnd, &ps);
+                free_update();
                 return;
             }
-            if self.paint_code_area_only(hwnd, hdc, dirty, rect) {
+            let fast = self.paint_code_area_only(hwnd, hdc, dirty, rect, fast_region);
+            free_update();
+            if fast {
                 SelectObject(hdc, old_font);
                 present(hdc);
                 EndPaint(hwnd, &ps);
@@ -283,7 +519,6 @@ impl App {
             let card_radius = self.scale(CARD_RADIUS);
             let bg = CreateSolidBrush(self.theme.editor_bg);
             let gutter_bg = CreateSolidBrush(self.theme.editor_bg);
-            let status_bg = CreateSolidBrush(self.theme.status_bg);
             let selection_bg = CreateSolidBrush(self.theme.select_bg);
             // The backdrop the cards float on. The rail stays flush to the
             // window edge; only the side panel and editor become cards.
@@ -1295,162 +1530,9 @@ impl App {
                     self.card_outline(hdc, ai_card, card_radius, self.theme.card_edge);
                 }
             }
-            FillRect(
-                hdc,
-                &RECT {
-                    left: 0,
-                    top: editor_bottom,
-                    right: rect.right,
-                    bottom: rect.bottom,
-                },
-                status_bg,
-            );
-            Self::fill(
-                hdc,
-                RECT {
-                    left: 0,
-                    top: editor_bottom,
-                    right: rect.right,
-                    bottom: editor_bottom + self.scale(1).max(1),
-                },
-                self.theme.edge,
-            );
-            SelectObject(hdc, self.ui_font);
-            // The status bar's contents; its background is filled above.
-            if shows(RECT {
-                left: 0,
-                top: editor_bottom,
-                right: rect.right,
-                bottom: rect.bottom,
-            }) {
-                // Durable repository health stays on the left; editor-specific
-                // details sit on the right beside the Ready indicator.
-                let branch = self.git_head_label();
-                let left_branch = format!("\u{2442}  {branch}");
-                let left_x = self.scale(16);
-                Self::label(
-                    hdc,
-                    &left_branch,
-                    left_x,
-                    editor_bottom + self.scale(5),
-                    self.theme.text,
-                    rect,
-                );
-                let health_x = left_x + self.text_width(hdc, &left_branch) + self.scale(24);
-                let (errors, warnings) = self.problem_counts();
-                let health = format!("⊗ {errors}    ⚠ {warnings}");
-                Self::label(
-                    hdc,
-                    &health,
-                    health_x,
-                    editor_bottom + self.scale(5),
-                    self.theme.muted,
-                    rect,
-                );
-                let left_info_right = health_x + self.text_width(hdc, &health);
-
-                let right_ready = "\u{25cf}  Ready";
-                let ready_width = self.text_width(hdc, right_ready);
-                let ready_x = rect.right - ready_width - self.scale(16);
-                Self::label(
-                    hdc,
-                    "\u{25cf}",
-                    ready_x,
-                    editor_bottom + self.scale(5),
-                    ui(52, 211, 153),
-                    rect,
-                );
-                Self::label(
-                    hdc,
-                    "Ready",
-                    ready_x + self.scale(14),
-                    editor_bottom + self.scale(5),
-                    self.theme.text,
-                    rect,
-                );
-
-                // Middle info: Ln, Col, Spaces, Encoding, Language. The language
-                // name is a real clickable control (see status_language_control),
-                // so it's drawn in the accent color used for other clickable
-                // labels instead of blending into the plain muted text.
-                // With no file open there is no document to describe, so the
-                // status message may use the space up to the Ready indicator.
-                let mid_x = if self.tab().is_placeholder() || self.tab().markdown.is_some() {
-                    ready_x
-                } else {
-                    let (mid_x, clip_right, prefix, language_rect) = self.status_language_control(
-                        hdc,
-                        rect,
-                        editor_bottom,
-                        left_info_right,
-                        ready_x,
-                    );
-                    let label_clip = RECT {
-                        left: mid_x,
-                        top: editor_bottom,
-                        right: clip_right,
-                        bottom: rect.bottom,
-                    };
-                    Self::label(
-                        hdc,
-                        &prefix,
-                        mid_x,
-                        editor_bottom + self.scale(5),
-                        self.theme.muted,
-                        label_clip,
-                    );
-                    let language = language_label(self.doc().path.as_deref());
-                    Self::label(
-                        hdc,
-                        &language,
-                        language_rect.left,
-                        editor_bottom + self.scale(5),
-                        ui(80, 160, 220),
-                        label_clip,
-                    );
-                    mid_x
-                };
-                // What the last action reported ("Formatted with ...", "WSL is not
-                // available ..."), shown for a few seconds in the free space
-                // between the problem counts and the cursor info.
-                if let Some(message) = self.fresh_status() {
-                    let left = left_info_right + self.scale(24);
-                    let right = mid_x - self.scale(16);
-                    if right > left + self.scale(40) {
-                        let lower = message.to_ascii_lowercase();
-                        let failed = [
-                            "fail",
-                            "error",
-                            "not available",
-                            "could not",
-                            "skipped",
-                            "invalid",
-                        ]
-                        .iter()
-                        .any(|word| lower.contains(word));
-                        Self::label(
-                            hdc,
-                            message,
-                            left,
-                            editor_bottom + self.scale(5),
-                            if failed {
-                                self.theme.error
-                            } else {
-                                self.theme.muted
-                            },
-                            RECT {
-                                left,
-                                top: editor_bottom,
-                                right,
-                                bottom: rect.bottom,
-                            },
-                        );
-                    }
-                }
-            }
+            self.paint_status_bar(hdc, rect, editor_bottom);
             DeleteObject(bg);
             DeleteObject(gutter_bg);
-            DeleteObject(status_bg);
             DeleteObject(selection_bg);
             DeleteObject(tab_bg);
             DeleteObject(active_bg);

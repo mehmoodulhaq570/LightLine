@@ -70,7 +70,7 @@ pub struct Range {
     pub end: Position,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostic {
     pub range: Range,
     pub severity: u8,

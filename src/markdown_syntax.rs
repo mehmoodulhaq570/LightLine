@@ -33,6 +33,7 @@ struct Fence {
 pub struct MarkdownSyntax {
     // states[i] is the code fence open at the start of line i, if any.
     states: Vec<Option<Fence>>,
+    pub(crate) recolored: crate::syntax::Recolored,
 }
 
 impl Default for MarkdownSyntax {
@@ -43,7 +44,10 @@ impl Default for MarkdownSyntax {
 
 impl MarkdownSyntax {
     pub fn new() -> Self {
-        Self { states: vec![None] }
+        Self {
+            states: vec![None],
+            recolored: crate::syntax::Recolored::Nothing,
+        }
     }
 
     pub fn invalidate_from(&mut self, line: usize) {
@@ -54,6 +58,7 @@ impl MarkdownSyntax {
     /// Returns false while lines up to `target` are still unscanned.
     pub fn advance_to(&mut self, document: &Document, target: usize, budget: usize) -> bool {
         let target = target.min(document.line_count().saturating_sub(1));
+        let scanned_before = self.states.len();
         for _ in 0..budget {
             if self.states.len() > target {
                 break;
@@ -61,6 +66,9 @@ impl MarkdownSyntax {
             let line = self.states.len() - 1;
             let next = fence_after(document.line(line), self.states[line]);
             self.states.push(next);
+        }
+        if self.states.len() != scanned_before {
+            self.recolored = crate::syntax::Recolored::Unknown;
         }
         self.states.len() > target
     }

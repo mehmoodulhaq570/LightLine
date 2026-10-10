@@ -183,12 +183,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             0
         }
         WM_TIMER if wparam == 2 => {
+            // Redraws whatever new colors arrived.
             app.advance_syntax(hwnd);
-            // New colors only show in the code panes.
-            let panes = app.editor_area(hwnd, false);
-            unsafe {
-                InvalidateRect(hwnd, &panes, 0);
-            }
             0
         }
         WM_TIMER if wparam == 3 => {
