@@ -1,5 +1,6 @@
 use super::super::terminal::cell_colors;
 use super::super::*;
+use super::code_pane::blend;
 
 // CURSOR uses a soft block color distinct from the palette so it stays visible on
 // both default and colored cells.
@@ -8,6 +9,7 @@ const CURSOR_BG: u32 = rgb(158, 178, 214);
 impl App {
     pub(in crate::windows_app) fn paint_terminal(
         &mut self,
+        hwnd: HWND,
         hdc: HDC,
         left: i32,
         right: i32,
@@ -42,19 +44,20 @@ impl App {
         let header_bottom = layout.header_bottom;
 
         let (errors, warnings) = self.problem_counts();
+        let problems_active = self.terminal_tab == TerminalTab::Problems;
         Self::label(
             hdc,
             &format!("PROBLEMS  {}", errors + warnings),
             layout.problems.left,
             top + self.scale(9),
-            if self.problems_shown {
+            if problems_active {
                 self.theme.text
             } else {
                 self.theme.muted
             },
             layout.problems,
         );
-        if self.problems_shown {
+        if problems_active {
             Self::fill(
                 hdc,
                 RECT {
@@ -67,7 +70,7 @@ impl App {
             );
         }
 
-        let output_active = self.terminal_tab == TerminalTab::Output && !self.problems_shown;
+        let output_active = self.terminal_tab == TerminalTab::Output;
         Self::label(
             hdc,
             "OUTPUT",
@@ -107,9 +110,8 @@ impl App {
             } else {
                 format!("{shell_tag} {title}")
             };
-            let active = self.terminal_tab == TerminalTab::Terminal
-                && index == self.terminal_active
-                && !self.problems_shown;
+            let active =
+                self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
             let clip = RECT {
                 left: rect.left,
                 top: rect.top,
@@ -180,6 +182,7 @@ impl App {
             if match self.terminal_tab {
                 TerminalTab::Output => self.run_session.is_some(),
                 TerminalTab::Terminal => shell_open,
+                TerminalTab::Problems => false,
             } {
                 self.theme.muted
             } else {
@@ -188,7 +191,7 @@ impl App {
             layout.kill,
         );
 
-        if self.problems_shown {
+        if problems_active {
             Self::label(
                 hdc,
                 "\u{d7}",
@@ -197,7 +200,34 @@ impl App {
                 self.theme.muted,
                 layout.hide,
             );
-            self.paint_problems(hdc, self.hwnd);
+            self.paint_problems(hdc, hwnd);
+            if let Some((track, slider)) = self.problems_scrollbar(hwnd) {
+                let edge = self.scale(1).max(1);
+                Self::fill(hdc, track, self.theme.editor_bg);
+                Self::fill(
+                    hdc,
+                    RECT {
+                        right: track.left + edge,
+                        ..track
+                    },
+                    self.theme.edge,
+                );
+                let strength = if self.problem_scrollbar_grab.is_some() {
+                    0.4
+                } else if self.problem_scrollbar_hover {
+                    0.3
+                } else {
+                    0.2
+                };
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: track.left + edge,
+                        ..slider
+                    },
+                    blend(self.theme.editor_bg, self.theme.text, strength),
+                );
+            }
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
             }
@@ -209,6 +239,7 @@ impl App {
                 .terminals
                 .get(self.terminal_active)
                 .and_then(|pane| pane.snapshot.clone()),
+            TerminalTab::Problems => None,
         };
         let status = match &active_snapshot {
             Some(snapshot) => match &snapshot.status {

@@ -1494,7 +1494,7 @@ impl App {
                     bottom: card_bottom,
                 })
             {
-                self.paint_terminal(hdc, editor_left, editor_card.right, card_bottom);
+                self.paint_terminal(hwnd, hdc, editor_left, editor_card.right, card_bottom);
             }
             // Card borders go on last: the interior fills above are square, so
             // drawing the outlines now is what keeps the rounded corners and

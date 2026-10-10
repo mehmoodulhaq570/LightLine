@@ -341,6 +341,9 @@ impl App {
                 return true;
             }
         }
+        if self.problems_key(hwnd, key, ctrl) {
+            return true;
+        }
         if self.panel_focus && !ctrl && self.side_view == SideView::Review && !self.commit_focus {
             // The list mixes section titles with rows, so navigation has to
             // step over the ones that cannot be opened.
@@ -588,8 +591,8 @@ impl App {
                 }
                 // Ctrl+Shift+M, as in VS Code.
                 0x4D if shift => {
-                    if self.problems_shown && self.terminal_visible {
-                        self.problems_shown = false;
+                    if self.terminal_tab == TerminalTab::Problems && self.terminal_visible {
+                        self.problem_focus = false;
                         self.hide_terminal(hwnd);
                     } else {
                         self.show_problems(hwnd);
@@ -1386,6 +1389,10 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+        if self.problem_focus {
+            self.problem_focus = false;
+            self.invalidate_problems(hwnd);
+        }
         if self.run_choice_click(hwnd, x, y) {
             return;
         }
@@ -1956,7 +1963,8 @@ impl App {
         }
         if self.terminal_visible && y >= self.terminal_top(hwnd) {
             let top = self.terminal_top(hwnd);
-            let header_bottom = top + self.scale(34);
+            let layout = self.terminal_header_layout(editor_left, rect.right, top);
+            let header_bottom = layout.header_bottom;
             if y < header_bottom {
                 match self.terminal_header_hit(editor_left, rect.right, top, x, y) {
                     // The far-right close hides the panel but keeps every
@@ -2132,6 +2140,10 @@ impl App {
     pub(super) fn mouse_drag(&mut self, hwnd: HWND, x: i32, y: i32) {
         if self.run_config_panel.is_some() {
             self.run_config_click(hwnd, x, y, true, true);
+            return;
+        }
+        if self.problem_scrollbar_grab.is_some() {
+            self.problems_scrollbar_drag(hwnd, y);
             return;
         }
         if self.scrollbar_grab.is_some() {

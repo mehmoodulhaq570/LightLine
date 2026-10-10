@@ -829,6 +829,7 @@ impl App {
                             );
                         }
                     }
+                    self.clamp_problems();
                 }
                 WorkerMessage::Formatted {
                     path,

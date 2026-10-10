@@ -2,7 +2,7 @@ use super::super::*;
 use super::*;
 
 // `amount` (0..=1) of `over` mixed into `base`; both are COLORREFs.
-fn blend(base: u32, over: u32, amount: f32) -> u32 {
+pub(super) fn blend(base: u32, over: u32, amount: f32) -> u32 {
     let channel = |shift: u32| {
         let from = ((base >> shift) & 0xff) as f32;
         let to = ((over >> shift) & 0xff) as f32;

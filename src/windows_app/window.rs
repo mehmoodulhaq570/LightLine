@@ -422,6 +422,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         WM_MOUSEMOVE => {
             if (app.dragging
                 || app.scrollbar_grab.is_some()
+                || app.problem_scrollbar_grab.is_some()
                 || app.divider_dragging
                 || app.sidebar_dragging
                 || app.terminal_resizing
@@ -444,6 +445,12 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         }
         WM_LBUTTONUP => {
             app.run_config_end_drag();
+            if app.problem_scrollbar_grab.take().is_some() {
+                // Released away from it, the scrollbar is no longer under the
+                // mouse.
+                app.problem_scrollbar_hover = false;
+                app.invalidate_problems(hwnd);
+            }
             if app.scrollbar_grab.take().is_some() {
                 app.invalidate_scrollbar(hwnd, app.focused_pane);
                 // Released away from the scrollbar, it's no longer under the
@@ -484,6 +491,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.sidebar_dragging = false;
             app.terminal_resizing = false;
             app.terminal_selecting = false;
+            app.problem_scrollbar_grab = None;
             if app.scrollbar_grab.take().is_some() {
                 app.invalidate_scrollbar(hwnd, app.focused_pane);
             }
@@ -555,6 +563,11 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 && point.x >= app.editor_left()
                 && point.y >= app.terminal_top(hwnd)
             {
+                // Over the Problems tab strip: nothing to scroll.
+                if app.terminal_tab == TerminalTab::Problems {
+                    return 0;
+                }
+
                 app.scroll_terminal(hwnd, delta as i32);
                 return 0;
             }

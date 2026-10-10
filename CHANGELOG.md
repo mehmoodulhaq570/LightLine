@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
-- **Problems Panel**: `Ctrl+Shift+M`, the **PROBLEMS** tab in the bottom panel, or a click on the error and warning counts in the status bar lists every error, warning and note in the open files, grouped by file with line and column. Click one to jump to it. The tab shows the count and updates as the language server reports.
+- **Problems Panel**: `Ctrl+Shift+M`, the **PROBLEMS** tab in the bottom panel, or a click on the error and warning counts in the status bar lists every error, warning and note in the open files, grouped by file with line and column. Click one to jump to it, or use `Up`/`Down` and `Enter`; `Esc` returns the keyboard to the editor. Long lists scroll with the wheel or the scrollbar. The tab shows the count and updates as the language server reports. Built with @Mayuri-004's Problems tab (#61, for #15).
 - **Go to Symbol in Workspace**: Type `#` in Quick Open (or press `Ctrl+T`) and a name to search the whole project's functions, types and methods through the language server, then press `Enter` to open the file at that symbol. rust-analyzer now searches all symbols, not only types.
 - **Inlay Hints**: Types of variables and the names of parameters show in muted text inside the code (`let total: i32 = add(left: 1, right: 2)`), from the language server. They move with the text as you type and refresh once typing pauses; the caret, clicks and selection skip over them. Turn them off with `"inlayHints": false` in Settings. Typing speed is unchanged.
 

@@ -704,7 +704,7 @@ impl App {
             }
         }
         if diagnostics_changed {
-            self.problems_first = self.problems_first.min(self.problem_rows().len());
+            self.clamp_problems();
             self.invalidate_problems(hwnd);
         }
         if repaint_all {
@@ -821,6 +821,21 @@ impl App {
         if self.editor_context_hover(hwnd, x, y) || self.more_menu_hover(hwnd, x, y) {
             return;
         }
+
+        if self.terminal_tab == TerminalTab::Problems {
+            let over_problem_scrollbar = self.problems_scrollbar_at(hwnd, x, y);
+            if over_problem_scrollbar != self.problem_scrollbar_hover {
+                self.problem_scrollbar_hover = over_problem_scrollbar;
+                if let Some((track, _)) = self.problems_scrollbar(hwnd) {
+                    unsafe { InvalidateRect(hwnd, &track, 0) };
+                }
+            }
+            if over_problem_scrollbar {
+                self.clear_hover(hwnd);
+                return;
+            }
+        }
+
         let over_scrollbar = self.scrollbar_at(hwnd, x, y);
         self.set_scrollbar_hover(hwnd, over_scrollbar);
         if over_scrollbar.is_some() {

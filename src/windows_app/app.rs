@@ -17,6 +17,7 @@ pub(super) enum SideView {
 pub(super) enum TerminalTab {
     Output,
     Terminal,
+    Problems,
 }
 
 // One interactive shell instance in the bottom Terminal area. Each pane owns
@@ -738,6 +739,11 @@ pub(super) struct App {
     pub(super) scrollbar_grab: Option<(i32, usize)>,
     // The pane whose scrollbar is under the mouse, drawn lighter.
     pub(super) scrollbar_hover: Option<usize>,
+    // While the Problems scrollbar slider is held: the mouse's y when it
+    // was pressed, and the problem index then at the top.
+    pub(super) problem_scrollbar_grab: Option<(i32, usize)>,
+    // Whether the Problems scrollbar is under the mouse.
+    pub(super) problem_scrollbar_hover: bool,
     // The window title last set, for the same reason: setting it on every
     // click and keystroke made Windows redraw the frame and tell the
     // taskbar each time, even when it hadn't changed.
@@ -784,6 +790,8 @@ pub(super) struct App {
     pub(super) terminal_selecting: bool,
     pub(super) terminal_select_anchor: Option<(u16, u16)>,
     pub(super) terminal_select_end: Option<(u16, u16)>,
+    pub(super) problem_selected: usize,
+    pub(super) problem_first: usize,
     pub(super) explorer_first_row: usize,
     pub(super) explorer_input: Option<ExplorerInputState>,
     pub(super) selected_explorer_path: Option<PathBuf>,
@@ -826,6 +834,7 @@ pub(super) struct App {
     pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
     pub(super) terminal_focus: bool,
+    pub(super) problem_focus: bool,
     pub(super) terminal_profile_menu_open: bool,
     pub(super) terminal_profile_defaults_open: bool,
     pub(super) terminal_profile_availability: Vec<(ShellKind, bool)>,
@@ -910,10 +919,6 @@ pub(super) struct App {
     pub(super) multi_editing: bool,
     // The button under the mouse (see hot.rs).
     pub(super) hot: Option<Hot>,
-    // The bottom panel shows the Problems list (problems.rs) instead of the
-    // Output or terminal tab, scrolled to `problems_first`.
-    pub(super) problems_shown: bool,
-    pub(super) problems_first: usize,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1307,6 +1312,8 @@ impl App {
             backbuffer: None,
             scrollbar_grab: None,
             scrollbar_hover: None,
+            problem_scrollbar_grab: None,
+            problem_scrollbar_hover: false,
             transition: None,
             status: "Ready".into(),
             title_shown: RefCell::new(String::new()),
@@ -1372,6 +1379,8 @@ impl App {
             }),
             terminal_tab: TerminalTab::Terminal,
             terminals: Vec::new(),
+            problem_selected: 0,
+            problem_first: 0,
             terminal_active: 0,
             terminal_counter: 0,
             run_session: None,
@@ -1379,6 +1388,7 @@ impl App {
             run_applied_size: None,
             terminal_visible: false,
             terminal_focus: false,
+            problem_focus: false,
             terminal_profile_menu_open: false,
             terminal_profile_defaults_open: false,
             terminal_profile_availability: Vec::new(),
@@ -1445,8 +1455,6 @@ impl App {
             signature_request: None,
             multi_editing: false,
             hot: None,
-            problems_shown: false,
-            problems_first: 0,
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;
@@ -2252,6 +2260,7 @@ impl App {
     pub(super) fn activate_tab(&mut self, hwnd: HWND, index: usize) {
         if index < self.tabs.len() {
             self.terminal_focus = false;
+            self.problem_focus = false;
             if index != self.active {
                 self.start_transition(hwnd);
             }
@@ -2523,7 +2532,6 @@ impl App {
             },
         ))
     }
-
     /// The code pane whose scrollbar is at (`x`, `y`).
     pub(super) fn scrollbar_at(&self, hwnd: HWND, x: i32, y: i32) -> Option<usize> {
         if self.quick_open {
