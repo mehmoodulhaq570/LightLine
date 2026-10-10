@@ -16,6 +16,14 @@ impl App {
             SideView::Extensions => self.explorer_visible.then_some(4),
             SideView::Settings => None,
         };
+        // Under the mouse: a pill behind it (the selected one has its own).
+        if let Some(hot) = self.hot
+            && let Some(rect) = self.rail_item_rect(hot, editor_bottom)
+            && !matches!(hot, Hot::Rail(index) if selected == Some(index)
+                || (index == 5 && self.ai_assistant_visible))
+        {
+            Self::rounded_fill(hdc, rect, self.scale(7), hover_fill());
+        }
         // ☰: three bars, centered in the rail.
         let bar_left = self.scale(RAIL / 2 - 9);
         for bar in 0..3 {
@@ -55,6 +63,8 @@ impl App {
             }
             let color = if is_selected {
                 label_on(ui(18, 35, 72), 240, 245, 255)
+            } else if self.hot == Some(Hot::Rail(index)) {
+                self.theme.text
             } else {
                 self.theme.muted
             };
@@ -66,32 +76,6 @@ impl App {
                 if is_selected { ui(56, 189, 248) } else { color },
             );
         }
-        let name = "";
-        Self::label(
-            hdc,
-            "",
-            self.scale(20),
-            editor_bottom - self.scale(104),
-            self.theme.muted,
-            clip,
-        );
-        Self::label(
-            hdc,
-            name,
-            self.scale(20),
-            editor_bottom - self.scale(82),
-            self.theme.text,
-            clip,
-        );
-        let branch = "";
-        Self::label(
-            hdc,
-            &format!("◎{branch}"),
-            self.scale(20),
-            editor_bottom - self.scale(58),
-            self.theme.muted,
-            clip,
-        );
         let settings_open = self.side_view == SideView::Settings && self.explorer_visible;
         Self::label(
             hdc,
@@ -100,17 +84,11 @@ impl App {
             editor_bottom - self.scale(32),
             if settings_open {
                 ui(56, 189, 248)
+            } else if self.hot == Some(Hot::RailSettings) {
+                self.theme.text
             } else {
                 self.theme.muted
             },
-            clip,
-        );
-        Self::label(
-            hdc,
-            "→",
-            self.scale(54),
-            editor_bottom - self.scale(31),
-            self.theme.muted,
             clip,
         );
     }

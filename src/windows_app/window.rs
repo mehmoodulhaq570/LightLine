@@ -88,6 +88,15 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
     };
     match msg {
         WM_ERASEBKGND => 1,
+        #[cfg(debug_assertions)]
+        hot::HOVER_TEST_MESSAGE => {
+            app.hover_for_test(
+                hwnd,
+                (lparam as u32 & 0xffff) as i16 as i32,
+                ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+            );
+            0
+        }
         WM_NCHITTEST => {
             let default_hit = unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
             if default_hit != HTCLIENT as LRESULT {
@@ -480,6 +489,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         }
         WM_MOUSELEAVE => {
             app.set_scrollbar_hover(hwnd, None);
+            app.clear_hot(hwnd);
             0
         }
         WM_RBUTTONUP => {

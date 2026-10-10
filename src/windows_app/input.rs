@@ -1347,6 +1347,7 @@ impl App {
                     self.set_workspace(hwnd, path);
                 }
             }
+            WelcomeAction::Settings => self.open_settings_panel(hwnd),
         }
     }
 
@@ -1529,25 +1530,17 @@ impl App {
         }
         if x < rail {
             self.terminal_focus = false;
-            let y = y - self.chrome_top();
-            let panel_bottom = rect.bottom - self.chrome_top();
-            if y >= self.scale(RAIL_MENU_ROW) && y < self.scale(RAIL_FIRST_ROW) {
-                self.toggle_sidebar(hwnd);
-            } else if y >= self.scale(RAIL_FIRST_ROW)
-                && y < self.scale(RAIL_FIRST_ROW + RAIL_ROW * 6)
-            {
-                let row = (y - self.scale(RAIL_FIRST_ROW)) / self.scale(RAIL_ROW).max(1);
-                match row {
-                    0 => self.toggle_side_view(hwnd, SideView::Files),
-                    1 => self.toggle_side_view(hwnd, SideView::Search),
-                    2 => self.toggle_side_view(hwnd, SideView::Review),
-                    3 => self.toggle_side_view(hwnd, SideView::Debug),
-                    4 => self.toggle_side_view(hwnd, SideView::Extensions),
-                    5 => self.toggle_ai_assistant(hwnd),
-                    _ => {}
-                }
-            } else if y >= panel_bottom - self.scale(STATUS + 40) {
-                self.toggle_side_view(hwnd, SideView::Settings);
+            // The same hit test as the hover highlight (hot.rs).
+            match self.rail_item_at(y - self.chrome_top(), rect.bottom - self.chrome_top()) {
+                Some(Hot::RailMenu) => self.toggle_sidebar(hwnd),
+                Some(Hot::Rail(0)) => self.toggle_side_view(hwnd, SideView::Files),
+                Some(Hot::Rail(1)) => self.toggle_side_view(hwnd, SideView::Search),
+                Some(Hot::Rail(2)) => self.toggle_side_view(hwnd, SideView::Review),
+                Some(Hot::Rail(3)) => self.toggle_side_view(hwnd, SideView::Debug),
+                Some(Hot::Rail(4)) => self.toggle_side_view(hwnd, SideView::Extensions),
+                Some(Hot::Rail(5)) => self.toggle_ai_assistant(hwnd),
+                Some(Hot::RailSettings) => self.toggle_side_view(hwnd, SideView::Settings),
+                _ => {}
             }
             return;
         }

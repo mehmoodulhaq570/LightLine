@@ -16,6 +16,8 @@ mod rename;
 mod workspace_edit;
 mod wrap;
 use code_actions::{CodeActionMenu, CodeActionRequest};
+mod hot;
+use hot::{Hot, hover_fill};
 mod multi_cursor;
 mod signature;
 use signature::{SignatureCard, SignatureRequest};

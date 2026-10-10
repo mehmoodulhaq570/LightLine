@@ -35,6 +35,19 @@ pub(in crate::windows_app) enum WelcomeAction {
     CommandPalette,
     Community,
     Recent(usize),
+    Settings,
+}
+
+/// What the welcome rail's button `index` (as in `WelcomeLayout::targets`,
+/// which starts with them) opens, for its tip; None past them.
+pub(in crate::windows_app) fn welcome_rail_tip(
+    targets: &[(RECT, WelcomeAction)],
+    index: usize,
+) -> Option<&'static str> {
+    if let Some((label, _, _)) = NAV_ITEMS.get(index) {
+        return Some(label);
+    }
+    (targets.get(index)?.1 == WelcomeAction::Settings).then_some("Settings (Ctrl+,)")
 }
 
 // Rail icon indices shared with App::rail_icon, so the welcome nav and the
@@ -163,6 +176,16 @@ impl App {
                 *action,
             ));
         }
+
+        targets.push((
+            RECT {
+                left: s(7),
+                top: status_top - s(42),
+                right: rail_right - s(7),
+                bottom: status_top - s(4),
+            },
+            WelcomeAction::Settings,
+        ));
 
         let compact_hero = hero_panel.bottom - hero_panel.top < s(270);
         let button_height = if compact_hero { s(46) } else { s(50) };
@@ -322,6 +345,7 @@ impl App {
             );
             SelectObject(hdc, self.brand_font);
         }
+        let name_width = self.text_width(hdc, "LightLine");
         Self::label(
             hdc,
             "LightLine",
@@ -331,39 +355,31 @@ impl App {
             RECT {
                 left: s(56),
                 top: 0,
-                right: s(160),
+                right: s(56) + name_width,
                 bottom: layout.content_top,
             },
         );
-        Self::rounded_fill(
+        self.paint_ide_badge(
             hdc,
-            RECT {
-                left: s(132),
-                top: s(15),
-                right: s(164),
-                bottom: s(35),
-            },
+            self.ui_font,
+            s(56) + name_width + s(6),
+            s(25),
+            s(20),
+            s(6),
             s(5),
             ui(63, 47, 150),
         );
         unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(
-            hdc,
-            "IDE",
-            s(138),
-            s(15),
-            self.theme.text,
-            RECT {
-                left: s(132),
-                top: 0,
-                right: s(164),
-                bottom: layout.content_top,
-            },
-        );
 
         let command = self.command_center_rect(hwnd);
         if command.right > command.left {
-            self.panel_card(hdc, command, s(6), ui(43, 76, 132), ui(12, 25, 48));
+            self.panel_card(
+                hdc,
+                command,
+                s(6),
+                self.command_center_edge(),
+                ui(12, 25, 48),
+            );
             self.rail_icon(
                 hdc,
                 1,
@@ -401,6 +417,7 @@ impl App {
             );
         }
 
+        self.paint_hot_title_button(hdc, hwnd);
         let button = s(46);
         let controls_left = rect.right - button * 3;
         let middle = layout.content_top / 2;
@@ -475,14 +492,6 @@ impl App {
         }
         Self::label(
             hdc,
-            "◎",
-            s(19),
-            layout.status_top - s(62),
-            self.theme.muted,
-            clip,
-        );
-        Self::label(
-            hdc,
             "⚙",
             s(18),
             layout.status_top - s(34),
@@ -553,25 +562,15 @@ impl App {
             clip,
         );
         let badge_left = word_left + self.text_width(hdc, "LightLine") + s(16);
-        Self::rounded_fill(
+        self.paint_ide_badge(
             hdc,
-            RECT {
-                left: badge_left,
-                top: logo_top + s(if compact { 8 } else { 10 }),
-                right: badge_left + s(60),
-                bottom: logo_top + s(if compact { 42 } else { 46 }),
-            },
+            self.title_font,
+            badge_left,
+            logo_top + logo_size / 2,
+            s(if compact { 34 } else { 36 }),
+            s(12),
             s(7),
             ui(78, 56, 176),
-        );
-        unsafe { SelectObject(hdc, self.title_font) };
-        self.label_mid(
-            hdc,
-            "IDE",
-            badge_left + s(12),
-            logo_top + logo_size / 2,
-            self.theme.text,
-            clip,
         );
         unsafe { SelectObject(hdc, self.title_font) };
         let slogan_top = logo_top + s(if compact { 50 } else { 70 });

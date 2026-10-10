@@ -896,6 +896,8 @@ pub(super) struct App {
     // True while an edit is made at every caret (multiple cursors); any
     // other edit drops the extra carets, whose places it doesn't track.
     pub(super) multi_editing: bool,
+    // The button under the mouse (see hot.rs).
+    pub(super) hot: Option<Hot>,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1424,6 +1426,7 @@ impl App {
             signature: None,
             signature_request: None,
             multi_editing: false,
+            hot: None,
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;

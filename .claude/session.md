@@ -136,4 +136,15 @@ Done in this order, each tested live (drivers in the scratchpad: `ll.py` helper,
 - Syntax worker: really ~1.7 ms per keystroke (benchmark: 1.5 ms of it tree-sitter's incremental reparse, 0.16 ms the full span copy) and ~4 ms of thread CPU live at low clocks; it's off the UI thread. The earlier "6.5 ms" note was wrong. Left as is.
 - Multiple cursors: windows_app/multi_cursor.rs; `EditorView::extra: Vec<Caret>` besides the main caret. `replace_range` (unless `App::multi_editing`), `move_cursor` and undo drop the extras; `keystroke_stays_in_editor` is false with extras, so those keystrokes repaint the editor fully. Extra carets don't blink. Paste/copy weren't driven live (they'd use the user's clipboard).
 
+## Follow-up: GitHub issue check (2026-10-11, uncommitted)
+
+Every open user report was checked against the current build (live, driver `t_issues.py`, `t_hover.py`):
+
+- #20 "VCRUNTIME140.dll was not found": real. `.cargo/config.toml` now links the C runtime statically (`+crt-static`, x64 and ARM64); the exe imports only Windows DLLs (checked with `pe_imports.py`) and runs.
+- #62 / #5.1 / #3.2–3 / #16 tooltips: windows_app/hot.rs. `Hot` = rail items, title buttons, command center, Welcome targets; `hot_at` is also the rail click's hit test (`rail_item_at`), Welcome uses its layout targets. Hover redraws only old/new button + tip. Welcome ⚙ is now a target (opens Settings); dead "◎"/"→"/empty labels removed from the rails. Debug builds take `HOVER_TEST_MESSAGE` (WM_APP+98) because WM_MOUSEMOVE from a test triggers an instant WM_MOUSELEAVE.
+- #3.1 badge: `paint_ide_badge` (render/primitives.rs) sizes it from its text, used by the title bar and the Welcome header/hero.
+- Checked and fine: #29.1 scrollbar unchanged by keys/clicks; #22.2 no white pixels at the right edge while typing; #22.1 Stop Running Program and closing LightLine both end a running program; #14.1 terminal: 20,000 lines 4.1 s vs 4.2–4.4 s in conhost with the same PowerShell 7, window responsive (worst ping 7 ms); #5.2 Open Folder is the modern folder picker.
+- Still open: #13 code signing (SignPath), #52 more Run languages (contributor), #29.5 "folder section UI" (no details).
+- Reply drafts for each issue were given to the user to post; nothing was posted.
+
 - Live tests on this PC: the user is often using the machine, and windows that open on top of their work get minimized. Launch LightLine, immediately `SetWindowPos` it to (20000, 20000) with SWP_NOACTIVATE and hand the foreground back (AttachThreadInput + SetForegroundWindow to the previous window); STARTUPINFO position is ignored because LightLine places itself. Capture off-screen windows with PrintWindow(PW_RENDERFULLCONTENT); the first capture after launch can be all black, so retry. BitBlt stale-pixel checks need an on-screen window, so they weren't run for the rename box.

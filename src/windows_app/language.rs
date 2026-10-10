@@ -774,6 +774,7 @@ impl App {
     }
 
     pub(super) fn mouse_hover_move(&mut self, hwnd: HWND, x: i32, y: i32) {
+        self.update_hot(hwnd, x, y);
         if self.run_config_panel.is_some() {
             self.run_config_hover(hwnd, x, y);
             return;

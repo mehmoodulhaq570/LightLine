@@ -235,6 +235,7 @@ impl App {
         self.paint_completion(hdc, window, editor_bottom);
         self.paint_editor_context_menu(hdc, hwnd);
         self.paint_more_menu(hdc, hwnd);
+        self.paint_hot_tip(hdc, hwnd);
         true
     }
 
@@ -491,6 +492,8 @@ impl App {
             SetBkMode(hdc, TRANSPARENT as i32);
             if self.welcome {
                 self.paint_welcome(hwnd, hdc, rect);
+                self.paint_hot_welcome(hdc, hwnd);
+                self.paint_hot_tip(hdc, hwnd);
                 self.paint_quick_open(hdc, rect);
                 self.paint_run_configurations(hwnd, hdc);
                 SelectObject(hdc, old_font);
@@ -577,6 +580,7 @@ impl App {
                     DI_NORMAL,
                 );
                 SelectObject(hdc, self.brand_font);
+                let name_width = self.text_width(hdc, "LightLine");
                 Self::label(
                     hdc,
                     "LightLine",
@@ -586,35 +590,22 @@ impl App {
                     RECT {
                         left: self.scale(56),
                         top: 0,
-                        right: self.scale(160),
+                        right: self.scale(56) + name_width,
                         bottom: chrome_top,
                     },
                 );
-                Self::rounded_fill(
+                self.paint_ide_badge(
                     hdc,
-                    RECT {
-                        left: self.scale(132),
-                        top: self.scale(15),
-                        right: self.scale(164),
-                        bottom: self.scale(35),
-                    },
+                    self.ui_font,
+                    self.scale(56) + name_width + self.scale(6),
+                    self.scale(25),
+                    self.scale(20),
+                    self.scale(6),
                     self.scale(5),
                     ui(63, 47, 150),
                 );
                 SelectObject(hdc, self.ui_font);
-                Self::label(
-                    hdc,
-                    "IDE",
-                    self.scale(138),
-                    self.scale(15),
-                    self.theme.text,
-                    RECT {
-                        left: self.scale(132),
-                        top: 0,
-                        right: self.scale(164),
-                        bottom: chrome_top,
-                    },
-                );
+                self.paint_hot_title_button(hdc, hwnd);
                 let title_button = self.scale(46);
                 let controls_left = rect.right - title_button * 3;
                 let controls_mid_y = chrome_top / 2;
@@ -994,7 +985,7 @@ impl App {
                     hdc,
                     command_rect,
                     self.scale(6),
-                    ui(43, 76, 132),
+                    self.command_center_edge(),
                     ui(12, 25, 48),
                 );
                 self.rail_icon(
@@ -1587,6 +1578,7 @@ impl App {
             self.paint_more_menu(hdc, hwnd);
             self.paint_run_choice(hwnd, hdc);
             self.paint_run_configurations(hwnd, hdc);
+            self.paint_hot_tip(hdc, hwnd);
             SelectObject(hdc, old_font);
             present(hdc);
             EndPaint(hwnd, &ps);

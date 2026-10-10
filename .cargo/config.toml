@@ -1,0 +1,9 @@
+# Link the C runtime into lightline.exe. Linked dynamically, the exe needed
+# VCRUNTIME140.dll from the Visual C++ Redistributable, which many PCs don't
+# have: Windows refused to start it with "VCRUNTIME140.dll was not found"
+# (issue #20). The Universal CRT it also uses ships with Windows 10 and 11.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

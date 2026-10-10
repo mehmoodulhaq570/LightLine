@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Buttons Respond to the Mouse**: The left rail, the title-bar buttons, the search box and every Welcome screen action now light up under the mouse, and icon-only buttons show what they do in a small tip ("Search in files (Ctrl+Shift+F)", "Settings (Ctrl+,)"); Close turns red, as in Windows. Only the button that changed is redrawn, and nothing runs while the mouse is still. The Welcome screen's ⚙ now opens Settings, and decorative marks in the rails that looked clickable but did nothing are gone (#62, #5, #3).
 - **Multiple Cursors**: `Alt+Click` adds a cursor, `Ctrl+Alt+Up`/`Down` adds one on the line above or below, and `Ctrl+D` selects the word at the cursor, then each next match. Typing, `Enter`, `Backspace`, `Delete`, arrows, `Home`/`End`, cut, copy and paste then act at every cursor, and one `Ctrl+Z` undoes the edit at all of them. `Esc` goes back to one cursor.
 - **Go to Symbol**: Type `@` in Quick Open (`Ctrl+P`) to list the current file's functions, types, methods and fields from its language server; type to filter and press `Enter` to jump. Also **Go to Symbol in File** in the Command Palette.
 - **Parameter Hints**: Typing `(` or `,` in a call shows the function's signature above the cursor, with the parameter being typed highlighted; it follows along as you type and closes when you leave the call. `Ctrl+Shift+Space` shows it by hand, `Esc` hides it. Only the hint itself is redrawn, so typing stays as fast.
@@ -57,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Fixed
 
+- **Starts Without the Visual C++ Runtime**: On PCs without the Visual C++ Redistributable, Windows refused to start LightLine with "VCRUNTIME140.dll was not found" (#20). The C runtime is now built into `lightline.exe`, which needs only what ships with Windows 10 and 11.
+- **The "IDE" Badge Fits Its Text**: The badge beside the LightLine name had a fixed width, so on some fonts and display scales its text ran past the edge (#3). It's now sized from its text.
 - **Saving Through a Symbolic Link**: Saving a file opened through a symbolic link replaced the link with a plain copy. It now saves into the file the link points at, and the link stays.
 - **Mixed Line Endings Are Kept**: A file mixing Windows (CRLF) and Unix (LF) line endings was saved with one kind throughout, changing every other line in a diff. Each line now keeps its ending; new lines use the file's more common one, and pressing Enter at the end of a line leaves that line's ending alone.
 - **F2 Renames in the Explorer**: The User Guide listed `F2` for renaming the selected file or folder in the Explorer, but the key did nothing. It now opens the rename field, as the right-click **Rename** does.

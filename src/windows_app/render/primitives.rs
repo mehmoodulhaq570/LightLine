@@ -160,6 +160,38 @@ impl App {
         );
     }
 
+    /// The "IDE" badge after the product name, sized from its text in
+    /// `font` so the text stays inside on any font or scale (it ran past a
+    /// fixed-width box, #3). Centered on `middle`, `pad` either side of the
+    /// text; returns its right edge.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::windows_app) fn paint_ide_badge(
+        &self,
+        hdc: HDC,
+        font: HFONT,
+        left: i32,
+        middle: i32,
+        height: i32,
+        pad: i32,
+        radius: i32,
+        color: u32,
+    ) -> i32 {
+        unsafe {
+            let previous = SelectObject(hdc, font);
+            let right = left + self.text_width(hdc, "IDE") + pad * 2;
+            let badge = RECT {
+                left,
+                top: middle - height / 2,
+                right,
+                bottom: middle - height / 2 + height,
+            };
+            Self::rounded_fill(hdc, badge, radius, color);
+            self.label_mid(hdc, "IDE", left + pad, middle, self.theme.text, badge);
+            SelectObject(hdc, previous);
+            right
+        }
+    }
+
     pub(in crate::windows_app) fn caret_rect(&self, hwnd: HWND) -> RECT {
         unsafe {
             let cursor = self.doc().clamp(self.view().cursor);
