@@ -233,8 +233,10 @@ fn parse_event(line: &str) -> Event {
 }
 
 /// Asks `model` at `endpoint` to answer `messages`, handing each piece of
-/// the answer to `on_text` as it arrives. Returns early (Ok) once `cancel`
-/// is set.
+/// the answer to `on_text` as it arrives. While the answer is quiet,
+/// `on_text` also gets an empty piece every `CANCEL_CHECK`, so a caller that
+/// batches pieces can pass on what it holds. Returns early (Ok) once
+/// `cancel` is set.
 pub fn stream_chat(
     endpoint: &str,
     model: &str,
@@ -285,7 +287,10 @@ pub fn stream_chat(
             Err(RecvTimeoutError::Timeout) if last_line.elapsed() >= quiet_limit => {
                 return Err("The server stopped answering".into());
             }
-            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Timeout) => {
+                on_text("");
+                continue;
+            }
             Err(RecvTimeoutError::Disconnected) => break,
         };
         last_line = Instant::now();
@@ -549,7 +554,11 @@ mod tests {
             "m",
             &[Message::new(Role::User, "hi")],
             &cancel,
-            |text| pieces.push(text.to_string()),
+            |text| {
+                if !text.is_empty() {
+                    pieces.push(text.to_string());
+                }
+            },
         )
         .unwrap();
         assert_eq!(pieces, ["Hel", "lo"]);
@@ -589,7 +598,10 @@ mod tests {
             |text| pieces.push(text.to_string()),
         )
         .unwrap();
-        assert_eq!(pieces, ["Hel"]);
+        // The piece, then empty ones while the answer is quiet: what lets a
+        // caller pass on held text without waiting for the next piece.
+        assert_eq!(pieces[0], "Hel");
+        assert!(pieces.len() > 1 && pieces[1..].iter().all(String::is_empty));
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
     }
 

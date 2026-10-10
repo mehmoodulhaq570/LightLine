@@ -102,9 +102,9 @@ LightLine collects no usage data and sends nothing on its own. It uses the netwo
 - push, pull or fetch with Git;
 - run **Python: Install debugpy**;
 - allow web images in a Markdown preview;
-- open a Python file for the first time, when it downloads Pyright.
+- open a Python file without Pyright installed, when it asks before downloading Pyright.
 
-LightLine stores preferences and caches in `%APPDATA%\LightLine`, edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in `.lightline-run` beside the source file; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
+LightLine stores preferences and caches in `%APPDATA%\LightLine`, edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in a `lightline-run` folder in your temp directory; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
 
 ## Code signing policy
 

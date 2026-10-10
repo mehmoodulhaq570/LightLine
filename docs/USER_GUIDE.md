@@ -94,7 +94,7 @@ No runner extension is required. Install the language's runtime or compiler:
 
 For JavaScript/TypeScript projects, a `start` script in the nearest `package.json` takes precedence; otherwise a `dev` script is used when present. These run from the package directory with `npm run`. Without a script, files run directly. Runtime configuration and project dependencies still apply; `tsx` runs TypeScript without type-checking it.
 
-Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are stored in `.lightline-run` beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
+Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are built into a `lightline-run` folder in your temp directory, not beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
 
 ### Saved Run configurations
 
@@ -173,11 +173,11 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 Colors, folding and search are built in. Running uses the language tools listed above. These add more:
 
 - **Rust**: for errors, completions and go-to-definition, run `rustup component add rust-analyzer rust-src`.
-- **Python**: install Node.js once (for example `winget install OpenJS.NodeJS.LTS`). The first time you open a Python file, LightLine downloads Pyright into `%APPDATA%\LightLine\pyright`.
+- **Python**: install Node.js once (for example `winget install OpenJS.NodeJS.LTS`). The first time you open a Python file without Pyright, LightLine asks before downloading Pyright 1.1.414 (about 19 MB) into `%APPDATA%\LightLine\pyright`.
 - **Debugging Rust**: needs `lldb-dap` on your `PATH`; it comes with LLVM or the Visual Studio C++ Build Tools.
 - **Debugging Python**: needs `debugpy` in the Python that `Ctrl+Shift+R` uses (the selected one, a nearby `.venv`, or `python` on `PATH`). Run **Python: Install debugpy** from the Command Palette, or `python -m pip install debugpy`. Your program runs in the Output pane, so `input()` works while debugging.
 - **C and C++**: files can be run, not yet debugged.
-- **Formatting**: JSON and TOML format with nothing installed, keeping comments and key order. For JavaScript, TypeScript, CSS, HTML, Markdown and YAML, install Prettier (`npm install -g prettier`) or have `npx` available. LightLine only looks for it; it never installs it.
+- **Formatting**: JSON and TOML format with nothing installed, keeping comments and key order. For JavaScript, TypeScript, CSS, HTML, Markdown and YAML, install Prettier in the project (`npm install --save-dev prettier`) or globally (`npm install -g prettier`); the project's copy is used first. LightLine only looks for it; it never installs it.
 
 ---
 

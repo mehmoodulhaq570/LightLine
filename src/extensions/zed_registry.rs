@@ -1,22 +1,22 @@
-//! Resolves an extension id to its real Zed registry entry (git URL +
-//! pinned version) by fetching zed-industries/extensions' own
-//! `extensions.toml` and `.gitmodules` at runtime -- the same two files
-//! this project's manual `gh api` lookups read this session to find
-//! `material-icon-theme`'s real repository, now done in Rust.
-//!
-//! Deliberately not cloning the whole registry repo: `extensions.toml` maps
-//! an id to a submodule path (`[material-icon-theme] submodule =
-//! "extensions/material-icon-theme"`), and `.gitmodules` maps that path to
-//! the actual git URL -- two small text fetches instead of a multi-hundred
-//! megabyte clone.
+//! Resolves an extension id to its Zed registry entry: the repository and
+//! the exact commit the registry pins. zed-industries/extensions lists ids in
+//! `extensions.toml` and pins each extension as a git submodule; GitHub's
+//! contents API reports a submodule's repository and commit in one request,
+//! so nothing has to be cloned to find them.
 
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const EXTENSIONS_TOML_URL: &str =
     "https://raw.githubusercontent.com/zed-industries/extensions/main/extensions.toml";
-const GITMODULES_URL: &str =
-    "https://raw.githubusercontent.com/zed-industries/extensions/main/.gitmodules";
+const CONTENTS_API: &str = "https://api.github.com/repos/zed-industries/extensions/contents";
+// A request that takes longer is treated as failed rather than left hanging.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// The registry list is reused this long: searching and then installing
+// would otherwise download it twice.
+const LIST_REUSE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Deserialize)]
 struct RegistryEntry {
@@ -29,37 +29,33 @@ pub struct ResolvedExtension {
     pub id: String,
     pub version: String,
     pub git_url: String,
+    /// The commit the registry pins: what gets installed.
+    pub commit: String,
 }
 
-/// Looks up `id` in the live registry and resolves it to a clonable git URL.
+/// Looks up `id` in the live registry and resolves it to a repository and
+/// the commit to install.
 pub fn resolve(id: &str) -> Result<ResolvedExtension, String> {
-    let extensions_toml = fetch(EXTENSIONS_TOML_URL)?;
-    let entries: HashMap<String, RegistryEntry> = toml::from_str(&extensions_toml)
-        .map_err(|error| format!("could not parse the Zed extensions registry: {error}"))?;
+    let entries = registry()?;
     let entry = entries
         .get(id)
         .ok_or_else(|| format!("\"{id}\" is not in the Zed extensions registry"))?;
-    let gitmodules = fetch(GITMODULES_URL)?;
-    let git_url = git_url_for_submodule(&gitmodules, &entry.submodule).ok_or_else(|| {
-        format!("the registry lists \"{id}\" but its git URL could not be resolved")
+    let contents = fetch(&format!("{CONTENTS_API}/{}?ref=main", entry.submodule))?;
+    let (git_url, commit) = parse_submodule(&contents).ok_or_else(|| {
+        format!("the registry lists \"{id}\" but its repository could not be resolved")
     })?;
     Ok(ResolvedExtension {
         id: id.to_string(),
         version: entry.version.clone(),
         git_url,
+        commit,
     })
 }
 
-/// Lists every id (and its pinned version) currently in the registry, for
-/// populating an "Install" search list. Git URLs aren't resolved here (that
-/// needs a second round trip against `.gitmodules`, via `resolve()`) --
-/// listing hundreds of ids is one fetch; resolving all of them up front
-/// would be hundreds.
+/// Lists every id (and its version) in the registry, for the Extensions
+/// panel's search.
 pub fn list_ids() -> Result<Vec<(String, String)>, String> {
-    let extensions_toml = fetch(EXTENSIONS_TOML_URL)?;
-    let entries: HashMap<String, RegistryEntry> = toml::from_str(&extensions_toml)
-        .map_err(|error| format!("could not parse the Zed extensions registry: {error}"))?;
-    let mut ids: Vec<(String, String)> = entries
+    let mut ids: Vec<(String, String)> = registry()?
         .into_iter()
         .map(|(id, entry)| (id, entry.version))
         .collect();
@@ -67,30 +63,55 @@ pub fn list_ids() -> Result<Vec<(String, String)>, String> {
     Ok(ids)
 }
 
+fn registry() -> Result<HashMap<String, RegistryEntry>, String> {
+    static LIST: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+    let cached = LIST
+        .lock()
+        .ok()
+        .and_then(|list| list.clone())
+        .filter(|(fetched, _)| fetched.elapsed() < LIST_REUSE)
+        .map(|(_, text)| text);
+    let text = match cached {
+        Some(text) => text,
+        None => {
+            let text = fetch(EXTENSIONS_TOML_URL)?;
+            if let Ok(mut list) = LIST.lock() {
+                *list = Some((Instant::now(), text.clone()));
+            }
+            text
+        }
+    };
+    toml::from_str(&text)
+        .map_err(|error| format!("could not parse the Zed extensions registry: {error}"))
+}
+
 fn fetch(url: &str) -> Result<String, String> {
     let mut response = ureq::get(url)
+        .config()
+        .timeout_global(Some(REQUEST_TIMEOUT))
+        .build()
         .call()
         .map_err(|error| format!("could not reach {url}: {error}"))?;
     response
         .body_mut()
+        .with_config()
+        .limit(16 * 1024 * 1024)
         .read_to_string()
         .map_err(|error| format!("could not read the response from {url}: {error}"))
 }
 
-// .gitmodules is git's own config format, not TOML/JSON:
-//   [submodule "extensions/material-icon-theme"]
-//       path = extensions/material-icon-theme
-//       url = https://github.com/zed-extensions/material-icon-theme.git
-fn git_url_for_submodule(gitmodules: &str, submodule_path: &str) -> Option<String> {
-    let header = format!("[submodule \"{submodule_path}\"]");
-    let start = gitmodules.find(&header)?;
-    let after = &gitmodules[start + header.len()..];
-    let end = after.find("[submodule").unwrap_or(after.len());
-    after[..end].lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("url = ")
-            .map(|url| url.trim().to_string())
-    })
+// The repository and commit in GitHub's contents-API answer for a
+// submodule. Only an https repository and a full commit id are accepted:
+// both are handed to git.
+fn parse_submodule(json: &str) -> Option<(String, String)> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    if value.get("type")?.as_str()? != "submodule" {
+        return None;
+    }
+    let url = value.get("submodule_git_url")?.as_str()?;
+    let commit = value.get("sha")?.as_str()?;
+    let full_commit = commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit());
+    (url.starts_with("https://") && full_commit).then(|| (url.to_owned(), commit.to_owned()))
 }
 
 #[cfg(test)]
@@ -98,32 +119,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_a_real_gitmodules_snippet() {
-        let text = r#"
-[submodule "extensions/gruvbox-material-icons"]
-	path = extensions/gruvbox-material-icons
-	url = https://github.com/RiverMatsumoto/zed-gruvbox-material-icons
-
-[submodule "extensions/material-icon-theme"]
-	path = extensions/material-icon-theme
-	url = https://github.com/zed-extensions/material-icon-theme.git
-
-[submodule "extensions/material-theme"]
-	path = extensions/material-theme
-	url = https://github.com/zed-extensions/material-theme.git
-"#;
+    fn submodule_answers_give_the_repository_and_pinned_commit() {
+        let answer = r#"{"type":"submodule","sha":"92f46057151693648bd3acac1e0c138696f34433",
+            "submodule_git_url":"https://github.com/dracula/zed.git","path":"extensions/dracula"}"#;
         assert_eq!(
-            git_url_for_submodule(text, "extensions/material-icon-theme").as_deref(),
-            Some("https://github.com/zed-extensions/material-icon-theme.git")
+            parse_submodule(answer),
+            Some((
+                "https://github.com/dracula/zed.git".into(),
+                "92f46057151693648bd3acac1e0c138696f34433".into()
+            ))
         );
-        assert_eq!(
-            git_url_for_submodule(text, "extensions/material-theme").as_deref(),
-            Some("https://github.com/zed-extensions/material-theme.git")
-        );
-        assert!(git_url_for_submodule(text, "extensions/does-not-exist").is_none());
+        // Anything git could misread is refused.
+        for bad in [
+            answer.replace("https://", "ext::"),
+            answer.replace("92f46057", "--upload"),
+            answer.replace("\"submodule\"", "\"dir\""),
+        ] {
+            assert_eq!(parse_submodule(&bad), None, "{bad}");
+        }
     }
 
-    // Live network test, same spirit as the LSP live tests: skipped by
+    // Live network tests, same spirit as the LSP live tests: skipped by
     // default, run explicitly to prove this resolves against the real
     // registry, not a fixture.
     #[test]
@@ -135,6 +151,7 @@ mod tests {
             resolved.git_url,
             "https://github.com/zed-extensions/material-icon-theme.git"
         );
+        assert_eq!(resolved.commit.len(), 40);
     }
 
     #[test]
@@ -146,10 +163,6 @@ mod tests {
             "expected hundreds of real registry entries, got {}",
             ids.len()
         );
-        let material = ids
-            .iter()
-            .find(|(id, _)| id == "material-icon-theme")
-            .expect("material-icon-theme should be in the live registry");
-        assert_eq!(material.1, "1.3.1");
+        assert!(ids.iter().any(|(id, _)| id == "material-icon-theme"));
     }
 }

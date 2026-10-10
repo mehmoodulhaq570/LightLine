@@ -96,6 +96,21 @@ fn nearest(file: &Path, markers: &[&str]) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// Where the program built from one source file goes: its own folder under
+/// the system temp directory, so running a file never adds files to the
+/// project beside it.
+pub fn build_output_dir(source: &Path) -> std::io::Result<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+    let directory = std::env::temp_dir()
+        .join("lightline-run")
+        .join(format!("{stem}-{:016x}", hasher.finish()));
+    std::fs::create_dir_all(&directory)?;
+    Ok(directory)
+}
+
 pub fn prepare(file: &Path) -> Result<RunPlan, String> {
     prepare_with(file, crate::workflow::resolve_command)
 }
@@ -246,8 +261,7 @@ fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Resul
                 "rustc",
                 "Install Rust through https://rustup.rs/ (includes cargo and rustc), then restart LightLine.",
             )?;
-            let directory = cwd.join(".lightline-run");
-            std::fs::create_dir_all(&directory)
+            let directory = build_output_dir(&file)
                 .map_err(|error| format!("Could not create run output directory: {error}"))?;
             let mut output_name = file
                 .file_stem()
@@ -394,10 +408,13 @@ mod tests {
                 "loose file.test"
             }
         );
-        assert_eq!(
-            plan.commands[1].program.parent().unwrap(),
-            root.join(".lightline-run")
-        );
+        // Built outside the project, in a folder of its own.
+        let built_in = plan.commands[1].program.parent().unwrap();
+        assert_eq!(built_in, build_output_dir(&loose).unwrap());
+        assert!(built_in.starts_with(std::env::temp_dir()));
+        assert!(!root.join(".lightline-run").exists());
+        let other = write(&root, "other.rs", "fn main() {}");
+        assert_ne!(build_output_dir(&other).unwrap(), built_in);
     }
 
     #[test]

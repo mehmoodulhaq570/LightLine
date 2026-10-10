@@ -732,6 +732,9 @@ pub fn run() -> io::Result<()> {
         } else {
             app.borrow_mut().restore_session(hwnd);
         }
+        // Until now, gaining focus (SetFocus above) and other early events
+        // could not snapshot the still-empty editor over the saved session.
+        app.borrow_mut().restoring = false;
         // No shell starts here: launching PowerShell (and its profile) on every
         // start cost startup time, hid the Welcome screen and took keyboard
         // focus from the editor. Ctrl+` starts the first terminal on demand.

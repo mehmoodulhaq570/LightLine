@@ -87,48 +87,17 @@ fn promote(staging: &Path, target: &Path, backup: &Path) -> Result<(), String> {
 }
 use std::process::Command;
 
-const MATERIAL_ICON_THEME_URL: &str = "https://github.com/zed-extensions/material-icon-theme.git";
-const MATERIAL_ICON_THEME_TAG: &str = "v1.3.1";
-
-/// Ensures the Material Icon Theme extension is present in the local
-/// extensions directory, cloning it from its real upstream repository if
-/// it's missing. Silently does nothing if `git` isn't on PATH or the clone
-/// fails — callers already treat a missing/unloadable theme as "fall back
-/// gracefully," not a fatal error, so a failed install here shouldn't be one
-/// either.
-///
-/// This is the one extension LightLine installs itself, unprompted, so
-/// there's always at least one icon theme available — everything else goes
-/// through `install()` below, driven by the registry and a user's Install
-/// click. This runs synchronously on the caller's thread: on a fresh install
-/// that means a one-time blocking `git clone` before the window first
-/// paints; every subsequent launch is a single fast file-existence check.
-pub fn ensure_material_icon_theme() {
-    let target_exists = crate::workflow::extensions_dir()
-        .map(|dir| dir.join("material-icon-theme"))
-        .is_some_and(|target| target.join("extension.toml").is_file());
-    if target_exists {
-        return;
-    }
-    let _ = install(
-        "material-icon-theme",
-        MATERIAL_ICON_THEME_URL,
-        Some(MATERIAL_ICON_THEME_TAG),
-    );
-}
-
-/// Clones `git_url` (optionally at `tag`) into
-/// `<extensions_dir>/<id>`, replacing anything already there. Returns the
-/// installed extension's directory on success.
-pub fn install(id: &str, git_url: &str, tag: Option<&str>) -> Result<PathBuf, String> {
+/// Installs `git_url` at `commit` into `<extensions_dir>/<id>`, replacing
+/// anything already there. Returns the installed extension's directory.
+pub fn install(id: &str, git_url: &str, commit: &str) -> Result<PathBuf, String> {
     validate_id(id)?;
     let _guard = INSTALL_LOCK.lock().map_err(|e| e.to_string())?;
     let dir =
         crate::workflow::extensions_dir().ok_or("could not determine the extensions directory")?;
-    install_in(&dir, id, git_url, tag)
+    install_in(&dir, id, git_url, commit)
 }
 
-fn install_in(dir: &Path, id: &str, git_url: &str, tag: Option<&str>) -> Result<PathBuf, String> {
+fn install_in(dir: &Path, id: &str, git_url: &str, commit: &str) -> Result<PathBuf, String> {
     validate_id(id)?;
     let target = dir.join(id);
     if !crate::workflow::command_available("git") {
@@ -166,40 +135,8 @@ fn install_in(dir: &Path, id: &str, git_url: &str, tag: Option<&str>) -> Result<
             backup.display()
         ));
     }
-    let clone = |tag: Option<&str>| -> Result<bool, String> {
-        let mut command = Command::new("git");
-        command.args(["clone", "--depth", "1"]);
-        if let Some(tag) = tag {
-            command.args(["--branch", tag]);
-        }
-        command.arg("--").arg(git_url).arg(&staging);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let status = crate::jobs::status(&mut command)
-            .map_err(|error| format!("could not run git: {error}"))?;
-        Ok(status.success())
-    };
-    // Not every registry entry tags its releases as "v<version>" (the
-    // registry's own version number can just track upstream's default
-    // branch) -- confirmed against a real extension, dracula/zed, which has
-    // no git tags at all. Fall back to the default branch rather than
-    // failing the install over a naming convention the registry doesn't
-    // actually guarantee.
     let result = (|| {
-        if !clone(tag)? {
-            if tag.is_none() {
-                return Err(format!("git clone of {git_url} failed"));
-            }
-            if staging.exists() {
-                std::fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
-            }
-            if !clone(None)? {
-                return Err(format!("git clone of {git_url} failed"));
-            }
-        }
+        fetch_commit(&staging, git_url, commit)?;
         validate_download(&staging, id)?;
         promote(&staging, &target, &backup)?;
         Ok(target)
@@ -210,6 +147,48 @@ fn install_in(dir: &Path, id: &str, git_url: &str, tag: Option<&str>) -> Result<
     result
 }
 
+// Exactly `commit` of `git_url` into `folder`, with no other history: the
+// version the registry pins, whatever the repository's branches say now.
+fn fetch_commit(folder: &Path, git_url: &str, commit: &str) -> Result<(), String> {
+    let git = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
+        let mut command = Command::new("git");
+        command.args(args);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let status = crate::jobs::status(&mut command)
+            .map_err(|error| format!("could not run git: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("could not download {git_url} at {commit}"))
+        }
+    };
+    let folder = folder.as_os_str();
+    git(&["init".as_ref(), "-q".as_ref(), folder])?;
+    git(&[
+        "-C".as_ref(),
+        folder,
+        "fetch".as_ref(),
+        "-q".as_ref(),
+        "--depth".as_ref(),
+        "1".as_ref(),
+        "--".as_ref(),
+        git_url.as_ref(),
+        commit.as_ref(),
+    ])?;
+    git(&[
+        "-C".as_ref(),
+        folder,
+        "-c".as_ref(),
+        "advice.detachedHead=false".as_ref(),
+        "checkout".as_ref(),
+        "-q".as_ref(),
+        "FETCH_HEAD".as_ref(),
+    ])
+}
 /// Removes an installed extension's local files. Idempotent: missing is not
 /// an error.
 pub fn uninstall(id: &str) -> Result<(), String> {
@@ -323,6 +302,26 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    #[ignore = "hits the real network; run explicitly with --ignored"]
+    fn installs_exactly_the_commit_the_registry_pins() {
+        let resolved = crate::extensions::zed_registry::resolve("dracula").unwrap();
+        let dir = fixture("pinned");
+        let installed = install_in(&dir, "dracula", &resolved.git_url, &resolved.commit).unwrap();
+        assert!(installed.join("extension.toml").is_file());
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(&installed)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).trim(),
+            resolved.commit
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn local_clone_failure_keeps_old_install_and_cleans_staging() {
         if !crate::workflow::command_available("git") {
             return;
@@ -336,7 +335,7 @@ mod tests {
                 &dir,
                 "theme",
                 dir.join("missing-repository").to_str().unwrap(),
-                None
+                "0123456789012345678901234567890123456789"
             )
             .is_err()
         );

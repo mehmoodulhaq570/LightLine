@@ -858,6 +858,8 @@ pub(super) struct App {
     pub(super) lsp_event_tx: Sender<LspEvent>,
     pub(super) lsp_events: Receiver<LspEvent>,
     pub(super) lsp_failed_at: HashMap<(LspLanguage, PathBuf), Instant>,
+    // The user turned down downloading Pyright this session.
+    pub(super) pyright_declined: bool,
     pub(super) python_interpreter: Option<PathBuf>,
     pub(super) hover_mouse: Option<(i32, i32)>,
     pub(super) hover_target: Option<HoverTarget>,
@@ -871,6 +873,8 @@ pub(super) struct App {
     pub(super) completion: Option<CompletionPopup>,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
+    // Also true from startup until the session is back (see run): a snapshot
+    // taken before then would replace the saved session with an empty one.
     pub(super) restoring: bool,
     pub(super) watcher: Option<lightline::watcher::FileWatcher>,
     pub(super) settings: lightline::settings::Settings,
@@ -1374,6 +1378,7 @@ impl App {
             lsp_event_tx: lsp_tx,
             lsp_events: lsp_rx,
             lsp_failed_at: HashMap::new(),
+            pyright_declined: false,
             python_interpreter: None,
             hover_mouse: None,
             hover_target: None,
@@ -1385,7 +1390,7 @@ impl App {
             request_id: 5000,
             completion_request: None,
             completion: None,
-            restoring: false,
+            restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;
                 lightline::watcher::FileWatcher::start(move || unsafe {
@@ -1580,7 +1585,7 @@ impl App {
                         let dir = lightline::extensions::installer::install(
                             &registry_id,
                             &resolved.git_url,
-                            Some(&format!("v{}", resolved.version)),
+                            &resolved.commit,
                         )?;
                         if lightline::extensions::zed_manifest::is_icon_theme(&dir) {
                             return Ok(ExtensionInstallKind::IconTheme);

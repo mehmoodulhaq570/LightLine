@@ -44,8 +44,8 @@ impl App {
             let compiler = workflow::detect_c_compiler(cpp)
                 .ok_or("Install GCC/MinGW or Clang before running C/C++")?;
             let folder = file.parent().ok_or("The file has no parent directory")?;
-            let output_dir = folder.join(".lightline-run");
-            std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
+            let output_dir =
+                lightline::runner::build_output_dir(&file).map_err(|e| e.to_string())?;
             let mut name = file.file_stem().ok_or("Invalid filename")?.to_os_string();
             name.push(".exe");
             let output = output_dir.join(name);

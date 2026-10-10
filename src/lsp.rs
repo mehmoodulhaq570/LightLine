@@ -209,6 +209,13 @@ pub enum Event {
         language: Language,
         message: String,
     },
+    /// The server isn't installed and can be downloaded, which needs the
+    /// user's consent (see `allow_pyright_install`). The client for `root`
+    /// has stopped.
+    InstallNeeded {
+        language: Language,
+        root: PathBuf,
+    },
 }
 
 pub struct Client {
@@ -589,7 +596,21 @@ fn resolve_pyright() -> PyrightLaunch {
     PyrightLaunch::Missing(NODE_MISSING.into())
 }
 
-/// One-time silent install of Pyright into LightLine's own data folder.
+/// The Pyright LightLine installs for itself; a known version, not whatever
+/// npm has newest that day.
+pub const PYRIGHT_VERSION: &str = "1.1.414";
+
+static PYRIGHT_INSTALL_ALLOWED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Lets the next Python server start download Pyright, once the user has
+/// agreed to it. Until then a start that would need to reports
+/// `Event::InstallNeeded` instead.
+pub fn allow_pyright_install() {
+    PYRIGHT_INSTALL_ALLOWED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// One-time install of Pyright into LightLine's own data folder.
 fn install_pyright() -> Result<PathBuf, String> {
     let home = pyright_home().ok_or_else(|| "could not resolve %APPDATA%".to_string())?;
     std::fs::create_dir_all(&home).map_err(|error| error.to_string())?;
@@ -600,7 +621,7 @@ fn install_pyright() -> Result<PathBuf, String> {
             "install",
             "--prefix",
             home.to_str().unwrap_or_default(),
-            "pyright",
+            &format!("pyright@{PYRIGHT_VERSION}"),
             "--no-audit",
             "--no-fund",
             "--loglevel=error",
@@ -644,11 +665,24 @@ fn run_server(
                 command.arg(script);
                 command
             }
+            PyrightLaunch::Install
+                if !PYRIGHT_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) =>
+            {
+                emit(
+                    Event::InstallNeeded {
+                        language: config.language,
+                        root: root.clone(),
+                    },
+                    &events,
+                    &wake,
+                );
+                return;
+            }
             PyrightLaunch::Install => {
                 emit(
                     Event::Status {
                         language: config.language,
-                        message: "Setting up Pyright automatically (one-time download)…".into(),
+                        message: format!("Downloading Pyright {PYRIGHT_VERSION}…"),
                     },
                     &events,
                     &wake,

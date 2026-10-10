@@ -46,6 +46,10 @@ impl App {
         let Some(path) = self.doc().path.as_deref() else {
             return;
         };
+        // Asked once per session; "Not Now" means not again until restart.
+        if language == LspLanguage::Python && self.pyright_declined {
+            return;
+        }
         if self.doc().byte_len() > LSP_MAX_FILE_BYTES {
             self.status = format!(
                 "{} language support skipped for files over 2 MiB",
@@ -560,6 +564,18 @@ impl App {
                 LspEvent::Status { message, .. } => {
                     self.status = message;
                 }
+                LspEvent::InstallNeeded { language, root } => {
+                    self.reset_language_client(language, Some(&root));
+                    if !self.pyright_declined && self.ask_to_install_pyright(hwnd) {
+                        lsp::allow_pyright_install();
+                        self.ensure_lsp(hwnd);
+                    } else {
+                        self.pyright_declined = true;
+                        self.status = "Python language support is off: Pyright isn't \
+                                       installed (npm install -g pyright)"
+                            .into();
+                    }
+                }
                 LspEvent::Completion {
                     language,
                     id,
@@ -620,6 +636,36 @@ impl App {
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    fn ask_to_install_pyright(&self, hwnd: HWND) -> bool {
+        let message = format!(
+            "Python language support (errors, completion, go to definition) uses \
+             Pyright, which isn't installed.\n\nDownload Pyright {} now? It's about \
+             19 MB from npm and goes into LightLine's own folder; nothing else on \
+             your PC changes.",
+            lsp::PYRIGHT_VERSION
+        );
+        dialog::show_dialog(
+            hwnd,
+            "Set up Python support",
+            &message,
+            dialog::DialogIcon::Question,
+            &[
+                dialog::DialogButton {
+                    label: "Download",
+                    id: dialog::DLG_YES,
+                    is_default: true,
+                    is_cancel: false,
+                },
+                dialog::DialogButton {
+                    label: "Not Now",
+                    id: dialog::DLG_NO,
+                    is_default: false,
+                    is_cancel: true,
+                },
+            ],
+        ) == dialog::DLG_YES
     }
 
     pub(super) fn select_python_interpreter(&mut self, hwnd: HWND) {

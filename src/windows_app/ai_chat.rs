@@ -796,9 +796,11 @@ impl App {
             };
             let mut pending = String::new();
             let mut flushed = Instant::now();
+            // An empty `text` is stream_chat saying the answer has paused:
+            // whatever is held then goes out instead of waiting for more.
             let result = ai::stream_chat(&endpoint, &model, &messages, &cancel, |text| {
                 pending.push_str(text);
-                if flushed.elapsed() >= ANSWER_FLUSH {
+                if !pending.is_empty() && flushed.elapsed() >= ANSWER_FLUSH {
                     let _ = tx.send(AiEvent::Text(id, std::mem::take(&mut pending)));
                     wake();
                     flushed = Instant::now();
