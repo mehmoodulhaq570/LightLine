@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-10-07 (Asia/Karachi)
+Updated: 2026-10-10 (Asia/Karachi). The newest work is in "Follow-up: code audit, speed and robustness" at the end.
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -54,8 +54,8 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 
 ## Current handoff
 
-- The requested implementation and documentation updates are complete. This session note was created because `.claude/session.md` did not previously exist in this checkout.
-- Latest observed commit: `ae2795a` (saved configurations and language runner capabilities). Working tree was clean before this note was added.
+- As of 2026-10-10 all code work is committed on `main` up to `84543aa`. The README, CHANGELOG and this note were updated afterwards and are not committed yet.
+- The sections below are in date order; the last one is the newest.
 - Preserve concurrent/user changes and inspect Git status before editing. Do not commit or publish unless requested.
 - User prefers direct implementation and live app verification, and wants new UI to match LightLine's own design.
 - The open `d:\Google Drive\Code\Python Programming\dsa\class-1.py` tab is user context, not part of this documentation task; it was not modified.
@@ -81,3 +81,32 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 - The Unicode registry archive was downloaded with Invoke-WebRequest after Cargo networking failed, SHA-256 verified against the registry index, and copied to Cargo's cache. Cargo.lock uses the standard registry source/checksum; temporary source override is only in ignored tmp/cached-unicode.toml.
 - Details: docs/RELIABILITY_VERIFICATION.md. Local results: target/live-verification/reliability/results.txt and measure-editing.txt. The smoke-test script is tmp/verify_reliability_ui.py.
 - Preserve concurrent changes to docs/LightLine_Issues_Report.md and .claude/settings.local.json; neither was edited for this task. Nothing was committed or published.
+
+## Follow-up: code audit, speed and robustness (2026-10-09 to 2026-10-10)
+
+A full audit of the code, then fixes in five rounds. The user committed each round on `main` themselves (they prefer to commit; ask before committing): `c0b120d` quick fixes, `8b3925c` idle/LSP/search speed, `57de1b8` format-on-save and process jobs, `ac328f4` crash handling and editing bugs, `25bcd70` extension pinning, Pyright prompt and cleanup, `84543aa` typing repaint work. CHANGELOG (Unreleased) and README describe all of it for users.
+
+What changed, by area:
+
+- Formatting: `apply_formatted` (windows_app/language.rs) applies a formatter's output as the smallest edit and keeps the caret on the same code (`changed_span`, `formatted_offset`). rustfmt gets `--edition` from Cargo.toml (`rust_edition` in formatter.rs). Format-on-save runs external formatters after the save and re-saves (`save_with`, `format_before_save`, `WorkerMessage::Formatted { then_save }`). Prettier is found in the project's `node_modules/.bin`, then PATH (`prettier_for`); npx is never used. `prettierEnabled` setting gates Prettier.
+- Documents: breakpoints shift with edits (`shift_breakpoints`), `Document::id`, `pos_at`/`offset_of`, `changed_on_disk` + `save_over_disk_changes` (Save asks Overwrite/Reload/Cancel via `keep_own_version` in app.rs; reload logic shared in `reload_tab_from_disk`).
+- Idle cost: background jobs post `WORKER_EVENT_MESSAGE` (`WorkerSender`); watcher.rs uses ReadDirectoryChangesW per watched folder and posts `WATCHER_EVENT_MESSAGE`; the 1 s timer is gone; session snapshots use a one-shot `RECOVERY_TIMER` armed from paint (`arm_recovery`). `App.restoring` is true from creation until startup restored the session (otherwise the focus event at startup snapshots an empty editor over the saved session).
+- Language servers: one client per (language, root) in `App.lsp: Vec<LspClient>`; Rust roots are the Cargo workspace (`cargo_root`); roots normalised with `display_path`. `Event::Stopped` carries the root. Pyright install needs consent (`Event::InstallNeeded`, `lsp::allow_pyright_install`), pinned to `PYRIGHT_VERSION` 1.1.414.
+- Processes: src/jobs.rs (`adopt`, `ProcessTree`, `output`, `status`) puts LSP, DAP, formatters, runs, debug build, pyright install and extension git in a kill-on-close job. Explorer "Reveal" is deliberately not adopted.
+- Crash handling: windows_app/crash.rs (panic hook writes `%APPDATA%\LightLine\crash.log`; `guard` around wnd_proc saves recovery, shows a MessageBox, exits). Debug builds accept `CRASH_TEST_MESSAGE` (WM_APP+99) to test it.
+- Extensions: zed_registry.rs resolves the pinned submodule commit through GitHub's contents API; installer.rs fetches exactly that commit. Registry list cached 10 min, 30 s timeouts.
+- Search: parallel, whole-file `contains` pre-check, results unchanged. `git ls-files` was tried and rejected: each git spawn costs ~50 ms here vs a 4 ms walk.
+- Typing repaint: `caret_changes`/`edited_lines` (render/primitives.rs) redraw only edited rows; diagnostics are kept and shifted on edit (`shift_diagnostics`) and redraw only changed lines (`changed_diagnostic_lines`); syntax results report `Recolored` lines (syntax.rs, `take_recolored`); empty update regions return early in `paint`; `paint_code_area_only` also covers the status bar (`paint_status_bar`, region check `region_within`); `rows_showing` stays inside the card border and off the scrollbar strip.
+
+Measured (release builds; method below): idle wakeups in the background ~3/s -> 0; rust-analyzer no longer restarts on tab switches; search 9.3 s -> 3.0 s over 18.7k files; Ctrl+S with Prettier 407 ms -> 10 ms; typing in a 3,000-line Rust file with rust-analyzer: keystroke->screen p50 16-18 -> 4.5-4.8 ms, p95 32-36 -> 8-9 ms, UI-thread CPU per key 33-37 -> 7.5 ms. Startup (~280 ms to a responding window) is unchanged and was not yet broken down.
+
+Verification and how to repeat it:
+
+- Tests: 268 pass (`cargo test`), plus opt-in live tests (`--ignored`) for the registry and pinned install. Clippy with `-D warnings` and `cargo fmt --check` are clean; CI now runs the fmt check.
+- Live checks drove an isolated debug/release build (own `APPDATA`, so the user's profile is untouched) with window messages from Python. Test profiles and fixtures: `target/live-verification/quickwins` and `target/live-verification/perf` (perf has a git test crate with a 3,000-line `src/main.rs`). The driver scripts lived in the session scratchpad and are not in the repo.
+- Ctrl shortcuts without stealing focus: AttachThreadInput to the window's thread, SetKeyboardState with Ctrl down, then send the key.
+- Screenshots that must show stale pixels: capture with GetDC + BitBlt. PrintWindow makes the window repaint itself, so it can never show a missed repaint (verified with a red square drawn from outside). Prove such a check with a deliberate sabotage before trusting it.
+- Idle wakeups: Get-Counter `\Thread(lightline*)\Context Switches/sec`; post WM_KILLFOCUS first so caret blinking doesn't skew it.
+- Paint costs: time WM_PAINT as a whole and group by update-region size; per-GDI-call timers mislead because GDI batches calls.
+
+Still open: saving through a symlink replaces the link; files with mixed line endings are saved all CRLF; the window may not repaint behind open dialogs (unverified); background syntax parsing costs ~6.5 ms CPU per keystroke in a 3,000-line file; startup breakdown. GitHub issue #62 (hover/tooltips) is the most visible feature gap; #59, #52 and #15 are claimed by contributors.

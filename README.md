@@ -20,12 +20,13 @@
 
 ---
 
-LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth.
+LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth: in our tests a keystroke reaches the screen in about 5 ms, and LightLine idling in the background doesn't wake up at all.
 
 ## Features
 
 - **Smart editing**: syntax colors, code folding, bracket matching, find and replace, word wrap, and a split editor.
-- **Unsaved-work recovery**: periodic local checkpoints for modified files and untitled text, with a Restore/Discard choice after restarting. Cursor movement and deletion preserve combined characters and joined emoji.
+- **Unsaved-work recovery**: periodic local checkpoints for modified files and untitled text, with a Restore/Discard choice after restarting. If LightLine ever crashes, it saves your unsaved work first. Cursor movement and deletion preserve combined characters and joined emoji.
+- **Stays in step with your files**: files changed by another program reload by themselves; if you have unsaved edits, saving asks whether to keep your version or reload.
 - **Language support**: errors as you type, completions, go to definition, and hover docs for Rust, Python, C/C++, JavaScript/TypeScript and Go, through their language servers.
 - **Run and debug**: run Python, C/C++, JavaScript, TypeScript, Go or Rust with one key, and debug Rust and Python with breakpoints, stepping and variables.
 - **Saved Run configurations**: choose an entry file or command, arguments, environment variables and working directory in a panel that follows LightLine's theme. Each workspace remembers its configurations and selected default.
@@ -104,7 +105,7 @@ LightLine collects no usage data and sends nothing on its own. It uses the netwo
 - allow web images in a Markdown preview;
 - open a Python file without Pyright installed, when it asks before downloading Pyright.
 
-LightLine stores preferences and caches in `%APPDATA%\LightLine`, edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in a `lightline-run` folder in your temp directory; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
+LightLine stores preferences, caches and, if it ever crashes, a `crash.log` in `%APPDATA%\LightLine`; the log stays on your PC. It edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in a `lightline-run` folder in your temp directory; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
 
 ## Code signing policy
 
