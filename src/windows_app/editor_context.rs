@@ -15,6 +15,8 @@ enum EditorContextAction {
     FixSelection,
     TestsForSelection,
     CommentsForSelection,
+    QuickFix,
+    RenameSymbol,
     Cut,
     Copy,
     Paste,
@@ -82,6 +84,8 @@ pub(super) struct EditorContextMenu {
     diagnostic: Option<EditorContextDiagnostic>,
     has_selection: bool,
     has_hunk: bool,
+    // The file has a language server to rename with.
+    can_rename: bool,
     highlighted: Option<EditorContextAction>,
 }
 
@@ -107,8 +111,14 @@ impl EditorContextMenu {
             diagnostic,
             has_selection,
             has_hunk,
+            can_rename: false,
             highlighted,
         }
+    }
+
+    pub(super) fn with_rename(mut self, can_rename: bool) -> Self {
+        self.can_rename = can_rename;
+        self
     }
 
     fn enabled_actions(&self) -> Vec<EditorContextAction> {
@@ -134,6 +144,12 @@ impl EditorContextMenu {
                 EditorContextAction::StageHunk,
                 EditorContextAction::DiscardHunk,
                 EditorContextAction::OpenDiffView,
+            ]);
+        }
+        if self.can_rename {
+            actions.extend([
+                EditorContextAction::QuickFix,
+                EditorContextAction::RenameSymbol,
             ]);
         }
         actions.extend([
@@ -196,6 +212,8 @@ fn action_label(
         EditorContextAction::FixSelection => "Fix selection".into(),
         EditorContextAction::TestsForSelection => "Write tests for selection".into(),
         EditorContextAction::CommentsForSelection => "Add comments to selection".into(),
+        EditorContextAction::QuickFix => "Quick fix...".into(),
+        EditorContextAction::RenameSymbol => "Rename symbol".into(),
         EditorContextAction::Cut => "Cut".into(),
         EditorContextAction::Copy => "Copy".into(),
         EditorContextAction::Paste => "Paste".into(),
@@ -210,6 +228,8 @@ fn action_label(
 fn action_shortcut(action: EditorContextAction) -> &'static str {
     match action {
         EditorContextAction::ExplainError => "Ctrl+Shift+E",
+        EditorContextAction::QuickFix => "Ctrl+.",
+        EditorContextAction::RenameSymbol => "F2",
         EditorContextAction::Cut => "Ctrl+X",
         EditorContextAction::Copy => "Ctrl+C",
         EditorContextAction::Paste => "Ctrl+V",
@@ -275,6 +295,20 @@ impl App {
         }
         specs.push((ContextElementKind::Divider, s(7)));
         specs.push((ContextElementKind::Section("EDIT"), s(18)));
+        if menu.can_rename {
+            for action in [
+                EditorContextAction::QuickFix,
+                EditorContextAction::RenameSymbol,
+            ] {
+                specs.push((
+                    ContextElementKind::Row {
+                        action,
+                        enabled: true,
+                    },
+                    s(30),
+                ));
+            }
+        }
         for action in [
             EditorContextAction::Cut,
             EditorContextAction::Copy,
@@ -467,6 +501,8 @@ impl App {
             EditorContextAction::FixSelection => self.ai_run_task(hwnd, AiTask::Fix),
             EditorContextAction::TestsForSelection => self.ai_run_task(hwnd, AiTask::Tests),
             EditorContextAction::CommentsForSelection => self.ai_run_task(hwnd, AiTask::Comments),
+            EditorContextAction::QuickFix => self.request_code_actions(hwnd),
+            EditorContextAction::RenameSymbol => self.start_rename(hwnd),
             EditorContextAction::Cut => {
                 if self.copy_selection(hwnd) {
                     self.replace_selection("");

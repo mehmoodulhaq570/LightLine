@@ -75,6 +75,21 @@ pub struct Diagnostic {
     pub range: Range,
     pub severity: u8,
     pub message: String,
+    /// As the server sent it (code, source, data), to hand back when asking
+    /// for its fixes; Null when it came from elsewhere.
+    pub raw: Value,
+}
+
+/// A fix or refactoring the server offers at a place (textDocument/codeAction).
+#[derive(Clone, Debug)]
+pub struct CodeAction {
+    pub title: String,
+    /// "quickfix", "refactor.extract", "source.organizeImports"..., or "".
+    pub kind: String,
+    pub preferred: bool,
+    pub edit: Vec<FileEdit>,
+    /// A server command to run after the edit: its name and arguments.
+    pub command: Option<(String, Value)>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +102,13 @@ pub struct Location {
 pub struct TextEdit {
     pub range: Range,
     pub text: String,
+}
+
+/// The edits a rename makes in one file.
+#[derive(Clone, Debug)]
+pub struct FileEdit {
+    pub uri: String,
+    pub edits: Vec<TextEdit>,
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +173,30 @@ pub enum Command {
         version: i32,
         position: Position,
     },
+    Rename {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
+        new_name: String,
+    },
+    /// Files LightLine changed on disk without having them open.
+    FilesChanged {
+        uris: Vec<String>,
+    },
+    /// Fixes and refactorings for `range`, given the problems in it.
+    CodeActions {
+        id: u64,
+        uri: String,
+        version: i32,
+        range: Range,
+        diagnostics: Vec<Diagnostic>,
+    },
+    /// Runs a command from a code action, if the server offers it.
+    ExecuteCommand {
+        command: String,
+        arguments: Value,
+    },
     Shutdown,
 }
 
@@ -198,6 +244,27 @@ pub enum Event {
         uri: String,
         version: i32,
         items: Vec<CompletionItem>,
+    },
+    /// The edits per file, or why the server won't rename.
+    Rename {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        result: Result<Vec<FileEdit>, String>,
+    },
+    CodeActions {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        result: Result<Vec<CodeAction>, String>,
+    },
+    /// Edits the server asked for itself (workspace/applyEdit), usually
+    /// while running a code action's command, or why they can't be made.
+    ApplyEdit {
+        language: Language,
+        result: Result<Vec<FileEdit>, String>,
     },
     // `root` tells apart servers of one language started for different projects.
     Stopped {
@@ -259,6 +326,12 @@ struct Pending {
     references: HashMap<u64, PendingHover>,
     formats: HashMap<u64, (String, i32)>,
     completions: HashMap<u64, PendingHover>,
+    renames: HashMap<u64, PendingHover>,
+    code_actions: HashMap<u64, PendingHover>,
+    // The commands the server runs (executeCommandProvider), and the next
+    // id for running one; nothing waits for their answers.
+    server_commands: Vec<String>,
+    next_command_id: u64,
 }
 
 fn hover_request(id: u64, hover: &PendingHover) -> Value {
@@ -287,6 +360,41 @@ fn format_request(id: u64, uri: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"method":"textDocument/formatting","params":{
         "textDocument":{"uri":uri},
         "options":{"tabSize":4,"insertSpaces":true}
+    }})
+}
+
+fn rename_request(id: u64, request: &PendingHover, new_name: &str) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/rename","params":{
+        "textDocument":{"uri":request.uri},
+        "position":{"line":request.position.line,"character":request.position.character},
+        "newName":new_name
+    }})
+}
+
+fn code_action_request(
+    id: u64,
+    request: &PendingHover,
+    range: Range,
+    diagnostics: &[Diagnostic],
+) -> Value {
+    let position = |at: Position| json!({"line":at.line,"character":at.character});
+    let range_json =
+        |range: Range| json!({"start":position(range.start),"end":position(range.end)});
+    // As the server sent them, at where they are now: problems below an
+    // edit move with their lines until the server sends new ones.
+    let diagnostics: Vec<Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.raw.is_object())
+        .map(|diagnostic| {
+            let mut raw = diagnostic.raw.clone();
+            raw["range"] = range_json(diagnostic.range);
+            raw
+        })
+        .collect();
+    json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{
+        "textDocument":{"uri":request.uri},
+        "range":range_json(range),
+        "context":{"diagnostics":diagnostics,"triggerKind":1}
     }})
 }
 
@@ -811,12 +919,27 @@ fn run_server(
         "workspaceFolders": [{"uri":root_uri,"name":name}],
         "capabilities": {
             "general": {"positionEncodings":["utf-16"]},
-            "workspace": {"configuration":true,"workspaceFolders":true},
+            "workspace": {
+                "configuration":true,
+                "workspaceFolders":true,
+                "workspaceEdit": {"documentChanges":true},
+                "applyEdit":true,
+                "executeCommand": {}
+            },
             "textDocument": {
                 "synchronization": {"didSave":true},
                 "hover": {"contentFormat":["plaintext","markdown"]},
                 "definition": {"linkSupport":false},
                 "formatting": {},
+                "rename": {"prepareSupport":false},
+                "codeAction": {
+                    "codeActionLiteralSupport": {"codeActionKind": {"valueSet": [
+                        "", "quickfix", "refactor", "refactor.extract", "refactor.inline",
+                        "refactor.rewrite", "source", "source.organizeImports"
+                    ]}},
+                    "isPreferredSupport":true,
+                    "disabledSupport":true
+                },
                 "completion": {
                     "contextSupport":true,
                     "completionItem": {
@@ -869,6 +992,16 @@ fn run_server(
                 }
             };
             if is_initialize_response(&message) {
+                pending.server_commands = message
+                    .pointer("/result/capabilities/executeCommandProvider/commands")
+                    .and_then(Value::as_array)
+                    .map(|commands| {
+                        commands
+                            .iter()
+                            .filter_map(|command| command.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 if let Some(error) = message.get("error") {
                     failure = Some(format!(
                         "{} initialization failed: {error}",
@@ -917,7 +1050,27 @@ fn run_server(
                     let result = match method {
                         "workspace/configuration" => configuration_response(&message, &config),
                         "workspace/workspaceFolders" => json!([{"uri":root_uri,"name":name}]),
-                        "workspace/applyEdit" => json!({"applied":false}),
+                        // Answered before the edit is made: the editor
+                        // applies it on its own thread, and an edit only
+                        // fails there for a file it can't read or write.
+                        "workspace/applyEdit" => {
+                            let result = message
+                                .pointer("/params/edit")
+                                .map_or(Err("it sent no edit".into()), parse_workspace_edit);
+                            let answer = match &result {
+                                Ok(_) => json!({"applied":true}),
+                                Err(reason) => json!({"applied":false,"failureReason":reason}),
+                            };
+                            emit(
+                                Event::ApplyEdit {
+                                    language: config.language,
+                                    result,
+                                },
+                                &events,
+                                &wake,
+                            );
+                            answer
+                        }
                         _ => Value::Null,
                     };
                     if write_packet(
@@ -1016,6 +1169,30 @@ fn run_server(
                             uri: request.uri,
                             version: request.version,
                             items,
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.code_actions.remove(&id) {
+                    emit(
+                        Event::CodeActions {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            result: parse_code_actions(&message),
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.renames.remove(&id) {
+                    emit(
+                        Event::Rename {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            result: parse_rename(&message),
                         },
                         &events,
                         &wake,
@@ -1210,6 +1387,56 @@ fn send_command(
             pending.completions.insert(id, request_state);
             request
         }
+        Command::Rename {
+            id,
+            uri,
+            version,
+            position,
+            new_name,
+        } => {
+            let request_state = PendingHover {
+                uri,
+                version,
+                position,
+                retries: 0,
+            };
+            let request = rename_request(id, &request_state, &new_name);
+            pending.renames.insert(id, request_state);
+            request
+        }
+        Command::CodeActions {
+            id,
+            uri,
+            version,
+            range,
+            diagnostics,
+        } => {
+            let request_state = PendingHover {
+                uri,
+                version,
+                position: range.start,
+                retries: 0,
+            };
+            let request = code_action_request(id, &request_state, range, &diagnostics);
+            pending.code_actions.insert(id, request_state);
+            request
+        }
+        Command::ExecuteCommand { command, arguments } => {
+            // Others are the client's own (VS Code's), which only VS Code runs.
+            if !pending.server_commands.contains(&command) {
+                return Ok(());
+            }
+            // Far above the editor's request ids.
+            let id = (1u64 << 40) + pending.next_command_id;
+            pending.next_command_id += 1;
+            json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{
+                "command":command,"arguments":arguments
+            }})
+        }
+        Command::FilesChanged { uris } => {
+            let changes: Vec<Value> = uris.iter().map(|uri| json!({"uri":uri,"type":2})).collect();
+            json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":changes}})
+        }
         Command::Shutdown => return Ok(()),
     };
     if std::env::var_os("LIGHTLINE_LSP_TRACE").is_some() {
@@ -1339,6 +1566,7 @@ fn parse_diagnostics(message: &Value) -> Option<(String, Option<i32>, Vec<Diagno
                     .unwrap_or(3)
                     .min(4) as u8,
                 message: item.get("message")?.as_str()?.to_owned(),
+                raw: item.clone(),
             })
         })
         .collect();
@@ -1422,13 +1650,134 @@ fn parse_text_edits(message: &Value) -> Vec<TextEdit> {
     };
     items
         .iter()
-        .filter_map(|item| {
-            let range = parse_range(item.get("range")?)?;
-            let text = item.get("newText")?.as_str()?.to_owned();
-            Some(TextEdit { range, text })
-        })
+        .filter_map(parse_text_edit)
         .take(20_000)
         .collect()
+}
+
+fn parse_text_edit(item: &Value) -> Option<TextEdit> {
+    let range = parse_range(item.get("range")?)?;
+    let text = item.get("newText")?.as_str()?.to_owned();
+    Some(TextEdit { range, text })
+}
+
+// textDocument/rename answers with a WorkspaceEdit; null means nothing needs
+// to change.
+fn parse_rename(message: &Value) -> Result<Vec<FileEdit>, String> {
+    if let Some(error) = message.get("error") {
+        let text = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the language server refused");
+        return Err(text.to_owned());
+    }
+    match message.get("result").filter(|result| !result.is_null()) {
+        Some(result) => parse_workspace_edit(result),
+        None => Ok(Vec::new()),
+    }
+}
+
+// A WorkspaceEdit: edits per file under `changes`, or under
+// `documentChanges`, which may also create, rename or delete files.
+fn parse_workspace_edit(result: &Value) -> Result<Vec<FileEdit>, String> {
+    let mut files: Vec<FileEdit> = Vec::new();
+    let mut add = |uri: &str, edits: &[Value]| {
+        let edits = edits.iter().filter_map(parse_text_edit);
+        match files.iter_mut().find(|file| file.uri == uri) {
+            Some(file) => file.edits.extend(edits),
+            None => files.push(FileEdit {
+                uri: uri.to_owned(),
+                edits: edits.collect(),
+            }),
+        }
+    };
+    if let Some(changes) = result.get("documentChanges").and_then(Value::as_array) {
+        for change in changes {
+            if change.get("kind").is_some() {
+                return Err(
+                    "it would also rename or move files, which LightLine can't do yet".into(),
+                );
+            }
+            if let (Some(uri), Some(edits)) = (
+                change.pointer("/textDocument/uri").and_then(Value::as_str),
+                change.get("edits").and_then(Value::as_array),
+            ) {
+                add(uri, edits);
+            }
+        }
+    } else if let Some(changes) = result.get("changes").and_then(Value::as_object) {
+        for (uri, edits) in changes {
+            if let Some(edits) = edits.as_array() {
+                add(uri, edits);
+            }
+        }
+    }
+    files.retain(|file| !file.edits.is_empty());
+    Ok(files)
+}
+
+// textDocument/codeAction answers with Commands and CodeActions. Those that
+// are disabled, or whose edit LightLine can't make (one that creates or
+// moves files), are left out.
+fn parse_code_actions(message: &Value) -> Result<Vec<CodeAction>, String> {
+    if let Some(error) = message.get("error") {
+        let text = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the language server refused");
+        return Err(text.to_owned());
+    }
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let command_of = |value: &Value| {
+        let name = value.get("command")?.as_str()?.to_owned();
+        let arguments = value.get("arguments").cloned().unwrap_or(json!([]));
+        Some((name, arguments))
+    };
+    let actions = items
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("title")?.as_str()?.to_owned();
+            // A bare Command: `command` is its name.
+            if item.get("command").is_some_and(Value::is_string) {
+                return Some(CodeAction {
+                    title,
+                    kind: String::new(),
+                    preferred: false,
+                    edit: Vec::new(),
+                    command: command_of(item),
+                });
+            }
+            if item.get("disabled").is_some() {
+                return None;
+            }
+            let edit = match item.get("edit") {
+                Some(edit) => parse_workspace_edit(edit).ok()?,
+                None => Vec::new(),
+            };
+            let command = item.get("command").and_then(command_of);
+            if edit.is_empty() && command.is_none() {
+                return None;
+            }
+            Some(CodeAction {
+                title,
+                kind: item
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                preferred: item
+                    .get("isPreferred")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                edit,
+                command,
+            })
+        })
+        .take(100)
+        .collect();
+    Ok(actions)
 }
 
 // textDocument/completion answers with either a bare array of items or a
@@ -1771,6 +2120,121 @@ mod tests {
         assert_eq!(edits[0].text, "  ");
         assert_eq!(edits[1].range.end.line, 1);
         assert!(parse_text_edits(&json!({"result":null})).is_empty());
+    }
+
+    #[test]
+    fn rename_parses_both_workspace_edit_forms() {
+        let edit = |line, from, to| json!({"range":{"start":{"line":line,"character":from},"end":{"line":line,"character":to}},"newText":"total"});
+        // documentChanges, with one file in two entries.
+        let message = json!({"result":{"documentChanges":[
+            {"textDocument":{"uri":"file:///a.rs","version":3},"edits":[edit(0, 4, 7)]},
+            {"textDocument":{"uri":"file:///b.rs","version":null},"edits":[edit(2, 0, 3), edit(5, 8, 11)]},
+            {"textDocument":{"uri":"file:///a.rs","version":3},"edits":[edit(9, 1, 4)]}
+        ]}});
+        let files = parse_rename(&message).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].uri, "file:///a.rs");
+        assert_eq!(files[0].edits.len(), 2);
+        assert_eq!(files[1].edits[1].range.start.character, 8);
+        assert_eq!(files[1].edits[0].text, "total");
+
+        // changes.
+        let message = json!({"result":{"changes":{"file:///c.py":[edit(1, 0, 3)]}}});
+        let files = parse_rename(&message).unwrap();
+        assert_eq!((files.len(), files[0].uri.as_str()), (1, "file:///c.py"));
+
+        // Nothing to change, a refusal, and a rename that would move files.
+        assert!(parse_rename(&json!({"result":null})).unwrap().is_empty());
+        let refused = json!({"error":{"code":-32602,"message":"No references found at position"}});
+        assert_eq!(
+            parse_rename(&refused).unwrap_err(),
+            "No references found at position"
+        );
+        let moves = json!({"result":{"documentChanges":[
+            {"textDocument":{"uri":"file:///a.rs","version":1},"edits":[edit(0, 4, 7)]},
+            {"kind":"rename","oldUri":"file:///foo.rs","newUri":"file:///bar.rs"}
+        ]}});
+        assert!(parse_rename(&moves).is_err());
+    }
+
+    #[test]
+    fn code_actions_parse_edits_commands_and_skip_what_cannot_apply() {
+        let edit = json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+                          "newText":"use std::collections::HashMap;\n"});
+        let message = json!({"result":[
+            {"title":"Import `HashMap`","kind":"quickfix","isPreferred":true,
+             "edit":{"changes":{"file:///a.rs":[edit]}}},
+            {"title":"Organize imports","command":"_typescript.organizeImports","arguments":["file:///a.ts"]},
+            {"title":"Extract into function","kind":"refactor.extract","disabled":{"reason":"select an expression"},
+             "edit":{"changes":{"file:///a.rs":[edit]}}},
+            {"title":"Move to new file","kind":"refactor.move",
+             "edit":{"documentChanges":[{"kind":"create","uri":"file:///b.rs"}]}},
+            {"title":"Nothing to do","kind":"quickfix"},
+            {"title":"Fix and run","kind":"quickfix","edit":{"changes":{"file:///a.rs":[edit]}},
+             "command":{"title":"run","command":"server.run","arguments":[1]}}
+        ]});
+        let actions = parse_code_actions(&message).unwrap();
+        let titles: Vec<&str> = actions.iter().map(|action| action.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Import `HashMap`", "Organize imports", "Fix and run"]
+        );
+        assert!(actions[0].preferred);
+        assert_eq!(actions[0].kind, "quickfix");
+        assert_eq!(
+            actions[0].edit[0].edits[0].text,
+            "use std::collections::HashMap;\n"
+        );
+        assert_eq!(
+            actions[1].command,
+            Some((
+                "_typescript.organizeImports".into(),
+                json!(["file:///a.ts"])
+            ))
+        );
+        assert!(actions[1].edit.is_empty());
+        assert_eq!(actions[2].command.as_ref().unwrap().0, "server.run");
+        assert!(
+            parse_code_actions(&json!({"result":null}))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(parse_code_actions(&json!({"error":{"message":"busy"}})).is_err());
+    }
+
+    #[test]
+    fn code_action_requests_send_problems_where_they_are_now() {
+        let request = PendingHover {
+            uri: "file:///a.rs".into(),
+            version: 3,
+            position: Position {
+                line: 4,
+                character: 0,
+            },
+            retries: 0,
+        };
+        let at = |line| Range {
+            start: Position { line, character: 2 },
+            end: Position { line, character: 5 },
+        };
+        let from_server = Diagnostic {
+            range: at(9),
+            severity: 1,
+            message: "unresolved".into(),
+            raw: json!({"range":{"start":{"line":7,"character":2},"end":{"line":7,"character":5}},
+                        "message":"unresolved","code":"E0425","data":{"fix":1}}),
+        };
+        let from_compiler = Diagnostic {
+            raw: Value::Null,
+            ..from_server.clone()
+        };
+        let sent = code_action_request(8, &request, at(9), &[from_server, from_compiler]);
+        let diagnostics = sent.pointer("/params/context/diagnostics").unwrap();
+        assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+        assert_eq!(diagnostics[0]["range"]["start"]["line"], 9);
+        assert_eq!(diagnostics[0]["code"], "E0425");
+        assert_eq!(diagnostics[0]["data"]["fix"], 1);
+        assert_eq!(sent.pointer("/params/range/end/character").unwrap(), 5);
     }
 
     #[test]

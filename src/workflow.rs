@@ -905,6 +905,7 @@ fn parse_gcc_diagnostic(line: &str) -> Option<crate::lsp::Diagnostic> {
         },
         severity,
         message: message.trim().to_string(),
+        raw: serde_json::Value::Null,
     })
 }
 

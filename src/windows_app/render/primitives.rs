@@ -236,6 +236,7 @@ impl App {
         !self.welcome
             && self.hover_card.is_none()
             && self.completion.is_none()
+            && self.code_actions.is_none()
             && self.editor_context.is_none()
             && self.more_menu.is_none()
             && !self.ai_assistant_visible

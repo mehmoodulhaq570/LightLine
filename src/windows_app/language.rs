@@ -394,6 +394,9 @@ impl App {
                     self.definition_target = None;
                     self.references_target = None;
                     self.format_target = None;
+                    self.rename_target = None;
+                    self.code_action_request = None;
+                    self.code_actions = None;
                     self.completion_request = None;
                     self.completion = None;
                     self.status = message;
@@ -530,40 +533,8 @@ impl App {
                         self.activate_tab(hwnd, index);
                     }
                     let cursor = self.view().cursor;
-                    // Resolve LSP ranges into document positions against the
-                    // unmodified text, then apply from the end backwards so the
-                    // earlier edits keep valid line/byte offsets. Each
-                    // replace_range re-syncs the server incrementally.
-                    let mut resolved: Vec<(Pos, Pos, String)> = edits
-                        .iter()
-                        .map(|edit| {
-                            let doc = self.doc();
-                            let start_line = (edit.range.start.line as usize)
-                                .min(doc.line_count().saturating_sub(1));
-                            let end_line = (edit.range.end.line as usize)
-                                .min(doc.line_count().saturating_sub(1));
-                            (
-                                Pos {
-                                    line: start_line,
-                                    byte: lsp::utf16_to_byte(
-                                        doc.line(start_line),
-                                        edit.range.start.character,
-                                    ),
-                                },
-                                Pos {
-                                    line: end_line,
-                                    byte: lsp::utf16_to_byte(
-                                        doc.line(end_line),
-                                        edit.range.end.character,
-                                    ),
-                                },
-                                edit.text.clone(),
-                            )
-                        })
-                        .collect();
-                    resolved.sort_by_key(|edit| std::cmp::Reverse((edit.0.line, edit.0.byte)));
-                    for (start, end, text) in resolved {
-                        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                    // Each replace_range re-syncs the server incrementally.
+                    for (start, end, text) in resolve_edits(self.doc(), &edits) {
                         self.replace_range(start, end, &text);
                     }
                     let restored = {
@@ -583,6 +554,23 @@ impl App {
                 }
                 LspEvent::Status { message, .. } => {
                     self.status = message;
+                }
+                LspEvent::Rename {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    result,
+                } => self.finish_rename(language, id, &uri, version, result),
+                LspEvent::CodeActions {
+                    language,
+                    id,
+                    uri,
+                    version,
+                    result,
+                } => self.finish_code_actions(language, id, &uri, version, result),
+                LspEvent::ApplyEdit { language, result } => {
+                    self.apply_server_edit(language, result)
                 }
                 LspEvent::InstallNeeded { language, root } => {
                     self.reset_language_client(language, Some(&root));
@@ -1316,6 +1304,28 @@ impl App {
     }
 }
 
+// A language server's edits to `doc` as document positions, resolved against
+// its text before any of them is applied, last first: applying them in this
+// order leaves the positions of those still to apply valid.
+pub(super) fn resolve_edits(doc: &Document, edits: &[lsp::TextEdit]) -> Vec<(Pos, Pos, String)> {
+    let at = |position: LspPosition| {
+        let line = (position.line as usize).min(doc.line_count().saturating_sub(1));
+        Pos {
+            line,
+            byte: lsp::utf16_to_byte(doc.line(line), position.character),
+        }
+    };
+    let mut resolved: Vec<(Pos, Pos, String)> = edits
+        .iter()
+        .map(|edit| {
+            let text = edit.text.replace("\r\n", "\n").replace('\r', "\n");
+            (at(edit.range.start), at(edit.range.end), text)
+        })
+        .collect();
+    resolved.sort_by_key(|edit| std::cmp::Reverse(edit.0));
+    resolved
+}
+
 // (errors, warnings) among `diagnostics`; hints and information aren't counted.
 fn problem_counts<'a>(diagnostics: impl Iterator<Item = &'a LspDiagnostic>) -> (usize, usize) {
     diagnostics.fold((0, 0), |(errors, warnings), diagnostic| {
@@ -1532,6 +1542,7 @@ mod tests {
             range: LspRange { start: at, end: at },
             severity,
             message: String::new(),
+            raw: serde_json::Value::Null,
         }
     }
 

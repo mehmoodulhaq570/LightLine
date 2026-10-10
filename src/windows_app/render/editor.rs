@@ -228,6 +228,8 @@ impl App {
         self.paint_search_preview(hdc, bounds.left, bounds.right, code_bottom);
         self.paint_quick_open(hdc, window);
         self.paint_find_widget(hdc, hwnd);
+        self.paint_rename_box(hdc, hwnd);
+        self.paint_code_actions(hdc, hwnd);
         self.paint_hover_card(hdc, window, editor_bottom);
         self.paint_completion(hdc, window, editor_bottom);
         self.paint_editor_context_menu(hdc, hwnd);
@@ -1575,6 +1577,8 @@ impl App {
             SelectObject(hdc, self.ui_font);
             self.paint_quick_open(hdc, rect);
             self.paint_find_widget(hdc, hwnd);
+            self.paint_rename_box(hdc, hwnd);
+            self.paint_code_actions(hdc, hwnd);
             self.paint_hover_card(hdc, rect, editor_bottom);
             self.paint_completion(hdc, rect, editor_bottom);
             self.paint_editor_context_menu(hdc, hwnd);

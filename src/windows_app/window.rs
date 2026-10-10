@@ -511,6 +511,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             if app.editor_context.is_some() {
                 return 0;
             }
+            app.cancel_rename(hwnd);
+            app.dismiss_code_actions(hwnd);
             let delta = (wparam >> 16) as i16;
             let mut point = POINT::default();
             unsafe {

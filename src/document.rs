@@ -40,6 +40,8 @@ struct Edit {
     new: String,
     before: u64,
     after: u64,
+    // Made together with the edit before it (see `begin_group`).
+    joined: bool,
 }
 
 // Hands each Document its `id`.
@@ -63,6 +65,8 @@ pub struct Document {
     next_revision: u64,
     change_serial: u64,
     last_change: Option<TextChange>,
+    // Some while edits are grouped; true once the group has its first edit.
+    group: Option<bool>,
     // Zero-based line numbers with a breakpoint set from the gutter.
     breakpoints: BTreeSet<usize>,
     // Collapsed line ranges: (start_line, end_line), inclusive.
@@ -92,6 +96,7 @@ impl Document {
             next_revision: 1,
             change_serial: 0,
             last_change: None,
+            group: None,
             breakpoints: BTreeSet::new(),
             folded_ranges: BTreeSet::new(),
         }
@@ -142,6 +147,7 @@ impl Document {
             next_revision: 1,
             change_serial: 0,
             last_change: None,
+            group: None,
             breakpoints: BTreeSet::new(),
             folded_ranges: BTreeSet::new(),
         })
@@ -947,12 +953,17 @@ impl Document {
         let new_end = self.replace_raw(start, end, &replacement);
         let after = self.next_revision;
         self.next_revision += 1;
+        let joined = match &mut self.group {
+            Some(started) => std::mem::replace(started, true),
+            None => false,
+        };
         self.undo.push(Edit {
             start,
             old,
             new: replacement,
             before: self.revision,
             after,
+            joined,
         });
         self.redo.clear();
         self.revision = after;
@@ -972,6 +983,29 @@ impl Document {
                 byte: text.rsplit('\n').next().unwrap().len(),
             }
         }
+    }
+
+    /// Edits made from here until `end_group` are undone and redone as one:
+    /// after each step of that, `undo_continues` or `redo_continues` is true
+    /// until the whole group is done.
+    pub fn begin_group(&mut self) {
+        self.group = Some(false);
+    }
+
+    pub fn end_group(&mut self) {
+        self.group = None;
+    }
+
+    /// After `undo`: the edit just undone was grouped with the one now next
+    /// to undo.
+    pub fn undo_continues(&self) -> bool {
+        self.redo.last().is_some_and(|edit| edit.joined)
+    }
+
+    /// After `redo`: the edit now next to redo is grouped with the one just
+    /// redone.
+    pub fn redo_continues(&self) -> bool {
+        self.redo.last().is_some_and(|edit| edit.joined)
     }
 
     pub fn undo(&mut self) -> Option<(Pos, usize)> {
@@ -1221,6 +1255,49 @@ mod tests {
         assert_eq!(doc.lines, ["alpha", "beta", "gamma"]);
         assert_eq!(doc.redo(), Some((Pos { line: 1, byte: 1 }, 0)));
         assert_eq!(doc.lines, ["alX", "Yta", "gamma"]);
+    }
+
+    #[test]
+    fn grouped_edits_undo_and_redo_together() {
+        let mut doc = Document::new();
+        doc.replace(Pos::default(), Pos::default(), "foo(foo, foo)");
+        doc.mark_clean();
+        let at = |byte| Pos { line: 0, byte };
+        // A rename, last place first so earlier places keep their offsets.
+        doc.begin_group();
+        for start in [9, 4, 0] {
+            doc.replace(at(start), at(start + 3), "bar");
+        }
+        doc.end_group();
+        doc.replace(at(13), at(13), ";");
+        assert_eq!(doc.lines, ["bar(bar, bar);"]);
+
+        // The edit after the group is a step of its own.
+        doc.undo();
+        assert!(!doc.undo_continues());
+        assert_eq!(doc.lines, ["bar(bar, bar)"]);
+        let mut steps = 0;
+        while doc.undo().is_some() {
+            steps += 1;
+            if !doc.undo_continues() {
+                break;
+            }
+        }
+        assert_eq!(steps, 3);
+        assert_eq!(doc.lines, ["foo(foo, foo)"]);
+        assert!(!doc.is_dirty());
+
+        let mut steps = 0;
+        while doc.redo().is_some() {
+            steps += 1;
+            if !doc.redo_continues() {
+                break;
+            }
+        }
+        assert_eq!(steps, 3);
+        assert_eq!(doc.lines, ["bar(bar, bar)"]);
+        doc.redo();
+        assert_eq!(doc.lines, ["bar(bar, bar);"]);
     }
 
     #[test]

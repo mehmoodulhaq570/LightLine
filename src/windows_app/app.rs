@@ -145,7 +145,7 @@ pub(super) struct EditorView {
     pub(super) first_row: usize,
 }
 
-fn remap_position(pos: Pos, start: Pos, end: Pos, inserted_end: Pos) -> Pos {
+pub(super) fn remap_position(pos: Pos, start: Pos, end: Pos, inserted_end: Pos) -> Pos {
     if pos < start {
         pos
     } else if pos <= end {
@@ -871,6 +871,12 @@ pub(super) struct App {
     pub(super) request_id: u64,
     pub(super) completion_request: Option<CompletionRequest>,
     pub(super) completion: Option<CompletionPopup>,
+    // Rename Symbol: the box asking for the new name, then the request.
+    pub(super) rename_box: Option<RenameBox>,
+    pub(super) rename_target: Option<RenameRequest>,
+    // Quick fixes (Ctrl+.): the request, then the list.
+    pub(super) code_action_request: Option<CodeActionRequest>,
+    pub(super) code_actions: Option<CodeActionMenu>,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1390,6 +1396,10 @@ impl App {
             request_id: 5000,
             completion_request: None,
             completion: None,
+            rename_box: None,
+            rename_target: None,
+            code_action_request: None,
+            code_actions: None,
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;
@@ -2679,6 +2689,41 @@ impl App {
         self.sync_lsp_edit();
         self.hover_target = None;
         self.hover_card = None;
+    }
+
+    /// Ctrl+Z, or Ctrl+Y with `redo`: one step, or every edit of a group
+    /// (a rename's places in this file) one by one, so the highlighter and
+    /// the language server follow each.
+    pub(super) fn undo_or_redo(&mut self, redo: bool) {
+        self.view_mut().selection_anchor = None;
+        loop {
+            let lines_before = self.doc().line_count();
+            let applied = if redo {
+                self.doc_mut().redo()
+            } else {
+                self.doc_mut().undo()
+            };
+            let Some((cursor, line)) = applied else {
+                return;
+            };
+            self.view_mut().cursor = cursor;
+            self.syntax_changed();
+            self.revalidate_other_view(None);
+            self.sync_lsp_edit();
+            // Undo/redo report only the first changed line; a removal
+            // spanned `-delta` lines below it.
+            let delta = self.doc().line_count() as isize - lines_before as isize;
+            self.shift_gutter_marks(line, line + (-delta).max(0) as usize, delta);
+            self.schedule_gutter_diff();
+            let more = if redo {
+                self.doc().redo_continues()
+            } else {
+                self.doc().undo_continues()
+            };
+            if !more {
+                return;
+            }
+        }
     }
 
     pub(super) fn revalidate_other_view(&mut self, edit: Option<(Pos, Pos, Pos)>) {

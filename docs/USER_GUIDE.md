@@ -45,6 +45,8 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `Ctrl+Space` | Show completions |
 | `F1` | Show documentation for the symbol at the cursor |
 | `F12` / `Shift+F12` | Go to definition / find all references |
+| `F2` | Rename the symbol at the cursor everywhere it's used (see [Rename Symbol](#rename-symbol)) |
+| `Ctrl+.` | Quick fixes and refactorings at the cursor or selection (see [Quick Fixes](#quick-fixes-and-refactorings)) |
 | `Shift+Alt+F` | Format the document |
 | `Alt+Z` | Toggle word wrap for this file (on by default for Markdown) |
 | `Ctrl+Shift+V` | Preview a Markdown file (`>Markdown: Open Preview to the Side` shows it beside the file) |
@@ -178,6 +180,22 @@ Colors, folding and search are built in. Running uses the language tools listed 
 - **Debugging Python**: needs `debugpy` in the Python that `Ctrl+Shift+R` uses (the selected one, a nearby `.venv`, or `python` on `PATH`). Run **Python: Install debugpy** from the Command Palette, or `python -m pip install debugpy`. Your program runs in the Output pane, so `input()` works while debugging.
 - **C and C++**: files can be run, not yet debugged.
 - **Formatting**: JSON and TOML format with nothing installed, keeping comments and key order. For JavaScript, TypeScript, CSS, HTML, Markdown and YAML, install Prettier in the project (`npm install --save-dev prettier`) or globally (`npm install -g prettier`); the project's copy is used first. LightLine only looks for it; it never installs it.
+
+### Rename Symbol
+
+Put the cursor on a variable, function, type or other name and press `F2` (or right-click → **Rename symbol**, or **Rename Symbol** in the Command Palette). Type the new name in the box below it and press `Enter`; `Esc` cancels. The language server finds every use, in all files of the project:
+
+- Open files change in the editor, and are saved straight away unless they already had unsaved changes. One `Ctrl+Z` undoes the rename in that file.
+- Files that aren't open are changed and saved on disk. Undo doesn't reach them, so use Git to review or revert a large rename.
+- When the server can't rename something (a name from a library, say), the status bar says why and nothing changes. A rename that would also rename or move files isn't supported yet.
+
+It needs the language's server (see above): rust-analyzer, Pyright, clangd, typescript-language-server or gopls.
+
+### Quick Fixes and refactorings
+
+Press `Ctrl+.` (or right-click → **Quick fix...**) to see what the language server can do at the cursor: fixes for the problem on that line, such as adding a missing import, and refactorings such as extracting a selected expression into a variable or function. Pick one with the arrow keys and `Enter`, or click it; `Esc` closes the list.
+
+The change lands like an edit you made: `Ctrl+Z` undoes it in each open file, and the file you're editing stays unsaved. Other files it changes are saved, as with Rename Symbol. What's offered depends on the server: rust-analyzer and typescript-language-server offer many actions, Pyright only a few.
 
 ---
 

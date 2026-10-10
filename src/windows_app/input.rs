@@ -83,6 +83,9 @@ impl App {
                 }
             }
         }
+        if self.rename_key(hwnd, key, ctrl) || self.code_action_key(hwnd, key) {
+            return true;
+        }
         if self.editor_context_key(hwnd, key, ctrl, shift) {
             return true;
         }
@@ -218,6 +221,25 @@ impl App {
             && let Some(path) = self.selected_explorer_path.clone()
         {
             self.delete_entry(hwnd, &path);
+            return true;
+        }
+        if key == VK_F2 as u32
+            && self.side_view == SideView::Files
+            && self.explorer_visible
+            && self.panel_focus
+            && !self.quick_open
+            && let Some(path) = self.selected_explorer_path.clone()
+            && let Some(parent) = path.parent().map(Path::to_path_buf)
+        {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            self.start_explorer_input(parent, path.is_dir(), true, Some(path), hwnd);
+            if let Some(input) = &mut self.explorer_input {
+                input.buffer = name;
+            }
             return true;
         }
         if self.quick_open {
@@ -548,6 +570,10 @@ impl App {
                     self.trigger_completion(hwnd);
                     return true;
                 }
+                x if x == VK_OEM_PERIOD as u32 && !self.panel_focus => {
+                    self.request_code_actions(hwnd);
+                    return true;
+                }
                 x if x == VK_OEM_3 as u32 && shift => {
                     self.new_terminal(hwnd, false);
                     return true;
@@ -702,35 +728,7 @@ impl App {
                     self.activate_tab(hwnd, (self.active + 1).min(self.tabs.len() - 1));
                     return true;
                 }
-                0x5a if shift => {
-                    self.view_mut().selection_anchor = None;
-                    if let Some((cursor, _)) = self.doc_mut().redo() {
-                        self.view_mut().cursor = cursor;
-                        self.syntax_changed();
-                        self.revalidate_other_view(None);
-                        self.sync_lsp_edit();
-                    }
-                }
-                0x5a | 0x59 => {
-                    self.view_mut().selection_anchor = None;
-                    let lines_before = self.doc().line_count();
-                    let applied = if key == 0x5a {
-                        self.doc_mut().undo()
-                    } else {
-                        self.doc_mut().redo()
-                    };
-                    if let Some((cursor, line)) = applied {
-                        self.view_mut().cursor = cursor;
-                        self.syntax_changed();
-                        self.revalidate_other_view(None);
-                        self.sync_lsp_edit();
-                        // Undo/redo report only the first changed line; a
-                        // removal spanned `-delta` lines below it.
-                        let delta = self.doc().line_count() as isize - lines_before as isize;
-                        self.shift_gutter_marks(line, line + (-delta).max(0) as usize, delta);
-                        self.schedule_gutter_diff();
-                    }
-                }
+                0x5a | 0x59 => self.undo_or_redo(key == 0x59 || shift),
                 x if x == VK_HOME as u32 => self.move_cursor(Pos::default(), shift),
                 x if x == VK_END as u32 => self.move_cursor(self.doc().end(), shift),
                 x if x == VK_LEFT as u32 => {
@@ -811,6 +809,10 @@ impl App {
             }
             x if x == VK_F12 as u32 && shift => {
                 self.find_references(hwnd);
+                return true;
+            }
+            x if x == VK_F2 as u32 && !self.panel_focus => {
+                self.start_rename(hwnd);
                 return true;
             }
             x if x == VK_F12 as u32 => {
@@ -971,6 +973,12 @@ impl App {
         if self.run_config_panel.is_some() {
             self.run_config_character(hwnd, unit);
             return;
+        }
+        if self.rename_char(hwnd, unit) {
+            return;
+        }
+        if self.code_actions.is_some() || self.code_action_request.is_some() {
+            self.dismiss_code_actions(hwnd);
         }
         if self.terminal_rename_input.is_some() {
             if !self.terminal_focus
@@ -1324,6 +1332,9 @@ impl App {
             return;
         }
         if self.more_menu_click(hwnd, x, y) {
+            return;
+        }
+        if self.rename_click(hwnd, x, y) || self.code_action_click(hwnd, x, y) {
             return;
         }
         self.clear_hover(hwnd);
@@ -2142,12 +2153,16 @@ impl App {
             .ai_diagnostic_at_cursor()
             .map(|diagnostic| EditorContextDiagnostic::from_lsp(&diagnostic));
         let has_hunk = self.active_hunk_at_cursor().is_some();
-        self.editor_context = Some(EditorContextMenu::new(x, y, problem, selected, has_hunk));
+        let can_rename = Tab::lsp_language(self.doc()).is_some();
+        self.editor_context =
+            Some(EditorContextMenu::new(x, y, problem, selected, has_hunk).with_rename(can_rename));
         unsafe { InvalidateRect(hwnd, null(), 0) };
         true
     }
 
     pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
+        self.cancel_rename(hwnd);
+        self.dismiss_code_actions(hwnd);
         if self.run_config_panel.is_some() {
             return;
         }

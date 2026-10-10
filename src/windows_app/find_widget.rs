@@ -261,7 +261,7 @@ impl App {
 
     // One input: its text (the end of it, when too long to fit) or a
     // placeholder, and a caret when it has the focus.
-    fn paint_find_field(
+    pub(super) fn paint_find_field(
         &self,
         hdc: HDC,
         rect: RECT,

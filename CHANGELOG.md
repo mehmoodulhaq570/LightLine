@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Quick Fixes and Refactorings**: Press `Ctrl+.` (or right-click → **Quick fix...**) for the language server's fixes and refactorings at the cursor or selection, such as adding a missing import or extracting an expression. Pick one from the list to apply it; `Ctrl+Z` undoes it. Actions that run on the server and send their changes back (TypeScript's refactorings, for example) work too. The server is asked only when you press `Ctrl+.`, so typing and moving the cursor cost nothing extra.
+- **Rename Symbol**: Press `F2` on a name (or right-click → **Rename symbol**) to rename it everywhere the language server finds it, across the project. Open files change in the editor as one undo step each and are saved unless they had unsaved changes; files that aren't open are changed on disk. Works with rust-analyzer, Pyright, clangd, typescript-language-server and gopls.
 - **Crash Safety Net**: If LightLine hits an internal error, it saves your unsaved work, says so, writes the details to `%APPDATA%\LightLine\crash.log`, and then closes. The next start offers the work back with **Restore**. Before, it vanished with no message and lost anything typed in the last few seconds.
 - **Files Changed by Another Program**: When a file you have unsaved edits in is changed on disk, the status bar says so, and saving asks what to do: **Overwrite** keeps your version, **Reload** takes the one on disk, or **Cancel**. A deleted file offers **Save Again**. Saving used to fail with "save to a different path". Files without unsaved edits still reload by themselves.
 - **Project-Local Prettier**: Formatting uses the project's own Prettier from `node_modules/.bin` first, then one on `PATH`.
@@ -50,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Fixed
 
+- **F2 Renames in the Explorer**: The User Guide listed `F2` for renaming the selected file or folder in the Explorer, but the key did nothing. It now opens the rename field, as the right-click **Rename** does.
 - **Formatting Keeps Your Place**: Format Document and format-on-save moved the caret to the end of the file and scrolled there. The caret, selection and scroll position now stay with the code they were on, and folds outside the changed text stay folded.
 - **Rust Formatting Works on Modern Code**: `rustfmt` read the buffer as Rust 2015 and rejected `async fn`, `let … else` and similar. It now uses the edition from the project's `Cargo.toml`, including one inherited from the workspace.
 - **Breakpoints Follow Their Code**: Adding or removing lines above a breakpoint left it on the old line number, so the debugger stopped on the wrong line. Breakpoints now move with their line, and go away when their line is deleted.
