@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-10-11
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.4.0-windows-x86_64.zip`, `lightline-v0.4.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns. It no longer needs the Visual C++ Redistributable.
+
 #### Added
 
 - **Buttons Respond to the Mouse**: The left rail, the title-bar buttons, the search box and every Welcome screen action now light up under the mouse, and icon-only buttons show what they do in a small tip ("Search in files (Ctrl+Shift+F)", "Settings (Ctrl+,)"); Close turns red, as in Windows. Only the button that changed is redrawn, and nothing runs while the mouse is still. The Welcome screen's ⚙ now opens Settings, and decorative marks in the rails that looked clickable but did nothing are gone (#62, #5, #3).
