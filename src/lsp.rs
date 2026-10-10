@@ -154,8 +154,11 @@ pub struct CompletionItem {
     pub kind: u8,
     pub detail: Option<String>,
     // Text to insert: the server's textEdit.newText, else insertText, else
-    // label, with any snippet placeholders stripped to plain text.
+    // label. A snippet (see `snippet`) is kept as sent, for expand_snippet;
+    // other text has any stray placeholders stripped.
     pub insert: String,
+    // Whether `insert` is snippet syntax, with tab stops ($1, ${2:name}, $0).
+    pub snippet: bool,
     // The server's own replacement range, when it sent a textEdit. The GUI
     // applies this range if present, otherwise it replaces the identifier
     // prefix it tracked when the request was made.
@@ -244,6 +247,13 @@ pub enum Command {
         uri: String,
         version: i32,
         range: Range,
+    },
+    /// The other places the name at `position` is used in the file.
+    Highlights {
+        id: u64,
+        uri: String,
+        version: i32,
+        position: Position,
     },
     /// Symbols matching `query` anywhere in the project.
     WorkspaceSymbols {
@@ -349,6 +359,15 @@ pub enum Event {
     InlayHintsStale {
         language: Language,
     },
+    /// Where the name asked about is used in the file; None when the server
+    /// answered with an error.
+    Highlights {
+        language: Language,
+        id: u64,
+        uri: String,
+        version: i32,
+        ranges: Option<Vec<Range>>,
+    },
     /// None when the caret isn't in a call.
     SignatureHelp {
         language: Language,
@@ -429,6 +448,7 @@ struct Pending {
     signatures: HashMap<u64, PendingHover>,
     workspace_symbols: std::collections::HashSet<u64>,
     inlay_hints: HashMap<u64, PendingHover>,
+    highlights: HashMap<u64, PendingHover>,
     // The commands the server runs (executeCommandProvider), and the next
     // id for running one; nothing waits for their answers.
     server_commands: Vec<String>,
@@ -1045,6 +1065,7 @@ fn run_server(
                 "rename": {"prepareSupport":false},
                 "documentSymbol": {"hierarchicalDocumentSymbolSupport":true},
                 "inlayHint": {},
+                "documentHighlight": {},
                 "signatureHelp": {
                     "signatureInformation": {
                         "parameterInformation": {"labelOffsetSupport":true},
@@ -1062,7 +1083,7 @@ fn run_server(
                 "completion": {
                     "contextSupport":true,
                     "completionItem": {
-                        "snippetSupport":false,
+                        "snippetSupport":true,
                         "documentationFormat":["plaintext"],
                         "resolveSupport":{"properties":[]}
                     }
@@ -1314,6 +1335,18 @@ fn run_server(
                             uri: request.uri,
                             version: request.version,
                             hints: parse_inlay_hints(&message),
+                        },
+                        &events,
+                        &wake,
+                    );
+                } else if let Some(request) = pending.highlights.remove(&id) {
+                    emit(
+                        Event::Highlights {
+                            language: config.language,
+                            id,
+                            uri: request.uri,
+                            version: request.version,
+                            ranges: parse_highlights(&message),
                         },
                         &events,
                         &wake,
@@ -1614,6 +1647,28 @@ fn send_command(
                 "context":{"triggerKind":1,"isRetrigger":false}
             }});
             pending.signatures.insert(
+                id,
+                PendingHover {
+                    uri,
+                    version,
+                    position,
+                    retries: 0,
+                },
+            );
+            request
+        }
+        Command::Highlights {
+            id,
+            uri,
+            version,
+            position,
+        } => {
+            let request = json!({"jsonrpc":"2.0","id":id,"method":"textDocument/documentHighlight",
+            "params":{
+                "textDocument":{"uri":uri},
+                "position":{"line":position.line,"character":position.character}
+            }});
+            pending.highlights.insert(
                 id,
                 PendingHover {
                     uri,
@@ -2005,6 +2060,24 @@ fn parse_inlay_hints(message: &Value) -> Option<Vec<InlayHint>> {
     Some(hints)
 }
 
+// textDocument/documentHighlight answers with ranges (and kinds, unused);
+// null means none, an error None.
+fn parse_highlights(message: &Value) -> Option<Vec<Range>> {
+    if message.get("error").is_some() {
+        return None;
+    }
+    let Some(items) = message.get("result").and_then(Value::as_array) else {
+        return Some(Vec::new());
+    };
+    let mut ranges: Vec<Range> = items
+        .iter()
+        .filter_map(|item| parse_range(item.get("range")?))
+        .take(5_000)
+        .collect();
+    ranges.sort_by_key(|range| (range.start.line, range.start.character));
+    Some(ranges)
+}
+
 // workspace/symbol answers with SymbolInformation or WorkspaceSymbol items;
 // a WorkspaceSymbol's location may be just a file.
 fn parse_workspace_symbols(message: &Value) -> Result<Vec<WorkspaceSymbol>, String> {
@@ -2235,7 +2308,12 @@ fn parse_completion(message: &Value) -> Vec<CompletionItem> {
                 .and_then(|edit| edit.get("newText").and_then(Value::as_str))
                 .or_else(|| item.get("insertText").and_then(Value::as_str))
                 .unwrap_or(label);
-            let insert = strip_snippet(insert);
+            let snippet = item.get("insertTextFormat").and_then(Value::as_u64) == Some(2);
+            let insert = if snippet {
+                insert.to_owned()
+            } else {
+                strip_snippet(insert)
+            };
             // A textEdit may be a plain {range,newText} or an
             // InsertReplaceEdit with separate insert/replace ranges.
             let edit_range = text_edit.and_then(|edit| {
@@ -2261,12 +2339,154 @@ fn parse_completion(message: &Value) -> Vec<CompletionItem> {
                     .and_then(Value::as_str)
                     .map(str::to_owned),
                 insert,
+                snippet,
                 edit_start,
                 edit_end,
             })
         })
         .take(300)
         .collect()
+}
+
+/// A snippet expanded to the text to insert, with its tab stops: (number,
+/// start, end) as byte offsets into the text, in the order Tab visits them,
+/// the final $0 last (at the end when the snippet has none). Each line after
+/// the first starts with `indent`, and a tab becomes `tab`. A number used
+/// twice keeps its first place; choices give their first option, and
+/// variables their default.
+pub fn expand_snippet(text: &str, indent: &str, tab: &str) -> (String, Vec<(u32, usize, usize)>) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut stops: Vec<(u32, usize, usize)> = Vec::new();
+    let mut index = 0;
+    let mut expander = Expander {
+        chars: &chars,
+        indent,
+        tab,
+    };
+    expander.expand(&mut index, None, &mut out, &mut stops);
+    let mut ordered: Vec<(u32, usize, usize)> = Vec::new();
+    for stop in stops {
+        if !ordered.iter().any(|kept| kept.0 == stop.0) {
+            ordered.push(stop);
+        }
+    }
+    ordered.sort_by_key(|stop| if stop.0 == 0 { u32::MAX } else { stop.0 });
+    if ordered.last().is_none_or(|stop| stop.0 != 0) {
+        ordered.push((0, out.len(), out.len()));
+    }
+    (out, ordered)
+}
+
+struct Expander<'a> {
+    chars: &'a [char],
+    indent: &'a str,
+    tab: &'a str,
+}
+
+impl Expander<'_> {
+    fn number(&self, index: &mut usize) -> Option<u32> {
+        let start = *index;
+        while *index < self.chars.len() && self.chars[*index].is_ascii_digit() {
+            *index += 1;
+        }
+        self.chars[start..*index]
+            .iter()
+            .collect::<String>()
+            .parse()
+            .ok()
+    }
+
+    fn name(&self, index: &mut usize) -> bool {
+        let start = *index;
+        while *index < self.chars.len()
+            && (self.chars[*index].is_alphanumeric() || self.chars[*index] == '_')
+        {
+            *index += 1;
+        }
+        *index > start
+    }
+
+    // Expands from `index` up to the `until` character (the `}` closing a
+    // placeholder) or the end.
+    fn expand(
+        &mut self,
+        index: &mut usize,
+        until: Option<char>,
+        out: &mut String,
+        stops: &mut Vec<(u32, usize, usize)>,
+    ) {
+        let chars = self.chars;
+        while *index < chars.len() {
+            let ch = chars[*index];
+            if Some(ch) == until {
+                return;
+            }
+            let next = chars.get(*index + 1).copied();
+            match ch {
+                '\\' if matches!(next, Some('$' | '}' | '\\')) => {
+                    out.extend(next);
+                    *index += 2;
+                }
+                '$' if next.is_some_and(|next| next.is_ascii_digit()) => {
+                    *index += 1;
+                    if let Some(stop) = self.number(index) {
+                        stops.push((stop, out.len(), out.len()));
+                    }
+                }
+                '$' if next == Some('{') => {
+                    *index += 2;
+                    let start = out.len();
+                    if let Some(stop) = self.number(index) {
+                        match chars.get(*index) {
+                            Some(':') => {
+                                *index += 1;
+                                self.expand(index, Some('}'), out, stops);
+                            }
+                            Some('|') => {
+                                // A choice: its first option.
+                                *index += 1;
+                                while *index < chars.len() && !matches!(chars[*index], ',' | '|') {
+                                    out.push(chars[*index]);
+                                    *index += 1;
+                                }
+                            }
+                            _ => {}
+                        }
+                        stops.push((stop, start, out.len()));
+                    } else if self.name(index) && chars.get(*index) == Some(&':') {
+                        // A variable: its default.
+                        *index += 1;
+                        self.expand(index, Some('}'), out, stops);
+                    }
+                    // Past the closing brace (and anything unexpected before it).
+                    while *index < chars.len() && chars[*index] != '}' {
+                        *index += 1;
+                    }
+                    *index += 1;
+                }
+                '$' if next.is_some_and(|next| next.is_alphabetic() || next == '_') => {
+                    // A variable such as $TM_FILENAME: nothing.
+                    *index += 1;
+                    self.name(index);
+                }
+                '\n' => {
+                    out.push('\n');
+                    out.push_str(self.indent);
+                    *index += 1;
+                }
+                '\t' => {
+                    out.push_str(self.tab);
+                    *index += 1;
+                }
+                '\r' => *index += 1,
+                _ => {
+                    out.push(ch);
+                    *index += 1;
+                }
+            }
+        }
+    }
 }
 
 // Drops snippet placeholders so a plain-text insert never leaves `${...}` or
@@ -2634,6 +2854,27 @@ mod tests {
     }
 
     #[test]
+    fn highlights_parse_in_file_order() {
+        let range = |line, from, to| json!({"start":{"line":line,"character":from},"end":{"line":line,"character":to}});
+        let message = json!({"result":[
+            {"range":range(4, 8, 13),"kind":2},
+            {"range":range(1, 4, 9),"kind":3},
+            {"kind":1}
+        ]});
+        let found: Vec<(u32, u32)> = parse_highlights(&message)
+            .unwrap()
+            .iter()
+            .map(|range| (range.start.line, range.start.character))
+            .collect();
+        assert_eq!(found, [(1, 4), (4, 8)]);
+        assert_eq!(parse_highlights(&json!({"result":null})), Some(Vec::new()));
+        assert_eq!(
+            parse_highlights(&json!({"error":{"code":-32801,"message":"content modified"}})),
+            None
+        );
+    }
+
+    #[test]
     fn inlay_hints_parse_labels_padding_and_order() {
         let at = |line, character| json!({"line":line,"character":character});
         let message = json!({"result":[
@@ -2795,6 +3036,29 @@ mod tests {
     }
 
     #[test]
+    fn snippets_expand_with_their_tab_stops() {
+        let (text, stops) = expand_snippet("add(${1:left}, ${2:right})$0", "", "    ");
+        assert_eq!(text, "add(left, right)");
+        assert_eq!(stops, [(1, 4, 8), (2, 10, 15), (0, 16, 16)]);
+        // $0 inside, an empty stop, and no $0: one is added at the end.
+        assert_eq!(expand_snippet("push($0)", "", "\t").1, [(0, 5, 5)]);
+        assert_eq!(expand_snippet("f($1)", "", "\t").1, [(1, 2, 2), (0, 3, 3)]);
+        // Nested placeholders, choices, variables and escapes.
+        let (text, stops) = expand_snippet("${1:Vec<${2:T}>} ${3|a,b|} ${TM_X:d} \\$1 \\}", "", "");
+        assert_eq!(text, "Vec<T> a d $1 }");
+        assert_eq!(stops, [(1, 0, 6), (2, 4, 5), (3, 7, 8), (0, 15, 15)]);
+        // New lines take the line's indentation; tabs follow the settings.
+        let (text, stops) = expand_snippet("if ${1:x} {\n\t$0\n}", "    ", "    ");
+        assert_eq!(text, "if x {\n        \n    }");
+        assert_eq!(stops, [(1, 3, 4), (0, 15, 15)]);
+        // A number used twice keeps its first place (the other isn't filled).
+        assert_eq!(
+            expand_snippet("${1:a} $1", "", "").1,
+            [(1, 0, 1), (0, 2, 2)]
+        );
+    }
+
+    #[test]
     fn completion_parses_lists_and_snippets() {
         // Bare array form, a snippet insertText, and an object form with a
         // textEdit range are all accepted.
@@ -2818,6 +3082,13 @@ mod tests {
         assert_eq!(object[0].insert, "push()");
         assert_eq!(object[0].edit_start.unwrap().line, 2);
         assert_eq!(object[0].edit_end.unwrap().character, 7);
+
+        let marked = parse_completion(&json!({"result":[
+            {"label":"add","insertText":"add(${1:left}, ${2:right})$0","insertTextFormat":2}
+        ]}));
+        assert!(marked[0].snippet);
+        assert_eq!(marked[0].insert, "add(${1:left}, ${2:right})$0");
+        assert!(!array[0].snippet);
 
         assert!(parse_completion(&json!({"result":null})).is_empty());
         assert_eq!(strip_snippet("${1:foo}bar"), "foobar");

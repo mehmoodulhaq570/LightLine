@@ -201,6 +201,11 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.request_inlay_hints();
             0
         }
+        WM_TIMER if wparam == OCCURRENCE_TIMER => {
+            unsafe { KillTimer(hwnd, OCCURRENCE_TIMER) };
+            app.request_occurrences();
+            0
+        }
         WM_TIMER if wparam == 3 => {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             0
@@ -809,6 +814,20 @@ pub fn run() -> io::Result<()> {
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+            // Keys and clicks are what move the caret: the uses of the name
+            // at it are looked up again once it rests.
+            if matches!(
+                msg.message,
+                WM_KEYDOWN
+                    | WM_SYSKEYDOWN
+                    | WM_CHAR
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_RBUTTONDOWN
+            ) && let Ok(mut app) = app.try_borrow_mut()
+            {
+                app.track_caret(hwnd);
+            }
         }
         DeleteObject(app.borrow().font);
         DeleteObject(app.borrow().ui_font);

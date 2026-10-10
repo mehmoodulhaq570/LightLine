@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Problems Panel**: `Ctrl+Shift+M`, the **PROBLEMS** tab in the bottom panel, or a click on the error and warning counts in the status bar lists every error, warning and note in the open files, grouped by file with line and column. Click one to jump to it, or use `Up`/`Down` and `Enter`; `Esc` returns the keyboard to the editor. Long lists scroll with the wheel or the scrollbar. The tab shows the count and updates as the language server reports. Built with @Mayuri-004's Problems tab (#61, for #15).
 - **Go to Symbol in Workspace**: Type `#` in Quick Open (or press `Ctrl+T`) and a name to search the whole project's functions, types and methods through the language server, then press `Enter` to open the file at that symbol. rust-analyzer now searches all symbols, not only types.
 - **Inlay Hints**: Types of variables and the names of parameters show in muted text inside the code (`let total: i32 = add(left: 1, right: 2)`), from the language server. They move with the text as you type and refresh once typing pauses; the caret, clicks and selection skip over them. Turn them off with `"inlayHints": false` in Settings. Typing speed is unchanged.
+- **Highlight Uses of a Name**: Rest the caret on a variable, function or type and its other uses in the file get a soft highlight, from the language server (like VS Code). The server is asked only once the caret has rested for a quarter of a second; moving off the name or typing clears the highlights at once. Turn it off with `"occurrencesHighlight": false`.
+- **Snippet Completions**: Accepting a function from the completion list now inserts its arguments as places to fill in: `add(left, right)` with `left` selected. Type to replace it, `Tab` goes to the next place and `Shift+Tab` back, and the last `Tab` leaves the caret after the call. Multi-line snippets take the line's indentation.
+
+#### Fixed
+
+- **Tab and Shift+Tab**: `Tab` typed a tab character even with **Insert Spaces** on (the default), and with several lines selected it replaced them all with a tab. It now types spaces up to the next tab stop, and indents the selected lines; `Shift+Tab` outdents the selected lines or the caret's line. Each is one undo step.
 
 ## [v0.4.0] - 2026-10-11
 

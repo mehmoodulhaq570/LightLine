@@ -338,6 +338,7 @@ impl App {
                     | LspEvent::SignatureHelp { .. }
                     | LspEvent::InlayHints { .. }
                     | LspEvent::InlayHintsStale { .. }
+                    | LspEvent::Highlights { .. }
             );
             match event {
                 LspEvent::Ready { language } => {
@@ -394,6 +395,11 @@ impl App {
                     self.request_inlay_hints();
                     continue;
                 }
+                LspEvent::Highlights { id, ranges, .. } => {
+                    // It redraws just the rows of the old and new highlights.
+                    self.finish_occurrences(hwnd, id, ranges);
+                    continue;
+                }
                 LspEvent::Hover {
                     language,
                     id,
@@ -424,6 +430,7 @@ impl App {
                 } => {
                     self.reset_language_client(language, Some(&root));
                     self.lsp_failed_at.insert((language, root), Instant::now());
+                    self.occurrences.forget_request();
                     self.hover_target = None;
                     self.hover_card = None;
                     self.definition_target = None;
@@ -707,6 +714,7 @@ impl App {
             self.clamp_problems();
             self.invalidate_problems(hwnd);
         }
+        self.track_caret(hwnd);
         if repaint_all {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         } else if diagnostics_changed {
@@ -1370,6 +1378,10 @@ impl App {
         };
         self.completion = None;
         self.completion_request = None;
+        if item.snippet {
+            self.insert_snippet(hwnd, start, end, &item.insert);
+            return;
+        }
         let text = item.insert.replace("\r\n", "\n").replace('\r', "\n");
         self.replace_range(start, end, &text);
         self.keep_cursor_visible(hwnd);

@@ -155,6 +155,9 @@ impl App {
                 self.theme.edge,
             );
             let hint_bg = blend(self.theme.editor_bg, self.theme.text, 0.07);
+            // The other uses of the name at the caret (occurrences.rs).
+            let occurrences = self.occurrences_in(self.tab_for_pane(pane));
+            let occurrence_bg = blend(self.theme.editor_bg, self.theme.text, 0.15);
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
@@ -197,6 +200,20 @@ impl App {
                                 source.len()
                             },
                             index < end.line,
+                        )
+                    })
+                    .collect();
+                let line_occurrences: Vec<(usize, usize)> = occurrences
+                    .iter()
+                    .filter(|(start, end)| start.line <= index && index <= end.line)
+                    .map(|(start, end)| {
+                        (
+                            if index == start.line { start.byte } else { 0 },
+                            if index == end.line {
+                                end.byte
+                            } else {
+                                source.len()
+                            },
                         )
                     })
                     .collect();
@@ -447,6 +464,24 @@ impl App {
                             Polygon(hdc, pts.as_ptr(), 3);
                             SelectObject(hdc, old_pen);
                             SelectObject(hdc, old_brush);
+                        }
+                    }
+                    for &(from, to) in &line_occurrences {
+                        let (from, to) = (from.max(row_start), to.min(row_end));
+                        if from < to {
+                            let (x1, x2) = (x_after(from), x_of(to));
+                            if x2 > x1 && x1 < right {
+                                Self::fill(
+                                    hdc,
+                                    RECT {
+                                        left: x1,
+                                        top: y,
+                                        right: x2.min(right),
+                                        bottom: row_bottom,
+                                    },
+                                    occurrence_bg,
+                                );
+                            }
                         }
                     }
                     for &(from, to, continues) in &line_selections {

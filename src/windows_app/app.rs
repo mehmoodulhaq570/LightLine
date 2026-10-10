@@ -911,6 +911,10 @@ pub(super) struct App {
     pub(super) workspace_search: WorkspaceSearch,
     // The inlay hints asked for (inlay.rs), until they come.
     pub(super) inlay_request: Option<InlayRequest>,
+    // The other uses of the name at the caret (occurrences.rs).
+    pub(super) occurrences: Occurrences,
+    // A completion's snippet being filled in (snippet.rs).
+    pub(super) snippet: Option<SnippetSession>,
     // Parameter hints: the card shown, and the latest request.
     pub(super) signature: Option<SignatureCard>,
     pub(super) signature_request: Option<SignatureRequest>,
@@ -1451,6 +1455,8 @@ impl App {
             symbols_request: None,
             workspace_search: WorkspaceSearch::default(),
             inlay_request: None,
+            occurrences: Occurrences::default(),
+            snippet: None,
             signature: None,
             signature_request: None,
             multi_editing: false,
@@ -2742,6 +2748,7 @@ impl App {
         // would move the highlighter's colors a second time.
         if self.doc().change_serial() != serial_before {
             self.syntax_changed();
+            self.shift_snippet(start, end, cursor);
         }
         self.view_mut().cursor = cursor;
         self.revalidate_other_view(Some((start, end, cursor)));
@@ -2755,6 +2762,7 @@ impl App {
     /// the language server follow each.
     pub(super) fn undo_or_redo(&mut self, redo: bool) {
         self.drop_extra_carets();
+        self.snippet = None;
         self.view_mut().selection_anchor = None;
         loop {
             let lines_before = self.doc().line_count();

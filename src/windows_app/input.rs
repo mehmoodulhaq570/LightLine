@@ -836,6 +836,12 @@ impl App {
         if key == VK_TAB as u32 && !ctrl && !shift && self.accept_ghost_text(hwnd) {
             return true;
         }
+        if !ctrl && self.snippet_key(hwnd, key, shift) {
+            return true;
+        }
+        if key == VK_TAB as u32 && !ctrl && self.tab_key(hwnd, shift) {
+            return true;
+        }
         // Checked before the key acts: Backspace and Delete clear a hover card.
         let stays_in_editor = self.keystroke_stays_in_editor();
         let before = self.caret_frame(hwnd);
@@ -988,7 +994,7 @@ impl App {
     // After a key or a click moved the caret, selected or edited text: redraws
     // what that changed in the editor and the status bar (see caret_changes),
     // or everything when something outside them may have changed.
-    fn refresh_after_editor_input(
+    pub(super) fn refresh_after_editor_input(
         &mut self,
         hwnd: HWND,
         stays_in_editor: bool,

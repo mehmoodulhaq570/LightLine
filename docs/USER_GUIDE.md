@@ -42,7 +42,8 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `Ctrl+F` | Find in the current file. `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) go to the next / previous match; `Esc` closes |
 | `Ctrl+H` | Find and replace. `Tab` switches fields, `Enter` replaces the current match, `Alt+Enter` replaces all (one `Ctrl+Z` undoes it) |
 | `Ctrl+Shift+F` | Search all files in the workspace; `Enter` moves to the results |
-| `Ctrl+Space` | Show completions |
+| `Ctrl+Space` | Show completions. A function goes in with its arguments as places to fill: type over the selected one, `Tab` / `Shift+Tab` move between them |
+| `Tab` / `Shift+Tab` | Indent (spaces to the next tab stop) / outdent; with several lines selected, indent or outdent them all |
 | `F1` | Show documentation for the symbol at the cursor |
 | `F12` / `Shift+F12` | Go to definition / find all references |
 | `F2` | Rename the symbol at the cursor everywhere it's used (see [Rename Symbol](#rename-symbol)) |
@@ -149,6 +150,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "autoIndent": true,
   "formatOnSave": false,
   "inlayHints": true,
+  "occurrencesHighlight": true,
   "bracketMatching": true,
   "indentGuides": true,
   "markdownLoadRemoteImages": false,
@@ -175,6 +177,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides |
 | `formatOnSave` | Format the file before each save |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
+| `occurrencesHighlight` | Highlight the other uses of the name at the caret |
 | `markdownLoadRemoteImages` | Load web images in Markdown previews without asking |
 | `colorTheme` | An installed color theme, such as `"Catppuccin Mocha"`; leave it out for LightLine's own. **Preferences: Color Theme** sets it for you |
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |

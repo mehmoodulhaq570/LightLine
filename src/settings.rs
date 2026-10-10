@@ -21,6 +21,8 @@ pub struct Settings {
     pub prettier_enabled: bool,
     /// Show the language server's inlay hints (types, parameter names).
     pub inlay_hints: bool,
+    /// Highlight the other uses of the name at the caret.
+    pub occurrences_highlight: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
@@ -55,6 +57,7 @@ impl Default for Settings {
             format_on_save: false,
             prettier_enabled: true,
             inlay_hints: true,
+            occurrences_highlight: true,
             bracket_matching: true,
             indent_guides: true,
             minimap: true,
@@ -173,6 +176,9 @@ impl Settings {
         if let Some(b) = value.get("inlayHints").and_then(|v| v.as_bool()) {
             settings.inlay_hints = b;
         }
+        if let Some(b) = value.get("occurrencesHighlight").and_then(|v| v.as_bool()) {
+            settings.occurrences_highlight = b;
+        }
         if let Some(b) = value.get("bracketMatching").and_then(|v| v.as_bool()) {
             settings.bracket_matching = b;
         }
@@ -285,6 +291,10 @@ impl Settings {
             serde_json::Value::Bool(self.inlay_hints),
         );
         obj.insert(
+            "occurrencesHighlight".into(),
+            serde_json::Value::Bool(self.occurrences_highlight),
+        );
+        obj.insert(
             "bracketMatching".into(),
             serde_json::Value::Bool(self.bracket_matching),
         );
@@ -335,6 +345,7 @@ const OWN_KEYS: &[&str] = &[
     "formatOnSave",
     "prettierEnabled",
     "inlayHints",
+    "occurrencesHighlight",
     "bracketMatching",
     "indentGuides",
     "minimap",
@@ -405,6 +416,16 @@ mod tests {
             ..Settings::default()
         };
         assert!(!Settings::parse(&s.to_json()).unwrap().inlay_hints);
+    }
+
+    #[test]
+    fn occurrence_highlights_are_on_until_turned_off() {
+        assert!(Settings::default().occurrences_highlight);
+        let s = Settings {
+            occurrences_highlight: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().occurrences_highlight);
     }
 
     #[test]
