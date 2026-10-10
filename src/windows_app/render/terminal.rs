@@ -96,6 +96,32 @@ impl App {
             );
         }
 
+        let debug_active = self.terminal_tab == TerminalTab::DebugConsole;
+        Self::label(
+            hdc,
+            "DEBUG CONSOLE",
+            layout.debug.left,
+            top + self.scale(9),
+            if debug_active {
+                self.theme.text
+            } else {
+                self.theme.muted
+            },
+            layout.debug,
+        );
+        if debug_active {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: layout.debug.left,
+                    top: header_bottom - self.scale(2),
+                    right: layout.debug.right - self.scale(14),
+                    bottom: header_bottom,
+                },
+                self.theme.violet,
+            );
+        }
+
         // One tab per interactive shell session, marked with a leading bullet.
         for (index, rect) in layout.terminals.iter().enumerate() {
             let pane = self.terminals.get(index);
@@ -182,7 +208,7 @@ impl App {
             if match self.terminal_tab {
                 TerminalTab::Output => self.run_session.is_some(),
                 TerminalTab::Terminal => shell_open,
-                TerminalTab::Problems => false,
+                TerminalTab::Problems | TerminalTab::DebugConsole => false,
             } {
                 self.theme.muted
             } else {
@@ -233,13 +259,28 @@ impl App {
             }
             return;
         }
+        if debug_active {
+            Self::label(
+                hdc,
+                "\u{d7}",
+                layout.hide.left + self.scale(6),
+                top + self.scale(6),
+                self.theme.muted,
+                layout.hide,
+            );
+            self.paint_debug_console(hdc, hwnd);
+            if self.terminal_profile_menu_open {
+                self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
+            }
+            return;
+        }
         let active_snapshot: Option<Arc<Snapshot>> = match self.terminal_tab {
             TerminalTab::Output => self.run_snapshot.clone(),
             TerminalTab::Terminal => self
                 .terminals
                 .get(self.terminal_active)
                 .and_then(|pane| pane.snapshot.clone()),
-            TerminalTab::Problems => None,
+            TerminalTab::Problems | TerminalTab::DebugConsole => None,
         };
         let status = match &active_snapshot {
             Some(snapshot) => match &snapshot.status {

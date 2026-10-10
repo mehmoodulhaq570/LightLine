@@ -561,15 +561,21 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             }
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect) };
-            if app.scroll_problems(hwnd, point.x, point.y, if delta > 0 { -3 } else { 3 }) {
+            if app.scroll_problems(hwnd, point.x, point.y, if delta > 0 { -3 } else { 3 })
+                || app.scroll_debug_console(hwnd, point.x, point.y, if delta > 0 { -3 } else { 3 })
+            {
                 return 0;
             }
             if app.terminal_visible
                 && point.x >= app.editor_left()
                 && point.y >= app.terminal_top(hwnd)
             {
-                // Over the Problems tab strip: nothing to scroll.
-                if app.terminal_tab == TerminalTab::Problems {
+                // Over the Problems or Debug Console tab strip: nothing to
+                // scroll.
+                if matches!(
+                    app.terminal_tab,
+                    TerminalTab::Problems | TerminalTab::DebugConsole
+                ) {
                     return 0;
                 }
 
@@ -827,6 +833,7 @@ pub fn run() -> io::Result<()> {
             ) && let Ok(mut app) = app.try_borrow_mut()
             {
                 app.track_caret(hwnd);
+                app.check_sticky(hwnd);
             }
         }
         DeleteObject(app.borrow().font);

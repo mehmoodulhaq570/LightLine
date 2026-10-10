@@ -759,6 +759,7 @@ impl App {
                 && !self.search_input
                 && !self.panel_focus
                 && pane == self.focused_pane
+                && !self.debug_prompt_has_keyboard(hwnd)
             {
                 // Its screen row, not its document line: rows above it can be
                 // wrapped (several per line) or folded (one per block).
@@ -815,6 +816,9 @@ impl App {
                     }
                 }
             }
+            // Sticky scroll's pinned lines go over the top rows (and any
+            // caret there).
+            self.paint_sticky(hdc, hwnd, pane, left, right);
             // The scrollbar goes over the text: a track with a thin edge, and
             // the slider, lighter under the mouse and lighter still held.
             if let Some((track, slider)) = self.scrollbar(hwnd, pane) {

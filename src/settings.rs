@@ -23,6 +23,8 @@ pub struct Settings {
     pub inlay_hints: bool,
     /// Highlight the other uses of the name at the caret.
     pub occurrences_highlight: bool,
+    /// Pin the first lines of the blocks the view is inside above the code.
+    pub sticky_scroll: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
@@ -58,6 +60,7 @@ impl Default for Settings {
             prettier_enabled: true,
             inlay_hints: true,
             occurrences_highlight: true,
+            sticky_scroll: true,
             bracket_matching: true,
             indent_guides: true,
             minimap: true,
@@ -179,6 +182,9 @@ impl Settings {
         if let Some(b) = value.get("occurrencesHighlight").and_then(|v| v.as_bool()) {
             settings.occurrences_highlight = b;
         }
+        if let Some(b) = value.get("stickyScroll").and_then(|v| v.as_bool()) {
+            settings.sticky_scroll = b;
+        }
         if let Some(b) = value.get("bracketMatching").and_then(|v| v.as_bool()) {
             settings.bracket_matching = b;
         }
@@ -295,6 +301,10 @@ impl Settings {
             serde_json::Value::Bool(self.occurrences_highlight),
         );
         obj.insert(
+            "stickyScroll".into(),
+            serde_json::Value::Bool(self.sticky_scroll),
+        );
+        obj.insert(
             "bracketMatching".into(),
             serde_json::Value::Bool(self.bracket_matching),
         );
@@ -346,6 +356,7 @@ const OWN_KEYS: &[&str] = &[
     "prettierEnabled",
     "inlayHints",
     "occurrencesHighlight",
+    "stickyScroll",
     "bracketMatching",
     "indentGuides",
     "minimap",
@@ -426,6 +437,16 @@ mod tests {
             ..Settings::default()
         };
         assert!(!Settings::parse(&s.to_json()).unwrap().occurrences_highlight);
+    }
+
+    #[test]
+    fn sticky_scroll_is_on_until_turned_off() {
+        assert!(Settings::default().sticky_scroll);
+        let s = Settings {
+            sticky_scroll: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().sticky_scroll);
     }
 
     #[test]

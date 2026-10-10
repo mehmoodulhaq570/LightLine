@@ -341,7 +341,7 @@ impl App {
                 return true;
             }
         }
-        if self.problems_key(hwnd, key, ctrl) {
+        if self.problems_key(hwnd, key, ctrl) || self.debug_console_key(hwnd, key, ctrl) {
             return true;
         }
         if self.panel_focus && !ctrl && self.side_view == SideView::Review && !self.commit_focus {
@@ -596,6 +596,14 @@ impl App {
                         self.hide_terminal(hwnd);
                     } else {
                         self.show_problems(hwnd);
+                    }
+                    return true;
+                }
+                0x59 if shift => {
+                    if self.terminal_tab == TerminalTab::DebugConsole && self.terminal_visible {
+                        self.hide_terminal(hwnd);
+                    } else {
+                        self.show_debug_console(hwnd);
                     }
                     return true;
                 }
@@ -1022,7 +1030,7 @@ impl App {
             self.run_config_character(hwnd, unit);
             return;
         }
-        if self.rename_char(hwnd, unit) {
+        if self.rename_char(hwnd, unit) || self.debug_console_char(hwnd, unit) {
             return;
         }
         if self.code_actions.is_some() || self.code_action_request.is_some() {
@@ -1398,6 +1406,10 @@ impl App {
         if self.problem_focus {
             self.problem_focus = false;
             self.invalidate_problems(hwnd);
+        }
+        if self.debug_console.focus {
+            self.debug_console.focus = false;
+            self.invalidate_debug_console(hwnd);
         }
         if self.run_choice_click(hwnd, x, y) {
             return;
@@ -1980,6 +1992,7 @@ impl App {
                     TerminalHeaderHit::OutputTab => {
                         self.switch_terminal_tab(hwnd, TerminalTab::Output);
                     }
+                    TerminalHeaderHit::DebugTab => self.show_debug_console(hwnd),
                     TerminalHeaderHit::TerminalTab(index) => self.select_terminal(hwnd, index),
                     TerminalHeaderHit::New => self.new_terminal(hwnd, false),
                     TerminalHeaderHit::ShellPicker => self.toggle_terminal_profile_menu(hwnd),
@@ -1992,6 +2005,9 @@ impl App {
                 return;
             }
             if self.problems_click(hwnd, x, y) {
+                return;
+            }
+            if self.debug_console_click(hwnd, x, y) {
                 return;
             }
             self.focus_terminal(hwnd);
@@ -2094,6 +2110,9 @@ impl App {
         }
         if self.scrollbar_at(hwnd, x, y) == Some(pane) {
             self.scrollbar_press(hwnd, y);
+            return;
+        }
+        if self.sticky_click(hwnd, pane, y) {
             return;
         }
         let pane_left = self.pane_left(hwnd, pane);

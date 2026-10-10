@@ -86,6 +86,7 @@ impl App {
             ("Go to Symbol in File (@)", 53),
             ("Go to Symbol in Workspace (Ctrl+T, #)", 56),
             ("View: Problems (Ctrl+Shift+M)", 57),
+            ("View: Debug Console (Ctrl+Shift+Y)", 58),
             ("Source Action...", 54),
             ("Organize Imports (Shift+Alt+O)", 55),
             ("Close Workspace", 21),
@@ -181,6 +182,7 @@ impl App {
                 Some(52) => self.request_code_actions(hwnd),
                 Some(56) => self.show_workspace_symbols(hwnd),
                 Some(57) => self.show_problems(hwnd),
+                Some(58) => self.show_debug_console(hwnd),
                 Some(54) => self.request_source_actions(hwnd),
                 Some(55) => self.organize_imports(hwnd),
                 Some(53) => {

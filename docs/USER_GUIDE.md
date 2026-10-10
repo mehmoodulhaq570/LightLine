@@ -75,6 +75,7 @@ Add cursors with `Alt+Click`, `Ctrl+Alt+Up` / `Ctrl+Alt+Down` or `Ctrl+D`. Typin
 | `` Ctrl+` `` / `` Ctrl+Shift+` `` | Show or hide the terminal / open a new terminal tab |
 | `Ctrl+Shift+G` | Source Control |
 | `Ctrl+Shift+D` | Run & Debug |
+| `Ctrl+Shift+Y` | Show or hide the **Debug Console**: the debugger's messages, and a prompt to evaluate expressions while paused |
 | `Ctrl+Shift+X` | Extensions |
 | `Ctrl+,` | Settings |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
@@ -151,6 +152,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "formatOnSave": false,
   "inlayHints": true,
   "occurrencesHighlight": true,
+  "stickyScroll": true,
   "bracketMatching": true,
   "indentGuides": true,
   "markdownLoadRemoteImages": false,
@@ -178,6 +180,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `formatOnSave` | Format the file before each save |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `occurrencesHighlight` | Highlight the other uses of the name at the caret |
+| `stickyScroll` | Pin the first lines of the blocks you're scrolled into (function, loop...) at the top of the editor |
 | `markdownLoadRemoteImages` | Load web images in Markdown previews without asking |
 | `colorTheme` | An installed color theme, such as `"Catppuccin Mocha"`; leave it out for LightLine's own. **Preferences: Color Theme** sets it for you |
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |

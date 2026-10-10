@@ -221,6 +221,7 @@ impl App {
             PostMessageW(hwnd_value as HWND, DEBUG_EVENT_MESSAGE, 0, 0);
         });
         let events = self.debug_event_tx.clone();
+        self.debug_console.clear();
         self.debug = Some(DebugClient::start(request, events, wake));
     }
 
@@ -281,12 +282,22 @@ impl App {
         if events.is_empty() {
             return;
         }
+        // Only output (a program printing): just the console and the status
+        // bar change, not the whole window.
+        let only_output = events.iter().all(|event| {
+            matches!(
+                event,
+                DebugEvent::Output { .. } | DebugEvent::Evaluated { .. }
+            )
+        });
         for event in events {
             match event {
                 DebugEvent::Running => {
                     self.debug_state.status = "Running".into();
                     self.debug_state.running = true;
+                    self.debug_console.note("Debugging started");
                 }
+                DebugEvent::Evaluated { result } => self.finish_debug_evaluate(result),
                 DebugEvent::Stopped {
                     thread_id,
                     reason,
@@ -295,6 +306,15 @@ impl App {
                 } => {
                     self.debug_state.status = format!("Paused: {reason}");
                     self.debug_state.running = false;
+                    let place = frames
+                        .first()
+                        .and_then(|frame| {
+                            let name = frame.path.as_deref()?.file_name()?.to_string_lossy();
+                            Some(format!(" at {name}:{}", frame.line))
+                        })
+                        .unwrap_or_default();
+                    self.debug_console
+                        .note(&format!("Paused ({reason}){place}"));
                     self.debug_state.thread_id = thread_id;
                     self.debug_state.frames = frames;
                     self.debug_state.scopes = scopes;
@@ -354,13 +374,16 @@ impl App {
                         None => self.status = "The debugger asked to run an empty command".into(),
                     }
                 }
-                DebugEvent::Output { text } => {
+                DebugEvent::Output { category, text } => {
+                    self.debug_console.push(&category, &text);
+                    // Shown in the status bar too while the console isn't.
                     let trimmed = text.trim_end();
-                    if !trimmed.is_empty() {
+                    if !trimmed.is_empty() && self.terminal_tab != TerminalTab::DebugConsole {
                         self.status = trimmed.chars().take(200).collect();
                     }
                 }
                 DebugEvent::Terminated => {
+                    self.debug_console.note("Program exited");
                     self.debug = None;
                     self.debug_state = DebugState {
                         status: "Program exited".into(),
@@ -370,6 +393,7 @@ impl App {
                     self.status = "Debug session ended".into();
                 }
                 DebugEvent::Failed { message } => {
+                    self.debug_console.push("stderr", &format!("{message}\n"));
                     self.debug = None;
                     self.debug_state = DebugState {
                         status: message.clone(),
@@ -378,6 +402,12 @@ impl App {
                     self.status = message;
                 }
             }
+        }
+        if only_output {
+            self.invalidate_debug_console(hwnd);
+            let status = self.status_area(hwnd);
+            unsafe { InvalidateRect(hwnd, &status, 0) };
+            return;
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }

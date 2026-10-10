@@ -54,6 +54,12 @@ pub enum Command {
     /// Fetch the children of a struct/collection variable on demand, keyed by
     /// its `variablesReference` (0 means "no children" and is never sent).
     Variables(i64),
+    /// Evaluates `expression` as typed in the Debug Console, in stack frame
+    /// `frame` when paused; answered with `Event::Evaluated`.
+    Evaluate {
+        expression: String,
+        frame: Option<i64>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +97,8 @@ pub enum Event {
     },
     Continued,
     Output {
+        /// The DAP category: "stdout", "stderr", "console", "important"...
+        category: String,
         text: String,
     },
     /// debugpy asks for the program to be started in a terminal, so its
@@ -107,6 +115,10 @@ pub enum Event {
     Variables {
         reference: i64,
         variables: Vec<Variable>,
+    },
+    /// The value of a `Command::Evaluate` expression, or why there's none.
+    Evaluated {
+        result: Result<String, String>,
     },
     Terminated,
     Failed {
@@ -211,6 +223,7 @@ enum PendingKind {
     VariablesOnDemand {
         reference: i64,
     },
+    Evaluate,
     Other,
 }
 
@@ -504,6 +517,20 @@ fn run_adapter(
                             failure = Some(text.to_string());
                             break 'running;
                         }
+                        if matches!(kind, PendingKind::Evaluate) {
+                            // The reason is often only in the error's format.
+                            let reason = message
+                                .pointer("/body/error/format")
+                                .and_then(Value::as_str)
+                                .unwrap_or(text);
+                            emit(
+                                Event::Evaluated {
+                                    result: Err(reason.to_string()),
+                                },
+                                &events,
+                                &wake,
+                            );
+                        }
                         continue;
                     }
                     match kind {
@@ -657,6 +684,14 @@ fn run_adapter(
                                 &wake,
                             );
                         }
+                        PendingKind::Evaluate => {
+                            let value = message
+                                .pointer("/body/result")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            emit(Event::Evaluated { result: Ok(value) }, &events, &wake);
+                        }
                         PendingKind::Other => {}
                     }
                 }
@@ -759,6 +794,7 @@ fn run_adapter(
                             {
                                 emit(
                                     Event::Output {
+                                        category: category.unwrap_or("console").to_string(),
                                         text: text.to_string(),
                                     },
                                     &events,
@@ -824,6 +860,20 @@ fn run_adapter(
                 json!({"variablesReference": reference}),
                 PendingKind::VariablesOnDemand { reference },
             ),
+            Input::Command(Command::Evaluate { expression, frame }) => {
+                let mut arguments = json!({"expression": expression, "context": "repl"});
+                if let Some(frame) = frame {
+                    arguments["frameId"] = json!(frame);
+                }
+                send_request(
+                    &mut stdin,
+                    &mut seq,
+                    &mut pending,
+                    "evaluate",
+                    arguments,
+                    PendingKind::Evaluate,
+                )
+            }
             Input::AdapterMessage => Ok(()),
         };
         if sent.is_err() {

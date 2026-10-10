@@ -164,6 +164,7 @@ fn output_control_bytes(key: TermKey, modifiers: TermModifiers) -> Option<Vec<u8
 pub(super) enum TerminalHeaderHit {
     Problems,
     OutputTab,
+    DebugTab,
     TerminalTab(usize),
     New,
     ShellPicker,
@@ -217,6 +218,7 @@ pub(super) struct TerminalHeaderLayout {
     pub(super) header_bottom: i32,
     pub(super) problems: RECT,
     pub(super) output: RECT,
+    pub(super) debug: RECT,
     pub(super) terminals: Vec<RECT>,
     pub(super) plus: RECT,
     pub(super) chevron: RECT,
@@ -304,7 +306,7 @@ impl App {
         match self.terminal_tab {
             TerminalTab::Terminal => self.terminals.get(self.terminal_active)?.snapshot.as_ref(),
             TerminalTab::Output => self.run_snapshot.as_ref(),
-            TerminalTab::Problems => None,
+            TerminalTab::Problems | TerminalTab::DebugConsole => None,
         }
     }
 
@@ -484,6 +486,7 @@ impl App {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
             TerminalTab::Problems => self.show_problems(hwnd),
+            TerminalTab::DebugConsole => self.show_debug_console(hwnd),
         }
     }
 
@@ -621,6 +624,13 @@ impl App {
             bottom: header_bottom,
         };
         x += self.scale(78);
+        let debug = RECT {
+            left: x,
+            top,
+            right: x + self.scale(124),
+            bottom: header_bottom,
+        };
+        x += self.scale(124);
         let tab_width = self.scale(92);
         let gap = self.scale(6);
         let mut terminals = Vec::with_capacity(self.terminals.len());
@@ -663,6 +673,7 @@ impl App {
             header_bottom,
             problems,
             output,
+            debug,
             terminals,
             plus,
             chevron,
@@ -690,6 +701,9 @@ impl App {
         }
         if inside(&layout.output) {
             return TerminalHeaderHit::OutputTab;
+        }
+        if inside(&layout.debug) {
+            return TerminalHeaderHit::DebugTab;
         }
         for (index, rect) in layout.terminals.iter().enumerate() {
             if inside(rect) {
@@ -1249,7 +1263,7 @@ impl App {
                         .is_some_and(|id| self.terminal.key(id, key, modifiers).is_ok())
                 }
             }
-            TerminalTab::Problems => false,
+            TerminalTab::Problems | TerminalTab::DebugConsole => false,
         };
         if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1269,7 +1283,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.input(id, bytes).is_ok()),
-            TerminalTab::Problems => false,
+            TerminalTab::Problems | TerminalTab::DebugConsole => false,
         };
         if delivered {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1298,7 +1312,7 @@ impl App {
                     let _ = self.terminal.scrollback(id, 0);
                 }
             }
-            TerminalTab::Problems => {}
+            TerminalTab::Problems | TerminalTab::DebugConsole => {}
         }
     }
 
@@ -1325,7 +1339,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.scrollback(id, next).is_ok()),
-            TerminalTab::Problems => false,
+            TerminalTab::Problems | TerminalTab::DebugConsole => false,
         };
         if ok {
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1350,7 +1364,7 @@ impl App {
             TerminalTab::Output => self
                 .run_session
                 .is_some_and(|id| self.terminal.paste(id, &text).is_ok()),
-            TerminalTab::Problems => false,
+            TerminalTab::Problems | TerminalTab::DebugConsole => false,
         };
         if !sent {
             self.status = "Terminal is busy; try pasting again".into();

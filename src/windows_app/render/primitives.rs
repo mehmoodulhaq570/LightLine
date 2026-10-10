@@ -501,6 +501,10 @@ impl App {
     /// terminal, a search box or the commit message), the whole window is
     /// redrawn, as each paints its own caret from `caret_on`.
     pub(in crate::windows_app) fn invalidate_blink(&self, hwnd: HWND) {
+        if self.debug_prompt_has_keyboard(hwnd) {
+            self.invalidate_debug_prompt(hwnd);
+            return;
+        }
         let editor_only = !self.welcome
             && !self.quick_open
             && !self.terminal_focus

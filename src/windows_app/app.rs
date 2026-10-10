@@ -18,6 +18,7 @@ pub(super) enum TerminalTab {
     Output,
     Terminal,
     Problems,
+    DebugConsole,
 }
 
 // One interactive shell instance in the bottom Terminal area. Each pane owns
@@ -913,8 +914,12 @@ pub(super) struct App {
     pub(super) inlay_request: Option<InlayRequest>,
     // The other uses of the name at the caret (occurrences.rs).
     pub(super) occurrences: Occurrences,
+    // The Debug Console tab's lines (debug_console.rs).
+    pub(super) debug_console: DebugConsole,
     // A completion's snippet being filled in (snippet.rs).
     pub(super) snippet: Option<SnippetSession>,
+    // Each pane's lines pinned by sticky scroll when last drawn (sticky.rs).
+    pub(super) sticky_shown: RefCell<[Vec<usize>; 2]>,
     // Parameter hints: the card shown, and the latest request.
     pub(super) signature: Option<SignatureCard>,
     pub(super) signature_request: Option<SignatureRequest>,
@@ -1456,7 +1461,9 @@ impl App {
             workspace_search: WorkspaceSearch::default(),
             inlay_request: None,
             occurrences: Occurrences::default(),
+            debug_console: DebugConsole::default(),
             snippet: None,
+            sticky_shown: RefCell::new([Vec::new(), Vec::new()]),
             signature: None,
             signature_request: None,
             multi_editing: false,
