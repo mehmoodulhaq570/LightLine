@@ -1002,6 +1002,17 @@ impl Document {
         }
     }
 
+    /// True when this document's file was changed (or deleted) by something
+    /// else since it was last read or written here.
+    pub fn changed_on_disk(&self) -> bool {
+        let (Some(path), Some((modified, len))) = (&self.path, self.last_saved) else {
+            return false;
+        };
+        fs::metadata(path)
+            .is_ok_and(|current| current.len() != len || current.modified().ok() != Some(modified))
+            || !path.exists()
+    }
+
     pub fn save(&mut self, path: &Path) -> io::Result<()> {
         if self.path.as_deref() == Some(path)
             && let Some((modified, len)) = self.last_saved
@@ -1014,6 +1025,12 @@ impl Document {
                 ));
             }
         }
+        self.save_over_disk_changes(path)
+    }
+
+    /// Like `save`, but writes even if the file changed on disk since it was
+    /// read: for when the user chose to keep their version over that change.
+    pub fn save_over_disk_changes(&mut self, path: &Path) -> io::Result<()> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let mut temporary = None;
         for n in 0..100 {
@@ -1231,6 +1248,27 @@ mod tests {
             b"\xef\xbb\xbfhello\r\nworld!"
         );
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn an_outside_change_blocks_save_until_the_user_overwrites_it() {
+        let path =
+            std::env::temp_dir().join(format!("lightline-conflict-{}.txt", std::process::id()));
+        std::fs::write(&path, "original").unwrap();
+        let mut doc = Document::open(path.clone()).unwrap();
+        assert!(!doc.changed_on_disk());
+        doc.replace(Pos::default(), Pos::default(), "mine ");
+        std::fs::write(&path, "theirs, longer than before").unwrap();
+        assert!(doc.changed_on_disk());
+        assert_eq!(
+            doc.save(&path).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        doc.save_over_disk_changes(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mine original");
+        assert!(!doc.changed_on_disk());
+        std::fs::remove_file(&path).unwrap();
+        assert!(doc.changed_on_disk(), "a deleted file counts as changed");
     }
 
     #[test]

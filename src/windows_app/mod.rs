@@ -2,6 +2,7 @@ mod ai_chat;
 mod app;
 mod binary_view;
 mod builtin_icons;
+mod crash;
 mod dialog;
 mod editor_context;
 mod file_dialog;

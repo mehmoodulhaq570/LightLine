@@ -36,6 +36,16 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    crash::guard(hwnd, msg, wparam, lparam, || {
+        handle_message(hwnd, msg, wparam, lparam)
+    })
+}
+
+fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    #[cfg(debug_assertions)]
+    if msg == crash::CRASH_TEST_MESSAGE {
+        panic!("crash test requested by a debug build's CRASH_TEST_MESSAGE");
+    }
     // Remove the standard caption while retaining the thick resize frame.
     // LightLine paints and hit-tests its own workbench title bar below.
     if msg == WM_NCCALCSIZE {
@@ -645,6 +655,7 @@ unsafe extern "system" fn wnd_proc(
 }
 
 pub fn run() -> io::Result<()> {
+    crash::install_hook();
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         dialog::enable_native_dark_mode();

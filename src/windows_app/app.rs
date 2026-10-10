@@ -2780,6 +2780,49 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
+    // Replaces tab `index`'s text with its file's, dropping unsaved edits
+    // and undo history. False if the file can't be read.
+    pub(super) fn reload_tab_from_disk(&mut self, hwnd: HWND, index: usize) -> bool {
+        let Some(path) = self.tabs[index].document.path.clone() else {
+            return false;
+        };
+        let Ok(document) = Document::open(path) else {
+            return false;
+        };
+        let visible = self.visible_lines(hwnd);
+        let tab = &mut self.tabs[index];
+        tab.document = document;
+        // The new text can be shorter: keep every cursor, selection and
+        // scroll inside it.
+        let last_line = tab.document.line_count().saturating_sub(1);
+        let last_page = last_line.saturating_sub(visible.saturating_sub(1));
+        for view in &mut tab.views {
+            view.cursor = tab.document.clamp(view.cursor);
+            view.selection_anchor = view
+                .selection_anchor
+                .map(|anchor| tab.document.clamp(anchor));
+            view.first_line = view.first_line.min(last_page);
+        }
+        if let Some(syntax) = &mut tab.syntax {
+            syntax.invalidate_from(0);
+        }
+        // The language server still holds the old text, and later edits are
+        // sent as changes to it: reopen the file with its new text. A
+        // background tab reopens when it is next shown (ensure_lsp).
+        self.close_lsp_tab(index);
+        self.tabs[index].diagnostics.clear();
+        if index == self.active {
+            self.ensure_lsp(hwnd);
+        }
+        for preview in self.tabs.iter().filter_map(|tab| tab.markdown.as_ref()) {
+            preview.invalidate();
+        }
+        // The buffer was replaced without replace_range, so the gutter marks
+        // are recomputed here.
+        self.schedule_gutter_diff();
+        true
+    }
+
     pub(super) fn poll_watcher(&mut self, hwnd: HWND) {
         let Some(watcher) = &self.watcher else {
             return;
@@ -2790,8 +2833,6 @@ impl App {
         }
         let mut needs_refresh = false;
         let mut git_changed = false;
-        let mut reloaded = Vec::new();
-        let visible = self.visible_lines(hwnd);
         for event in events {
             match event {
                 lightline::watcher::WatchEvent::FileChanged(path)
@@ -2800,54 +2841,34 @@ impl App {
                     git_changed = true;
                 }
                 lightline::watcher::WatchEvent::FileChanged(path) => {
-                    for (index, tab) in self.tabs.iter_mut().enumerate() {
-                        // A tab not read yet reads the latest file when shown.
-                        if !tab.unloaded
-                            && tab
-                                .document
-                                .path
-                                .as_deref()
-                                .is_some_and(|p| Self::same_path(p, &path))
-                        {
-                            // LightLine's own save also fires this event.
-                            // Reloading then would wipe the undo history and
-                            // replace the save's status message.
-                            if tab.document.disk_matches_last_save() {
-                                continue;
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    // A tab not read yet reads the latest file when shown.
+                    // LightLine's own save fires this event too; reloading
+                    // then would wipe the undo history and the save's status.
+                    let changed: Vec<usize> = (0..self.tabs.len())
+                        .filter(|&index| {
+                            let tab = &self.tabs[index];
+                            !tab.unloaded
+                                && tab
+                                    .document
+                                    .path
+                                    .as_deref()
+                                    .is_some_and(|p| Self::same_path(p, &path))
+                                && !tab.document.disk_matches_last_save()
+                        })
+                        .collect();
+                    for index in changed {
+                        if !self.tabs[index].document.is_dirty() {
+                            if self.reload_tab_from_disk(hwnd, index) {
+                                self.status = format!("Reloaded: {name}");
                             }
-                            if !tab.document.is_dirty() {
-                                if let Ok(doc) = Document::open(path.clone()) {
-                                    tab.document = doc;
-                                    // The new text can be shorter: keep every
-                                    // cursor, selection and scroll inside it.
-                                    let last_line = tab.document.line_count().saturating_sub(1);
-                                    let last_page =
-                                        last_line.saturating_sub(visible.saturating_sub(1));
-                                    for view in &mut tab.views {
-                                        view.cursor = tab.document.clamp(view.cursor);
-                                        view.selection_anchor = view
-                                            .selection_anchor
-                                            .map(|anchor| tab.document.clamp(anchor));
-                                        view.first_line = view.first_line.min(last_page);
-                                    }
-                                    if let Some(syntax) = &mut tab.syntax {
-                                        syntax.invalidate_from(0);
-                                    }
-                                    reloaded.push(index);
-                                    self.status = format!(
-                                        "Reloaded: {}",
-                                        path.file_name().unwrap_or_default().to_string_lossy()
-                                    );
-                                    needs_refresh = true;
-                                }
-                            } else {
-                                self.status = format!(
-                                    "External change in {} (unsaved edits kept)",
-                                    path.file_name().unwrap_or_default().to_string_lossy()
-                                );
-                                needs_refresh = true;
-                            }
+                        } else {
+                            self.status = format!(
+                                "{name} changed on disk; your unsaved edits are kept, and \
+                                 saving asks which to keep"
+                            );
                         }
+                        needs_refresh = true;
                     }
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
@@ -2862,25 +2883,7 @@ impl App {
                 }
             }
         }
-        // The language server still holds the old text, and later edits are
-        // sent as changes to it; reopen a reloaded file with its new text.
-        // A background tab reopens when it is next activated (ensure_lsp).
-        for &index in &reloaded {
-            self.close_lsp_tab(index);
-            self.tabs[index].diagnostics.clear();
-        }
-        if reloaded.contains(&self.active) {
-            self.ensure_lsp(hwnd);
-        }
-        if !reloaded.is_empty() {
-            for preview in self.tabs.iter().filter_map(|tab| tab.markdown.as_ref()) {
-                preview.invalidate();
-            }
-        }
         if needs_refresh {
-            // A reload (e.g. after Discard) replaces the buffer without going
-            // through replace_range, so the gutter has to be recomputed here.
-            self.schedule_gutter_diff();
             self.backbuffer = None;
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
@@ -3368,8 +3371,20 @@ impl App {
             self.error(hwnd, &"That file is already open in another tab");
             return false;
         }
+        let same_file = old_path
+            .as_deref()
+            .is_some_and(|old| Self::same_path(old, &path));
+        let overwrite = same_file && self.doc().changed_on_disk();
+        if overwrite && !self.keep_own_version(hwnd, &path) {
+            return false;
+        }
         let format_after = format && self.format_before_save(&path);
-        match self.doc_mut().save(&path) {
+        let written = if overwrite {
+            self.doc_mut().save_over_disk_changes(&path)
+        } else {
+            self.doc_mut().save(&path)
+        };
+        match written {
             Ok(()) => {
                 self.lsp_after_save(hwnd, old_path.as_deref());
                 self.tab_mut().update_syntax_language();
@@ -3411,6 +3426,73 @@ impl App {
                 false
             }
         }
+    }
+
+    // The active file changed or was deleted on disk since it was read, and
+    // it's being saved: asks whether to write this version over that change.
+    // Reload takes the disk version instead. True means go ahead and write.
+    fn keep_own_version(&mut self, hwnd: HWND, path: &Path) -> bool {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        const OVERWRITE: isize = dialog::DLG_YES;
+        const RELOAD: isize = dialog::DLG_NO;
+        let cancel = dialog::DialogButton {
+            label: "Cancel",
+            id: dialog::DLG_CANCEL,
+            is_default: false,
+            is_cancel: true,
+        };
+        let answer = if path.exists() {
+            dialog::show_dialog(
+                hwnd,
+                "File changed on disk",
+                &format!(
+                    "{name} was changed by another program since you opened it.\n\n\
+                     Overwrite saves your version over that change. Reload replaces \
+                     your unsaved edits with the version on disk."
+                ),
+                dialog::DialogIcon::Question,
+                &[
+                    dialog::DialogButton {
+                        label: "Overwrite",
+                        id: OVERWRITE,
+                        is_default: true,
+                        is_cancel: false,
+                    },
+                    dialog::DialogButton {
+                        label: "Reload",
+                        id: RELOAD,
+                        is_default: false,
+                        is_cancel: false,
+                    },
+                    cancel,
+                ],
+            )
+        } else {
+            dialog::show_dialog(
+                hwnd,
+                "File deleted on disk",
+                &format!("{name} was deleted by another program. Save it again?"),
+                dialog::DialogIcon::Question,
+                &[
+                    dialog::DialogButton {
+                        label: "Save Again",
+                        id: OVERWRITE,
+                        is_default: true,
+                        is_cancel: false,
+                    },
+                    cancel,
+                ],
+            )
+        };
+        if answer == RELOAD {
+            self.status = if self.reload_tab_from_disk(hwnd, self.active) {
+                format!("Reloaded {name} from disk")
+            } else {
+                format!("Could not read {name}")
+            };
+            self.refresh(hwnd);
+        }
+        answer == OVERWRITE
     }
 
     pub(super) fn can_discard(&mut self, hwnd: HWND) -> bool {

@@ -1152,25 +1152,18 @@ impl App {
                 }
             }
             let text = if ch == '\r' {
-                let cursor = self.view().cursor;
-                let line = self.doc().line(cursor.line);
-                let indent: String = line
-                    .chars()
-                    .take_while(|c| *c == ' ' || *c == '\t')
-                    .collect();
-                let trimmed = line.trim_end();
-                // Auto-indent: add one extra indent level after { or :,
-                // unless the user has turned it off.
-                if self.settings.auto_indent && (trimmed.ends_with('{') || trimmed.ends_with(':')) {
-                    let unit = if self.settings.insert_spaces {
-                        " ".repeat(self.settings.tab_size)
-                    } else {
-                        "\t".to_string()
-                    };
-                    format!("\n{indent}{unit}")
+                // A selection is replaced, so what stays on the line is the
+                // text before its start.
+                let start = self
+                    .selection_range()
+                    .map_or(self.view().cursor, |(start, _)| start);
+                let line = self.doc().line(start.line);
+                let unit = if self.settings.insert_spaces {
+                    " ".repeat(self.settings.tab_size)
                 } else {
-                    format!("\n{indent}")
-                }
+                    "\t".to_string()
+                };
+                newline_text(&line[..start.byte], self.settings.auto_indent, &unit)
             } else if should_auto_close {
                 format!("{}{}", ch, closing.unwrap())
             } else {
@@ -2365,9 +2358,40 @@ impl App {
     }
 }
 
+// What Enter inserts, given the text left before the caret on its line: a
+// newline with that text's indentation, one `unit` deeper after a `{` or `:`
+// when auto-indent is on. Only the text before the caret counts: Enter at
+// the start of `def f():` moves the line down as it is.
+fn newline_text(before: &str, auto_indent: bool, unit: &str) -> String {
+    let indent: String = before
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let opens_block = before.trim_end().ends_with(['{', ':']);
+    if auto_indent && opens_block {
+        format!("\n{indent}{unit}")
+    } else {
+        format!("\n{indent}")
+    }
+}
+
 #[cfg(test)]
 mod shortcut_tests {
     use super::*;
+
+    #[test]
+    fn enter_indents_from_the_text_before_the_caret() {
+        // After a block opener: one level deeper.
+        assert_eq!(newline_text("    def f():", true, "    "), "\n        ");
+        assert_eq!(newline_text("fn main() {", true, "    "), "\n    ");
+        // At the start of such a line: the line just moves down.
+        assert_eq!(newline_text("", true, "    "), "\n");
+        // Inside its indentation: only the indentation before the caret.
+        assert_eq!(newline_text("  ", true, "    "), "\n  ");
+        // Mid-line, or with auto-indent off: the same indentation.
+        assert_eq!(newline_text("    let x = {a", true, "    "), "\n    ");
+        assert_eq!(newline_text("\tif x:", false, "\t"), "\n\t");
+    }
 
     #[test]
     fn sidebar_guard_allows_extensions_shortcut() {

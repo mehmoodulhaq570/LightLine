@@ -72,6 +72,12 @@ impl App {
         }
     }
 
+    // Writes a snapshot now and waits for it, without dialogs: for the crash
+    // handler, which can't show LightLine's own UI.
+    pub(super) fn save_recovery_now(&self) -> Result<(), String> {
+        workflow::queue_session(self.capture_session(), true)
+    }
+
     // Queues a snapshot if anything it records changed; true if one was.
     pub(super) fn save_session(&self) -> bool {
         if self.restoring {
