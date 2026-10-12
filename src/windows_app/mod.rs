@@ -40,6 +40,7 @@ mod panels;
 mod run_choice;
 mod run_config_panel;
 mod run_config_ui;
+mod run_language;
 mod session;
 mod settings_panel;
 mod terminal;

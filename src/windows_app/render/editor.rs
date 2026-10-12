@@ -78,7 +78,7 @@ impl App {
             self.settings.tab_size,
         );
         let prefix_width = self.text_width(hdc, &prefix);
-        let language = language_label(self.doc().path.as_deref());
+        let language = self.language_name();
         let language_width = self.text_width(hdc, &language);
         let mid_x = (clip_right - prefix_width - language_width).max(left_bound);
         let language_left = (mid_x + prefix_width).min(clip_right);
@@ -126,7 +126,7 @@ impl App {
         if x >= health_left - self.scale(6) && x < health_right + self.scale(6) {
             self.show_problems(hwnd);
         } else if x >= language_rect.left && x < language_rect.right && y >= language_rect.top {
-            self.open_language_actions(hwnd);
+            self.show_language_pick(hwnd);
         }
     }
 
@@ -353,7 +353,7 @@ impl App {
                         self.theme.muted,
                         label_clip,
                     );
-                    let language = language_label(self.doc().path.as_deref());
+                    let language = self.language_name();
                     Self::label(
                         hdc,
                         &language,

@@ -328,6 +328,9 @@ pub(super) struct Tab {
     pub(super) markdown: Option<MarkdownPreview>,
     // Word wrap chosen for this tab with Alt+Z; None follows the setting.
     pub(super) word_wrap: Option<bool>,
+    // The language Run treats the file as, chosen in the language picker;
+    // None follows the file's name (run_language.rs).
+    pub(super) run_language: Option<super::run_language::RunLanguage>,
     // True for a tab restored from the last session whose file hasn't been
     // read yet: it's read the first time the tab is shown (show_active_tab).
     // `document` is then an empty placeholder with the file's path and must
@@ -352,7 +355,7 @@ pub(super) struct ExplorerRow<'a> {
     pub(super) expanded: bool,
 }
 
-// Shared by Tab::is_c_family/is_cpp and the on-save syntax check
+// Shared by the Run language detection (run_language.rs) and the on-save syntax check
 // (panels::check_c_syntax_on_save), which only has a bare path, not a Document.
 pub(super) fn is_c_family_path(path: &Path) -> bool {
     path.extension()
@@ -433,6 +436,7 @@ impl Tab {
             placeholder: false,
             markdown: None,
             word_wrap: None,
+            run_language: None,
             unloaded: false,
             recovery_cache: RefCell::new(None),
         }
@@ -525,6 +529,7 @@ impl Tab {
             placeholder: false,
             markdown: None,
             word_wrap: None,
+            run_language: None,
             unloaded: false,
             recovery_cache: RefCell::new(None),
         }
@@ -558,12 +563,6 @@ impl Tab {
             .as_deref()
             .and_then(Path::extension)
             .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
-    }
-
-    // True for a standalone C or C++ source file that can be compiled and run
-    // on its own (not a header, which has no entry point to run).
-    pub(super) fn is_c_family(document: &Document) -> bool {
-        document.path.as_deref().is_some_and(is_c_family_path)
     }
 
     pub(super) fn is_c_family_or_header(document: &Document) -> bool {
@@ -626,20 +625,6 @@ impl Tab {
             .and_then(Path::extension)
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("go"))
-    }
-
-    // True for any file the Run action knows how to execute on its own.
-    pub(super) fn is_runnable(document: &Document) -> bool {
-        Self::is_python(document)
-            || Self::is_c_family(document)
-            || document
-                .path
-                .as_deref()
-                .is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
-    }
-
-    pub(super) fn is_cpp(document: &Document) -> bool {
-        document.path.as_deref().is_some_and(is_cpp_path)
     }
 
     pub(super) fn lsp_language(document: &Document) -> Option<LspLanguage> {
@@ -818,6 +803,8 @@ pub(super) struct App {
     // Every workspace file with its lowercase relative path (the match key).
     pub(super) quick_files: Vec<(PathBuf, String)>,
     pub(super) quick_loading: bool,
+    // The Quick Open box is the language picker (run_language.rs).
+    pub(super) language_pick: bool,
     pub(super) search_input: bool,
     pub(super) project_query: String,
     pub(super) search_results: Vec<SearchHit>,
@@ -1376,6 +1363,7 @@ impl App {
             quick_first: 0,
             quick_files: Vec::new(),
             quick_loading: false,
+            language_pick: false,
             search_input: false,
             project_query: String::new(),
             search_results: Vec::new(),
@@ -1991,7 +1979,7 @@ impl App {
             return None;
         }
         let doc = self.doc();
-        if Tab::is_runnable(doc) {
+        if self.run_language().is_some() {
             Some(FileAction::Run)
         } else if doc
             .path

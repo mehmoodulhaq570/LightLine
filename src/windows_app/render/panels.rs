@@ -548,7 +548,12 @@ impl App {
         Self::label(
             hdc,
             &format!(
-                "Quick Open  ›  {}{}",
+                "{}  ›  {}{}",
+                if self.language_pick {
+                    "Run this file as"
+                } else {
+                    "Quick Open"
+                },
                 self.quick_query,
                 if self.focused && self.caret_on {
                     "|"
@@ -568,7 +573,11 @@ impl App {
         );
         Self::label(
             hdc,
-            "Type to filter  ·  Enter opens  ·  Esc closes",
+            if self.language_pick {
+                "Type to filter  ·  Enter chooses  ·  Esc closes"
+            } else {
+                "Type to filter  ·  Enter opens  ·  Esc closes"
+            },
             left + self.scale(16),
             top + self.scale(39),
             self.theme.muted,
@@ -581,7 +590,12 @@ impl App {
         );
         // QUICK_ROWS rows are shown (not the 8 the box has room for) so the list
         // never shares its last row with the hint line below it.
-        let items: Vec<String> = if self.quick_query.starts_with('>') {
+        let items: Vec<String> = if self.language_pick {
+            self.language_picks()
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect()
+        } else if self.quick_query.starts_with('>') {
             self.quick_commands()
                 .iter()
                 .map(|(name, _)| format!(">  {name}"))
@@ -644,7 +658,9 @@ impl App {
             let symbols_message;
             Self::label(
                 hdc,
-                if self.quick_query.starts_with('@') {
+                if self.language_pick {
+                    "No matching languages"
+                } else if self.quick_query.starts_with('@') {
                     symbols_message = self.symbols_empty_message();
                     &symbols_message
                 } else if self.quick_query.starts_with('#') {
@@ -671,7 +687,7 @@ impl App {
             );
         }
         let mut hints = Vec::new();
-        if !self.quick_query.starts_with(['>', '@', '#']) {
+        if !self.language_pick && !self.quick_query.starts_with(['>', '@', '#']) {
             hints.push("> commands  ·  @ symbols in this file  ·  # in the project".to_string());
         }
         if items.len() > QUICK_ROWS {

@@ -66,6 +66,11 @@ pub trait Formatter: Send + Sync {
     fn is_builtin(&self) -> bool {
         false
     }
+
+    /// How to install the tool, for when it isn't found.
+    fn install_hint(&self) -> &'static str {
+        ""
+    }
 }
 
 /// Spawns `command`, writes `source` to its stdin, and reads formatted code
@@ -219,6 +224,10 @@ impl Formatter for PrettierFormatter {
         command.arg("--stdin-filepath").arg(path);
         command
     }
+
+    fn install_hint(&self) -> &'static str {
+        "Install it in the project with `npm install --save-dev prettier`, or globally with `npm install -g prettier`."
+    }
 }
 
 /// Runs `rustfmt` directly on Rust files via stdin/stdout.
@@ -248,6 +257,10 @@ impl Formatter for RustfmtFormatter {
             command.current_dir(folder);
         }
         command
+    }
+
+    fn install_hint(&self) -> &'static str {
+        "Install Rust through https://rustup.rs/ (includes rustfmt)."
     }
 }
 
@@ -323,6 +336,10 @@ impl Formatter for PythonFormatter {
             other => other,
         }
     }
+
+    fn install_hint(&self) -> &'static str {
+        "Install ruff with `pip install ruff` (or black with `pip install black`)."
+    }
 }
 
 /// Runs `clang-format` on C/C++ files.
@@ -349,6 +366,10 @@ impl Formatter for ClangFormatter {
         let mut command = tool_command("clang-format");
         command.arg(format!("-assume-filename={}", path.display()));
         command
+    }
+
+    fn install_hint(&self) -> &'static str {
+        "Install LLVM from https://releases.llvm.org/ (includes clang-format) and add it to PATH."
     }
 }
 

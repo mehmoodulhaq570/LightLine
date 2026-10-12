@@ -528,12 +528,14 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 );
                 return 0;
             }
+            // Where the mouse was when the wheel turned, in client
+            // coordinates: the message carries it in screen coordinates.
+            let mut point = POINT {
+                x: (lparam as u32 & 0xffff) as i16 as i32,
+                y: ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+            };
+            unsafe { ScreenToClient(hwnd, &mut point) };
             if app.run_config_panel.is_some() {
-                let mut point = POINT::default();
-                unsafe {
-                    GetCursorPos(&mut point);
-                    ScreenToClient(hwnd, &mut point);
-                }
                 app.run_config_scroll(hwnd, (wparam >> 16) as i16 as i32, point.x);
                 return 0;
             }
@@ -544,11 +546,6 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.dismiss_code_actions(hwnd);
             app.hide_signature(hwnd);
             let delta = (wparam >> 16) as i16;
-            let mut point = POINT::default();
-            unsafe {
-                GetCursorPos(&mut point);
-                ScreenToClient(hwnd, &mut point);
-            }
             if app.quick_open {
                 app.scroll_quick_open(hwnd, delta as i32);
                 return 0;
@@ -672,8 +669,14 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 let rows = if delta > 0 { -3 } else { 3 };
                 app.scroll_pane_rows(hwnd, pane, rows);
             }
-            unsafe {
-                InvalidateRect(hwnd, null(), 0);
+            // Scrolling moves only the code panes. Redrawing the whole
+            // window (title bar, sidebar, tabs, status bar) took ~20 ms a
+            // notch; a popup or menu may reach past the panes, though.
+            if app.keystroke_stays_in_editor() {
+                let area = app.editor_area(hwnd, false);
+                unsafe { InvalidateRect(hwnd, &area, 0) };
+            } else {
+                unsafe { InvalidateRect(hwnd, null(), 0) };
             }
             0
         }

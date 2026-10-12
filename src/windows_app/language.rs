@@ -6,34 +6,6 @@ const LSP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub(super) const LSP_EVENT_MESSAGE: u32 = WM_APP + 7;
 
 impl App {
-    // Clicking the status bar's language name (see status_language_control)
-    // opens the command palette pre-filtered to that language's run/setup
-    // actions, standing in for a dedicated language-picker menu: users
-    // reported the label as an unresponsive "dropdown", and this is what
-    // there actually is to pick from for the language of the active file.
-    pub(super) fn open_language_actions(&mut self, hwnd: HWND) {
-        let filter = if Tab::is_python(self.doc()) {
-            "python"
-        } else if Tab::is_c_family(self.doc()) {
-            "c/c++"
-        } else if Tab::is_rust(self.doc()) {
-            "rust"
-        } else {
-            ""
-        };
-        if filter.is_empty() {
-            self.status = format!(
-                "No run action is available for {} files",
-                super::render::language_label(self.doc().path.as_deref())
-            );
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-            return;
-        }
-        self.show_quick_open(hwnd);
-        self.quick_query = format!(">{filter}");
-        unsafe { InvalidateRect(hwnd, null(), 0) };
-    }
-
     /// Errors and warnings reported for every open file, for the status bar.
     pub(super) fn problem_counts(&self) -> (usize, usize) {
         problem_counts(self.tabs.iter().flat_map(|tab| &tab.diagnostics))
@@ -1122,9 +1094,14 @@ impl App {
         };
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
-            let result = formatter
-                .format(&code, &path)
-                .map_err(|error| error.to_string());
+            let result = formatter.format(&code, &path).map_err(|error| match error {
+                lightline::formatter::FormatError::NotAvailable => format!(
+                    "{} was not found. {}",
+                    formatter.name(),
+                    formatter.install_hint()
+                ),
+                error => error.to_string(),
+            });
             tx.send(WorkerMessage::Formatted {
                 path,
                 formatter: formatter.name(),

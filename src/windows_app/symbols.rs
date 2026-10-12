@@ -41,7 +41,7 @@ impl App {
     /// Asks for the active file's symbols when Quick Open is in `@` mode
     /// and the list isn't for this version of the file yet.
     pub(super) fn ensure_symbols(&mut self, hwnd: HWND) {
-        if !self.quick_open || !self.quick_query.starts_with('@') {
+        if !self.quick_open || self.language_pick || !self.quick_query.starts_with('@') {
             return;
         }
         if self.welcome || self.tab().read_only() || Tab::lsp_language(self.doc()).is_none() {
@@ -188,7 +188,7 @@ impl App {
     /// Asks every running language server for the symbols matching what's
     /// typed after `#`, when that changed.
     pub(super) fn ensure_workspace_symbols(&mut self) {
-        if !self.quick_open || !self.quick_query.starts_with('#') {
+        if !self.quick_open || self.language_pick || !self.quick_query.starts_with('#') {
             return;
         }
         let query = self.quick_query[1..].trim().to_owned();

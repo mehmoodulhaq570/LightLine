@@ -115,12 +115,39 @@ pub fn prepare(file: &Path) -> Result<RunPlan, String> {
     prepare_with(file, crate::workflow::resolve_command)
 }
 
+/// Runs `file` as `language`, whatever its name says: the language chosen
+/// for it in the status bar's language picker.
+pub fn prepare_as(file: &Path, language: Language) -> Result<RunPlan, String> {
+    prepare_language(file, Some(language), crate::workflow::resolve_command)
+}
+
 fn prepare_with(file: &Path, resolve: impl Fn(&str) -> Option<PathBuf>) -> Result<RunPlan, String> {
+    prepare_language(file, None, resolve)
+}
+
+fn prepare_language(
+    file: &Path,
+    language: Option<Language>,
+    resolve: impl Fn(&str) -> Option<PathBuf>,
+) -> Result<RunPlan, String> {
     let file = normal_path(&std::path::absolute(file).map_err(|error| error.to_string())?);
     if !file.is_file() {
         return Err("Save the file before running it".into());
     }
-    let language = Language::for_path(&file).ok_or("This file type cannot be run")?;
+    let named = Language::for_path(&file);
+    let language = language.or(named).ok_or("This file type cannot be run")?;
+    // `go run` and tsx decide how to read a file from its name, so these two
+    // can't run a file under another name.
+    if language == Language::Go && named != Some(Language::Go) {
+        return Err(
+            "Go runs only files whose names end in .go. Rename the file to run it as Go.".into(),
+        );
+    }
+    if language == Language::TypeScript
+        && !matches!(named, Some(Language::TypeScript | Language::JavaScript))
+    {
+        return Err("TypeScript runs only .ts, .tsx, .mts, .cts and JavaScript files. Rename the file to run it as TypeScript.".into());
+    }
     let cwd = file
         .parent()
         .ok_or("The file has no parent directory")?
@@ -415,6 +442,27 @@ mod tests {
         assert!(!root.join(".lightline-run").exists());
         let other = write(&root, "other.rs", "fn main() {}");
         assert_ne!(build_output_dir(&other).unwrap(), built_in);
+    }
+
+    #[test]
+    fn a_chosen_language_runs_files_of_any_name_its_tool_accepts() {
+        let root = fixture();
+        let script = write(&root, "build", "console.log(42)");
+        assert!(prepare_with(&script, tool).is_err());
+        let plan = prepare_language(&script, Some(Language::JavaScript), tool).unwrap();
+        assert_eq!(plan.commands[0].program, Path::new("node.exe"));
+        assert_eq!(plan.commands[0].arguments, [script.as_os_str()]);
+        let rust = prepare_language(&script, Some(Language::Rust), tool).unwrap();
+        assert_eq!(rust.commands[0].program, Path::new("rustc.exe"));
+        for language in [Language::Go, Language::TypeScript] {
+            assert!(
+                prepare_language(&script, Some(language), tool)
+                    .unwrap_err()
+                    .contains("Rename the file")
+            );
+        }
+        let js = write(&root, "main.js", "console.log(42)");
+        assert!(prepare_language(&js, Some(Language::TypeScript), tool).is_ok());
     }
 
     #[test]

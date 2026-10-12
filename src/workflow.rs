@@ -859,6 +859,9 @@ pub fn c_syntax_diagnostics(
     if is_cpp {
         command.arg("-std=c++17");
     }
+    // The language is said, not left to the file's extension: a file can be
+    // run as C or C++ whatever its name (the status bar's language picker).
+    command.arg("-x").arg(if is_cpp { "c++" } else { "c" });
     command.arg(file);
     let Ok(output) = command.output() else {
         return Vec::new();

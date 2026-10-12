@@ -17,7 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Highlight Uses of a Name**: Rest the caret on a variable, function or type and its other uses in the file get a soft highlight, from the language server (like VS Code). The server is asked only once the caret has rested for a quarter of a second; moving off the name or typing clears the highlights at once. Turn it off with `"occurrencesHighlight": false`.
 - **Snippet Completions**: Accepting a function from the completion list now inserts its arguments as places to fill in: `add(left, right)` with `left` selected. Type to replace it, `Tab` goes to the next place and `Shift+Tab` back, and the last `Tab` leaves the caret after the call. Multi-line snippets take the line's indentation.
 - **Sticky Scroll**: While you scroll through a long function, the first lines of the blocks you're inside (the `impl`, the `fn`, the loop) stay pinned at the top of the editor, with their line numbers, as in VS Code. Click one to scroll back to it. They're worked out from indentation, so typing and scrolling stay as fast. Turn it off with `"stickyScroll": false`.
+- **Choose the Language to Run a File As**: Click the language name in the status bar (or use **Run: Choose the File's Language** in the Command Palette) to pick Python, C, C++, JavaScript, TypeScript, Go or Rust for the active file, or **Auto Detect**. **Run** then treats the file as that language, even a script without an extension, and the status bar shows it. C and C++ files compile whatever their name; Go and TypeScript say when the file needs renaming, since their tools go by the name. The list also leads to the language's own commands, such as selecting a Python interpreter (#52).
 - **Debug Console**: A **DEBUG CONSOLE** tab in the bottom panel (`Ctrl+Shift+Y`) shows what the debugger reports during a session (its messages, and the program's output when the debugger captures it) and notes when the session starts, pauses (with the file and line) and ends. While paused, type an expression at its prompt and press `Enter` to see its value, such as `total * 10`; `Up`/`Down` recall earlier ones and `Esc` gives the keyboard back to the editor. Only the console redraws as output arrives (#15).
+
+#### Changed
+
+- **Faster Scrolling**: Each turn of the mouse wheel redrew the whole window: title bar, side panel, tabs and status bar. Now only the editor is redrawn: about 22 → 14 ms a notch in a 3,000-line Rust file (release build).
+- **Missing Formatters Say How to Install Them**: When Prettier, rustfmt, ruff/black or clang-format isn't installed, the status bar now says how to install it instead of only "formatter not found on PATH" (#48).
 
 #### Fixed
 

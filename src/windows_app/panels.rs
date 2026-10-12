@@ -1,8 +1,10 @@
+use super::run_language::RunLanguage;
 use super::*;
 
 impl App {
     pub(super) fn show_quick_open(&mut self, hwnd: HWND) {
         self.quick_open = true;
+        self.language_pick = false;
         self.panel_focus = false;
         self.terminal_focus = false;
         self.quick_query.clear();
@@ -47,6 +49,7 @@ impl App {
             ("Run Active File (Ctrl+Shift+R)", 48),
             ("Stop Running Program", 49),
             ("Run: Configure / Select Saved Configuration", 50),
+            ("Run: Choose the File's Language", 59),
             ("Review Git changes", 2),
             ("Open folder", 3),
             ("New file", 4),
@@ -114,7 +117,9 @@ impl App {
     }
 
     pub(super) fn quick_count(&self) -> usize {
-        if self.quick_query.starts_with('>') {
+        if self.language_pick {
+            self.language_picks().len()
+        } else if self.quick_query.starts_with('>') {
             self.quick_commands().len()
         } else if self.quick_query.starts_with('@') {
             self.quick_symbols().len()
@@ -153,6 +158,10 @@ impl App {
     }
 
     pub(super) fn activate_quick_item(&mut self, hwnd: HWND, index: usize) {
+        if self.language_pick {
+            self.pick_language(hwnd, index);
+            return;
+        }
         if self.quick_query.starts_with('>') {
             let action = self.quick_commands().get(index).map(|(_, action)| *action);
             self.quick_open = false;
@@ -164,6 +173,7 @@ impl App {
                 Some(48) => self.run_active_file(hwnd),
                 Some(49) => self.stop_running_program(hwnd),
                 Some(50) => self.show_run_configurations(hwnd),
+                Some(59) => self.show_language_pick(hwnd),
                 Some(2) => self.show_review(hwnd),
                 Some(3) => self.open_folder(hwnd),
                 Some(4) => self.new_file(hwnd),
@@ -382,16 +392,12 @@ impl App {
         if self.run_selected_configuration(hwnd) {
             return;
         }
-        if Tab::is_python(self.doc()) {
+        let language = self.run_language();
+        if language == Some(RunLanguage::Python) {
             self.run_python_file(hwnd);
-        } else if Tab::is_c_family(self.doc()) {
+        } else if matches!(language, Some(RunLanguage::C | RunLanguage::Cpp)) {
             self.run_c_file(hwnd);
-        } else if self
-            .doc()
-            .path
-            .as_deref()
-            .is_some_and(|path| lightline::runner::Language::for_path(path).is_some())
-        {
+        } else if let Some(runner) = language.and_then(RunLanguage::runner) {
             if self.doc().is_dirty() && !self.save(hwnd, false) {
                 self.status = "Save the file before running it".into();
                 self.refresh(hwnd);
@@ -400,15 +406,14 @@ impl App {
             let Some(file) = self.doc().path.clone() else {
                 return;
             };
-            match lightline::runner::prepare(&file) {
+            match lightline::runner::prepare_as(&file, runner) {
                 Ok(plan) => self.run_language_plan(hwnd, plan),
                 Err(error) => {
                     self.show_run_error(hwnd, error);
                 }
             }
         } else {
-            self.status =
-                "Open a Python, C/C++, JavaScript, TypeScript, Go, or Rust file to run it".into();
+            self.status = "Run supports Python, C, C++, JavaScript, TypeScript, Go and Rust: pick this file's language in the status bar".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
     }
@@ -455,7 +460,8 @@ impl App {
     }
 
     pub(super) fn run_c_file(&mut self, hwnd: HWND) {
-        if !Tab::is_c_family(self.doc()) {
+        let language = self.run_language();
+        if !matches!(language, Some(RunLanguage::C | RunLanguage::Cpp)) {
             self.status = "Open a C/C++ file to run it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
@@ -470,7 +476,7 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        let is_cpp = Tab::is_cpp(self.doc());
+        let is_cpp = language == Some(RunLanguage::Cpp);
         let Some(compiler) = workflow::detect_c_compiler(is_cpp) else {
             let error = if is_cpp {
                 "Missing C++ compiler: g++ or clang++. Install a MinGW-w64 toolchain or LLVM/Clang with Windows build tools.".into()
@@ -493,7 +499,15 @@ impl App {
                     lightline::runner::RunCommand {
                         program: workflow::resolve_command(compiler)
                             .unwrap_or_else(|| compiler.into()),
-                        arguments: vec![source.into(), "-o".into(), output.clone().into()],
+                        // The language is said, not left to the extension:
+                        // the file may have been picked as C or C++.
+                        arguments: vec![
+                            "-x".into(),
+                            if is_cpp { "c++" } else { "c" }.into(),
+                            source.into(),
+                            "-o".into(),
+                            output.clone().into(),
+                        ],
                     },
                     lightline::runner::RunCommand {
                         program: output,
@@ -505,7 +519,7 @@ impl App {
     }
 
     pub(super) fn run_python_file(&mut self, hwnd: HWND) {
-        if !Tab::is_python(self.doc()) {
+        if self.run_language() != Some(RunLanguage::Python) {
             self.status = "Open a Python file to run it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
