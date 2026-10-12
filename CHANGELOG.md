@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-13
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.5.0-windows-x86_64.zip`, `lightline-v0.5.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
 #### Added
 
 - **Problems Panel**: `Ctrl+Shift+M`, the **PROBLEMS** tab in the bottom panel, or a click on the error and warning counts in the status bar lists every error, warning and note in the open files, grouped by file with line and column. Click one to jump to it, or use `Up`/`Down` and `Enter`; `Esc` returns the keyboard to the editor. Long lists scroll with the wheel or the scrollbar. The tab shows the count and updates as the language server reports. Built with @Mayuri-004's Problems tab (#61, for #15).
@@ -23,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 
 - **Faster Scrolling**: Each turn of the mouse wheel redrew the whole window: title bar, side panel, tabs and status bar. Now only the editor is redrawn: about 22 → 14 ms a notch in a 3,000-line Rust file (release build).
+- **Opening a File No Longer Opens Its Folder**: Opening or saving a single file with no folder open made the file's whole folder (all of Downloads, say) the workspace, listed it in the Explorer and added it to the recent workspaces. Now the file opens on its own, as in VS Code: the Explorer says "No folder opened" and offers **Open Folder**. Language servers still work, using the file's own folder (#7).
 - **Missing Formatters Say How to Install Them**: When Prettier, rustfmt, ruff/black or clang-format isn't installed, the status bar now says how to install it instead of only "formatter not found on PATH" (#48).
 
 #### Fixed
