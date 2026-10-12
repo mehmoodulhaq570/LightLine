@@ -1413,20 +1413,34 @@ impl App {
                     } else {
                         Self::label(
                             hdc,
-                            "Open a file to browse",
+                            "No folder opened",
                             self.scale(RAIL + 16),
                             self.scale(49),
-                            self.theme.muted,
+                            self.theme.text,
                             sidebar_clip,
                         );
                         Self::label(
                             hdc,
-                            "its folder  (Ctrl+O)",
+                            "Open a folder to see its files here.",
                             self.scale(RAIL + 16),
                             self.scale(73),
                             self.theme.muted,
                             sidebar_clip,
                         );
+                        let button = self.open_folder_button();
+                        if button.right > button.left {
+                            Self::rounded_fill(hdc, button, self.scale(6), self.theme.select_bg);
+                            let label = "Open Folder (Ctrl+Shift+O)";
+                            let width = self.text_width(hdc, label);
+                            self.label_mid(
+                                hdc,
+                                label,
+                                button.left + ((button.right - button.left - width) / 2).max(0),
+                                (button.top + button.bottom) / 2,
+                                self.theme.text,
+                                button,
+                            );
+                        }
                     }
                 }
                 RestoreDC(hdc, sidebar_state);

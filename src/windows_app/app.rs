@@ -3523,7 +3523,6 @@ impl App {
                 self.lsp_after_save(hwnd, old_path.as_deref());
                 self.tab_mut().update_syntax_language();
                 self.check_c_syntax_on_save(&path);
-                self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
                 if let Some(parent) = path.parent() {
                     self.directory_cache.remove(parent);
@@ -3756,7 +3755,6 @@ impl App {
                     self.tabs.push(tab);
                     self.set_active_index(self.tabs.len() - 1);
                 }
-                self.set_workspace_from_file(&path);
                 self.reveal_file_in_explorer(&path);
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.status = if preview {

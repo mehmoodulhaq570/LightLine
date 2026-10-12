@@ -1906,6 +1906,13 @@ impl App {
                 self.explorer_input = None;
                 self.refresh(hwnd);
             }
+            if self.workspace_root.is_none() {
+                let button = self.open_folder_button();
+                if x >= button.left && x < button.right && y >= button.top && y < button.bottom {
+                    self.open_folder(hwnd);
+                }
+                return;
+            }
             if y >= self.scale(40)
                 && y < self.scale(EXPLORER_TOP)
                 && let Some(root) = self.workspace_root.clone()

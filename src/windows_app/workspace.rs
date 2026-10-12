@@ -53,26 +53,16 @@ impl App {
         });
     }
 
-    pub(super) fn set_workspace_from_file(&mut self, path: &Path) {
-        if self.workspace_root.is_some() {
-            return;
-        }
-        if let Some(parent) = path.parent() {
-            let folder = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
-            let root = folder
-                .ancestors()
-                .take(8)
-                .find(|dir| dir.join("Cargo.toml").is_file() || dir.join(".git").exists())
-                .unwrap_or(&folder)
-                .to_path_buf();
-            self.workspace_root = Some(root.clone());
-            self.workspace_generation += 1;
-            self.workspace_branch = None;
-            self.refresh_git();
-            self.expanded_dirs.insert(root.clone());
-            self.load_directory(&root);
-            workflow::remember_workspace(&root);
-            self.recent = workflow::recent_workspaces();
+    /// The Explorer's Open Folder button, shown while no folder is open: a
+    /// file opened on its own doesn't make its folder the workspace, as in
+    /// VS Code (#7). In the side panel's coordinates, as painted.
+    pub(super) fn open_folder_button(&self) -> RECT {
+        let left = self.scale(RAIL + 16);
+        RECT {
+            left,
+            top: self.scale(104),
+            right: (self.editor_left() - self.scale(16)).min(left + self.scale(220)),
+            bottom: self.scale(136),
         }
     }
 

@@ -13,7 +13,7 @@ Status key: **Resolved** · **Partly resolved** · **Open** · **Decision needed
 
 ## 1. Summary
 
-#48 and #52 can be closed once the 2026-10-12 changes are pushed. #7 needs a decision on item 2, then it can be closed too.
+#48 and #52 can be closed now that the 2026-10-12 changes are pushed, and #7 once the lone-file change below ships.
 
 | # | Title | Status | Notes |
 |---|-------|--------|-------|
@@ -23,7 +23,7 @@ Status key: **Resolved** · **Partly resolved** · **Open** · **Decision needed
 | 43 | Contributor onboarding | **Not a code fix** | CONTRIBUTING.md (#44) and CI (`rust.yml`, `release.yml`) exist. Kept open on purpose for further onboarding. |
 | 35 | Doesn't support Mac | **Not a code fix** | Win32 app; needs a platform port. |
 | 13 | Lighline issue | **Partly resolved** | AI assistant fixed. The SmartScreen warning stays until the app is code-signed (SignPath application pending). |
-| 7 | Extensions Tab & Switching | **Decision needed** | Items 1 and 3 resolved (3 verified live). Item 2 is how single files open by design. |
+| 7 | Extensions Tab & Switching | **Resolved** (local) | All three items resolved: item 2 by opening lone files without a folder, as VS Code does. |
 
 ---
 
@@ -61,9 +61,9 @@ Checked against each requirement:
 1. Windows Defender/SmartScreen warning: **open** until the app is code-signed (SignPath application pending). The README documents the SHA256 check and "Run anyway".
 2. AI Assistant: **resolved**.
 
-### #7 — [Extensions Tab & Switching in IDE](https://github.com/mehmoodulhaq570/LightLine/issues/7) `extensions` `file-management` — **Decision needed**
+### #7 — [Extensions Tab & Switching in IDE](https://github.com/mehmoodulhaq570/LightLine/issues/7) `extensions` `file-management` — **Resolved (local)**
 1. "0 extensions installed" indicator: **resolved** (`Installed (0)` and "No installed extensions").
-2. "Opening one file gives access to my whole Downloads folder": **works as designed today, decision needed**. When no folder is open, `set_workspace_from_file` (`workspace.rs`) makes the file's folder the workspace (or the nearest folder with `Cargo.toml` or `.git`, up to 8 levels), lists it in the Explorer and saves it as a recent workspace. That gives language servers and Quick Open a project root. VS Code instead opens a lone file with no folder. Options: keep it (and say so on the issue), or open lone files without a workspace and give language servers the file's folder as their root.
+2. "Opening one file gives access to my whole Downloads folder": **resolved (2026-10-13, local)**. Opening or saving a file with no folder open used to make the file's folder the workspace (`set_workspace_from_file`), list it in the Explorer and save it as a recent workspace. Now the file opens on its own, as in VS Code: the Explorer shows "No folder opened" with an **Open Folder** button, and language servers use the file's folder as their root. Verified live.
 3. "Files keep switching after clicking in Run & Debug": **resolved, verified live**. Every click in the Run & Debug panel is handled there and returns. With three tabs open, 72 clicks across the panel left the editor and tab strip unchanged.
 
 ---
@@ -91,7 +91,7 @@ Checked against each requirement:
 | B. Run & Debug | Code didn't run; only C/C++; no tool checks | Run covers Python, C, C++, Rust, JS/TS and Go, with saved configurations, missing-tool guidance and a language picker. The debugger supports Rust and Python, and has a Debug Console. | None once #52 is closed |
 | C. Terminal | No input / slow | Input fixed; tabs and shell picker; an idle shell causes 0 wakeups/s. | None |
 | D. Extensions | Search/install broken, no empty state | Search, install and the "0 installed" state work. | None |
-| E. File/Project management | Can't close/delete/add files; Open Project problems | Close, delete, New File, Add File to Project and the folder picker are in. | #7 item 2 (decision) |
+| E. File/Project management | Can't close/delete/add files; Open Project problems | Close, delete, New File, Add File to Project and the folder picker are in; a lone file no longer opens its folder. | None once #7 is closed |
 | F. Navigation & UI stability | Scrollbar jumps, flicker, no hover feedback | Fixed: hover and tooltips (#62), scrollbar, and narrow repaints. | None |
 | G. UI/UX & layout | Cramped layout, no tooltips, missing panel tabs | Problems and Debug Console tabs, Settings, shell picker and tooltips are in. | None |
 | H. Platform / environment | No macOS, Defender warning, launch error | Runs without the VC++ runtime (#20 fixed in v0.4.0). | #35, #13 item 1 |
@@ -102,6 +102,6 @@ Checked against each requirement:
 ## 5. Next Steps (suggested)
 
 1. **Push the 2026-10-12 changes, then close #52 and #48** with a short note on what was delivered (section 2).
-2. **Decide #7 item 2**, then close #7 or open a focused issue for "open a lone file without a workspace".
+2. **Close #7** once the lone-file change is released.
 3. **#59**: ask @RajDalvi08 whether they are still on it; otherwise it is open for anyone.
 4. **Longer term:** #13 (code signing), #35 (macOS port), #43 (onboarding).
