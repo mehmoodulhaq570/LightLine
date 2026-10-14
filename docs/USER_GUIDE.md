@@ -240,6 +240,7 @@ Inserted code is indented to fit where it lands, and one **Ctrl+Z** undoes it.
 **From the editor:** right-click selected code for **Explain**, **Fix**, **Write Tests** or **Add Comments**. Right-click a red or yellow underline for **Explain This Error** or **Fix This Error**. These are also in the Command Palette under `>AI:`.
 
 - **Other servers**: set `aiEndpoint` to any OpenAI-compatible server, such as LM Studio (`http://localhost:1234`).
+- **Cloud services with your own API key**: set `aiEndpoint` to the service, for example `https://api.openai.com` (or `https://openrouter.ai/api`, `https://api.groq.com/openai`). Then run **AI: Set API Key...** from the Command Palette (or click **Set API Key** in the panel), paste the key and press **Enter**. It shows only as dots, is saved in Windows Credential Manager under the service's name (never in `settings.json`), and is sent only to that service. If no key is saved, LightLine uses the `OPENAI_API_KEY` environment variable. **Connect** then lists the service's chat models (not its speech, image or embedding models) and picks a small, fast one; switch with the model name at the top. **AI: Remove API Key** forgets the key. The panel says which service answers, because your questions and the code you include are sent there. A rejected key or a used-up quota gets a plain message saying what to do.
 - **Cloud models**: Ollama models whose names end in `cloud` run on ollama.com, not your PC. LightLine never picks one for you, and warns you if you do.
 
 ---

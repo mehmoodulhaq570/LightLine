@@ -1,7 +1,12 @@
 //! Chatting with a language model through the OpenAI-compatible HTTP API
-//! that Ollama, LM Studio and llama.cpp's server all offer. Ollama on this
-//! PC is the default, so code never leaves the machine unless the user
-//! points `aiEndpoint` somewhere else.
+//! that Ollama, LM Studio and llama.cpp's server all offer, and cloud
+//! services such as OpenAI, OpenRouter and Groq. Ollama on this PC is the
+//! default, so code never leaves the machine unless the user points
+//! `aiEndpoint` somewhere else.
+//!
+//! A cloud service wants an API key. It's kept in Windows Credential Manager
+//! under the service's host name (or read from OPENAI_API_KEY), sent only to
+//! that host, and kept out of every error message.
 //!
 //! Nothing here runs on its own: a request is made only when the user
 //! connects, picks a model or sends a message, always on a worker thread,
@@ -60,6 +65,145 @@ impl Message {
     }
 }
 
+/// Where requests go: the server, and the API key it wants, if any.
+#[derive(Clone)]
+pub struct Server {
+    pub endpoint: String,
+    key: Option<String>,
+}
+
+impl Server {
+    pub fn new(endpoint: impl Into<String>, key: Option<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            key: key
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty()),
+        }
+    }
+
+    fn authorize<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+        match &self.key {
+            Some(key) => request.header("Authorization", format!("Bearer {key}")),
+            None => request,
+        }
+    }
+
+    // `text` with the key blanked out, in case a server repeats it.
+    fn redact(&self, text: String) -> String {
+        match &self.key {
+            Some(key) if text.contains(key.as_str()) => text.replace(key.as_str(), "[API key]"),
+            _ => text,
+        }
+    }
+
+    // An answer other than 200 OK, as a message for the panel.
+    fn status_error(&self, status: u16, body: &str) -> String {
+        let host = host(&self.endpoint);
+        let message = match status {
+            401 if self.key.is_some() => format!(
+                "{host} didn't accept the API key. Set a new one with AI: Set API Key\u{2026} \
+                 in the Command Palette."
+            ),
+            401 => format!(
+                "{host} needs an API key. Set one with AI: Set API Key\u{2026} in the \
+                 Command Palette."
+            ),
+            429 => format!(
+                "{host} is limiting requests, or the account's quota is used up. Wait a \
+                 minute and try again, or check the plan and billing with the service."
+            ),
+            _ => server_error(status, body),
+        };
+        self.redact(message)
+    }
+}
+
+impl std::fmt::Debug for Server {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Server")
+            .field("endpoint", &self.endpoint)
+            .field("key", &self.key.as_ref().map(|_| "<hidden>"))
+            .finish()
+    }
+}
+
+/// The host (and port, if given) of `endpoint`, e.g. "api.openai.com".
+pub fn host(endpoint: &str) -> String {
+    let rest = endpoint.trim();
+    let rest = rest.split_once("://").map_or(rest, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    authority.to_ascii_lowercase()
+}
+
+/// Whether `endpoint` is on this PC, where no key is needed and nothing
+/// leaves the machine.
+pub fn is_local(endpoint: &str) -> bool {
+    let host = host(endpoint);
+    let name = if let Some(bracketed) = host.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or(bracketed)
+    } else {
+        host.rsplit_once(':')
+            .map_or(host.as_str(), |(name, _)| name)
+    };
+    name == "localhost" || name == "::1" || name.starts_with("127.")
+}
+
+/// Where a key comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeySource {
+    /// Windows Credential Manager, set with AI: Set API Key.
+    Saved,
+    /// The OPENAI_API_KEY environment variable.
+    Environment,
+}
+
+/// The environment variable read when no key is saved.
+pub const KEY_VARIABLE: &str = "OPENAI_API_KEY";
+
+// The Credential Manager entry holding the key for `endpoint`'s host.
+#[cfg(windows)]
+fn key_target(endpoint: &str) -> String {
+    format!("LightLine AI API key: {}", host(endpoint))
+}
+
+/// The key to send to `endpoint`: the one saved for its host, else
+/// OPENAI_API_KEY. None for a server on this PC.
+pub fn find_key(endpoint: &str) -> Option<(String, KeySource)> {
+    if is_local(endpoint) {
+        return None;
+    }
+    #[cfg(windows)]
+    if let Some(key) = crate::credentials::read(&key_target(endpoint)) {
+        return Some((key, KeySource::Saved));
+    }
+    std::env::var(KEY_VARIABLE)
+        .ok()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+        .map(|key| (key, KeySource::Environment))
+}
+
+/// The server at `endpoint`, with the key it should get.
+pub fn server(endpoint: &str) -> Server {
+    Server::new(endpoint, find_key(endpoint).map(|(key, _)| key))
+}
+
+/// Saves `key` for `endpoint`'s host.
+#[cfg(windows)]
+pub fn save_key(endpoint: &str, key: &str) -> std::io::Result<()> {
+    crate::credentials::write(&key_target(endpoint), "LightLine", key.trim())
+}
+
+/// Removes the key saved for `endpoint`'s host. False when there was none.
+#[cfg(windows)]
+pub fn remove_key(endpoint: &str) -> std::io::Result<bool> {
+    crate::credentials::delete(&key_target(endpoint))
+}
+
 // `endpoint` + "/v1/" + `path`. An endpoint given with its "/v1" (as LM
 // Studio shows it) works too.
 fn api_url(endpoint: &str, path: &str) -> String {
@@ -109,25 +253,28 @@ fn server_error(status: u16, body: &str) -> String {
         .unwrap_or_else(|| format!("The server answered with HTTP {status}"))
 }
 
-/// The models the server at `endpoint` offers, sorted by name.
-pub fn list_models(endpoint: &str) -> Result<Vec<String>, String> {
-    let mut response = ureq::get(&api_url(endpoint, "models"))
+/// The models `server` offers, sorted by name.
+pub fn list_models(server: &Server) -> Result<Vec<String>, String> {
+    let endpoint = server.endpoint.as_str();
+    let request = ureq::get(&api_url(endpoint, "models"))
         .config()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_global(Some(LIST_TIMEOUT))
         .http_status_as_error(false)
-        .build()
+        .build();
+    let mut response = server
+        .authorize(request)
         .call()
-        .map_err(|error| unreachable(endpoint, &error))?;
+        .map_err(|error| server.redact(unreachable(endpoint, &error)))?;
     let status = response.status().as_u16();
     let body = response
         .body_mut()
         .with_config()
-        .limit(1024 * 1024)
+        .limit(4 * 1024 * 1024)
         .read_to_string()
-        .map_err(|error| format!("Couldn't read the model list ({error})"))?;
+        .map_err(|error| server.redact(format!("Couldn't read the model list ({error})")))?;
     if status != 200 {
-        return Err(server_error(status, &body));
+        return Err(server.status_error(status, &body));
     }
     parse_models(&body)
 }
@@ -150,12 +297,36 @@ fn parse_models(body: &str) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
-/// Models that can chat: embedding models (which only turn text into
-/// numbers) are listed by servers too, but can't answer.
+// Parts of the names of models that can't chat: embedding models (which
+// only turn text into numbers), and OpenAI's models for speech, images,
+// moderation, plain completion and its other APIs.
+const NOT_CHAT: [&str; 15] = [
+    "embed",
+    "whisper",
+    "tts",
+    "dall-e",
+    "gpt-image",
+    "moderation",
+    "davinci",
+    "babbage",
+    "audio",
+    "realtime",
+    "transcribe",
+    "search",
+    "computer-use",
+    "codex",
+    "sora",
+];
+
+/// Models that can chat. Servers list the others too, but they can't
+/// answer.
 pub fn chat_models(models: &[String]) -> Vec<String> {
     models
         .iter()
-        .filter(|model| !model.to_ascii_lowercase().contains("embed"))
+        .filter(|model| {
+            let model = model.to_ascii_lowercase();
+            !NOT_CHAT.iter().any(|part| model.contains(part))
+        })
         .cloned()
         .collect()
 }
@@ -169,14 +340,25 @@ pub fn is_cloud_model(model: &str) -> bool {
         .is_some_and(|tag| tag == "cloud" || tag.ends_with("-cloud"))
 }
 
-/// A model to start with, never a cloud one: questions and code shouldn't
-/// leave the PC unless the user picks such a model. A chat model made for
-/// code is preferred; "base" models only complete text, so they come last.
-pub fn pick_model(models: &[String]) -> Option<String> {
+/// A model to start with, never an Ollama cloud one: questions and code
+/// shouldn't leave the PC unless the user picks such a model. A chat model
+/// made for code is preferred; "base" models only complete text, so they
+/// come last. From a cloud service (`remote`), a small, fast model ("mini")
+/// is preferred, and a dated snapshot or a preview comes after the model
+/// it's a version of.
+pub fn pick_model(models: &[String], remote: bool) -> Option<String> {
     let rank = |model: &str| {
         let model = model.to_ascii_lowercase();
         let chat = !model.contains("base");
-        u8::from(chat) + u8::from(chat && model.contains("code"))
+        let mut score = 2 * u8::from(chat) + 2 * u8::from(chat && model.contains("code"));
+        if remote {
+            let dated = model
+                .split('-')
+                .any(|part| part.len() == 4 && part.starts_with("20"));
+            let current = !dated && !model.contains("preview");
+            score += 2 * u8::from(model.contains("mini")) + u8::from(current);
+        }
+        score
     };
     let mut best: Option<(u8, String)> = None;
     for model in chat_models(models) {
@@ -238,19 +420,32 @@ fn parse_event(line: &str) -> Event {
 /// batches pieces can pass on what it holds. Returns early (Ok) once
 /// `cancel` is set.
 pub fn stream_chat(
-    endpoint: &str,
+    server: &Server,
+    model: &str,
+    messages: &[Message],
+    cancel: &AtomicBool,
+    on_text: impl FnMut(&str),
+) -> Result<(), String> {
+    stream_answer(server, model, messages, cancel, on_text).map_err(|error| server.redact(error))
+}
+
+fn stream_answer(
+    server: &Server,
     model: &str,
     messages: &[Message],
     cancel: &AtomicBool,
     mut on_text: impl FnMut(&str),
 ) -> Result<(), String> {
-    let response = ureq::post(&api_url(endpoint, "chat/completions"))
+    let endpoint = server.endpoint.as_str();
+    let request = ureq::post(&api_url(endpoint, "chat/completions"))
         .config()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_recv_response(Some(FIRST_TOKEN_TIMEOUT))
         .http_status_as_error(false)
         .build()
-        .header("Content-Type", "application/json")
+        .header("Content-Type", "application/json");
+    let response = server
+        .authorize(request)
         .send(request_body(model, messages))
         .map_err(|error| unreachable(endpoint, &error))?;
     let status = response.status().as_u16();
@@ -261,7 +456,7 @@ pub fn stream_chat(
             .limit(64 * 1024)
             .read_to_string()
             .unwrap_or_default();
-        return Err(server_error(status, &text));
+        return Err(server.status_error(status, &text));
     }
     // Read on a thread of its own, so that a server that goes quiet can
     // still be stopped. Once nobody is listening, the reader stops at the
@@ -314,7 +509,7 @@ pub fn stream_chat(
 
 /// Inline code completion: predicts the code snippet that should be inserted at the cursor.
 pub fn complete_inline(
-    endpoint: &str,
+    server: &Server,
     model: &str,
     prefix: &str,
     suffix: &str,
@@ -335,7 +530,7 @@ pub fn complete_inline(
         Message::new(Role::User, prompt),
     ];
     let mut output = String::new();
-    stream_chat(endpoint, model, &messages, cancel, |chunk| {
+    stream_chat(server, model, &messages, cancel, |chunk| {
         output.push_str(chunk);
     })?;
     Ok(clean_inline_completion(&output))
@@ -398,9 +593,12 @@ mod tests {
             chat_models(&models),
             vec!["llama3.2:latest".to_string(), "qwen2.5-coder:7b".into()]
         );
-        assert_eq!(pick_model(&models).as_deref(), Some("qwen2.5-coder:7b"));
         assert_eq!(
-            pick_model(&["nomic-embed-text".to_string()]),
+            pick_model(&models, false).as_deref(),
+            Some("qwen2.5-coder:7b")
+        );
+        assert_eq!(
+            pick_model(&["nomic-embed-text".to_string()], false),
             None,
             "an embedding model can't chat"
         );
@@ -422,18 +620,25 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        assert_eq!(pick_model(&installed).as_deref(), Some("qwen2.5-coder:7b"));
+        assert_eq!(
+            pick_model(&installed, false).as_deref(),
+            Some("qwen2.5-coder:7b")
+        );
         assert!(is_cloud_model("gpt-oss:120b-cloud"));
         assert!(is_cloud_model("nemotron-3-super:cloud"));
         assert!(!is_cloud_model("qwen2.5-coder:7b"));
         assert!(!is_cloud_model("llama3"));
         assert_eq!(
-            pick_model(&["gpt-oss:20b-cloud".to_string()]),
+            pick_model(&["gpt-oss:20b-cloud".to_string()], false),
             None,
             "a cloud model is only used when chosen"
         );
         assert_eq!(
-            pick_model(&["qwen2.5-coder:1.5b-base".to_string(), "llama3.2:1b".into()]).as_deref(),
+            pick_model(
+                &["qwen2.5-coder:1.5b-base".to_string(), "llama3.2:1b".into()],
+                false
+            )
+            .as_deref(),
             Some("llama3.2:1b")
         );
     }
@@ -502,8 +707,14 @@ mod tests {
     // read first: closing a socket with unread data resets the connection
     // on Windows, which the client would see as a failure.
     fn serve_once(response: &'static str) -> String {
+        serve_and_record(response).0
+    }
+
+    // serve_once, also handing over the request the server got.
+    fn serve_and_record(response: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = format!("http://{}", listener.local_addr().unwrap());
+        let (got, request_text) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
@@ -533,10 +744,152 @@ mod tests {
                     }
                 }
             }
+            let _ = got.send(String::from_utf8_lossy(&request).into_owned());
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
         });
-        address
+        (address, request_text)
+    }
+
+    const MODEL_LIST: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+        Connection: close\r\nContent-Length: 21\r\n\r\n{\"data\":[{\"id\":\"m\"}]}";
+
+    #[test]
+    fn the_key_is_sent_only_when_one_is_set() {
+        let (endpoint, request) = serve_and_record(MODEL_LIST);
+        let server = Server::new(endpoint, Some("sk-test-123".into()));
+        assert_eq!(list_models(&server).unwrap(), ["m"]);
+        let request = request.recv().unwrap().to_ascii_lowercase();
+        assert!(
+            request.contains("authorization: bearer sk-test-123"),
+            "{request}"
+        );
+
+        let (endpoint, request) = serve_and_record(MODEL_LIST);
+        assert_eq!(list_models(&Server::new(endpoint, None)).unwrap(), ["m"]);
+        assert!(
+            !request
+                .recv()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("authorization")
+        );
+
+        let (endpoint, request) = serve_and_record(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+             data: [DONE]\n\n",
+        );
+        let cancel = AtomicBool::new(false);
+        let server = Server::new(endpoint, Some("sk-test-123".into()));
+        stream_chat(&server, "m", &[], &cancel, |_| {}).unwrap();
+        assert!(
+            request
+                .recv()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("authorization: bearer sk-test-123")
+        );
+        assert!(!format!("{server:?}").contains("sk-test-123"));
+    }
+
+    #[test]
+    fn the_key_never_shows_in_errors() {
+        // OpenAI repeats part of a wrong key; some servers echo all of it.
+        let endpoint = serve_once(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: 61\r\n\r\n{\"error\":{\"message\":\"Incorrect API key provided: sk-abc123\"}}",
+        );
+        let server = Server::new(endpoint.clone(), Some("sk-abc123".into()));
+        let error = list_models(&server).unwrap_err();
+        assert!(!error.contains("sk-abc"), "{error}");
+        assert!(error.contains("didn't accept the API key"), "{error}");
+
+        let endpoint = serve_once(
+            "HTTP/1.1 500 Oops\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: 41\r\n\r\n{\"error\":{\"message\":\"bad key sk-abc123\"}}",
+        );
+        let cancel = AtomicBool::new(false);
+        let server = Server::new(endpoint, Some("sk-abc123".into()));
+        let error = stream_chat(&server, "m", &[], &cancel, |_| {}).unwrap_err();
+        assert_eq!(error, "bad key [API key]");
+    }
+
+    #[test]
+    fn rejected_keys_and_rate_limits_get_plain_messages() {
+        let server = Server::new("https://api.openai.com/v1", None);
+        assert!(
+            server
+                .status_error(401, "")
+                .starts_with("api.openai.com needs an API key")
+        );
+        let server = Server::new("https://api.openai.com/v1", Some("k".into()));
+        assert!(
+            server
+                .status_error(
+                    429,
+                    r#"{"error":{"message":"You exceeded your current quota"}}"#
+                )
+                .starts_with("api.openai.com is limiting requests, or the account's quota")
+        );
+    }
+
+    #[test]
+    fn hosts_and_local_servers_are_recognized() {
+        assert_eq!(host("https://api.openai.com/v1"), "api.openai.com");
+        assert_eq!(host("http://localhost:11434"), "localhost:11434");
+        assert_eq!(host("https://user@openrouter.ai/api"), "openrouter.ai");
+        assert!(is_local("http://localhost:11434"));
+        assert!(is_local("http://127.0.0.1:1234/v1"));
+        assert!(is_local("http://[::1]:8080"));
+        assert!(!is_local("https://api.openai.com"));
+        assert!(!is_local("https://localhost.example.com"));
+        assert_eq!(
+            find_key("http://localhost:11434"),
+            None,
+            "no key for this PC"
+        );
+    }
+
+    #[test]
+    fn only_chat_models_are_listed_and_a_small_one_is_picked_from_a_service() {
+        // Part of what api.openai.com/v1/models lists.
+        let listed: Vec<String> = [
+            "babbage-002",
+            "chatgpt-4o-latest",
+            "codex-mini-latest",
+            "dall-e-3",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-mini-2025-04-14",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4o-mini-search-preview",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-tts",
+            "gpt-4o-realtime-preview",
+            "gpt-image-1",
+            "o4-mini",
+            "omni-moderation-latest",
+            "text-embedding-3-small",
+            "tts-1",
+            "whisper-1",
+        ]
+        .map(String::from)
+        .to_vec();
+        let chat = chat_models(&listed);
+        assert_eq!(
+            chat,
+            [
+                "chatgpt-4o-latest",
+                "gpt-4.1",
+                "gpt-4.1-mini",
+                "gpt-4.1-mini-2025-04-14",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "o4-mini"
+            ]
+        );
+        assert_eq!(pick_model(&chat, true).as_deref(), Some("gpt-4.1-mini"));
     }
 
     #[test]
@@ -550,7 +903,7 @@ mod tests {
         let mut pieces = Vec::new();
         let cancel = AtomicBool::new(false);
         stream_chat(
-            &endpoint,
+            &Server::new(endpoint, None),
             "m",
             &[Message::new(Role::User, "hi")],
             &cancel,
@@ -591,7 +944,7 @@ mod tests {
         let started = Instant::now();
         let mut pieces = Vec::new();
         stream_chat(
-            &endpoint,
+            &Server::new(endpoint, None),
             "m",
             &[Message::new(Role::User, "hi")],
             &cancel,
@@ -612,7 +965,8 @@ mod tests {
              Content-Length: 43\r\n\r\n{\"error\":{\"message\":\"model 'm' not found\"}}",
         );
         let cancel = AtomicBool::new(false);
-        let error = stream_chat(&endpoint, "m", &[], &cancel, |_| {}).unwrap_err();
+        let error =
+            stream_chat(&Server::new(endpoint, None), "m", &[], &cancel, |_| {}).unwrap_err();
         assert_eq!(error, "model 'm' not found");
     }
 
@@ -625,7 +979,7 @@ mod tests {
             .unwrap()
             .port();
         let endpoint = format!("http://127.0.0.1:{port}");
-        let error = list_models(&endpoint).unwrap_err();
+        let error = list_models(&Server::new(endpoint.clone(), None)).unwrap_err();
         assert_eq!(error, format!("{NOTHING_ANSWERED} {endpoint}."));
     }
 
@@ -637,8 +991,9 @@ mod tests {
              data: [DONE]\n\n",
         );
         let cancel = AtomicBool::new(false);
+        let server = Server::new(endpoint, None);
         let completion =
-            complete_inline(&endpoint, "m", "let x = 10;\n", "", "rust", &cancel).unwrap();
+            complete_inline(&server, "m", "let x = 10;\n", "", "rust", &cancel).unwrap();
         assert_eq!(completion, "let y = 42;");
     }
 }

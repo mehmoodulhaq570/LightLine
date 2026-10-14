@@ -2,6 +2,8 @@ pub mod ai;
 #[cfg(windows)]
 pub mod clipboard;
 pub mod color_theme;
+#[cfg(windows)]
+pub mod credentials;
 pub mod debug;
 pub mod document;
 pub mod extensions;

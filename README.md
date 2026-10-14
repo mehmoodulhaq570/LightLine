@@ -33,7 +33,7 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 - **Git built in**: see changed lines in the margin, then stage, commit, push and review diffs without leaving the editor.
 - **Terminal**: PowerShell, Command Prompt, Git Bash or WSL, in tabs.
 - **Markdown preview**: see your README rendered beside the file as you type.
-- **Private AI Assistant (optional)**: ask about your code using a model on your own PC through [Ollama](https://ollama.com). Off until you turn it on.
+- **AI Assistant (optional)**: ask about your code using a model on your own PC through [Ollama](https://ollama.com), or bring your own API key for OpenAI or another OpenAI-compatible service. Off until you turn it on.
 - **Themes and icons**: install color and icon themes from the Zed extension registry.
 - **Picks up where you left off**: your folder, tabs and cursor positions come back when you reopen it.
 
@@ -103,7 +103,8 @@ LightLine collects no usage data and sends nothing on its own. It uses the netwo
 - push, pull or fetch with Git;
 - run **Python: Install debugpy**;
 - allow web images in a Markdown preview;
-- open a Python file without Pyright installed, when it asks before downloading Pyright.
+- open a Python file without Pyright installed, when it asks before downloading Pyright;
+- use the AI Assistant. With Ollama (the default) everything stays on your PC. If you point `aiEndpoint` at a cloud service such as OpenAI, your questions and the code you include are sent to that service, and the panel names it before you ask. Your API key is kept in Windows Credential Manager, never in LightLine's files, and is sent only to that service.
 
 LightLine stores preferences, caches and, if it ever crashes, a `crash.log` in `%APPDATA%\LightLine`; the log stays on your PC. It edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in a `lightline-run` folder in your temp directory; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
 

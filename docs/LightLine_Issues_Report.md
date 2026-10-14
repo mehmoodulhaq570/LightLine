@@ -17,7 +17,7 @@ Status key: **Resolved** · **Partly resolved** · **Open** · **Decision needed
 
 | # | Title | Status | Notes |
 |---|-------|--------|-------|
-| 59 | Own API key for OpenAI-compatible cloud services | **Open** | No `Authorization` header, credential storage or `OPENAI_API_KEY` support in `src/`. |
+| 59 | Own API key for OpenAI-compatible cloud services | **Resolved** (local, 2026-10-14) | Key in Windows Credential Manager (or `OPENAI_API_KEY`), sent as a Bearer header only to `aiEndpoint`'s host; chat-model filter; plain 401/429 messages; panel names the service. Verified live against a fake service. |
 | 52 | More languages and a language picker for Run/Debug | **Resolved** (local) | Runners were already done; the picker is now in. Debugging other languages was out of scope. |
 | 48 | Prettier CLI extension and architecture | **Resolved** (local) | Every requirement is met; the last gap (install instructions when Prettier is missing) is now in. |
 | 43 | Contributor onboarding | **Not a code fix** | CONTRIBUTING.md (#44) and CI (`rust.yml`, `release.yml`) exist. Kept open on purpose for further onboarding. |

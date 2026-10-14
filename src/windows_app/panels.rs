@@ -110,6 +110,8 @@ impl App {
             ("AI: Explain Error at Cursor", 44),
             ("AI: Fix Error at Cursor", 45),
             ("AI: New Chat", 46),
+            ("AI: Set API Key\u{2026}", 60),
+            ("AI: Remove API Key", 61),
         ]
         .into_iter()
         .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
@@ -263,6 +265,8 @@ impl App {
                     }
                     self.ai_new_chat(hwnd);
                 }
+                Some(60) => self.ai_start_key_entry(hwnd),
+                Some(61) => self.ai_remove_key(hwnd),
                 _ => {}
             }
         } else if self.quick_query.starts_with('@') {

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Use Your Own API Key with Cloud AI Services**: The AI Assistant now works with OpenAI and other OpenAI-compatible services such as OpenRouter and Groq. Set `aiEndpoint` to the service (for example `https://api.openai.com`), run **AI: Set API Key...** from the Command Palette or click **Set API Key** in the panel, and paste your key. It shows only as dots, is kept in Windows Credential Manager (never in `settings.json`), and is sent only to that service; with no key saved, `OPENAI_API_KEY` is used. **AI: Remove API Key** forgets it. Connect lists only models that can chat and picks a small, fast one. The panel names the service your questions and code go to, and a rejected key or a used-up quota gets a plain message instead of an HTTP error. With Ollama nothing changes (#59).
+
 #### Changed
 
 - **Even Faster Scrolling**: A turn of the mouse wheel no longer redraws the whole editor. The lines still on screen are moved up or down as they are, and only the newly revealed lines, the sticky lines and the scrollbar are drawn: about 35–40% less work per notch in a 3,000-line Rust file (release build, rust-analyzer running). When a popup, the find box or a tooltip is open over the editor, scrolling redraws the editor in full as before.

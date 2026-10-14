@@ -706,15 +706,20 @@ impl App {
         let s = |value: i32| self.scale(value);
         let mut y = self.paint_ai_intro(hdc, area, "Connect a model");
         let line_height = self.text_height(hdc) + s(4);
-        y = self.paint_wrapped(
-            hdc,
+        let endpoint = &self.settings.ai_endpoint;
+        let remote = !ai::is_local(endpoint);
+        let host = ai::host(endpoint);
+        let about = if remote {
+            format!(
+                "The assistant explains, fixes and writes code with a model from {host}. \
+                 Your questions and the code you include are sent there."
+            )
+        } else {
             "The assistant explains, fixes and writes code with a model that runs \
-             on your PC through Ollama: free, private, and it works offline.",
-            area,
-            y,
-            line_height,
-            self.theme.text,
-        );
+             on your PC through Ollama: free, private, and it works offline."
+                .to_string()
+        };
+        y = self.paint_wrapped(hdc, &about, area, y, line_height, self.theme.text);
         y = self.paint_ai_promises(hdc, area, y + s(12), line_height);
 
         y += s(12);
@@ -722,15 +727,23 @@ impl App {
             y = self.paint_wrapped(hdc, problem, area, y, line_height, self.theme.error) + s(8);
         }
         let default_endpoint = self.settings.ai_endpoint == ai::DEFAULT_ENDPOINT;
+        let key = if remote { self.ai_key_source() } else { None };
+        // A service without a key: the button sets one first.
+        let needs_key = remote && key.is_none();
         let label = if self.ai.connecting {
-            "Connecting\u{2026}"
+            "Connecting\u{2026}".to_string()
+        } else if needs_key {
+            "Set API Key".to_string()
         } else if self.ai.problem.is_some() {
-            "Try again"
+            "Try again".to_string()
         } else if default_endpoint {
-            "Connect to Ollama"
+            "Connect to Ollama".to_string()
+        } else if remote {
+            format!("Connect to {host}")
         } else {
-            "Connect"
+            "Connect".to_string()
         };
+        let label = label.as_str();
         let button = RECT {
             left: area.left,
             top: y,
@@ -757,12 +770,32 @@ impl App {
                 text,
                 button,
             );
-            if !self.ai.connecting {
+            if needs_key {
+                self.ai.hits.borrow_mut().set_key = Some(button);
+            } else if !self.ai.connecting {
                 self.ai.hits.borrow_mut().connect = Some(button);
             }
         }
         y = button.bottom + s(12);
-        let hint = if default_endpoint {
+        let hint = if remote {
+            let key = match key {
+                Some(ai::KeySource::Saved) => {
+                    "Its API key is saved in Windows Credential Manager.".to_string()
+                }
+                Some(ai::KeySource::Environment) => {
+                    format!("Its API key comes from {}.", ai::KEY_VARIABLE)
+                }
+                None => format!(
+                    "It needs an API key: the button above, or AI: Set API Key\u{2026} in \
+                     the Command Palette. Or set {}.",
+                    ai::KEY_VARIABLE
+                ),
+            };
+            format!(
+                "Uses {} (aiEndpoint in settings). {key}",
+                self.settings.ai_endpoint
+            )
+        } else if default_endpoint {
             format!(
                 "No Ollama yet? Get it from ollama.com, then run in a terminal: \
                  ollama pull {SUGGESTED_MODEL}"
@@ -782,21 +815,20 @@ impl App {
         let mut y = self.paint_ai_intro(hdc, area, "Ask about your code");
         let line_height = self.text_height(hdc) + s(4);
         let model = self.settings.ai_model.as_deref().unwrap_or_default();
-        let local = ["//localhost", "//127.0.0.1", "//[::1]"]
-            .iter()
-            .any(|host| self.settings.ai_endpoint.contains(host));
-        let source = if ai::is_cloud_model(model) {
+        let local = ai::is_local(&self.settings.ai_endpoint);
+        let source = if !local {
+            format!(
+                "Answers come from {model} via {}: your questions and the code you \
+                 include are sent there.",
+                ai::host(&self.settings.ai_endpoint)
+            )
+        } else if ai::is_cloud_model(model) {
             format!(
                 "Answers come from {model}, a cloud model: your questions and the code \
                  you include are sent to ollama.com."
             )
-        } else if local {
-            format!("Answers come from {model}, running on your PC.")
         } else {
-            format!(
-                "Answers come from {model} at {}.",
-                self.settings.ai_endpoint
-            )
+            format!("Answers come from {model}, running on your PC.")
         };
         y = self.paint_wrapped(
             hdc,
@@ -1127,6 +1159,16 @@ impl App {
         if input.bottom - input.top < s(30) {
             return;
         }
+        // A key being typed shows only as dots, one per character.
+        let key = self.ai.key_entry.as_deref();
+        let dots;
+        let (lines, enabled) = match key {
+            Some(key) => {
+                dots = [String::from("\u{2022}").repeat(key.chars().count().min(64))];
+                (&dots[..], true)
+            }
+            None => (lines, enabled),
+        };
         let focused = enabled && self.ai_typing();
         let edge = if focused {
             self.theme.violet
@@ -1148,16 +1190,21 @@ impl App {
         };
         unsafe { SelectObject(hdc, self.ui_font) };
         let line_height = self.text_height(hdc) + s(4);
-        let empty = self.ai.input.is_empty();
+        let empty = key.map_or(self.ai.input.is_empty(), str::is_empty);
         if !enabled || empty {
-            let placeholder = if enabled {
-                "Ask about your code\u{2026}"
+            let placeholder = if key.is_some() {
+                format!(
+                    "Paste the API key for {}, then press Enter",
+                    ai::host(&self.settings.ai_endpoint)
+                )
+            } else if enabled {
+                "Ask about your code\u{2026}".to_string()
             } else {
-                "Connect a model to start chatting"
+                "Connect a model to start chatting".to_string()
             };
             self.label_ellipsis(
                 hdc,
-                placeholder,
+                &placeholder,
                 text.left,
                 text.top,
                 self.theme.muted,
@@ -1190,8 +1237,8 @@ impl App {
             );
         }
 
-        let busy = enabled && self.ai.busy();
-        let ready = enabled && !self.ai.input.trim().is_empty();
+        let busy = enabled && key.is_none() && self.ai.busy();
+        let ready = enabled && !key.unwrap_or(&self.ai.input).trim().is_empty();
         let fill = if ready && !busy {
             self.theme.violet
         } else {

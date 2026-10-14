@@ -2090,6 +2090,9 @@ impl App {
         } else {
             self.ai.focused = false;
         }
+        if !opening {
+            self.ai.key_entry = None;
+        }
         if self.welcome {
             self.welcome = false;
             self.ai_assistant_visible = true;
@@ -3329,7 +3332,7 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         self.ghost_cancel = cancel.clone();
 
-        let endpoint = self.settings.ai_endpoint.clone();
+        let server = lightline::ai::server(&self.settings.ai_endpoint);
         let Some(model) = self.settings.ai_model.clone() else {
             self.status = "No AI model selected in AI Assistant".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -3369,7 +3372,7 @@ impl App {
 
         std::thread::spawn(move || {
             let res = lightline::ai::complete_inline(
-                &endpoint, &model, &prefix, &suffix, &language, &cancel,
+                &server, &model, &prefix, &suffix, &language, &cancel,
             );
             tx.send(WorkerMessage::GhostSuggestion {
                 tab,

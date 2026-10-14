@@ -1552,8 +1552,10 @@ impl App {
                 return;
             }
         }
-        // A click anywhere else takes the keyboard from the message box.
+        // A click anywhere else takes the keyboard from the message box,
+        // and drops a key being typed.
         self.ai.focused = false;
+        self.ai.key_entry = None;
         if y >= rect.bottom - self.scale(STATUS) {
             self.click_status_language(hwnd, rect, x, y);
             return;
