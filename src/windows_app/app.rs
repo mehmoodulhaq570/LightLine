@@ -907,6 +907,9 @@ pub(super) struct App {
     pub(super) snippet: Option<SnippetSession>,
     // Each pane's lines pinned by sticky scroll when last drawn (sticky.rs).
     pub(super) sticky_shown: RefCell<[Vec<usize>; 2]>,
+    // Backbuffer rows a wheel scroll moved that the screen doesn't show yet
+    // (scroll_blit.rs); the next paint copies them out.
+    pub(super) blitted: Option<RECT>,
     // Parameter hints: the card shown, and the latest request.
     pub(super) signature: Option<SignatureCard>,
     pub(super) signature_request: Option<SignatureRequest>,
@@ -1452,6 +1455,7 @@ impl App {
             debug_console: DebugConsole::default(),
             snippet: None,
             sticky_shown: RefCell::new([Vec::new(), Vec::new()]),
+            blitted: None,
             signature: None,
             signature_request: None,
             multi_editing: false,

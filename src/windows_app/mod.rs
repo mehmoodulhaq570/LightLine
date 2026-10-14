@@ -21,6 +21,7 @@ mod hot;
 mod indent;
 mod inlay;
 mod occurrences;
+mod scroll_blit;
 mod snippet;
 mod sticky;
 use debug_console::DebugConsole;

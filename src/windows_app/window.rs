@@ -79,6 +79,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     }
     let cell = unsafe { &*ptr };
+    #[cfg(debug_assertions)]
+    if msg == scroll_blit::SCROLL_CHECK_MESSAGE {
+        return scroll_blit::check_for_test(hwnd, cell);
+    }
     let Ok(mut app) = cell.try_borrow_mut() else {
         return if msg == WM_CLOSE {
             0
@@ -664,19 +668,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 return 0;
             }
             // Scroll by screen rows: a wrapped line has several, a folded
-            // block one.
+            // block one. Only the code panes are redrawn, and mostly not
+            // even those (scroll_blit.rs).
             if delta != 0 {
-                let rows = if delta > 0 { -3 } else { 3 };
-                app.scroll_pane_rows(hwnd, pane, rows);
-            }
-            // Scrolling moves only the code panes. Redrawing the whole
-            // window (title bar, sidebar, tabs, status bar) took ~20 ms a
-            // notch; a popup or menu may reach past the panes, though.
-            if app.keystroke_stays_in_editor() {
-                let area = app.editor_area(hwnd, false);
-                unsafe { InvalidateRect(hwnd, &area, 0) };
-            } else {
-                unsafe { InvalidateRect(hwnd, null(), 0) };
+                app.wheel_scroll(hwnd, pane, if delta > 0 { -3 } else { 3 });
             }
             0
         }

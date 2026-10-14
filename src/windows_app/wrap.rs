@@ -298,13 +298,23 @@ impl App {
     }
 
     /// Scrolls `pane` by `rows` screen rows. The focus stays where it is.
-    pub(super) fn scroll_pane_rows(&mut self, hwnd: HWND, pane: usize, rows: isize) {
-        let top = self.view_top(hwnd, pane);
-        let (first_line, first_row) = self.step_rows(hwnd, pane, top, rows);
+    /// Returns how many rows it moved, less than `rows` at either end.
+    pub(super) fn scroll_pane_rows(&mut self, hwnd: HWND, pane: usize, rows: isize) -> isize {
+        let mut top = self.view_top(hwnd, pane);
+        let mut moved = 0;
+        while moved != rows {
+            let next = self.step_rows(hwnd, pane, top, rows.signum());
+            if next == top {
+                break;
+            }
+            top = next;
+            moved += rows.signum();
+        }
         let tab = self.tab_for_pane(pane);
         let view = &mut self.tabs[tab].views[pane];
-        view.first_line = first_line;
-        view.first_row = first_row;
+        view.first_line = top.0;
+        view.first_row = top.1;
+        moved
     }
 
     /// The byte in `text[start..end]` whose left edge is nearest `x` pixels

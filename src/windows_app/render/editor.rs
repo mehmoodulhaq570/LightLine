@@ -444,6 +444,9 @@ impl App {
                 dirty = rect;
                 fresh = true;
             }
+            // Rows a wheel scroll moved in the backbuffer since the last
+            // paint (scroll_blit.rs), which go to the screen with this frame.
+            let moved = self.blitted.take().filter(|_| !fresh);
             let hdc = self
                 .backbuffer
                 .as_ref()
@@ -486,6 +489,23 @@ impl App {
                         dirty.top,
                         SRCCOPY,
                     );
+                    // BeginPaint's DC draws only inside the update region,
+                    // which leaves out most of the moved rows.
+                    if let Some(moved) = moved {
+                        let screen = GetDC(hwnd);
+                        BitBlt(
+                            screen,
+                            moved.left,
+                            moved.top,
+                            moved.right - moved.left,
+                            moved.bottom - moved.top,
+                            hdc,
+                            moved.left,
+                            moved.top,
+                            SRCCOPY,
+                        );
+                        ReleaseDC(hwnd, screen);
+                    }
                 }
             };
             let old_font = SelectObject(hdc, self.font);

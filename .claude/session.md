@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-10-10 (Asia/Karachi). The newest work is in "Follow-up: code audit, speed and robustness" at the end.
+Updated: 2026-10-14 (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: wheel scrolling moves rows instead of redrawing them" at the end.
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -54,7 +54,7 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 
 ## Current handoff
 
-- As of 2026-10-10 all code work is committed on `main` up to `84543aa`. The README, CHANGELOG and this note were updated afterwards and are not committed yet.
+- As of 2026-10-14, `main` is at `9851f97` (v0.5.0 released, Scoop bot commit on top). The scroll work in the last section is not committed.
 - The sections below are in date order; the last one is the newest.
 - Preserve concurrent/user changes and inspect Git status before editing. Do not commit or publish unless requested.
 - User prefers direct implementation and live app verification, and wants new UI to match LightLine's own design.
@@ -168,3 +168,18 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 
 - Sticky scroll: windows_app/sticky.rs. `block_starts` walks up from the line under the pinned rows (at most 2,000 lines) taking each line indented less than the last (skipping blank, comment and closer-only lines), max 5 or a third of the view. Drawn at the end of paint_code_pane (`paint_sticky`, before the scrollbar, so carets under it hide); `sticky_shown` (RefCell per pane) records what was drawn, `check_sticky` (message-loop hook, with track_caret) invalidates the strip only when the lines change; `sticky_click` scrolls so the line sits under its parents. Setting `stickyScroll`. Driver `t_sticky.py` (ll.App now takes `first=`).
 - Debug Console: windows_app/debug_console.rs, `TerminalTab::DebugConsole`, header tab after OUTPUT, Ctrl+Shift+Y (was a redo alias), palette 58. `debug::Event::Output` now has the DAP category; LightLine adds notes (started, paused at file:line, exited). Prompt: `debug::Command::Evaluate` (context "repl", top frame when paused) → `Event::Evaluated` (errors use body.error.format); keys via `debug_console_key` (after problems_key), chars via `debug_console_char`; the editor caret hides while the prompt has the keyboard (`debug_prompt_has_keyboard`). poll_debug redraws only the console and status bar for output-only batches. With debugpy (console=integratedTerminal) the program's prints stay in OUTPUT; the console has the notes and evaluation. Driver `t_console.py`.
+
+## Follow-up: language picker, lone files, v0.5.0 (2026-10-12 to 2026-10-13, committed)
+
+- Language picker for Run (`9d0932e`, #52): windows_app/run_language.rs, `runner::RunLanguage`. Click the status-bar language or palette **Run: Choose the File's Language**; Run then treats the file as that language (C/C++ compile with `-x c`/`-x c++`; Go and tsx go by file name, so they ask for a rename). The choice lasts until the tab closes (not in the session). Formatters gained install hints (`Formatter` install text, #48).
+- Lone files (`57a2d0a`, #7): opening or saving a file with no folder open no longer makes its folder the workspace; the Explorer shows "No folder opened" with **Open Folder**. Language servers use the file's folder as root.
+- v0.5.0 released 2026-10-13 (`91d686c` notes, `9851f97` Scoop bot). #52, #48 and #7 can be closed (docs/LightLine_Issues_Report.md has the notes); still open: #59 (own API key for OpenAI-compatible services), #43, #35, #13.
+- 2026-10-12 perf pass (release, v0.4.0 vs main): no regression from the new features; mouse-wheel scroll invalidated the whole window (~22 ms a notch) and was narrowed to `editor_area` (~14.5 ms).
+
+## Follow-up: wheel scrolling moves rows instead of redrawing them (2026-10-14, uncommitted)
+
+- windows_app/scroll_blit.rs: `wheel_scroll` (called from WM_MOUSEWHEEL) scrolls with `scroll_pane_rows`, which now returns the rows actually moved, then `blit_scroll` BitBlts the pane's rows inside the backbuffer by `moved * line_height` and invalidates only the rows scrolled into view, the strip along the card's rounded bottom corners, the scrollbar track and the sticky-scroll strip (old and new height). Pending invalid parts inside the moved area are offset with it. `App::blitted` records the moved area; paint copies it to the screen with a GetDC BitBlt, because BeginPaint's DC is clipped to the update region.
+- Falls back to the old editor-wide invalidation when anything floats over the panes (`nothing_over_panes`: completion, hover, find box, rename, signature, code actions, menus, tooltips, Quick Open, run dropdown/config, search preview, crossfade, diff view) or the backbuffer is the wrong size. Nothing is invalidated if the view didn't move (top or end of file).
+- Measured (release, perf/crate 3,000-line main.rs, rust-analyzer, QueryThreadCycleTime of the UI thread): ~16–23 → ~11–14 Mcycles per notch, about 35–40% less. Of the rest, ~7 Mcycles draw the 7–10 rows that really change and ~4 are full-frame overhead: the region includes the scrollbar and the bottom-corner strip, which paint's fast path (`paint_code_area_only`) can't draw. Next step if wanted: let the fast path draw that strip (card body, rows, `card_outline`), and skip drawing rows hidden under the sticky lines.
+- Verification: debug builds answer `SCROLL_CHECK_MESSAGE` (WM_APP+97) with the number of backbuffer pixels that differ from a full redraw (`check_for_test`). Driver `scroll_check.py` (session scratchpad; modes `pixels` and `time`) runs the app off-screen at (20000, 20000) with its own APPDATA (`target/live-verification/scroll-blit/`), posts wheel messages (single notches and bursts, both directions, both ends of the file) and asks after each: 0 px every time. A sabotaged build (exposed rows not invalidated) reported ~7,000–22,000 px, so the check catches stale rows. `cargo test` (205 lib, 88 bin, 9 integration), all-target Clippy with `-D warnings` and `cargo fmt --check` pass; one first-run debugpy test failure was a timing flake and passed on rerun.
+- Live-test lesson: GetDC + BitBlt of a window that is covered (e.g. at HWND_BOTTOM) returns what is on screen there, i.e. the user's other windows. Don't capture that way; keep test windows off-screen and check the backbuffer from inside the app.
