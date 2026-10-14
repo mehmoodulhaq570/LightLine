@@ -37,11 +37,50 @@ pub(super) fn check_for_test(hwnd: HWND, cell: &RefCell<App>) -> LRESULT {
     if shown.len() != redrawn.len() {
         return -1;
     }
-    shown
+    let width = cell
+        .borrow()
+        .backbuffer
+        .as_ref()
+        .map_or(1, |b| b.width.max(1)) as usize;
+    let differing: Vec<usize> = shown
         .iter()
         .zip(&redrawn)
-        .filter(|(a, b)| (*a ^ *b) & 0x00ff_ffff != 0)
-        .count() as LRESULT
+        .enumerate()
+        .filter(|(_, (a, b))| (*a ^ *b) & 0x00ff_ffff != 0)
+        .map(|(index, _)| index)
+        .collect();
+    // Where they are, for the test to report (LIGHTLINE_SCROLL_CHECK_LOG).
+    if let (Some(log), Some(first)) = (
+        std::env::var_os("LIGHTLINE_SCROLL_CHECK_LOG"),
+        differing.first(),
+    ) {
+        let (mut left, mut top, mut right, mut bottom) =
+            (first % width, first / width, first % width, first / width);
+        for index in &differing {
+            let (x, y) = (index % width, index / width);
+            left = left.min(x);
+            right = right.max(x);
+            top = top.min(y);
+            bottom = bottom.max(y);
+        }
+        let raw = |pixels: &[u32]| {
+            pixels
+                .iter()
+                .flat_map(|p| p.to_le_bytes())
+                .collect::<Vec<u8>>()
+        };
+        let _ = std::fs::write(format!("{}.shown", log.to_string_lossy()), raw(&shown));
+        let _ = std::fs::write(format!("{}.redrawn", log.to_string_lossy()), raw(&redrawn));
+        let _ = std::fs::write(
+            log,
+            format!(
+                "{left} {top} {right} {bottom} shown {:06x} redrawn {:06x}",
+                shown[*first] & 0xffffff,
+                redrawn[*first] & 0xffffff
+            ),
+        );
+    }
+    differing.len() as LRESULT
 }
 
 impl App {
@@ -99,7 +138,9 @@ impl App {
         else {
             return false;
         };
-        let bottom = self.editor_area(hwnd, false).bottom;
+        // Where the code pane stops drawing: a gap above the status bar or
+        // the terminal.
+        let bottom = self.editor_area(hwnd, false).bottom - self.chrome_gap();
         // From the card's left edge (or the split divider), which are the
         // same on every row, to the scrollbar, above the card's rounded
         // bottom corners.
@@ -107,7 +148,7 @@ impl App {
             left: self.pane_left(hwnd, pane),
             top: self.editor_top(),
             right: track.left,
-            bottom: bottom - self.scale(CARD_RADIUS) - self.chrome_gap(),
+            bottom: bottom - self.scale(CARD_RADIUS),
         };
         let shift = -(moved as i32) * self.line_height;
         let kept = area.bottom - area.top - shift.abs();
@@ -166,7 +207,10 @@ impl App {
                 ..area
             },
             // ...and the scrollbar.
-            track,
+            RECT {
+                bottom: track.bottom.min(bottom),
+                ..track
+            },
         ];
         // The pinned lines, before and after: the old ones moved with the
         // rows.

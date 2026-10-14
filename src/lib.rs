@@ -8,6 +8,7 @@ pub mod debug;
 pub mod document;
 pub mod extensions;
 pub mod formatter;
+pub mod gitignore;
 pub mod icon_theme;
 pub mod image_cache;
 pub mod jobs;

@@ -329,7 +329,8 @@ pub(super) struct Tab {
     // Word wrap chosen for this tab with Alt+Z; None follows the setting.
     pub(super) word_wrap: Option<bool>,
     // The language Run treats the file as, chosen in the language picker;
-    // None follows the file's name (run_language.rs).
+    // None follows the file's name, or a choice remembered for the file
+    // (run_language.rs).
     pub(super) run_language: Option<super::run_language::RunLanguage>,
     // True for a tab restored from the last session whose file hasn't been
     // read yet: it's read the first time the tab is shown (show_active_tab).
@@ -907,6 +908,8 @@ pub(super) struct App {
     pub(super) snippet: Option<SnippetSession>,
     // Each pane's lines pinned by sticky scroll when last drawn (sticky.rs).
     pub(super) sticky_shown: RefCell<[Vec<usize>; 2]>,
+    // Run languages chosen for files (run_language.rs).
+    pub(super) chosen_languages: RefCell<super::run_language::ChosenLanguages>,
     // Backbuffer rows a wheel scroll moved that the screen doesn't show yet
     // (scroll_blit.rs); the next paint copies them out.
     pub(super) blitted: Option<RECT>,
@@ -1455,6 +1458,7 @@ impl App {
             debug_console: DebugConsole::default(),
             snippet: None,
             sticky_shown: RefCell::new([Vec::new(), Vec::new()]),
+            chosen_languages: RefCell::default(),
             blitted: None,
             signature: None,
             signature_request: None,

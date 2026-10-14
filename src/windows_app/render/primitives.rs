@@ -342,6 +342,7 @@ impl App {
             (after.cursor.line, after.cursor.line),
         ];
         let mut scrollbar = false;
+        let mut edited_lines = None;
         if after.scene != before.scene {
             // Typing changes the text, but only on the lines it edited: each
             // keystroke used to redraw every line on screen.
@@ -349,6 +350,7 @@ impl App {
                 return everything();
             };
             lines.push(edited);
+            edited_lines = Some(edited);
             scrollbar = after.scene.lines != before.scene.lines;
         }
         // A selection edge that moved changes the lines between its places.
@@ -364,6 +366,9 @@ impl App {
             }
         }
         let mut areas = self.rows_showing(hwnd, self.focused_pane, &lines);
+        if let Some((first, last)) = edited_lines {
+            areas.extend(self.edit_shown_elsewhere(hwnd, after.scene.tab, first, last));
+        }
         areas.push(self.status_area(hwnd));
         if scrollbar && let Some((track, _)) = self.scrollbar(hwnd, self.focused_pane) {
             areas.push(track);
@@ -374,6 +379,43 @@ impl App {
                 bottom: self.editor_top(),
                 ..self.editor_area(hwnd, true)
             });
+        }
+        areas
+    }
+
+    /// What else shows lines `first..=last` of tab `tab`, just edited in the
+    /// focused pane: the other pane, whole, when it shows the same file, and
+    /// a sticky-scroll strip pinning one of those lines.
+    fn edit_shown_elsewhere(&self, hwnd: HWND, tab: usize, first: usize, last: usize) -> Vec<RECT> {
+        let mut areas = Vec::new();
+        let panes = if self.split_visible { 0..2 } else { 0..1 };
+        let bottom = self.editor_area(hwnd, false).bottom - self.chrome_gap();
+        for pane in panes {
+            if self.tab_for_pane(pane) != tab {
+                continue;
+            }
+            let (left, right) = (self.pane_left(hwnd, pane), self.pane_right(hwnd, pane));
+            if pane != self.focused_pane {
+                areas.push(RECT {
+                    left,
+                    top: self.editor_top(),
+                    right,
+                    bottom,
+                });
+                continue;
+            }
+            let pinned = self.sticky_shown.borrow()[pane].clone();
+            if pinned.iter().any(|line| (first..=last).contains(line)) {
+                areas.push(RECT {
+                    left,
+                    top: self.editor_top(),
+                    right: right - self.scale(SCROLLBAR),
+                    bottom: (self.editor_top()
+                        + pinned.len() as i32 * self.line_height
+                        + self.scale(1).max(1))
+                    .min(bottom),
+                });
+            }
         }
         areas
     }
@@ -431,7 +473,7 @@ impl App {
         // neither of which shows the text: what paint's fast path redraws.
         let left = self.pane_left(hwnd, pane) + self.scale(1).max(1);
         let right = self.pane_right(hwnd, pane) - self.scale(SCROLLBAR);
-        let bottom = self.editor_area(hwnd, false).bottom;
+        let bottom = self.editor_area(hwnd, false).bottom - self.chrome_gap();
         let (mut line, mut first_row) = self.view_top(hwnd, pane);
         let mut top = self.editor_top();
         let mut areas: Vec<RECT> = Vec::new();

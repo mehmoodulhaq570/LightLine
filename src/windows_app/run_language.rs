@@ -1,10 +1,107 @@
 //! The language Run treats the active file as: what its name says, or the
 //! one chosen for it in the language picker, which opens from the language
 //! name in the status bar (#52).
+//!
+//! A choice is remembered per file in `%APPDATA%\LightLine\run-languages.json`,
+//! so it outlives the tab and the session. That file is read once, when a
+//! file's language is first needed.
 
 use super::app::{is_c_family_path, is_cpp_path};
 use super::*;
 use lightline::runner::Language as RunnerLanguage;
+use lightline::settings::Settings;
+use std::fs;
+
+// At most this many choices are kept; the oldest go first.
+const REMEMBERED: usize = 500;
+
+/// Languages chosen for files, by path, oldest first.
+#[derive(Default)]
+pub(super) struct ChosenLanguages {
+    // None until read from disk.
+    chosen: Option<Vec<(PathBuf, RunLanguage)>>,
+}
+
+fn chosen_path() -> Option<PathBuf> {
+    Settings::settings_dir().map(|dir| dir.join("run-languages.json"))
+}
+
+impl ChosenLanguages {
+    fn loaded(&mut self) -> &mut Vec<(PathBuf, RunLanguage)> {
+        self.chosen.get_or_insert_with(|| {
+            chosen_path()
+                .and_then(|path| fs::read_to_string(path).ok())
+                .map(|text| parse_chosen(&text))
+                .unwrap_or_default()
+        })
+    }
+
+    fn get(&mut self, path: &Path) -> Option<RunLanguage> {
+        self.loaded()
+            .iter()
+            .rev()
+            .find(|(file, _)| same_file(file, path))
+            .map(|(_, language)| *language)
+    }
+
+    // Remembers `language` for `path` (None forgets it) and saves.
+    fn set(&mut self, path: &Path, language: Option<RunLanguage>) -> std::io::Result<()> {
+        let chosen = self.loaded();
+        chosen.retain(|(file, _)| !same_file(file, path));
+        if let Some(language) = language {
+            chosen.push((plain(path), language));
+        }
+        if chosen.len() > REMEMBERED {
+            chosen.drain(..chosen.len() - REMEMBERED);
+        }
+        let text = serialize_chosen(chosen);
+        let Some(file) = chosen_path() else {
+            return Ok(());
+        };
+        if let Some(dir) = file.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::write(file, text)
+    }
+}
+
+// The plain form of a path (no `\\?\` prefix, `\` between names), as the
+// file keeps it.
+fn plain(path: &Path) -> PathBuf {
+    PathBuf::from(display_path(path).replace('/', "\\"))
+}
+
+// Windows paths: the same file whatever the case or the form.
+fn same_file(a: &Path, b: &Path) -> bool {
+    plain(a)
+        .as_os_str()
+        .eq_ignore_ascii_case(plain(b).as_os_str())
+}
+
+// A list, oldest first: [{"path": "C:\\scripts\\hello", "language": "Python"}].
+fn parse_chosen(text: &str) -> Vec<(PathBuf, RunLanguage)> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str(text) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let path = item.get("path")?.as_str()?;
+            let language = RunLanguage::from_label(item.get("language")?.as_str()?)?;
+            Some((PathBuf::from(path), language))
+        })
+        .collect()
+}
+
+fn serialize_chosen(chosen: &[(PathBuf, RunLanguage)]) -> String {
+    let items: Vec<serde_json::Value> = chosen
+        .iter()
+        .map(|(path, language)| {
+            serde_json::json!({"path": path.to_string_lossy(), "language": language.label()})
+        })
+        .collect();
+    serde_json::to_string_pretty(&items).unwrap_or_default()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RunLanguage {
@@ -27,6 +124,12 @@ impl RunLanguage {
         Self::Go,
         Self::Rust,
     ];
+
+    fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|language| language.label() == label)
+    }
 
     pub(super) fn label(self) -> &'static str {
         match self {
@@ -96,19 +199,38 @@ pub(super) enum LanguagePick {
 }
 
 impl App {
+    /// The language chosen for the active file, if any: kept with the tab,
+    /// and for a saved file, in run-languages.json too.
+    fn chosen_language(&self) -> Option<RunLanguage> {
+        self.tab().run_language.or_else(|| {
+            let path = self.doc().path.as_deref()?;
+            self.chosen_languages.borrow_mut().get(path)
+        })
+    }
+
     /// The language Run treats the active file as.
     pub(super) fn run_language(&self) -> Option<RunLanguage> {
-        self.tab()
-            .run_language
+        self.chosen_language()
             .or_else(|| self.doc().path.as_deref().and_then(RunLanguage::for_path))
     }
 
     /// The status bar's language name: the chosen language, else what the
     /// file's name says.
     pub(super) fn language_name(&self) -> String {
-        match self.tab().run_language {
+        match self.chosen_language() {
             Some(language) => language.label().into(),
             None => super::render::language_label(self.doc().path.as_deref()),
+        }
+    }
+
+    // Keeps `language` (None: what the name says) for the active file.
+    fn choose_language(&mut self, language: Option<RunLanguage>) {
+        self.tab_mut().run_language = language;
+        let Some(path) = self.doc().path.clone() else {
+            return;
+        };
+        if let Err(error) = self.chosen_languages.borrow_mut().set(&path, language) {
+            self.status = format!("{} (not remembered: {error})", self.status);
         }
     }
 
@@ -178,18 +300,61 @@ impl App {
                 self.quick_query = format!(">{}", language.commands().unwrap_or_default());
             }
             LanguagePick::Detect => {
-                self.tab_mut().run_language = None;
                 self.status = match detected {
                     Some(language) => format!("Run treats this file as {}", language.label()),
                     None => "Run can't run this file: pick its language to run it".into(),
                 };
+                self.choose_language(None);
             }
             LanguagePick::Language(language) => {
-                // The file's own language needs no choice remembered.
-                self.tab_mut().run_language = (Some(language) != detected).then_some(language);
                 self.status = format!("Run treats this file as {}", language.label());
+                // The file's own language needs no choice remembered.
+                self.choose_language((Some(language) != detected).then_some(language));
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choices_round_trip_and_unknown_entries_are_dropped() {
+        // Oldest first, which isn't alphabetical.
+        let chosen = vec![
+            (PathBuf::from(r"C:\src\main.h"), RunLanguage::Cpp),
+            (PathBuf::from(r"C:\scripts\hello"), RunLanguage::Python),
+        ];
+        let text = serialize_chosen(&chosen);
+        assert_eq!(parse_chosen(&text), chosen);
+        let mixed = r#"[
+            {"path": "C:\\a", "language": "Cobol"},
+            {"path": "C:\\b", "language": "Go"},
+            {"path": "C:\\c"},
+            "C:\\d"
+        ]"#;
+        assert_eq!(
+            parse_chosen(mixed),
+            [(PathBuf::from(r"C:\b"), RunLanguage::Go)]
+        );
+        assert!(parse_chosen("not json").is_empty());
+    }
+
+    #[test]
+    fn a_file_is_the_same_whatever_its_case_or_form() {
+        assert!(same_file(
+            Path::new(r"C:\Src\Hello"),
+            Path::new(r"c:\src\hello")
+        ));
+        assert!(same_file(
+            Path::new(r"\\?\C:\src\hello"),
+            Path::new("C:/src/hello")
+        ));
+        assert!(!same_file(
+            Path::new(r"C:\src\hello"),
+            Path::new(r"C:\src\hello2")
+        ));
     }
 }

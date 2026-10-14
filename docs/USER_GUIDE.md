@@ -35,6 +35,8 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `Ctrl+Shift+W` | Close the workspace and return to the Welcome screen (also `>Close Workspace`) |
 | `F2` / `Delete` | In the Explorer: rename / delete the selected file or folder |
 
+Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patterns in each folder's `.gitignore`, the repository's `.git/info/exclude` and your own excludes file (`~/.config/git/ignore`, or `core.excludesFile`), as well as `.git`, `target`, `node_modules`, `.venv` and `__pycache__`. Build output, logs and downloaded packages don't crowd the results. The Explorer still shows every file.
+
 ### Editing and navigation
 
 | Shortcut | Action |
@@ -109,6 +111,8 @@ No runner extension is required. Install the language's runtime or compiler:
 | Rust | `cargo run` for Cargo source files, including named binaries/examples; loose files compile with `rustc` and then run | Rust/Cargo |
 
 For JavaScript/TypeScript projects, a `start` script in the nearest `package.json` takes precedence; otherwise a `dev` script is used when present. These run from the package directory with `npm run`. Without a script, files run directly. Runtime configuration and project dependencies still apply; `tsx` runs TypeScript without type-checking it.
+
+**A file Run doesn't recognize**, such as a script without an extension: click the language name in the status bar (or use **Run: Choose the File's Language** in the Command Palette) and pick Python, C, C++, JavaScript, TypeScript, Go or Rust. Run then treats the file as that language, and the choice is remembered for that file, also after you close it or restart LightLine (in `%APPDATA%\LightLine\run-languages.json`). **Auto Detect** goes back to what the file's name says.
 
 Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are built into a `lightline-run` folder in your temp directory, not beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
 

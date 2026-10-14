@@ -157,13 +157,14 @@ impl App {
         }
     }
 
-    // When everything to redraw lies inside the focused pane's code (a caret
-    // blink, or the rows a keystroke changed) and the status bar, draws only
-    // those: the code pane and whatever floats over it, and the status bar.
-    // A full frame took 3–5 ms per blink, and about as long per keystroke,
-    // nearly all of it on panels outside the redrawn area, which the
-    // backbuffer still holds unchanged. `update` is the region to redraw, if
-    // known. False when the full frame is needed.
+    // When everything to redraw lies inside the focused pane (a caret blink,
+    // the rows a keystroke changed, the rows a wheel scroll revealed and its
+    // scrollbar) and the status bar, draws only those: the code pane and
+    // whatever floats over it, and the status bar. A full frame took 3–5 ms
+    // per blink, and about as long per keystroke, nearly all of it on panels
+    // outside the redrawn area, which the backbuffer still holds unchanged.
+    // `update` is the region to redraw, if known. False when the full frame
+    // is needed.
     fn paint_code_area_only(
         &self,
         hwnd: HWND,
@@ -186,9 +187,8 @@ impl App {
             right: self.pane_right(hwnd, pane),
             bottom: code_bottom,
         };
-        // The card's border and rounded corners are drawn only in the full
-        // frame: its left edge, the scrollbar strip along its right edge and
-        // its bottom corners are left out.
+        // Inside the card's border and rounded corners, the scrollbar strip
+        // and the split divider: what the code pane alone draws.
         let code = RECT {
             left: bounds.left + self.scale(1).max(1),
             top: bounds.top,
@@ -205,8 +205,16 @@ impl App {
                 && dirty.right <= code.right
                 && dirty.bottom <= bounds.bottom
         } else {
-            region_within(update, &[code, status])
+            // Not the gap below the card, which the code pane leaves alone.
+            let pane = RECT {
+                bottom: bounds.bottom - self.chrome_gap(),
+                ..bounds
+            };
+            region_within(update, &[pane, status])
         };
+        // Past the code's own area, the card's body, border and the divider
+        // are drawn too, in the full frame's order.
+        let edges = !update.is_null() && !region_within(update, &[code, status]);
         // A crossfade or a diff view draws over this area differently.
         if !inside
             || self.run_choice.is_some()
@@ -216,11 +224,23 @@ impl App {
         {
             return false;
         }
+        let card = self.editor_card(hwnd, editor_bottom);
         unsafe {
-            Self::fill(hdc, dirty, self.theme.editor_bg);
+            if edges {
+                Self::fill(hdc, dirty, self.theme.shell_bg);
+                self.paint_editor_card_body(hdc, card);
+            } else {
+                Self::fill(hdc, dirty, self.theme.editor_bg);
+            }
             let selection_bg = CreateSolidBrush(self.theme.select_bg);
             self.paint_code_pane(hdc, hwnd, pane, bounds, selection_bg);
             DeleteObject(selection_bg);
+            if edges {
+                if self.split_visible {
+                    self.paint_pane_divider(hdc, hwnd, code_bottom);
+                }
+                self.card_outline(hdc, card, self.scale(CARD_RADIUS), self.theme.card_edge);
+            }
             SelectObject(hdc, self.ui_font);
             if RectVisible(hdc, &status) != 0 {
                 self.paint_status_bar(hdc, window, editor_bottom);
@@ -238,6 +258,71 @@ impl App {
         self.paint_more_menu(hdc, hwnd);
         self.paint_hot_tip(hdc, hwnd);
         true
+    }
+
+    // The editor card: tab strip, code panes and terminal.
+    fn editor_card(&self, hwnd: HWND, editor_bottom: i32) -> RECT {
+        RECT {
+            left: self.editor_left(),
+            top: self.chrome_top(),
+            right: self.editor_right(hwnd),
+            bottom: editor_bottom - self.chrome_gap(),
+        }
+    }
+
+    // The editor card before anything goes in it: the rounded body first,
+    // then square fills for the code and gutter below the tab strip, which
+    // stay clear of the rounded corners.
+    fn paint_editor_card_body(&self, hdc: HDC, card: RECT) {
+        let radius = self.scale(CARD_RADIUS);
+        let edge = self.scale(1).max(1);
+        let tab_strip_bottom = self.tab_strip_bottom();
+        self.panel_card(
+            hdc,
+            card,
+            radius,
+            self.theme.card_edge,
+            self.theme.editor_bg,
+        );
+        Self::fill(
+            hdc,
+            RECT {
+                left: card.left + radius,
+                top: tab_strip_bottom,
+                right: card.right - radius,
+                bottom: card.bottom - edge,
+            },
+            self.theme.editor_bg,
+        );
+        Self::fill(
+            hdc,
+            RECT {
+                left: card.left + edge,
+                top: tab_strip_bottom,
+                right: card.left + self.scale(GUTTER),
+                bottom: card.bottom - edge,
+            },
+            self.theme.editor_bg,
+        );
+    }
+
+    // The line between split panes, lit while it's dragged.
+    fn paint_pane_divider(&self, hdc: HDC, hwnd: HWND, code_bottom: i32) {
+        let divider = self.pane_divider(hwnd);
+        Self::fill(
+            hdc,
+            RECT {
+                left: divider - self.scale(1),
+                top: self.tab_strip_bottom(),
+                right: divider + self.scale(1),
+                bottom: code_bottom,
+            },
+            if self.divider_dragging {
+                self.theme.blue
+            } else {
+                self.theme.edge
+            },
+        );
     }
 
     // The status bar along the bottom of the window, from `editor_bottom`
@@ -544,8 +629,6 @@ impl App {
             let tab_strip_bottom = self.tab_strip_bottom();
             let card_bottom = editor_bottom - gap;
             let card_radius = self.scale(CARD_RADIUS);
-            let bg = CreateSolidBrush(self.theme.editor_bg);
-            let gutter_bg = CreateSolidBrush(self.theme.editor_bg);
             let selection_bg = CreateSolidBrush(self.theme.select_bg);
             // The backdrop the cards float on. The rail stays flush to the
             // window edge; only the side panel and editor become cards.
@@ -684,42 +767,8 @@ impl App {
                     self.theme.sidebar_bg,
                 );
             }
-            // Editor card: the rounded body first, then square-filled regions
-            // inside it for the gutter and tab strip, which stay clear of the
-            // rounded corners.
-            let editor_card = RECT {
-                left: editor_left,
-                top: chrome_top,
-                right: self.editor_right(hwnd),
-                bottom: card_bottom,
-            };
-            self.panel_card(
-                hdc,
-                editor_card,
-                card_radius,
-                self.theme.card_edge,
-                self.theme.editor_bg,
-            );
-            FillRect(
-                hdc,
-                &RECT {
-                    left: editor_left + card_radius,
-                    top: tab_strip_bottom,
-                    right: editor_card.right - card_radius,
-                    bottom: card_bottom - self.scale(1).max(1),
-                },
-                bg,
-            );
-            FillRect(
-                hdc,
-                &RECT {
-                    left: editor_left + self.scale(1).max(1),
-                    top: tab_strip_bottom,
-                    right: editor_left + self.scale(GUTTER),
-                    bottom: card_bottom - self.scale(1).max(1),
-                },
-                gutter_bg,
-            );
+            let editor_card = self.editor_card(hwnd, editor_bottom);
+            self.paint_editor_card_body(hdc, editor_card);
             let tab_bg = CreateSolidBrush(self.theme.tab_bg);
             let active_bg = CreateSolidBrush(self.theme.active_bg);
             // Tab strip rides the card's rounded top, so it is drawn as a
@@ -1498,20 +1547,7 @@ impl App {
                         },
                         selection_bg,
                     );
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: divider - self.scale(1),
-                            top: self.tab_strip_bottom(),
-                            right: divider + self.scale(1),
-                            bottom: code_bottom,
-                        },
-                        if self.divider_dragging {
-                            self.theme.blue
-                        } else {
-                            self.theme.edge
-                        },
-                    );
+                    self.paint_pane_divider(hdc, hwnd, code_bottom);
                 }
             }
             self.paint_search_preview(
@@ -1560,8 +1596,6 @@ impl App {
                 }
             }
             self.paint_status_bar(hdc, rect, editor_bottom);
-            DeleteObject(bg);
-            DeleteObject(gutter_bg);
             DeleteObject(selection_bg);
             DeleteObject(tab_bg);
             DeleteObject(active_bg);

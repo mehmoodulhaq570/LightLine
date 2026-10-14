@@ -47,7 +47,10 @@ impl App {
         bounds: RECT,
         selection_bg: HBRUSH,
     ) {
-        let (left, right, bottom) = (bounds.left, bounds.right, bounds.bottom);
+        // The card ends a gap above the status bar (or the terminal's top
+        // edge): nothing is drawn in that gap.
+        let (left, right) = (bounds.left, bounds.right);
+        let bottom = bounds.bottom - self.chrome_gap();
         if right <= left {
             return;
         }

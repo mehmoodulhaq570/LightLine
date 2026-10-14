@@ -462,10 +462,17 @@ pub fn workspace_files(root: &Path) -> Vec<PathBuf> {
     workspace_files_inner(root, None)
 }
 
+/// The files under `root` for Quick Open and search: not in `.git`, build
+/// and dependency folders, or anything the `.gitignore` files leave out.
 fn workspace_files_inner(root: &Path, cancel: Option<&AtomicBool>) -> Vec<PathBuf> {
-    let mut pending = vec![(root.to_path_buf(), 0)];
+    let mut pending = vec![(
+        root.to_path_buf(),
+        0,
+        String::new(),
+        crate::gitignore::Rules::for_root(root),
+    )];
     let mut files = Vec::new();
-    while let Some((directory, depth)) = pending.pop() {
+    while let Some((directory, depth, relative, rules)) = pending.pop() {
         if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             break;
         }
@@ -493,9 +500,15 @@ fn workspace_files_inner(root: &Path, cancel: Option<&AtomicBool>) -> Vec<PathBu
             if kind.is_symlink() {
                 continue;
             }
+            let path = format!("{relative}{name}");
+            if rules.ignores(&path, kind.is_dir()) {
+                continue;
+            }
             if kind.is_dir() {
                 if depth < MAX_DEPTH {
-                    pending.push((entry.path(), depth + 1));
+                    let path = format!("{path}/");
+                    let inner = rules.within(&entry.path(), &path);
+                    pending.push((entry.path(), depth + 1, path, inner));
                 }
             } else if kind.is_file() {
                 files.push(entry.path());
@@ -2107,6 +2120,57 @@ mod tests {
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].byte, 0);
         assert!(search_workspace_with_cancel(&root, "find", &AtomicBool::new(true)).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn quick_open_and_search_leave_out_what_gitignore_ignores() {
+        let root = std::env::temp_dir().join(format!(
+            "lightline-gitignore-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for dir in ["src", "dist", "web/build", "web/src", ".git/info"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(root.join(".gitignore"), "dist/\n*.log\n").unwrap();
+        fs::write(root.join("web/.gitignore"), "build/\n!keep.log\n").unwrap();
+        fs::write(root.join(".git/info/exclude"), "secret.txt\n").unwrap();
+        for file in [
+            "src/main.rs",
+            "dist/bundle.js",
+            "debug.log",
+            "web/keep.log",
+            "web/other.log",
+            "web/build/out.js",
+            "web/src/app.js",
+            "secret.txt",
+        ] {
+            fs::write(root.join(file), "find this\n").unwrap();
+        }
+        let listed: Vec<String> = workspace_files(&root)
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ".gitignore",
+                "src/main.rs",
+                "web/.gitignore",
+                "web/keep.log",
+                "web/src/app.js"
+            ]
+        );
+        assert_eq!(search_workspace(&root, "find this").len(), 3);
         fs::remove_dir_all(root).unwrap();
     }
 

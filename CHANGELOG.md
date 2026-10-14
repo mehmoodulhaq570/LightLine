@@ -15,7 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 
-- **Even Faster Scrolling**: A turn of the mouse wheel no longer redraws the whole editor. The lines still on screen are moved up or down as they are, and only the newly revealed lines, the sticky lines and the scrollbar are drawn: about 35–40% less work per notch in a 3,000-line Rust file (release build, rust-analyzer running). When a popup, the find box or a tooltip is open over the editor, scrolling redraws the editor in full as before.
+- **Quick Open and Search Skip What Git Ignores**: Files matched by `.gitignore` (in any folder), `.git/info/exclude` or your global Git excludes file no longer show up in Quick Open (`Ctrl+P`) or Search, so build output, logs, virtual environments and the like stay out of the results, as in VS Code. On a folder of 18 projects, Quick Open now lists 2,333 files instead of 36,322, and listing them takes 0.1–0.25 s. The Explorer still shows everything.
+- **The Run Language Is Remembered**: The language chosen for a file in the language picker (click the language name in the status bar) is now kept for that file after its tab closes and after a restart.
+- **Even Faster Scrolling**: A turn of the mouse wheel no longer redraws the whole editor. The lines still on screen are moved up or down as they are, and only the newly revealed lines, the sticky lines and the scrollbar are drawn: about 35–40% less work per notch in a 3,000-line Rust file (release build, rust-analyzer running). When a popup, the find box or a tooltip is open over the editor, scrolling redraws the editor in full as before. Typing on the editor's last visible line also takes the quicker redraw now.
+
+#### Fixed
+
+- **Stale Text After Typing in Split View or on a Sticky Line**: With the same file open in both halves of a split editor, typing in one didn't redraw the other until something else did, and editing a line pinned by sticky scroll left its old text at the top of the editor.
+- **A Stray Pixel Row Below the Editor**: The code drew one row of pixels past the editor card, into the gap above the status bar (or over the terminal's top edge), which partial redraws could leave out of date.
 
 ## [v0.5.0] - 2026-10-13
 
