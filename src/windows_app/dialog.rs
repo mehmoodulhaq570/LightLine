@@ -213,6 +213,25 @@ pub(super) fn show_dialog(
         .or(buttons.first())
         .map(|button| button.id)
         .unwrap_or(DLG_CANCEL);
+    // Debug builds under a live test: the dialog would take the foreground
+    // from whoever is using the PC, so it's written to the file named by
+    // LIGHTLINE_TEST_DIALOG and answered with its default button instead.
+    #[cfg(debug_assertions)]
+    if let Some(log) = std::env::var_os("LIGHTLINE_TEST_DIALOG") {
+        use std::io::Write;
+        let answer = buttons
+            .iter()
+            .find(|button| button.is_default)
+            .map_or(fallback, |button| button.id);
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+        {
+            let _ = writeln!(file, "{title}\n{message}\n-> {answer}\n");
+        }
+        return answer;
+    }
 
     unsafe {
         let instance = GetModuleHandleW(null());

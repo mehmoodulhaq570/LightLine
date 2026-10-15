@@ -48,6 +48,11 @@ pub(super) enum WorkerMessage {
     // Workspace root, then each file with its lowercase relative path.
     Files(PathBuf, Vec<(PathBuf, String)>),
     Search(PathBuf, String, Arc<AtomicBool>, Vec<SearchHit>),
+    // Replace All's files: its request's cancel flag, each file with how
+    // many matches it has on disk.
+    ReplaceTargets(Arc<AtomicBool>, Vec<(PathBuf, usize)>),
+    // A file's blame (blame.rs), for the blame generation it was asked in.
+    Blame(u64, PathBuf, Arc<workflow::Blame>),
     // Generation guards the status request: only the newest answer may paint,
     // because refreshes fire on activation, save and every completed action.
     Repo(u64, u64, Result<RepoState, String>),
@@ -338,6 +343,8 @@ pub(super) struct Tab {
     // never be edited or saved over the real file; `views` holds the saved
     // cursor and scroll positions.
     pub(super) unloaded: bool,
+    // Bracket depth at each line's start (bracket_colors.rs).
+    pub(super) bracket_depths: RefCell<super::bracket_colors::BracketDepths>,
     // The last session snapshot of `document`'s text, by (id, change_serial).
     pub(super) recovery_cache: RefCell<Option<RecoveryText>>,
 }
@@ -439,6 +446,7 @@ impl Tab {
             word_wrap: None,
             run_language: None,
             unloaded: false,
+            bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
         }
     }
@@ -532,6 +540,7 @@ impl Tab {
             word_wrap: None,
             run_language: None,
             unloaded: false,
+            bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
         }
     }
@@ -810,6 +819,11 @@ pub(super) struct App {
     pub(super) project_query: String,
     pub(super) search_results: Vec<SearchHit>,
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
+    // The Search panel's replacement; typing goes there while
+    // `search_input && replace_focus`.
+    pub(super) search_replacement: String,
+    pub(super) replace_focus: bool,
+    pub(super) replace_request: Option<super::replace_in_files::ReplaceRequest>,
     pub(super) terminal: TerminalService,
     pub(super) terminal_tab: TerminalTab,
     // Interactive shell sessions shown as tabs in the Terminal area; the
@@ -908,6 +922,22 @@ pub(super) struct App {
     pub(super) snippet: Option<SnippetSession>,
     // Each pane's lines pinned by sticky scroll when last drawn (sticky.rs).
     pub(super) sticky_shown: RefCell<[Vec<usize>; 2]>,
+    // The minimap (minimap.rs): what each pane's strip last showed, its
+    // pixels, the pane whose strip the mouse holds (and how far below the
+    // shading's top it took hold), and a count bumped when
+    // syntax colors change (or the theme does), which its pixels depend on.
+    pub(super) minimap_shown: RefCell<[Option<super::minimap::MinimapShown>; 2]>,
+    pub(super) minimap_pixels: RefCell<[Option<super::minimap::MinimapPixels>; 2]>,
+    pub(super) minimap_grab: Option<(usize, i32)>,
+    // The edit whose minimap redraw MINIMAP_TIMER is waiting for.
+    pub(super) minimap_waiting: std::cell::Cell<Option<u64>>,
+    pub(super) syntax_epoch: u64,
+    // What check_brackets last saw in each pane.
+    pub(super) brackets_shown: RefCell<[super::bracket_colors::BracketsShown; 2]>,
+    // Run/Debug links (codelens.rs): where paint put them, and which lines
+    // of each pane had one when check_lenses last looked.
+    pub(super) lens_hits: RefCell<super::codelens::LensHits>,
+    pub(super) lenses_shown: RefCell<[(u64, usize, Vec<usize>); 2]>,
     // Run languages chosen for files (run_language.rs).
     pub(super) chosen_languages: RefCell<super::run_language::ChosenLanguages>,
     // Backbuffer rows a wheel scroll moved that the screen doesn't show yet
@@ -940,6 +970,11 @@ pub(super) struct App {
     pub(super) hwnd: HWND,
     // Files that are new relative to HEAD, whose every line is marked added.
     pub(super) git_untracked: HashSet<PathBuf>,
+    // Git blame per file as of HEAD (blame.rs), the files being blamed, and
+    // a count bumped when HEAD moves, which drops answers asked before.
+    pub(super) blame_cache: HashMap<PathBuf, Arc<workflow::Blame>>,
+    pub(super) blame_requests: HashSet<PathBuf>,
+    pub(super) blame_generation: u64,
     // The repository's .git/index and .git/HEAD, watched so a commit, stage
     // or checkout run in a terminal refreshes the Git panel and gutter.
     pub(super) git_watch_files: Vec<PathBuf>,
@@ -1374,6 +1409,9 @@ impl App {
             project_query: String::new(),
             search_results: Vec::new(),
             search_cancel: None,
+            search_replacement: String::new(),
+            replace_focus: false,
+            replace_request: None,
             terminal: TerminalService::new({
                 let hwnd_value = hwnd as isize;
                 move || unsafe {
@@ -1458,6 +1496,14 @@ impl App {
             debug_console: DebugConsole::default(),
             snippet: None,
             sticky_shown: RefCell::new([Vec::new(), Vec::new()]),
+            minimap_shown: RefCell::new([None, None]),
+            minimap_pixels: RefCell::new([None, None]),
+            minimap_grab: None,
+            minimap_waiting: std::cell::Cell::new(None),
+            syntax_epoch: 0,
+            brackets_shown: RefCell::default(),
+            lens_hits: RefCell::default(),
+            lenses_shown: RefCell::default(),
             chosen_languages: RefCell::default(),
             blitted: None,
             signature: None,
@@ -1478,6 +1524,9 @@ impl App {
             status_seen: RefCell::new((String::new(), Instant::now())),
             hwnd,
             git_untracked: HashSet::new(),
+            blame_cache: HashMap::new(),
+            blame_requests: HashSet::new(),
+            blame_generation: 0,
             git_watch_files: Vec::new(),
             extensions: vec![
                 Extension {
@@ -2192,8 +2241,24 @@ impl App {
         }
         // Only lines whose colors changed are redrawn: while a parse was
         // pending, every 16 ms poll redrew the whole editor.
+        if recolored != lightline::syntax::Recolored::Nothing {
+            self.syntax_epoch += 1;
+        }
+        // Brackets may have moved into or out of a string.
+        let mut depths = self.tab().bracket_depths.borrow_mut();
+        match recolored {
+            lightline::syntax::Recolored::Nothing => {}
+            lightline::syntax::Recolored::Lines(first, _) => depths.invalidate_from(first),
+            lightline::syntax::Recolored::Unknown => depths.invalidate_from(0),
+        }
+        drop(depths);
         let panes = if self.split_visible { 0..2 } else { 0..1 };
         for pane in panes.filter(|&pane| self.tab_for_pane(pane) == self.active) {
+            if recolored != lightline::syntax::Recolored::Nothing
+                && let Some(strip) = self.minimap_rect(hwnd, pane)
+            {
+                unsafe { InvalidateRect(hwnd, &strip, 0) };
+            }
             let areas = match recolored {
                 lightline::syntax::Recolored::Nothing => Vec::new(),
                 lightline::syntax::Recolored::Lines(first, last) => {
@@ -2622,7 +2687,7 @@ impl App {
 
     /// Scrolls the focused pane so the `index`th visible line is at the top,
     /// redrawing only that pane: the caret, and so the status bar, stay put.
-    fn scroll_to_index(&mut self, hwnd: HWND, index: usize) {
+    pub(super) fn scroll_to_index(&mut self, hwnd: HWND, index: usize) {
         let pane = self.focused_pane;
         let top = (self.doc().line_at_visual_index(index), 0);
         if top == self.view_top(hwnd, pane) {

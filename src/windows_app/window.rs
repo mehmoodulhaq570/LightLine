@@ -93,6 +93,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
     match msg {
         WM_ERASEBKGND => 1,
         #[cfg(debug_assertions)]
+        minimap::GEOMETRY_TEST_MESSAGE => app.geometry_for_test(hwnd, wparam),
+        #[cfg(debug_assertions)]
         hot::HOVER_TEST_MESSAGE => {
             app.hover_for_test(
                 hwnd,
@@ -200,6 +202,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.advance_syntax(hwnd);
             0
         }
+        WM_TIMER if wparam == minimap::MINIMAP_TIMER => {
+            app.minimap_timer(hwnd);
+            0
+        }
         WM_TIMER if wparam == INLAY_TIMER => {
             unsafe { KillTimer(hwnd, INLAY_TIMER) };
             app.request_inlay_hints();
@@ -303,9 +309,20 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                             && point.y >= rect.top
                             && point.y < rect.bottom
                     });
+                let over_lens = !app.welcome
+                    && !app.quick_open
+                    && point.y >= app.editor_top()
+                    && point.y < app.editor_area(hwnd, false).bottom
+                    && point.x >= app.editor_left()
+                    && point.x < app.editor_right(hwnd)
+                    && app
+                        .lens_at(hwnd, app.pane_at_x(hwnd, point.x), point.x, point.y)
+                        .is_some();
                 let cursor = LoadCursorW(
                     null_mut(),
-                    if over_ai_input {
+                    if over_lens {
+                        IDC_HAND
+                    } else if over_ai_input {
                         IDC_IBEAM
                     } else if over_ai {
                         IDC_ARROW
@@ -326,6 +343,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                         || app.quick_open
                         || app.scrollbar_grab.is_some()
                         || app.scrollbar_at(hwnd, point.x, point.y).is_some()
+                        || app.minimap_grab.is_some()
+                        || app.minimap_at(hwnd, point.x, point.y).is_some()
                         || (app.side_view == SideView::Review && app.review_file.is_some())
                         || point.y < app.editor_top()
                         || point.x < app.editor_left()
@@ -431,6 +450,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         WM_MOUSEMOVE => {
             if (app.dragging
                 || app.scrollbar_grab.is_some()
+                || app.minimap_grab.is_some()
                 || app.problem_scrollbar_grab.is_some()
                 || app.divider_dragging
                 || app.sidebar_dragging
@@ -454,6 +474,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         }
         WM_LBUTTONUP => {
             app.run_config_end_drag();
+            app.minimap_grab = None;
             if app.problem_scrollbar_grab.take().is_some() {
                 // Released away from it, the scrollbar is no longer under the
                 // mouse.
@@ -501,6 +522,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.terminal_resizing = false;
             app.terminal_selecting = false;
             app.problem_scrollbar_grab = None;
+            app.minimap_grab = None;
             if app.scrollbar_grab.take().is_some() {
                 app.invalidate_scrollbar(hwnd, app.focused_pane);
             }
@@ -598,7 +620,9 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                     let (count, visible) = match app.side_view {
                         SideView::Search => (
                             app.search_results.len(),
-                            ((rect.bottom - app.scale(STATUS + WORKBENCH_HEADER + 113))
+                            ((rect.bottom
+                                - app.scale(STATUS + WORKBENCH_HEADER)
+                                - app.search_list_top())
                                 / app.scale(48).max(1))
                             .max(1) as usize,
                         ),
@@ -832,6 +856,18 @@ pub fn run() -> io::Result<()> {
             {
                 app.track_caret(hwnd);
                 app.check_sticky(hwnd);
+            }
+            // Whatever changed the text, its colors or the view (keys, a
+            // reload, a language server's edit, a timer's syntax pass), the
+            // minimap is redrawn if what it shows changed.
+            if !matches!(
+                msg.message,
+                WM_PAINT | WM_MOUSEMOVE | WM_NCMOUSEMOVE | WM_SETCURSOR
+            ) && let Ok(app) = app.try_borrow()
+            {
+                app.check_minimap(hwnd);
+                app.check_brackets(hwnd);
+                app.check_lenses(hwnd);
             }
         }
         DeleteObject(app.borrow().font);

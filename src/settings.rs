@@ -28,6 +28,12 @@ pub struct Settings {
     pub bracket_matching: bool,
     pub indent_guides: bool,
     pub minimap: bool,
+    /// Color brackets by how deeply they're nested.
+    pub bracket_pair_colors: bool,
+    /// Show who last changed the caret's line, and when, after its end.
+    pub git_blame: bool,
+    /// Show Run and Debug above `main` and tests.
+    pub code_lens: bool,
     pub smooth_scrolling: bool,
     pub parse_limit_kb: usize,
     pub default_terminal_profile: ShellKind,
@@ -64,6 +70,9 @@ impl Default for Settings {
             bracket_matching: true,
             indent_guides: true,
             minimap: true,
+            bracket_pair_colors: true,
+            git_blame: true,
+            code_lens: true,
             smooth_scrolling: false,
             parse_limit_kb: 4096,
             default_terminal_profile: ShellKind::PowerShell,
@@ -194,6 +203,18 @@ impl Settings {
         if let Some(b) = value.get("minimap").and_then(|v| v.as_bool()) {
             settings.minimap = b;
         }
+        if let Some(b) = value
+            .get("bracketPairColorization")
+            .and_then(|v| v.as_bool())
+        {
+            settings.bracket_pair_colors = b;
+        }
+        if let Some(b) = value.get("gitBlame").and_then(|v| v.as_bool()) {
+            settings.git_blame = b;
+        }
+        if let Some(b) = value.get("codeLens").and_then(|v| v.as_bool()) {
+            settings.code_lens = b;
+        }
         if let Some(b) = value.get("smoothScrolling").and_then(|v| v.as_bool()) {
             settings.smooth_scrolling = b;
         }
@@ -314,6 +335,12 @@ impl Settings {
         );
         obj.insert("minimap".into(), serde_json::Value::Bool(self.minimap));
         obj.insert(
+            "bracketPairColorization".into(),
+            serde_json::Value::Bool(self.bracket_pair_colors),
+        );
+        obj.insert("gitBlame".into(), serde_json::Value::Bool(self.git_blame));
+        obj.insert("codeLens".into(), serde_json::Value::Bool(self.code_lens));
+        obj.insert(
             "smoothScrolling".into(),
             serde_json::Value::Bool(self.smooth_scrolling),
         );
@@ -360,6 +387,9 @@ const OWN_KEYS: &[&str] = &[
     "bracketMatching",
     "indentGuides",
     "minimap",
+    "bracketPairColorization",
+    "gitBlame",
+    "codeLens",
     "smoothScrolling",
     "parseLimitKb",
     "colorTheme",
@@ -437,6 +467,23 @@ mod tests {
             ..Settings::default()
         };
         assert!(!Settings::parse(&s.to_json()).unwrap().occurrences_highlight);
+    }
+
+    #[test]
+    fn new_editor_features_are_on_until_turned_off() {
+        let defaults = Settings::default();
+        assert!(defaults.minimap && defaults.bracket_pair_colors);
+        assert!(defaults.git_blame && defaults.code_lens);
+        let s = Settings {
+            minimap: false,
+            bracket_pair_colors: false,
+            git_blame: false,
+            code_lens: false,
+            ..Settings::default()
+        };
+        let parsed = Settings::parse(&s.to_json()).unwrap();
+        assert!(!parsed.minimap && !parsed.bracket_pair_colors);
+        assert!(!parsed.git_blame && !parsed.code_lens);
     }
 
     #[test]

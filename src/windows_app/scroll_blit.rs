@@ -144,10 +144,12 @@ impl App {
         // From the card's left edge (or the split divider), which are the
         // same on every row, to the scrollbar, above the card's rounded
         // bottom corners.
+        // The minimap doesn't move with the rows: it's drawn again.
+        let minimap = self.minimap_rect(hwnd, pane);
         let area = RECT {
             left: self.pane_left(hwnd, pane),
             top: self.editor_top(),
-            right: track.left,
+            right: minimap.map_or(track.left, |strip| strip.left),
             bottom: bottom - self.scale(CARD_RADIUS),
         };
         let shift = -(moved as i32) * self.line_height;
@@ -212,6 +214,7 @@ impl App {
                 ..track
             },
         ];
+        redraw.extend(minimap);
         // The pinned lines, before and after: the old ones moved with the
         // rows.
         let sticky_after = self.sticky_lines(hwnd, pane).len();

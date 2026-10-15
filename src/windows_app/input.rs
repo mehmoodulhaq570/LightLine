@@ -274,17 +274,31 @@ impl App {
                     self.panel_focus = false;
                     self.set_sidebar_visible(hwnd, false);
                 }
+                x if x == VK_RETURN as u32 && self.replace_focus => {
+                    self.start_replace_all(hwnd);
+                }
                 x if x == VK_RETURN as u32 => {
                     self.search_project();
+                }
+                x if x == VK_BACK as u32 && self.replace_focus => {
+                    self.search_replacement.pop();
                 }
                 x if x == VK_BACK as u32 => {
                     self.project_query.pop();
                     self.search_results.clear();
                 }
+                // Tab and Shift+Tab move between the query and the replacement.
+                x if x == VK_TAB as u32 && !ctrl => {
+                    self.replace_focus = !self.replace_focus;
+                }
                 _ if !ctrl => return false,
                 _ => {}
             }
-            if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
+            if key == VK_ESCAPE as u32
+                || key == VK_RETURN as u32
+                || key == VK_BACK as u32
+                || key == VK_TAB as u32
+            {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return true;
             }
@@ -587,6 +601,10 @@ impl App {
                 }
                 0x54 if !shift => {
                     self.show_workspace_symbols(hwnd);
+                    return true;
+                }
+                0x47 if !shift && !alt => {
+                    self.show_goto_line(hwnd);
                     return true;
                 }
                 // Ctrl+Shift+M, as in VS Code.
@@ -1129,6 +1147,8 @@ impl App {
                     self.quick_first = 0;
                     self.ensure_symbols(hwnd);
                     self.ensure_workspace_symbols();
+                } else if self.search_input && self.replace_focus {
+                    self.search_replacement.push(ch);
                 } else if self.search_input {
                     self.project_query.push(ch);
                     self.search_results.clear();
@@ -1295,7 +1315,7 @@ impl App {
 
     // The document line and wrapped row at height `y` in `pane`; below the
     // end of the document, its last row.
-    fn row_at_y(&self, hwnd: HWND, pane: usize, y: i32) -> (usize, usize) {
+    pub(super) fn row_at_y(&self, hwnd: HWND, pane: usize, y: i32) -> (usize, usize) {
         let screen_row = ((y - self.editor_top()) / self.line_height.max(1)).max(0) as usize;
         self.at_screen_row(hwnd, pane, screen_row)
             .unwrap_or_else(|| {
@@ -1663,15 +1683,27 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Search {
-                if y >= self.scale(47) && y < self.scale(78) {
+                let contains = |rect: RECT| {
+                    x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+                };
+                let left = self.scale(RAIL);
+                if contains(self.replace_all_button(editor_left)) {
+                    self.start_replace_all(hwnd);
+                    return;
+                }
+                let query_box = self.search_query_box(left, editor_left);
+                let replace_box = self.replace_box(left, editor_left);
+                if contains(query_box) || contains(replace_box) {
                     self.search_input = true;
+                    self.replace_focus = contains(replace_box);
                     self.panel_focus = true;
                     self.refresh(hwnd);
                     return;
                 }
-                if y >= self.scale(113) {
+                let list_top = self.search_list_top();
+                if y >= list_top {
                     let index =
-                        self.panel_first + ((y - self.scale(113)) / self.scale(48).max(1)) as usize;
+                        self.panel_first + ((y - list_top) / self.scale(48).max(1)) as usize;
                     if let Some(hit) = self.search_results.get(index).cloned() {
                         self.search_input = false;
                         self.panel_focus = false;
@@ -2121,6 +2153,12 @@ impl App {
             self.scrollbar_press(hwnd, y);
             return;
         }
+        if self.minimap_at(hwnd, x, y) == Some(pane) && self.minimap_press(hwnd, pane, y) {
+            return;
+        }
+        if self.lens_click(hwnd, pane, x, y) {
+            return;
+        }
         if self.sticky_click(hwnd, pane, y) {
             return;
         }
@@ -2182,6 +2220,10 @@ impl App {
         }
         if self.scrollbar_grab.is_some() {
             self.scrollbar_drag(hwnd, y);
+            return;
+        }
+        if self.minimap_grab.is_some() {
+            self.minimap_drag(hwnd, y);
             return;
         }
         if self.divider_dragging {

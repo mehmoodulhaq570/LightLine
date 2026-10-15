@@ -173,23 +173,20 @@ impl App {
             return;
         }
         if self.side_view == SideView::Search {
+            let typing_query = self.search_input && !self.replace_focus;
+            let typing_replacement = self.search_input && self.replace_focus;
             Self::fill(
                 hdc,
-                RECT {
-                    left: left + self.scale(8),
-                    top: self.scale(47),
-                    right: editor_left - self.scale(8),
-                    bottom: self.scale(78),
-                },
+                self.search_query_box(left, editor_left),
                 self.theme.active_bg,
             );
-            let query_label = if self.project_query.is_empty() && !self.search_input {
+            let query_label = if self.project_query.is_empty() && !typing_query {
                 "Type query, press Enter".to_owned()
             } else {
                 format!(
                     "{}{}",
                     self.project_query,
-                    if self.search_input && self.focused && self.caret_on {
+                    if typing_query && self.focused && self.caret_on {
                         "|"
                     } else {
                         ""
@@ -208,6 +205,71 @@ impl App {
                 },
                 clip,
             );
+            let replace_box = self.replace_box(left, editor_left);
+            Self::fill(hdc, replace_box, self.theme.active_bg);
+            let replace_label = if self.search_replacement.is_empty() && !typing_replacement {
+                "Replace with (Tab)".to_owned()
+            } else {
+                format!(
+                    "{}{}",
+                    self.search_replacement,
+                    if typing_replacement && self.focused && self.caret_on {
+                        "|"
+                    } else {
+                        ""
+                    }
+                )
+            };
+            Self::label(
+                hdc,
+                &replace_label,
+                left + self.scale(16),
+                replace_box.top + self.scale(5),
+                if self.search_replacement.is_empty() {
+                    self.theme.muted
+                } else {
+                    self.theme.text
+                },
+                RECT {
+                    right: replace_box.right - self.scale(4),
+                    ..clip
+                },
+            );
+            let button = self.replace_all_button(editor_left);
+            let ready = !self.project_query.is_empty() && self.replace_request.is_none();
+            self.panel_card(
+                hdc,
+                button,
+                self.scale(5),
+                if ready {
+                    self.theme.violet
+                } else {
+                    self.theme.edge
+                },
+                self.theme.sidebar_bg,
+            );
+            let button_label = if self.replace_request.is_some() {
+                "Finding..."
+            } else {
+                "Replace all"
+            };
+            let width = self.text_width(hdc, button_label);
+            Self::label(
+                hdc,
+                button_label,
+                (button.left + button.right - width) / 2,
+                button.top + self.scale(5),
+                if ready {
+                    self.theme.text
+                } else {
+                    self.theme.muted
+                },
+                RECT {
+                    left: button.left,
+                    right: button.right,
+                    ..clip
+                },
+            );
             Self::label(
                 hdc,
                 &if self.search_cancel.is_some() {
@@ -216,17 +278,18 @@ impl App {
                     format!("{} RESULTS", self.search_results.len())
                 },
                 left + self.scale(16),
-                self.scale(87),
+                self.search_count_top(),
                 self.theme.muted,
                 clip,
             );
+            let list_top = self.search_list_top();
             for (index, hit) in self
                 .search_results
                 .iter()
                 .enumerate()
                 .skip(self.panel_first)
             {
-                let top = self.scale(113 + (index - self.panel_first) as i32 * 48);
+                let top = list_top + (index - self.panel_first) as i32 * self.scale(48);
                 if top >= editor_bottom {
                     break;
                 }
@@ -610,6 +673,8 @@ impl App {
                 .iter()
                 .map(|found| self.workspace_symbol_label(found))
                 .collect()
+        } else if self.quick_query.starts_with(':') {
+            self.goto_line_items()
         } else {
             self.quick_matches()
                 .iter()
@@ -666,6 +731,9 @@ impl App {
                 } else if self.quick_query.starts_with('#') {
                     symbols_message = self.workspace_symbols_message();
                     &symbols_message
+                } else if self.quick_query.starts_with(':') {
+                    symbols_message = self.goto_line_message();
+                    &symbols_message
                 } else if self.quick_query.starts_with('>') {
                     "No matching commands"
                 } else if self.quick_loading {
@@ -687,8 +755,10 @@ impl App {
             );
         }
         let mut hints = Vec::new();
-        if !self.language_pick && !self.quick_query.starts_with(['>', '@', '#']) {
-            hints.push("> commands  ·  @ symbols in this file  ·  # in the project".to_string());
+        if !self.language_pick && !self.quick_query.starts_with(['>', '@', '#', ':']) {
+            hints.push(
+                "> commands  ·  @ symbols in this file  ·  # in the project  ·  : line".to_string(),
+            );
         }
         if items.len() > QUICK_ROWS {
             let last = (self.quick_first + QUICK_ROWS).min(items.len());

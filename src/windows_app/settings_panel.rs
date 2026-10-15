@@ -25,6 +25,10 @@ enum Setting {
     AutoClosePairs,
     BracketMatching,
     IndentGuides,
+    BracketColors,
+    Minimap,
+    GitBlame,
+    CodeLens,
     FormatOnSave,
     ParseLimit,
     ColorTheme,
@@ -56,6 +60,10 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::AutoClosePairs),
     Row::Toggle(Setting::BracketMatching),
     Row::Toggle(Setting::IndentGuides),
+    Row::Toggle(Setting::BracketColors),
+    Row::Toggle(Setting::Minimap),
+    Row::Toggle(Setting::GitBlame),
+    Row::Toggle(Setting::CodeLens),
     Row::Toggle(Setting::FormatOnSave),
     Row::Choice(Setting::ParseLimit),
     Row::Heading("APPEARANCE"),
@@ -87,6 +95,10 @@ fn label(setting: Setting) -> &'static str {
         Setting::AutoClosePairs => "Close brackets and quotes",
         Setting::BracketMatching => "Highlight matching brackets",
         Setting::IndentGuides => "Indent guides",
+        Setting::BracketColors => "Color bracket pairs",
+        Setting::Minimap => "Minimap",
+        Setting::GitBlame => "Git blame on the current line",
+        Setting::CodeLens => "Run and Debug links on main and tests",
         Setting::FormatOnSave => "Format on save",
         Setting::ParseLimit => "Syntax parse limit",
         Setting::ColorTheme => "Color theme",
@@ -126,6 +138,10 @@ impl App {
             Setting::AutoClosePairs => settings.auto_close_pairs,
             Setting::BracketMatching => settings.bracket_matching,
             Setting::IndentGuides => settings.indent_guides,
+            Setting::BracketColors => settings.bracket_pair_colors,
+            Setting::Minimap => settings.minimap,
+            Setting::GitBlame => settings.git_blame,
+            Setting::CodeLens => settings.code_lens,
             Setting::FormatOnSave => settings.format_on_save,
             Setting::MarkdownImages => settings.markdown_load_remote_images,
             _ => false,
@@ -277,15 +293,25 @@ impl App {
             Setting::AutoClosePairs => &mut settings.auto_close_pairs,
             Setting::BracketMatching => &mut settings.bracket_matching,
             Setting::IndentGuides => &mut settings.indent_guides,
+            Setting::BracketColors => &mut settings.bracket_pair_colors,
+            Setting::Minimap => &mut settings.minimap,
+            Setting::GitBlame => &mut settings.git_blame,
+            Setting::CodeLens => &mut settings.code_lens,
             Setting::FormatOnSave => &mut settings.format_on_save,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
             _ => return,
         };
         *value = !*value;
-        if setting == Setting::WordWrap {
+        if setting == Setting::WordWrap || setting == Setting::Minimap {
             // Tabs that follow the setting (Alt+Z wasn't used on them)
-            // change how their rows are laid out, so they start at the top.
-            for tab in self.tabs.iter_mut().filter(|tab| tab.word_wrap.is_none()) {
+            // change how their rows are laid out, so they start at the top;
+            // the minimap changes how wide wrapped rows are.
+            let wrap_setting = setting == Setting::WordWrap;
+            for tab in self
+                .tabs
+                .iter_mut()
+                .filter(|tab| tab.word_wrap.is_none() || !wrap_setting)
+            {
                 for view in &mut tab.views {
                     view.first_row = 0;
                 }

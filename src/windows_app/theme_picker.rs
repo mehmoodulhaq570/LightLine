@@ -33,6 +33,7 @@ impl App {
     pub(super) fn apply_theme(&mut self, hwnd: HWND, theme: Theme, extension: Option<String>) {
         self.theme = theme;
         self.active_color_theme = extension;
+        self.syntax_epoch += 1;
         super::theme::activate(&self.theme);
         // Windows draws the frame's edges light or dark to match.
         let dark: i32 = (!self.theme.is_light()).into();

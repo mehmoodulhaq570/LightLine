@@ -161,6 +161,27 @@ impl App {
             // The other uses of the name at the caret (occurrences.rs).
             let occurrences = self.occurrences_in(self.tab_for_pane(pane));
             let occurrence_bg = blend(self.theme.editor_bg, self.theme.text, 0.15);
+            // Who last changed the caret's line (blame.rs), after its end.
+            let blame = if pane == self.focused_pane {
+                self.blame_label(self.tab_for_pane(pane), view.cursor.line)
+            } else {
+                None
+            };
+            let blame_color = blend(self.theme.editor_bg, self.theme.muted, 0.7);
+            let text_right = self
+                .minimap_rect(hwnd, pane)
+                .map_or(right, |strip| strip.left);
+            // The minimap and the scrollbar are opaque and drawn last over
+            // the rows' right ends: a row redraws only if the area being
+            // redrawn reaches left of them. Redrawing the minimap (after
+            // every keystroke) otherwise redrew every row under it.
+            let rows_right = self
+                .scrollbar(hwnd, pane)
+                .map_or(text_right, |(track, _)| track.left.min(text_right));
+            // The caret's block's guide is drawn brighter (bracket_colors.rs).
+            let active_guide = self.active_guide(pane);
+            let active_guide_brush =
+                CreateSolidBrush(blend(self.theme.editor_bg, self.theme.muted, 0.85));
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
@@ -174,7 +195,7 @@ impl App {
                     &RECT {
                         left,
                         top: line_top,
-                        right,
+                        right: rows_right,
                         bottom: line_top
                             + (rows.count() - first_row).max(1) as i32 * self.line_height,
                     },
@@ -184,6 +205,16 @@ impl App {
                         syntax.spans(doc, index)
                     }
                     _ => Vec::new(),
+                };
+                let lens = if line_shows {
+                    self.lens_on_line(self.tab_for_pane(pane), index)
+                } else {
+                    None
+                };
+                let bracket_colors = if line_shows {
+                    self.line_bracket_colors(self.tab_for_pane(pane), index, &spans)
+                } else {
+                    Vec::new()
                 };
                 // The selected byte ranges of this line, and whether each
                 // selection carries on past its end.
@@ -233,7 +264,7 @@ impl App {
                             &RECT {
                                 left,
                                 top: y,
-                                right,
+                                right: rows_right,
                                 bottom: y + self.line_height,
                             },
                         ) == 0
@@ -404,16 +435,17 @@ impl App {
                                 !is_folded,
                             );
                         }
-                        let indent_columns = source
-                            .chars()
-                            .take_while(|ch| *ch == ' ' || *ch == '\t')
-                            .take(64)
-                            .map(|ch| if ch == '\t' { 4 } else { 1 })
-                            .sum::<usize>();
-                        let guides = if self.settings.indent_guides { 8 } else { 0 };
-                        for level in 1..=(indent_columns / 4).min(guides) {
-                            let guide_x =
-                                code_left + level as i32 * 4 * space_width - self.scale(4);
+                        // Blank lines carry the guides of the lines around them.
+                        let levels = if self.settings.indent_guides {
+                            self.guide_levels(doc, index).min(16)
+                        } else {
+                            0
+                        };
+                        for level in 1..=levels {
+                            let guide_x = self.guide_x(hwnd, pane, level, space_width);
+                            let active = active_guide.is_some_and(|guide| {
+                                guide.level == level && (guide.start..=guide.end).contains(&index)
+                            });
                             if guide_x < right {
                                 FillRect(
                                     hdc,
@@ -423,7 +455,11 @@ impl App {
                                         right: guide_x + 1,
                                         bottom: row_bottom,
                                     },
-                                    guide_brush,
+                                    if active {
+                                        active_guide_brush
+                                    } else {
+                                        guide_brush
+                                    },
                                 );
                             }
                         }
@@ -538,7 +574,59 @@ impl App {
                         }
                         drawn_at = Some((hint.byte, x + width));
                     }
-                    if last_row && doc.is_folded_start(index).is_some() {
+                    let folded = last_row && doc.is_folded_start(index).is_some();
+                    // After the text, its hints and a fold's pill: the Run
+                    // links (codelens.rs), then the blame.
+                    let mut after = drawn_at
+                        .map_or(x_after(row_end), |(_, end)| end.max(x_after(row_end)))
+                        + if folded { self.scale(34) } else { 0 };
+                    if last_row {
+                        let mut hits = Vec::new();
+                        if let Some(lens) = &lens {
+                            let gap = self.text_width(hdc, "  ");
+                            let mut x = after + self.scale(24);
+                            for (label, action) in self.lens_links(self.tab_for_pane(pane), lens) {
+                                let width = self.text_width(hdc, label);
+                                if x < text_right {
+                                    Self::label(
+                                        hdc,
+                                        label,
+                                        x,
+                                        y,
+                                        self.theme.muted,
+                                        RECT {
+                                            right: text_right,
+                                            ..clip
+                                        },
+                                    );
+                                    hits.push((x, (x + width).min(text_right), action));
+                                }
+                                x += width + gap;
+                            }
+                            after = x - gap;
+                        }
+                        self.record_lens_hits(doc.id(), index, hits);
+                    }
+                    if last_row
+                        && index == view.cursor.line
+                        && let Some(label) = &blame
+                    {
+                        let x = after + self.scale(36);
+                        if x < text_right {
+                            Self::label(
+                                hdc,
+                                label,
+                                x,
+                                y,
+                                blame_color,
+                                RECT {
+                                    right: text_right,
+                                    ..clip
+                                },
+                            );
+                        }
+                    }
+                    if folded {
                         let pill_x = x_after(row_end) + self.scale(6);
                         let pill_w = self.scale(22);
                         let pill_h = self.scale(13);
@@ -580,6 +668,12 @@ impl App {
                         // instead of re-checking a HashMap on every span of
                         // every repaint.
                         draw_text(from, to, self.theme.syntax(span.color), &clip);
+                    }
+                    // Brackets in their pair's color, over the text color.
+                    for &(byte, color) in &bracket_colors {
+                        if byte >= row_start && byte < row_end {
+                            draw_text(byte, byte + 1, color, &clip);
+                        }
                     }
                     for diagnostic in tab
                         .diagnostics
@@ -649,6 +743,7 @@ impl App {
                 first_row = 0;
             }
             DeleteObject(guide_brush);
+            DeleteObject(active_guide_brush);
             DeleteObject(git_added_brush);
             DeleteObject(git_mod_brush);
             DeleteObject(git_del_brush);
@@ -704,7 +799,11 @@ impl App {
                         // that the earlier syntax-color pass already
                         // drew, leaving a blank highlighted box instead
                         // of a highlighted character; redraw it on top.
-                        SetTextColor(hdc, self.theme.text);
+                        SetTextColor(
+                            hdc,
+                            self.bracket_color_at(self.tab_for_pane(pane), at)
+                                .unwrap_or(self.theme.text),
+                        );
                         let chars: Vec<u16> = ch_text.encode_utf16().collect();
                         TextOutW(hdc, x, y, chars.as_ptr(), chars.len() as i32);
                     }
@@ -822,6 +921,8 @@ impl App {
             // Sticky scroll's pinned lines go over the top rows (and any
             // caret there).
             self.paint_sticky(hdc, hwnd, pane, left, right);
+            // The minimap goes over the text's right end, like the scrollbar.
+            self.paint_minimap(hdc, hwnd, pane);
             // The scrollbar goes over the text: a track with a thin edge, and
             // the slider, lighter under the mouse and lighter still held.
             if let Some((track, slider)) = self.scrollbar(hwnd, pane) {

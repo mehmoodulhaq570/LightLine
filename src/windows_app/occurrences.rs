@@ -60,6 +60,7 @@ impl App {
         if key == self.occurrences.caret {
             return;
         }
+        self.ensure_blame();
         self.occurrences.caret = key;
         let inside = |ranges: &[(Pos, Pos)]| {
             ranges

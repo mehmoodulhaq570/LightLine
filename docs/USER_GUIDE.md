@@ -43,7 +43,8 @@ Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patte
 | --- | --- |
 | `Ctrl+F` | Find in the current file. `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) go to the next / previous match; `Esc` closes |
 | `Ctrl+H` | Find and replace. `Tab` switches fields, `Enter` replaces the current match, `Alt+Enter` replaces all (one `Ctrl+Z` undoes it) |
-| `Ctrl+Shift+F` | Search all files in the workspace; `Enter` moves to the results |
+| `Ctrl+Shift+F` | Search all files in the workspace; `Enter` moves to the results. `Tab` goes to **Replace with**; `Enter` there (or **Replace all**) replaces every occurrence in the workspace after asking. Open files undo with `Ctrl+Z`; files that aren't open are saved |
+| `Ctrl+G` (or `Ctrl+P`, then `:`) | Go to a line: `42`, or `42:7` for its 7th character |
 | `Ctrl+Space` | Show completions. A function goes in with its arguments as places to fill: type over the selected one, `Tab` / `Shift+Tab` move between them |
 | `Tab` / `Shift+Tab` | Indent (spaces to the next tab stop) / outdent; with several lines selected, indent or outdent them all |
 | `F1` | Show documentation for the symbol at the cursor |
@@ -62,6 +63,8 @@ Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patte
 | `Alt+Z` | Toggle word wrap for this file (on by default for Markdown) |
 | `Ctrl+Shift+V` | Preview a Markdown file (`>Markdown: Open Preview to the Side` shows it beside the file) |
 | Gutter chevron | Fold or unfold a block (`⌄` / `›`) |
+| Minimap | Click to jump there; drag the shaded part (the lines on screen) to scroll |
+| **▶ Run** / **Debug** / **▶ Run test** | Links after `main` and test functions: run the file, debug it (Rust, Python), or run just that test in the Output panel |
 
 #### Multiple cursors
 
@@ -159,6 +162,10 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "stickyScroll": true,
   "bracketMatching": true,
   "indentGuides": true,
+  "bracketPairColorization": true,
+  "minimap": true,
+  "gitBlame": true,
+  "codeLens": true,
   "markdownLoadRemoteImages": false,
   "colorTheme": "Dracula",
   "aiEndpoint": "http://localhost:11434",
@@ -180,7 +187,11 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `tabSize`, `insertSpaces`, `autoIndent` | Indentation: tab width, spaces or tabs, and indenting new lines |
 | `wordWrap` | Wrap long lines in every file (Markdown wraps by default) |
 | `autoClosePairs` | Type closing brackets and quotes for you |
-| `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides |
+| `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides (the current block's is brighter) |
+| `bracketPairColorization` | Color nested brackets in turn with three colors (not those in strings or comments) |
+| `minimap` | Show the file in miniature at the right of the editor |
+| `gitBlame` | After the caret's line, show who last changed it, when, and the commit message |
+| `codeLens` | Show **▶ Run** / **Debug** after `main` and **▶ Run test** after test functions (Rust, Python, Go, C/C++) |
 | `formatOnSave` | Format the file before each save |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `occurrencesHighlight` | Highlight the other uses of the name at the caret |
@@ -190,7 +201,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |
 | `colors` | Override individual theme colors, on top of the color theme |
 
-`minimap`, `smoothScrolling` and `parseLimitKb` are accepted but don't do anything yet.
+`smoothScrolling` is accepted but doesn't do anything yet.
 
 ---
 

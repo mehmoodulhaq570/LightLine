@@ -577,6 +577,74 @@ pub fn search_workspace_with_cancel(
         .collect()
 }
 
+/// What Replace All in the Search panel changes: every workspace file whose
+/// text on disk contains `query` (no result limit, unlike the search), with
+/// how many times, plus those of `open` that are workspace files whatever
+/// they hold, since their unsaved text is what gets replaced. Files the
+/// search skips (too large, not UTF-8) are skipped here too. In workspace
+/// order; empty if cancelled.
+pub fn replace_targets(
+    root: &Path,
+    query: &str,
+    open: &[PathBuf],
+    cancel: &AtomicBool,
+) -> Vec<(PathBuf, usize)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let files = workspace_files_inner(root, Some(cancel));
+    // Open tabs' paths can be in another form (`\\?\`, `/`, case).
+    let plain = |path: &Path| {
+        let text = path.to_string_lossy();
+        text.strip_prefix(r"\\?\")
+            .unwrap_or(&text)
+            .replace('/', "\\")
+            .to_lowercase()
+    };
+    let open: Vec<String> = open.iter().map(|path| plain(path)).collect();
+    let is_open = |path: &Path| open.contains(&plain(path));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(4, |count| count.get().min(8));
+    let mut found: Vec<(usize, usize)> = std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut found = Vec::new();
+                    while !cancel.load(Ordering::Relaxed) {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(path) = files.get(index) else {
+                            break;
+                        };
+                        let count =
+                            if fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_FILE_BYTES) {
+                                fs::read_to_string(path)
+                                    .map_or(0, |content| content.matches(query).count())
+                            } else {
+                                0
+                            };
+                        if count > 0 || is_open(path) {
+                            found.push((index, count));
+                        }
+                    }
+                    found
+                })
+            })
+            .collect();
+        readers
+            .into_iter()
+            .flat_map(|reader| reader.join().unwrap_or_default())
+            .collect()
+    });
+    if cancel.load(Ordering::Relaxed) {
+        return Vec::new();
+    }
+    found.sort_unstable();
+    found
+        .into_iter()
+        .map(|(index, count)| (files[index].clone(), count))
+        .collect()
+}
+
 fn search_file(path: &Path, query: &str, cancel: &AtomicBool) -> Vec<SearchHit> {
     if !fs::metadata(path).is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES) {
         return Vec::new();
@@ -1459,6 +1527,92 @@ pub fn git_head_text(root: &Path, path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// One commit in a blame.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlameCommit {
+    pub sha: String,
+    pub author: String,
+    /// Seconds since 1970.
+    pub time: i64,
+    pub summary: String,
+}
+
+impl BlameCommit {
+    /// Git's name for lines not committed yet: all zeros.
+    pub fn uncommitted(&self) -> bool {
+        self.sha.bytes().all(|byte| byte == b'0')
+    }
+}
+
+/// Who last changed each line of a file as of HEAD.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Blame {
+    pub commits: Vec<BlameCommit>,
+    /// Per HEAD line (0-based), an index into `commits`.
+    pub lines: Vec<Option<u32>>,
+}
+
+impl Blame {
+    pub fn line(&self, line: usize) -> Option<&BlameCommit> {
+        let index = (*self.lines.get(line)?)?;
+        self.commits.get(index as usize)
+    }
+}
+
+/// `git blame` of `path` (relative to `root`) as of HEAD.
+pub fn git_blame(root: &Path, path: &Path) -> Result<Blame, String> {
+    let relative = path.to_string_lossy().replace('\\', "/");
+    let text = git_output(root, &["blame", "--incremental", "HEAD", "--", &relative])?;
+    Ok(parse_blame_incremental(&text))
+}
+
+/// Parses `git blame --incremental`: groups of "<sha> <source line> <line>
+/// <count>", then the commit's headers the first time it appears, ending in
+/// "filename".
+pub fn parse_blame_incremental(text: &str) -> Blame {
+    let mut blame = Blame::default();
+    let mut index_of: std::collections::HashMap<String, u32> = Default::default();
+    let mut current: Option<u32> = None;
+    for line in text.lines() {
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        if key.len() == 40 && key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            let numbers: Vec<usize> = value
+                .split(' ')
+                .filter_map(|part| part.parse().ok())
+                .collect();
+            let [_, first, count] = numbers[..] else {
+                current = None;
+                continue;
+            };
+            let next = blame.commits.len() as u32;
+            let index = *index_of.entry(key.to_string()).or_insert_with(|| {
+                blame.commits.push(BlameCommit {
+                    sha: key.to_string(),
+                    ..BlameCommit::default()
+                });
+                next
+            });
+            current = Some(index);
+            let (from, to) = (first.saturating_sub(1), first.saturating_sub(1) + count);
+            if blame.lines.len() < to {
+                blame.lines.resize(to, None);
+            }
+            blame.lines[from..to].fill(Some(index));
+            continue;
+        }
+        let Some(commit) = current.and_then(|index| blame.commits.get_mut(index as usize)) else {
+            continue;
+        };
+        match key {
+            "author" => commit.author = value.to_string(),
+            "author-time" => commit.time = value.parse().unwrap_or(0),
+            "summary" => commit.summary = value.to_string(),
+            _ => {}
+        }
+    }
+    blame
+}
+
 /// Upper bound on Myers diff work per call (edit distance x trimmed lines),
 /// so a live recompute after a keystroke stays within a few milliseconds
 /// even on a large file. Past it, the changed region is marked as a whole.
@@ -2124,6 +2278,40 @@ mod tests {
     }
 
     #[test]
+    fn replace_targets_are_every_file_with_the_text_and_open_files() {
+        let root = std::env::temp_dir().join(format!(
+            "lightline-replace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("target")).unwrap();
+        // More matching lines than the search lists: Replace All isn't capped.
+        fs::write(root.join("src/a.rs"), "old\n".repeat(MAX_RESULTS + 5)).unwrap();
+        fs::write(root.join("src/b.rs"), "nothing here\n").unwrap();
+        fs::write(root.join("src/c.rs"), "x old y\n").unwrap();
+        fs::write(root.join("target/gen.rs"), "old\n").unwrap();
+        // An open tab's path as canonicalize() gives it.
+        let verbatim = PathBuf::from(format!(r"\\?\{}", root.join(r"src\b.rs").display()));
+        let open = [verbatim, root.join("target/gen.rs")];
+        let targets = replace_targets(&root, "old", &open, &AtomicBool::new(false));
+        assert_eq!(
+            targets,
+            vec![
+                (root.join("src/a.rs"), MAX_RESULTS + 5),
+                (root.join("src/b.rs"), 0),
+                (root.join("src/c.rs"), 1)
+            ]
+        );
+        assert!(replace_targets(&root, "old", &[], &AtomicBool::new(true)).is_empty());
+        assert!(replace_targets(&root, "", &[], &AtomicBool::new(false)).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn quick_open_and_search_leave_out_what_gitignore_ignores() {
         let root = std::env::temp_dir().join(format!(
             "lightline-gitignore-{}-{}",
@@ -2492,6 +2680,32 @@ mod tests {
         };
         let patch = hunk_unified_diff(path, &del_hunk);
         assert!(patch.contains("@@ -4,2 +3,0 @@\n-old1\n-old2\n"));
+    }
+
+    #[test]
+    fn blame_groups_name_their_commit_once() {
+        let a = "a".repeat(40);
+        let b = "b".repeat(40);
+        let text = format!(
+            "{a} 1 1 2\nauthor Ada\nauthor-mail <ada@example.com>\nauthor-time 1700000000\n\
+             author-tz +0000\nsummary First commit\nfilename src/main.rs\n\
+             {b} 3 3 1\nauthor Bob\nauthor-time 1710000000\nsummary Fix it\n\
+             previous {a} src/main.rs\nfilename src/main.rs\n\
+             {a} 4 4 1\nfilename src/main.rs\n"
+        );
+        let blame = parse_blame_incremental(&text);
+        assert_eq!(blame.commits.len(), 2);
+        assert_eq!(blame.line(0).unwrap().author, "Ada");
+        assert_eq!(blame.line(1).unwrap().summary, "First commit");
+        assert_eq!(blame.line(2).unwrap().author, "Bob");
+        assert_eq!(blame.line(2).unwrap().time, 1_710_000_000);
+        assert_eq!(blame.line(3).unwrap().sha, a);
+        assert!(blame.line(4).is_none());
+        let zero = BlameCommit {
+            sha: "0".repeat(40),
+            ..BlameCommit::default()
+        };
+        assert!(zero.uncommitted() && !blame.line(0).unwrap().uncommitted());
     }
 
     #[test]

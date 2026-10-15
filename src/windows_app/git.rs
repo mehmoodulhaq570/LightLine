@@ -128,6 +128,7 @@ impl App {
             self.git_diff_cache.clear();
             self.git_untracked.clear();
             self.gutter_done = None;
+            self.forget_blame();
         }
         let watch: Vec<PathBuf> = state
             .git_dir
@@ -161,6 +162,7 @@ impl App {
         if head_moved {
             self.refresh_active_git_diff();
         }
+        self.ensure_blame();
         // The status line belongs to whatever the user last asked for, so the
         // counts here stay in the section headers instead of overwriting it.
         self.refresh(hwnd);

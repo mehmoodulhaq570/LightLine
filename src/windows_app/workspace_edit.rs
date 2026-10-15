@@ -1,8 +1,8 @@
-// Edits a language server asks for across files: a rename, a quick fix, or
-// one it sends itself. Open files change like typed edits, one undo step per
+// Edits across files: a rename, a quick fix, one a language server sends
+// itself, or the Search panel's Replace All. Open files change like typed edits, one undo step per
 // file; files that aren't open are changed on disk.
 
-use super::app::remap_position;
+use super::app::{remap_position, replace_all_edit};
 use super::language::resolve_edits;
 use super::*;
 use lightline::lsp::{Command as LspCommand, FileEdit, TextEdit};
@@ -12,6 +12,30 @@ pub(super) struct Applied {
     pub(super) files: usize,
     // Files that couldn't be saved, with why.
     pub(super) failed: Vec<String>,
+}
+
+/// Edits as positions in a document, last first.
+type Resolved = Vec<(Pos, Pos, String)>;
+
+/// One file's changes: a language server's edits, or Replace All's.
+pub(super) enum Edits {
+    Server(Vec<TextEdit>),
+    ReplaceAll { query: String, with: String },
+}
+
+impl Edits {
+    // The edits as positions in `doc`, last first, and how many places change.
+    fn resolve(&self, doc: &Document) -> (Resolved, usize) {
+        match self {
+            Edits::Server(edits) => (resolve_edits(doc, edits), edits.len()),
+            // One edit from the first match to the end of the last, as Find's
+            // Replace All makes.
+            Edits::ReplaceAll { query, with } => match replace_all_edit(doc, query, with) {
+                Some((start, end, text, count)) => (vec![(start, end, text)], count),
+                None => (Vec::new(), 0),
+            },
+        }
+    }
 }
 
 impl App {
@@ -28,24 +52,48 @@ impl App {
         language: LspLanguage,
         save_active: bool,
     ) -> Result<Applied, String> {
-        let mut in_tabs: Vec<(usize, Vec<TextEdit>)> = Vec::new();
+        let files = files
+            .into_iter()
+            .map(|file| (file.uri, Edits::Server(file.edits)))
+            .collect();
+        self.apply_edits(files, Some(language), save_active)
+    }
+
+    /// apply_workspace_edit for any `Edits`, by file URI; with no `language`
+    /// every running server hears of the files saved. Files where nothing
+    /// changes aren't counted or saved.
+    pub(super) fn apply_edits(
+        &mut self,
+        files: Vec<(String, Edits)>,
+        language: Option<LspLanguage>,
+        save_active: bool,
+    ) -> Result<Applied, String> {
+        let mut in_tabs: Vec<(usize, Resolved)> = Vec::new();
         let mut on_disk: Vec<(PathBuf, String, Document)> = Vec::new();
         let mut places = 0;
-        for file in files {
-            places += file.edits.len();
-            if let Some(index) = self.open_tab_for_uri(&file.uri) {
-                in_tabs.push((index, file.edits));
+        for (uri, edits) in files {
+            if let Some(index) = self.open_tab_for_uri(&uri) {
+                let (resolved, count) = edits.resolve(&self.tabs[index].document);
+                if !resolved.is_empty() {
+                    places += count;
+                    in_tabs.push((index, resolved));
+                }
                 continue;
             }
-            let Some(path) = lsp::uri_to_path(&file.uri) else {
-                return Err(format!("it changes {}", file.uri));
+            let Some(path) = lsp::uri_to_path(&uri) else {
+                return Err(format!("it changes {uri}"));
             };
             match Document::open(path.clone()) {
                 Ok(mut document) => {
-                    for (start, end, text) in resolve_edits(&document, &file.edits) {
+                    let (resolved, count) = edits.resolve(&document);
+                    if resolved.is_empty() {
+                        continue;
+                    }
+                    places += count;
+                    for (start, end, text) in resolved {
                         document.replace(start, end, &text);
                     }
-                    on_disk.push((path, file.uri, document));
+                    on_disk.push((path, uri, document));
                 }
                 Err(error) => return Err(format!("{}: {error}", path.display())),
             }
@@ -63,7 +111,7 @@ impl App {
             for client in self
                 .lsp
                 .iter()
-                .filter(|client| client.language() == language)
+                .filter(|client| language.is_none_or(|language| client.language() == language))
             {
                 client.send(LspCommand::FilesChanged {
                     uris: saved.clone(),
@@ -73,7 +121,7 @@ impl App {
         for (index, edits) in in_tabs {
             let save =
                 !self.tabs[index].document.is_dirty() && (save_active || index != self.active);
-            self.apply_edits_to_tab(index, &edits);
+            self.apply_edits_to_tab(index, edits);
             if save && let Err(error) = self.save_tab_quietly(index) {
                 let name = self.tabs[index].document.path.as_deref().map(display_name);
                 failed.push(format!("{}: {error}", name.unwrap_or_default()));
@@ -119,13 +167,12 @@ impl App {
         })
     }
 
-    // Applies a language server's edits to tab `index` as one undo step,
+    // Applies resolved edits (last first) to tab `index` as one undo step,
     // keeping each view's caret and selection on their code.
-    fn apply_edits_to_tab(&mut self, index: usize, edits: &[TextEdit]) {
+    fn apply_edits_to_tab(&mut self, index: usize, resolved: Resolved) {
         let active = self.active;
         // replace_range edits the active tab.
         self.active = index;
-        let resolved = resolve_edits(self.doc(), edits);
         let mut views = self.tab().views.clone();
         self.doc_mut().begin_group();
         for (start, end, text) in resolved {

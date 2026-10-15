@@ -44,6 +44,7 @@ impl App {
             .to_ascii_lowercase();
         [
             ("Search in files", 0),
+            ("Replace in Files", 63),
             ("Run Rust tests", 1),
             ("Run Python File", 8),
             ("Run Active File (Ctrl+Shift+R)", 48),
@@ -86,6 +87,7 @@ impl App {
             ("Find All References", 20),
             ("Rename Symbol (F2)", 51),
             ("Quick Fix (Ctrl+.)", 52),
+            ("Go to Line (Ctrl+G, :)", 62),
             ("Go to Symbol in File (@)", 53),
             ("Go to Symbol in Workspace (Ctrl+T, #)", 56),
             ("View: Problems (Ctrl+Shift+M)", 57),
@@ -127,6 +129,8 @@ impl App {
             self.quick_symbols().len()
         } else if self.quick_query.starts_with('#') {
             self.quick_workspace_symbols().len()
+        } else if self.quick_query.starts_with(':') {
+            self.goto_line_items().len()
         } else {
             self.quick_matches().len()
         }
@@ -170,6 +174,10 @@ impl App {
             self.backbuffer = None;
             match action {
                 Some(0) => self.open_project_search(hwnd),
+                Some(63) => {
+                    self.open_project_search(hwnd);
+                    self.replace_focus = !self.project_query.is_empty();
+                }
                 Some(1) => self.run_project(hwnd),
                 Some(8) => self.run_python_file(hwnd),
                 Some(48) => self.run_active_file(hwnd),
@@ -193,6 +201,7 @@ impl App {
                 Some(51) => self.start_rename(hwnd),
                 Some(52) => self.request_code_actions(hwnd),
                 Some(56) => self.show_workspace_symbols(hwnd),
+                Some(62) => self.show_goto_line(hwnd),
                 Some(57) => self.show_problems(hwnd),
                 Some(58) => self.show_debug_console(hwnd),
                 Some(54) => self.request_source_actions(hwnd),
@@ -277,6 +286,10 @@ impl App {
             self.quick_open = false;
             self.backbuffer = None;
             self.jump_to_workspace_symbol(hwnd, index);
+        } else if self.quick_query.starts_with(':') {
+            self.quick_open = false;
+            self.backbuffer = None;
+            self.goto_line(hwnd);
         } else {
             let path = self.quick_matches().get(index).cloned();
             self.quick_open = false;
@@ -336,6 +349,7 @@ impl App {
         self.side_view = SideView::Search;
         self.review_file = None;
         self.search_input = true;
+        self.replace_focus = false;
         self.panel_focus = true;
         self.terminal_focus = false;
         self.panel_first = 0;
@@ -662,6 +676,7 @@ impl App {
         // Changed-line marks, recomputed after each keystroke in a git file,
         // only show in the code panes' gutters.
         let mut only_gutter = true;
+        let mut replace = None;
         while let Ok(message) = self.worker_rx.try_recv() {
             received = true;
             only_gutter &= matches!(message, WorkerMessage::GutterComputed(..));
@@ -708,6 +723,13 @@ impl App {
                     self.search_cancel = None;
                     self.status = format!("{} results for {}", hits.len(), query);
                     self.search_results = hits;
+                }
+                WorkerMessage::Blame(generation, path, blame) => {
+                    self.blame_finished(hwnd, generation, path, blame);
+                }
+                // Asked after the loop: its dialog runs a message loop.
+                WorkerMessage::ReplaceTargets(cancel, targets) => {
+                    replace = Some((cancel, targets));
                 }
                 WorkerMessage::Repo(generation, workspace_generation, result) => {
                     if generation == self.git_generation
@@ -933,6 +955,9 @@ impl App {
             unsafe { InvalidateRect(hwnd, &panes, 0) };
         } else if received {
             unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+        if let Some((cancel, targets)) = replace {
+            self.finish_replace_all(hwnd, cancel, targets);
         }
     }
 }
