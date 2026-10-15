@@ -27,6 +27,9 @@ pub struct Settings {
     pub sticky_scroll: bool,
     pub bracket_matching: bool,
     pub indent_guides: bool,
+    /// Show the file in miniature beside the editor. Off by default: it
+    /// costs typing speed. Saved as `showMinimap`; the `minimap` key that
+    /// v0.5.0 wrote (as true, while it did nothing) is ignored.
     pub minimap: bool,
     /// Color brackets by how deeply they're nested.
     pub bracket_pair_colors: bool,
@@ -69,7 +72,7 @@ impl Default for Settings {
             sticky_scroll: true,
             bracket_matching: true,
             indent_guides: true,
-            minimap: true,
+            minimap: false,
             bracket_pair_colors: true,
             git_blame: true,
             code_lens: true,
@@ -200,7 +203,7 @@ impl Settings {
         if let Some(b) = value.get("indentGuides").and_then(|v| v.as_bool()) {
             settings.indent_guides = b;
         }
-        if let Some(b) = value.get("minimap").and_then(|v| v.as_bool()) {
+        if let Some(b) = value.get("showMinimap").and_then(|v| v.as_bool()) {
             settings.minimap = b;
         }
         if let Some(b) = value
@@ -333,7 +336,7 @@ impl Settings {
             "indentGuides".into(),
             serde_json::Value::Bool(self.indent_guides),
         );
-        obj.insert("minimap".into(), serde_json::Value::Bool(self.minimap));
+        obj.insert("showMinimap".into(), serde_json::Value::Bool(self.minimap));
         obj.insert(
             "bracketPairColorization".into(),
             serde_json::Value::Bool(self.bracket_pair_colors),
@@ -386,7 +389,7 @@ const OWN_KEYS: &[&str] = &[
     "stickyScroll",
     "bracketMatching",
     "indentGuides",
-    "minimap",
+    "showMinimap",
     "bracketPairColorization",
     "gitBlame",
     "codeLens",
@@ -472,8 +475,11 @@ mod tests {
     #[test]
     fn new_editor_features_are_on_until_turned_off() {
         let defaults = Settings::default();
-        assert!(defaults.minimap && defaults.bracket_pair_colors);
+        assert!(!defaults.minimap && defaults.bracket_pair_colors);
         assert!(defaults.git_blame && defaults.code_lens);
+        // v0.5.0 saved "minimap": true while it did nothing; that stays off.
+        assert!(!Settings::parse(r#"{"minimap": true}"#).unwrap().minimap);
+        assert!(Settings::parse(r#"{"showMinimap": true}"#).unwrap().minimap);
         let s = Settings {
             minimap: false,
             bracket_pair_colors: false,

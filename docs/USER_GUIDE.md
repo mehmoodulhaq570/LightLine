@@ -163,7 +163,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "bracketMatching": true,
   "indentGuides": true,
   "bracketPairColorization": true,
-  "minimap": true,
+  "showMinimap": false,
   "gitBlame": true,
   "codeLens": true,
   "markdownLoadRemoteImages": false,
@@ -189,7 +189,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `autoClosePairs` | Type closing brackets and quotes for you |
 | `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides (the current block's is brighter) |
 | `bracketPairColorization` | Color nested brackets in turn with three colors (not those in strings or comments) |
-| `minimap` | Show the file in miniature at the right of the editor |
+| `showMinimap` | Show the file in miniature at the right of the editor (off by default; it costs some typing speed) |
 | `gitBlame` | After the caret's line, show who last changed it, when, and the commit message |
 | `codeLens` | Show **▶ Run** / **Debug** after `main` and **▶ Run test** after test functions (Rust, Python, Go, C/C++) |
 | `formatOnSave` | Format the file before each save |
