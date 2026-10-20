@@ -1,4 +1,5 @@
 mod ai_chat;
+mod ai_provider;
 mod app;
 mod binary_view;
 mod blame;

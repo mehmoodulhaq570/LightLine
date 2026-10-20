@@ -198,7 +198,7 @@ impl App {
             left: panel.left + s(18),
             top: menu_top,
             right: panel.right - s(18),
-            bottom: (menu_top + s(420)).min(panel.bottom - s(78)),
+            bottom: (menu_top + s(451)).min(panel.bottom - s(78)),
         };
         if menu.right - menu.left < s(210) || menu.bottom - menu.top < s(240) {
             return;
@@ -271,7 +271,7 @@ impl App {
             );
         }
 
-        let actions_top = menu.bottom - s(82);
+        let actions_top = menu.bottom - s(113);
         Self::fill(
             hdc,
             RECT {
@@ -288,11 +288,35 @@ impl App {
             right: menu.right - s(8),
             bottom: actions_top + s(38),
         };
-        let turn_off = RECT {
+        let provider = RECT {
             top: refresh.bottom,
+            bottom: refresh.bottom + s(31),
+            ..refresh
+        };
+        let turn_off = RECT {
+            top: provider.bottom,
             bottom: menu.bottom - s(7),
             ..refresh
         };
+        Self::label(
+            hdc,
+            "\u{2699}",
+            provider.left + s(10),
+            provider.top + s(5),
+            ui(145, 174, 218),
+            provider,
+        );
+        self.label_ellipsis(
+            hdc,
+            &format!(
+                "Change provider\u{2026} ({})",
+                ai::host(&self.settings.ai_endpoint)
+            ),
+            provider.left + s(38),
+            provider.top + s(5),
+            self.theme.text,
+            provider,
+        );
         Self::label(
             hdc,
             "\u{21bb}",
@@ -507,6 +531,7 @@ impl App {
         hits.model_rows = row_hits;
         hits.model_refresh = Some(refresh);
         hits.model_turn_off = Some(turn_off);
+        hits.model_provider = Some(provider);
     }
 
     /// Standalone provider marks matching the model-picker mockup: the logo
@@ -775,6 +800,25 @@ impl App {
             } else if !self.ai.connecting {
                 self.ai.hits.borrow_mut().connect = Some(button);
             }
+            // Another service, or a key: the provider card.
+            let other = "Change provider\u{2026}";
+            let provider = RECT {
+                left: button.right + s(10),
+                right: button.right + s(10) + self.text_width(hdc, other) + s(28),
+                ..button
+            };
+            if provider.right <= area.right {
+                self.panel_card(hdc, provider, s(7), self.theme.edge, self.theme.editor_bg);
+                self.label_mid(
+                    hdc,
+                    other,
+                    provider.left + s(14),
+                    (provider.top + provider.bottom) / 2,
+                    self.theme.text,
+                    provider,
+                );
+                self.ai.hits.borrow_mut().provider = Some(provider);
+            }
         }
         y = button.bottom + s(12);
         let hint = if remote {
@@ -785,26 +829,17 @@ impl App {
                 Some(ai::KeySource::Environment) => {
                     format!("Its API key comes from {}.", ai::KEY_VARIABLE)
                 }
-                None => format!(
-                    "It needs an API key: the button above, or AI: Set API Key\u{2026} in \
-                     the Command Palette. Or set {}.",
-                    ai::KEY_VARIABLE
-                ),
+                None => "It needs an API key: Set API Key above.".to_string(),
             };
-            format!(
-                "Uses {} (aiEndpoint in settings). {key}",
-                self.settings.ai_endpoint
-            )
+            format!("Uses {}. {key}", self.settings.ai_endpoint)
         } else if default_endpoint {
             format!(
                 "No Ollama yet? Get it from ollama.com, then run in a terminal: \
-                 ollama pull {SUGGESTED_MODEL}"
+                 ollama pull {SUGGESTED_MODEL}. Or use a cloud service such as OpenAI \
+                 with Change provider."
             )
         } else {
-            format!(
-                "Uses the server at {} (aiEndpoint in settings).",
-                self.settings.ai_endpoint
-            )
+            format!("Uses the server at {}.", self.settings.ai_endpoint)
         };
         self.paint_wrapped(hdc, &hint, area, y, line_height, self.theme.muted);
     }
@@ -1159,16 +1194,6 @@ impl App {
         if input.bottom - input.top < s(30) {
             return;
         }
-        // A key being typed shows only as dots, one per character.
-        let key = self.ai.key_entry.as_deref();
-        let dots;
-        let (lines, enabled) = match key {
-            Some(key) => {
-                dots = [String::from("\u{2022}").repeat(key.chars().count().min(64))];
-                (&dots[..], true)
-            }
-            None => (lines, enabled),
-        };
         let focused = enabled && self.ai_typing();
         let edge = if focused {
             self.theme.violet
@@ -1190,14 +1215,8 @@ impl App {
         };
         unsafe { SelectObject(hdc, self.ui_font) };
         let line_height = self.text_height(hdc) + s(4);
-        let empty = key.map_or(self.ai.input.is_empty(), str::is_empty);
-        if !enabled || empty {
-            let placeholder = if key.is_some() {
-                format!(
-                    "Paste the API key for {}, then press Enter",
-                    ai::host(&self.settings.ai_endpoint)
-                )
-            } else if enabled {
+        if !enabled || self.ai.input.is_empty() {
+            let placeholder = if enabled {
                 "Ask about your code\u{2026}".to_string()
             } else {
                 "Connect a model to start chatting".to_string()
@@ -1219,7 +1238,7 @@ impl App {
         }
         if focused {
             let (x, y) = match lines.last() {
-                Some(line) if !empty => (
+                Some(line) if !self.ai.input.is_empty() => (
                     text.left + self.text_width(hdc, line),
                     text.top + (lines.len() as i32 - 1) * line_height,
                 ),
@@ -1237,8 +1256,8 @@ impl App {
             );
         }
 
-        let busy = enabled && key.is_none() && self.ai.busy();
-        let ready = enabled && !key.unwrap_or(&self.ai.input).trim().is_empty();
+        let busy = enabled && self.ai.busy();
+        let ready = enabled && !self.ai.input.trim().is_empty();
         let fill = if ready && !busy {
             self.theme.violet
         } else {
@@ -1303,7 +1322,7 @@ impl App {
 
     // Draws `text` word-wrapped to `area`'s width from `y`, stopping at its
     // bottom; returns the y below the last line.
-    fn paint_wrapped(
+    pub(in crate::windows_app) fn paint_wrapped(
         &self,
         hdc: HDC,
         text: &str,

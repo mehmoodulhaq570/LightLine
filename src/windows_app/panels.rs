@@ -112,6 +112,7 @@ impl App {
             ("AI: Explain Error at Cursor", 44),
             ("AI: Fix Error at Cursor", 45),
             ("AI: New Chat", 46),
+            ("AI: Choose Provider\u{2026}", 64),
             ("AI: Set API Key\u{2026}", 60),
             ("AI: Remove API Key", 61),
         ]
@@ -274,7 +275,8 @@ impl App {
                     }
                     self.ai_new_chat(hwnd);
                 }
-                Some(60) => self.ai_start_key_entry(hwnd),
+                Some(60) => self.show_ai_provider(hwnd, true),
+                Some(64) => self.show_ai_provider(hwnd, false),
                 Some(61) => self.ai_remove_key(hwnd),
                 _ => {}
             }

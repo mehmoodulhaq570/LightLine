@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Choose Your AI Provider in One Place**: Setting up the AI Assistant no longer means typing a URL into `settings.json` and then finding a separate command for the key. **AI: Choose Provider...** (Command Palette), **Change provider...** (in the AI panel and at the bottom of its model menu) or **Server** in Settings opens a card drawn in LightLine's own style. Pick **Ollama**, **OpenAI**, **OpenRouter**, **Groq** or **Other** (any OpenAI-compatible server, by address). For a cloud service, **Get a key** opens its key page; paste the key and it's checked at once, and the **Model** list fills with the models that can chat, with a small, fast one picked. **Save & Connect** keeps the key in Windows Credential Manager and the assistant is ready to use. A wrong key, a used-up quota or Ollama not running is explained on the card before anything is saved. **AI: Set API Key...** opens the same card, ready for the key; it used to say only, in the status bar, that a local server needs none.
+
 #### Fixed
 
 - **Run Dropdown Showing Through Popups**: In a narrow editor (with the AI Assistant open, say), the **Automatic** box beside Run was drawn on top of Quick Open and other popups. Popups now cover it; its open list still shows above everything. It also no longer reads `.lightline/run.json` on every redraw, only when the file has changed.

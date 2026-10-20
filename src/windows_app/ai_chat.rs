@@ -3,8 +3,8 @@
 //! putting code from an answer back into the editor.
 //! lightline::ai does the HTTP; render/ai_assistant.rs paints the panel.
 //!
-//! A cloud service's API key is typed into the panel's message box, shown
-//! as dots (`key_entry`), and goes straight to Windows Credential Manager.
+//! Which service answers, and its API key, are set in the AI provider card
+//! (ai_provider.rs); this file runs its connection check.
 //!
 //! Nothing runs until the user connects or sends a message: the assistant
 //! is only state until then. Each request runs on its own thread, and the
@@ -25,7 +25,6 @@ const MAX_CONTEXT_BYTES: usize = 24 * 1024;
 // Earlier messages sent along for context, newest first, up to this size.
 const MAX_HISTORY_BYTES: usize = 48 * 1024;
 const MAX_INPUT_BYTES: usize = 16 * 1024;
-const MAX_KEY_BYTES: usize = 1024;
 // Lines around an error sent with "Explain" and "Fix" (the fix replaces
 // exactly these lines, so it gets fewer).
 const ERROR_CONTEXT_EXPLAIN: usize = 10;
@@ -42,6 +41,8 @@ enum AiEvent {
     Models(Result<Vec<String>, String>),
     Text(u64, String),
     Done(u64, Result<(), String>),
+    /// The provider card's check: its generation and the models found.
+    Provider(u64, Result<Vec<String>, String>),
 }
 
 /// Something the editor asks the assistant to do with code.
@@ -167,6 +168,8 @@ pub(super) struct AiHits {
     pub(super) model_rows: Vec<(RECT, String)>,
     pub(super) model_refresh: Option<RECT>,
     pub(super) model_turn_off: Option<RECT>,
+    pub(super) model_provider: Option<RECT>,
+    pub(super) provider: Option<RECT>,
     pub(super) new_chat: Option<RECT>,
     pub(super) composer: Option<RECT>,
     pub(super) send: Option<RECT>,
@@ -194,8 +197,6 @@ pub(super) struct AiChat {
     pub(super) connecting: bool,
     /// Why connecting failed.
     pub(super) problem: Option<String>,
-    /// An API key being typed (AI: Set API Key), shown only as dots.
-    pub(super) key_entry: Option<String>,
     /// Where the endpoint's key comes from, for the panel, kept per
     /// endpoint: reading Credential Manager on every paint would be slow.
     key_source: RefCell<Option<(String, Option<ai::KeySource>)>>,
@@ -223,7 +224,6 @@ impl AiChat {
             model_menu_first: 0,
             connecting: false,
             problem: None,
-            key_entry: None,
             key_source: RefCell::new(None),
             request: None,
             next_request: 0,
@@ -237,6 +237,11 @@ impl AiChat {
     /// Whether an answer is being received.
     pub(super) fn busy(&self) -> bool {
         self.request.is_some()
+    }
+
+    /// Reads the key's source again on the next paint, after it changed.
+    pub(super) fn forget_key_source(&self) {
+        *self.key_source.borrow_mut() = None;
     }
 }
 
@@ -408,8 +413,8 @@ impl App {
         self.ai_assistant_visible
             && !self.welcome
             && !self.quick_open
-            && (self.ai.key_entry.is_some()
-                || (self.ai_ready() && (self.ai.focused || self.ai.model_menu_open)))
+            && self.ai_ready()
+            && (self.ai.focused || self.ai.model_menu_open)
     }
 
     /// Where the key for the endpoint comes from; None without one.
@@ -424,27 +429,6 @@ impl App {
                 source
             }
         }
-    }
-
-    /// AI: Set API Key. The message box takes the key, shown as dots.
-    pub(super) fn ai_start_key_entry(&mut self, hwnd: HWND) {
-        let endpoint = self.settings.ai_endpoint.clone();
-        if ai::is_local(&endpoint) {
-            self.status = format!(
-                "The AI endpoint is on this PC ({endpoint}) and needs no key. Set aiEndpoint \
-                 in Settings to the service first, e.g. https://api.openai.com"
-            );
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-            return;
-        }
-        if !self.ai_assistant_visible || self.welcome {
-            self.toggle_ai_assistant(hwnd);
-        }
-        self.ai.model_menu_open = false;
-        self.ai.key_entry = Some(String::new());
-        self.terminal_focus = false;
-        self.panel_focus = false;
-        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     /// AI: Remove API Key: forgets the key saved for the endpoint's host.
@@ -464,65 +448,6 @@ impl App {
             ));
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
-    }
-
-    // Enter in the key box: saves the key.
-    fn ai_save_key(&mut self, hwnd: HWND) {
-        let Some(key) = self.ai.key_entry.take() else {
-            return;
-        };
-        let endpoint = self.settings.ai_endpoint.clone();
-        let host = ai::host(&endpoint);
-        *self.ai.key_source.borrow_mut() = None;
-        if key.trim().is_empty() {
-            self.status = "No key typed; nothing was saved.".into();
-        } else {
-            self.status = match ai::save_key(&endpoint, &key) {
-                Ok(()) => {
-                    self.ai.problem = None;
-                    format!("API key for {host} saved in Windows Credential Manager.")
-                }
-                Err(error) => format!("Couldn't save the API key: {error}"),
-            };
-        }
-        if self.ai_ready() {
-            self.focus_ai_input();
-        }
-        unsafe { InvalidateRect(hwnd, null(), 0) };
-    }
-
-    // A key while the key box is open.
-    fn ai_key_entry_key(&mut self, hwnd: HWND, key: u32, ctrl: bool) -> bool {
-        let Some(entry) = self.ai.key_entry.as_mut() else {
-            return false;
-        };
-        match key {
-            k if k == VK_RETURN as u32 => {
-                self.ai_save_key(hwnd);
-                return true;
-            }
-            k if k == VK_ESCAPE as u32 => {
-                self.ai.key_entry = None;
-                self.status = "API key not changed.".into();
-            }
-            k if k == VK_BACK as u32 => {
-                if ctrl {
-                    entry.clear();
-                } else {
-                    entry.pop();
-                }
-            }
-            0x56 if ctrl => {
-                if let Ok(Some(text)) = clipboard::paste(hwnd) {
-                    entry.extend(text.trim().chars().filter(|ch| !ch.is_control()));
-                    entry.truncate(MAX_KEY_BYTES);
-                }
-            }
-            _ if (VK_F1 as u32..=VK_F24 as u32).contains(&key) => return false,
-            _ => return true,
-        }
-        unsafe { InvalidateRect(hwnd, null(), 0) };
-        true
     }
 
     pub(super) fn focus_ai_input(&mut self) {
@@ -550,6 +475,17 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
+    /// The provider card's check: asks `server` for its models on a worker
+    /// thread; the answer comes back as AiEvent::Provider.
+    pub(super) fn ai_check_provider(&mut self, hwnd: HWND, server: ai::Server, generation: u64) {
+        let tx = self.ai.tx.clone();
+        let hwnd_value = hwnd as isize;
+        std::thread::spawn(move || {
+            let _ = tx.send(AiEvent::Provider(generation, ai::list_models(&server)));
+            unsafe { PostMessageW(hwnd_value as HWND, AI_EVENT_MESSAGE, 0, 0) };
+        });
+    }
+
     /// Takes in what the worker threads sent (AI_EVENT_MESSAGE).
     pub(super) fn poll_ai(&mut self, hwnd: HWND) {
         let mut changed = false;
@@ -557,6 +493,9 @@ impl App {
             changed = true;
             match event {
                 AiEvent::Models(result) => self.ai_models_listed(result),
+                AiEvent::Provider(generation, result) => {
+                    self.provider_checked(hwnd, generation, result)
+                }
                 AiEvent::Text(id, text) => {
                     if self.ai_current(id)
                         && let Some(entry) = self.ai.entries.last_mut()
@@ -568,7 +507,11 @@ impl App {
                 AiEvent::Done(id, result) => {
                     if self.ai_current(id) {
                         self.ai.request = None;
-                        if let (Err(error), Some(entry)) = (result, self.ai.entries.last_mut()) {
+                        if let (Err(mut error), Some(entry)) = (result, self.ai.entries.last_mut())
+                        {
+                            if error.contains("API key") {
+                                error.push_str(" Change it with AI: Choose Provider\u{2026}");
+                            }
                             entry.error = Some(error);
                         }
                     }
@@ -1078,6 +1021,11 @@ impl App {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return;
             }
+            if hits.model_provider.as_ref().is_some_and(inside) {
+                self.ai.model_menu_open = false;
+                self.show_ai_provider(hwnd, false);
+                return;
+            }
             if hits.model_turn_off.as_ref().is_some_and(inside) {
                 self.ai.model_menu_open = false;
                 self.ai_stop(hwnd);
@@ -1106,12 +1054,11 @@ impl App {
         } else if hits.connect.as_ref().is_some_and(inside) {
             self.ai_connect(hwnd);
         } else if hits.set_key.as_ref().is_some_and(inside) {
-            self.ai_start_key_entry(hwnd);
-        } else if self.ai.key_entry.is_some() {
-            // The key box keeps the keyboard; its send button saves.
-            if hits.send.as_ref().is_some_and(inside) {
-                self.ai_save_key(hwnd);
-            }
+            self.show_ai_provider(hwnd, true);
+            return;
+        } else if hits.provider.as_ref().is_some_and(inside) {
+            self.show_ai_provider(hwnd, false);
+            return;
         } else if hits.send.as_ref().is_some_and(inside) {
             if self.ai.busy() {
                 self.ai_stop(hwnd);
@@ -1187,9 +1134,6 @@ impl App {
     /// document behind it are kept here; app-wide shortcuts (Ctrl+P, Ctrl+S,
     /// F5...) still work.
     pub(super) fn ai_key(&mut self, hwnd: HWND, key: u32, ctrl: bool, shift: bool) -> bool {
-        if self.ai.key_entry.is_some() {
-            return self.ai_key_entry_key(hwnd, key, ctrl);
-        }
         if self.ai.model_menu_open {
             return match key {
                 k if k == VK_ESCAPE as u32 => {
@@ -1287,12 +1231,7 @@ impl App {
             char::from_u32(unit as u32)
         };
         if let Some(ch) = ch {
-            if let Some(entry) = self.ai.key_entry.as_mut() {
-                if entry.len() + ch.len_utf8() <= MAX_KEY_BYTES {
-                    entry.push(ch);
-                }
-                unsafe { InvalidateRect(hwnd, null(), 0) };
-            } else if self.ai.model_menu_open {
+            if self.ai.model_menu_open {
                 if self.ai.model_query.len() < 128 {
                     self.ai.model_query.push(ch);
                     self.ai.model_menu_first = 0;

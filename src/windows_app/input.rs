@@ -54,6 +54,14 @@ impl App {
             self.run_config_key(hwnd, key, ctrl, shift);
             return true;
         }
+        if self.ai_provider.is_some() {
+            // App-wide F-keys (F5, F11...) still work behind the card.
+            if (VK_F1 as u32..=VK_F24 as u32).contains(&key) {
+                return false;
+            }
+            self.ai_provider_key(hwnd, key, ctrl, shift);
+            return true;
+        }
         if self.terminal_rename_input.is_some() {
             if !self.terminal_focus
                 || !self.terminal_visible
@@ -1048,6 +1056,10 @@ impl App {
             self.run_config_character(hwnd, unit);
             return;
         }
+        if self.ai_provider.is_some() {
+            self.ai_provider_character(hwnd, unit);
+            return;
+        }
         if self.rename_char(hwnd, unit) || self.debug_console_char(hwnd, unit) {
             return;
         }
@@ -1438,6 +1450,10 @@ impl App {
             self.run_config_click(hwnd, x, y, extend, false);
             return;
         }
+        if self.ai_provider.is_some() {
+            self.ai_provider_click(hwnd, x, y);
+            return;
+        }
         if self.editor_context_click(hwnd, x, y) {
             return;
         }
@@ -1572,10 +1588,8 @@ impl App {
                 return;
             }
         }
-        // A click anywhere else takes the keyboard from the message box,
-        // and drops a key being typed.
+        // A click anywhere else takes the keyboard from the message box.
         self.ai.focused = false;
-        self.ai.key_entry = None;
         if y >= rect.bottom - self.scale(STATUS) {
             self.click_status_language(hwnd, rect, x, y);
             return;
@@ -2214,6 +2228,9 @@ impl App {
             self.run_config_click(hwnd, x, y, true, true);
             return;
         }
+        if self.ai_provider.is_some() {
+            return;
+        }
         if self.problem_scrollbar_grab.is_some() {
             self.problems_scrollbar_drag(hwnd, y);
             return;
@@ -2310,7 +2327,7 @@ impl App {
     pub(super) fn mouse_right_click(&mut self, hwnd: HWND, x: i32, y: i32) {
         self.cancel_rename(hwnd);
         self.dismiss_code_actions(hwnd);
-        if self.run_config_panel.is_some() {
+        if self.run_config_panel.is_some() || self.ai_provider.is_some() {
             return;
         }
         self.dismiss_editor_context(hwnd);

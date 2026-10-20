@@ -111,6 +111,7 @@ impl App {
             && self.signature.is_none()
             && self.run_choice.is_none()
             && self.run_config_panel.is_none()
+            && self.ai_provider.is_none()
             && self.hot.is_none()
             && self.transition.is_none()
             && !(self.side_view == SideView::Search && self.panel_focus && !self.search_input)

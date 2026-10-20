@@ -758,6 +758,8 @@ pub(super) struct App {
     // painting doesn't read and parse the file every frame.
     pub(super) run_choice_name: RefCell<Option<run_choice::ShownName>>,
     pub(super) run_config_panel: Option<run_config_ui::RunConfigPanel>,
+    // The AI provider card (AI: Choose Provider), over the workbench.
+    pub(super) ai_provider: Option<ai_provider::ProviderCard>,
     // How far the Settings view in the side panel is scrolled, in pixels.
     pub(super) settings_scroll: i32,
     pub(super) dragging: bool,
@@ -1364,6 +1366,7 @@ impl App {
             run_choice: None,
             run_choice_name: RefCell::new(None),
             run_config_panel: None,
+            ai_provider: None,
             settings_scroll: 0,
             dragging: false,
             find_mode: false,
@@ -2146,9 +2149,6 @@ impl App {
             self.focus_ai_input();
         } else {
             self.ai.focused = false;
-        }
-        if !opening {
-            self.ai.key_entry = None;
         }
         if self.welcome {
             self.welcome = false;

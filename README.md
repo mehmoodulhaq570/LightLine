@@ -105,7 +105,7 @@ LightLine collects no usage data and sends nothing on its own. It uses the netwo
 - run **Python: Install debugpy**;
 - allow web images in a Markdown preview;
 - open a Python file without Pyright installed, when it asks before downloading Pyright;
-- use the AI Assistant. With Ollama (the default) everything stays on your PC. If you point `aiEndpoint` at a cloud service such as OpenAI, your questions and the code you include are sent to that service, and the panel names it before you ask. Your API key is kept in Windows Credential Manager, never in LightLine's files, and is sent only to that service.
+- use the AI Assistant. With Ollama (the default) everything stays on your PC. If you choose a cloud service such as OpenAI in **AI: Choose Provider**, your questions and the code you include are sent to that service, and the panel names it before you ask. Your API key is kept in Windows Credential Manager, never in LightLine's files, and is sent only to that service.
 
 LightLine stores preferences, caches and, if it ever crashes, a `crash.log` in `%APPDATA%\LightLine`; the log stays on your PC. It edits the files you open, and saves Run configurations in the workspace's `.lightline/run.json`. Standalone Rust runs and configured C/C++ runs create executables in a `lightline-run` folder in your temp directory; runtimes, compilers and project commands may create their own files or use the network. **Python: Install debugpy** also installs into your Python. To remove LightLine, delete `lightline.exe` and, if you like, `%APPDATA%\LightLine`.
 

@@ -219,6 +219,7 @@ impl App {
         if !inside
             || self.run_choice.is_some()
             || self.run_config_panel.is_some()
+            || self.ai_provider.is_some()
             || self.transition.is_some()
             || (self.side_view == SideView::Review && self.review_file.is_some())
         {
@@ -602,6 +603,7 @@ impl App {
                 self.paint_hot_tip(hdc, hwnd);
                 self.paint_quick_open(hdc, rect);
                 self.paint_run_configurations(hwnd, hdc);
+                self.paint_ai_provider(hwnd, hdc);
                 SelectObject(hdc, old_font);
                 present(hdc);
                 EndPaint(hwnd, &ps);
@@ -1648,6 +1650,7 @@ impl App {
             self.paint_more_menu(hdc, hwnd);
             self.paint_run_choice_list(hwnd, hdc);
             self.paint_run_configurations(hwnd, hdc);
+            self.paint_ai_provider(hwnd, hdc);
             self.paint_hot_tip(hdc, hwnd);
             SelectObject(hdc, old_font);
             present(hdc);

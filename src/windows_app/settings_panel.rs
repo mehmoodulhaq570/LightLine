@@ -73,7 +73,7 @@ const ROWS: &[Row] = &[
     Row::Heading("MARKDOWN"),
     Row::Toggle(Setting::MarkdownImages),
     Row::Heading("AI ASSISTANT"),
-    Row::Info(Setting::AiEndpoint),
+    Row::Choice(Setting::AiEndpoint),
     Row::Info(Setting::AiModel),
     Row::OpenJson,
 ];
@@ -277,6 +277,7 @@ impl App {
                 lightline::syntax::set_parse_limit_kb(next_kb);
                 self.save_settings_change(hwnd);
             }
+            Row::Choice(Setting::AiEndpoint) => self.show_ai_provider(hwnd, false),
             Row::OpenJson if contains(self.settings_json_button(rect), x, y) => {
                 self.open_settings(hwnd);
             }

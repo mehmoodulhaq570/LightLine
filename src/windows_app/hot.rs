@@ -38,6 +38,7 @@ impl App {
     pub(super) fn hot_at(&self, hwnd: HWND, x: i32, y: i32) -> Option<Hot> {
         if self.run_choice.is_some()
             || self.run_config_panel.is_some()
+            || self.ai_provider.is_some()
             || self.editor_context.is_some()
             || self.more_menu.is_some()
             || self.quick_open

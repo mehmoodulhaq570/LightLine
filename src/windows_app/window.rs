@@ -298,6 +298,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                     app.run_config_hover(hwnd, point.x, point.y);
                     return 1;
                 }
+                if app.ai_provider.is_some() {
+                    app.ai_provider_hover(hwnd, point.x, point.y);
+                    return 1;
+                }
                 let over_ai = app.ai_assistant_visible
                     && !app.welcome
                     && !app.quick_open
@@ -563,6 +567,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             unsafe { ScreenToClient(hwnd, &mut point) };
             if app.run_config_panel.is_some() {
                 app.run_config_scroll(hwnd, (wparam >> 16) as i16 as i32, point.x);
+                return 0;
+            }
+            if app.ai_provider.is_some() {
+                app.ai_provider_scroll(hwnd, (wparam >> 16) as i16 as i32);
                 return 0;
             }
             if app.editor_context.is_some() {

@@ -101,14 +101,12 @@ impl Server {
     fn status_error(&self, status: u16, body: &str) -> String {
         let host = host(&self.endpoint);
         let message = match status {
+            // The way to a new key (the provider card) is named by whoever
+            // shows this.
             401 if self.key.is_some() => format!(
-                "{host} didn't accept the API key. Set a new one with AI: Set API Key\u{2026} \
-                 in the Command Palette."
+                "{host} didn't accept the API key. Check that it's complete and still active."
             ),
-            401 => format!(
-                "{host} needs an API key. Set one with AI: Set API Key\u{2026} in the \
-                 Command Palette."
-            ),
+            401 => format!("{host} needs an API key."),
             429 => format!(
                 "{host} is limiting requests, or the account's quota is used up. Wait a \
                  minute and try again, or check the plan and billing with the service."
