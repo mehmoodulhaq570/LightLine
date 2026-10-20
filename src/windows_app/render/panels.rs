@@ -2395,6 +2395,12 @@ impl App {
 
     fn paint_extensions_panel(&self, hdc: HDC, left: i32, right: i32, bottom: i32, clip: RECT) {
         let s = |v: i32| self.scale(v);
+        // This narrow panel has a lot of information. Use one quiet surface
+        // colour and reserve the bright accent for selection and actions.
+        let surface = ui(12, 22, 39);
+        let outline = ui(38, 58, 91);
+        let quiet = ui(135, 159, 198);
+        let accent = ui(56, 189, 248);
 
         let search = RECT {
             left: left + s(8),
@@ -2411,7 +2417,7 @@ impl App {
             } else {
                 ui(42, 62, 96)
             },
-            ui(13, 22, 39),
+            surface,
         );
         let mx = search.left + s(15);
         let my = (search.top + search.bottom) / 2;
@@ -2420,7 +2426,7 @@ impl App {
             if self.extensions_search_active {
                 ui(56, 189, 248)
             } else {
-                ui(103, 132, 176)
+                quiet
             },
             |hdc| unsafe {
                 Ellipse(hdc, mx - s(5), my - s(5), mx + s(5), my + s(5));
@@ -2450,7 +2456,7 @@ impl App {
                 if self.extensions_search_active {
                     self.theme.text
                 } else {
-                    self.theme.muted
+                    quiet
                 },
                 search_clip,
             );
@@ -2472,7 +2478,7 @@ impl App {
         // Compact funnel icon; search remains the real filtering mechanism.
         if self.extensions_query.is_empty() {
             let fx = search.right - s(20);
-            self.stroke(hdc, ui(103, 132, 176), |hdc| unsafe {
+            self.stroke(hdc, quiet, |hdc| unsafe {
                 MoveToEx(hdc, fx - s(5), my - s(5), null_mut());
                 LineTo(hdc, fx + s(5), my - s(5));
                 LineTo(hdc, fx + s(1), my);
@@ -2489,7 +2495,7 @@ impl App {
             right: right - s(8),
             bottom: s(122),
         };
-        self.panel_card(hdc, tabs, s(5), ui(31, 47, 77), ui(13, 22, 39));
+        self.panel_card(hdc, tabs, s(5), outline, surface);
         let half = (tabs.right - tabs.left) / 2;
         let market = RECT {
             left: tabs.left + s(2),
@@ -2508,7 +2514,7 @@ impl App {
         } else {
             installed
         };
-        self.panel_card(hdc, selected, s(4), ui(56, 189, 248), ui(27, 57, 103));
+        self.panel_card(hdc, selected, s(4), accent, ui(24, 54, 98));
         let tab_label = |app: &App, label: &str, rect: RECT, active: bool| {
             let width = app.text_width(hdc, label);
             Self::label(
@@ -2517,9 +2523,9 @@ impl App {
                 rect.left + (rect.right - rect.left - width) / 2,
                 rect.top + s(5),
                 if active {
-                    label_on(ui(27, 57, 103), 245, 250, 255)
+                    label_on(ui(24, 54, 98), 245, 250, 255)
                 } else {
-                    ui(154, 174, 207)
+                    quiet
                 },
                 rect,
             );
@@ -2556,16 +2562,8 @@ impl App {
                 hdc,
                 rect,
                 s(5),
-                if active {
-                    ui(56, 189, 248)
-                } else {
-                    ui(35, 50, 78)
-                },
-                if active {
-                    ui(26, 55, 98)
-                } else {
-                    ui(15, 24, 43)
-                },
+                if active { accent } else { outline },
+                if active { ui(24, 54, 98) } else { surface },
             );
             let label_width = self.text_width(hdc, label);
             self.label_ellipsis(
@@ -2574,9 +2572,9 @@ impl App {
                 rect.left + ((rect.right - rect.left - label_width) / 2).max(s(5)),
                 rect.top + s(4),
                 if active {
-                    label_on(ui(26, 55, 98), 235, 246, 255)
+                    label_on(ui(24, 54, 98), 235, 246, 255)
                 } else {
-                    ui(151, 171, 204)
+                    quiet
                 },
                 RECT {
                     left: rect.left + s(4),
@@ -2589,43 +2587,35 @@ impl App {
         }
 
         let visible = self.filtered_extensions();
-        let section_y = s(170);
+        let section_y = s(164);
         let section_name = if self.extensions_tab == ExtensionsTab::Installed {
             "INSTALLED"
         } else {
-            "RECOMMENDED"
+            "PICKS FOR YOU"
         };
         Self::label(
             hdc,
             section_name,
             left + s(10),
             section_y,
-            ui(156, 181, 220),
+            ui(176, 199, 232),
             clip,
         );
-        let heading_width = self.text_width(hdc, section_name);
-        let count = visible.len().to_string();
-        // Sized to the number: a registry search can match hundreds.
-        let badge_left = left + s(18) + heading_width;
-        let badge_right = badge_left + self.text_width(hdc, &count) + s(18);
-        let badge = RECT {
-            left: badge_left,
-            top: section_y - s(2),
-            right: badge_right,
-            bottom: section_y + s(20),
-        };
-        self.panel_card(hdc, badge, s(10), ui(47, 68, 105), ui(24, 39, 67));
+        let count = format!("{} results", visible.len());
+        let count_width = self.text_width(hdc, &count);
         Self::label(
             hdc,
             &count,
-            badge.left + s(9),
+            right - s(10) - count_width,
             section_y,
-            ui(214, 227, 248),
-            badge,
+            quiet,
+            clip,
         );
 
-        let mut y = s(194);
-        let card_h = s(116);
+        let mut y = s(186);
+        // Keep the recommendations compact enough that the live capability
+        // summary remains visible in a typical sidebar height.
+        let card_h = s(132);
         let gap = s(8);
         if visible.is_empty() {
             let message = if self.extensions_tab == ExtensionsTab::Installed {
@@ -2663,18 +2653,22 @@ impl App {
                 right: right - s(8),
                 bottom: y + card_h,
             };
-            self.panel_card(hdc, card, s(6), ui(39, 59, 94), ui(13, 24, 43));
-            // A restrained top highlight gives each entry the layered card
-            // treatment from the visual mockup without increasing density.
+            self.panel_card(hdc, card, s(7), outline, surface);
+            let category_color = match ext.id.as_str() {
+                "prettier" => ui(86, 182, 240),
+                "material-icons" => ui(58, 207, 128),
+                "dracula" => ui(174, 109, 242),
+                _ => ui(103, 132, 176),
+            };
             Self::fill(
                 hdc,
                 RECT {
-                    left: card.left + s(7),
-                    top: card.top + s(1),
-                    right: card.right - s(7),
-                    bottom: card.top + s(2),
+                    left: card.left,
+                    top: card.top + s(8),
+                    right: card.left + s(3),
+                    bottom: card.bottom - s(8),
                 },
-                ui(27, 45, 73),
+                category_color,
             );
             let icon = RECT {
                 left: card.left + s(10),
@@ -2751,7 +2745,7 @@ impl App {
                 hdc,
                 title,
                 content_x,
-                card.top + s(9),
+                card.top + s(12),
                 ink(244, 248, 255),
                 RECT {
                     left: content_x,
@@ -2765,7 +2759,7 @@ impl App {
                 hdc,
                 &ext.version,
                 version_left,
-                card.top + s(9),
+                card.top + s(12),
                 ui(130, 151, 184),
                 RECT {
                     left: version_left,
@@ -2778,7 +2772,7 @@ impl App {
                 hdc,
                 &ext.description,
                 content_x,
-                card.top + s(36),
+                card.top + s(39),
                 ui(167, 186, 216),
                 RECT {
                     left: content_x,
@@ -2791,7 +2785,7 @@ impl App {
                 hdc,
                 &ext.publisher,
                 content_x,
-                card.top + s(62),
+                card.top + s(63),
                 ui(111, 137, 177),
                 RECT {
                     left: content_x,
@@ -2800,18 +2794,21 @@ impl App {
                     bottom: card.bottom,
                 },
             );
-            self.label_ellipsis(
+            let category = ext.category().label();
+            let category_rect = RECT {
+                left: content_x,
+                top: card.top + s(85),
+                right: content_x + self.text_width(hdc, category) + s(14),
+                bottom: card.top + s(109),
+            };
+            Self::rounded_fill(hdc, category_rect, s(9), ui(20, 36, 63));
+            Self::label(
                 hdc,
-                ext.category().label(),
-                content_x,
-                card.top + s(87),
-                ui(111, 137, 177),
-                RECT {
-                    left: content_x,
-                    top: card.top,
-                    right: card.right - s(92),
-                    bottom: card.bottom,
-                },
+                category,
+                category_rect.left + s(7),
+                category_rect.top + s(4),
+                category_color,
+                category_rect,
             );
             let action_text = if ext.installing {
                 "Checking..."
@@ -2829,9 +2826,9 @@ impl App {
             });
             let action = RECT {
                 left: card.right - s(10) - action_width,
-                top: card.top + s(80),
+                top: card.top + s(82),
                 right: card.right - s(10),
-                bottom: card.top + s(106),
+                bottom: card.top + s(116),
             };
             if ext.installing {
                 self.panel_card(hdc, action, s(4), ui(56, 189, 248), ui(22, 48, 83));
@@ -2840,7 +2837,7 @@ impl App {
                     hdc,
                     action_text,
                     action.left + (action.right - action.left - width) / 2,
-                    action.top + s(4),
+                    action.top + s(8),
                     ui(190, 228, 250),
                     action,
                 );
@@ -2851,19 +2848,19 @@ impl App {
                     hdc,
                     action_text,
                     action.left + (action.right - action.left - width) / 2,
-                    action.top + s(4),
+                    action.top + s(8),
                     ui(202, 250, 220),
                     action,
                 );
             } else {
-                Self::rounded_fill(hdc, action, s(4), ui(15, 116, 177));
+                Self::rounded_fill(hdc, action, s(5), ui(18, 126, 190));
                 let width = self.text_width(hdc, action_text);
                 Self::label(
                     hdc,
                     action_text,
                     action.left + (action.right - action.left - width) / 2,
-                    action.top + s(4),
-                    label_on(ui(15, 116, 177), 255, 255, 255),
+                    action.top + s(8),
+                    label_on(ui(18, 126, 190), 255, 255, 255),
                     action,
                 );
             }
@@ -2872,24 +2869,56 @@ impl App {
 
         let capabilities_top = y + s(8);
         self.color_theme_row.set(None);
-        if capabilities_top + s(136) < bottom {
-            Self::fill(
+        if capabilities_top + s(132) < bottom {
+            self.panel_card(
                 hdc,
                 RECT {
                     left: left + s(8),
                     top: capabilities_top,
                     right: right - s(8),
-                    bottom: capabilities_top + s(1),
+                    bottom: capabilities_top + s(132),
                 },
-                ui(35, 52, 84),
+                s(7),
+                outline,
+                surface,
             );
             Self::label(
                 hdc,
-                "ACTIVE CAPABILITIES",
+                "YOUR WORKSPACE",
                 left + s(10),
                 capabilities_top + s(12),
-                ui(156, 181, 220),
+                ui(176, 199, 232),
                 clip,
+            );
+            self.panel_card(
+                hdc,
+                RECT {
+                    left: right - s(70),
+                    top: capabilities_top + s(7),
+                    right: right - s(10),
+                    bottom: capabilities_top + s(29),
+                },
+                s(11),
+                ui(31, 103, 76),
+                ui(18, 54, 46),
+            );
+            Self::label(
+                hdc,
+                "• Ready",
+                right - s(64),
+                capabilities_top + s(11),
+                ui(120, 231, 177),
+                clip,
+            );
+            Self::fill(
+                hdc,
+                RECT {
+                    left: left + s(16),
+                    top: capabilities_top + s(36),
+                    right: right - s(16),
+                    bottom: capabilities_top + s(37),
+                },
+                outline,
             );
             let prettier_ready = self
                 .extensions
@@ -2899,29 +2928,29 @@ impl App {
                 .extensions
                 .iter()
                 .any(|ext| ext.id == "material-icons" && ext.installed);
-            let theme_detail = format!("{} (click to change)", self.color_theme_name());
+            let theme_detail = format!("{}  ›", self.color_theme_name());
             let rows = [
                 (
-                    "Formatter",
+                    "Formatting",
                     if prettier_ready {
-                        "Prettier ready"
+                        "Prettier available"
                     } else {
-                        "Built-in JSON/TOML ready"
+                        "Built-in formatter"
                     },
                 ),
                 (
-                    "Icon Theme",
+                    "File icons",
                     if material_ready {
-                        "Material Icon Theme active"
+                        "Material active"
                     } else {
-                        "Built-in icons active"
+                        "Built-in icons"
                     },
                 ),
-                ("Color Theme", theme_detail.as_str()),
+                ("Color theme", theme_detail.as_str()),
             ];
             for (index, (name, detail)) in rows.iter().enumerate() {
-                let row_y = capabilities_top + s(38 + index as i32 * 32);
-                if *name == "Color Theme" {
+                let row_y = capabilities_top + s(46 + index as i32 * 27);
+                if *name == "Color theme" {
                     // Clicking this row opens the theme picker (input.rs).
                     self.color_theme_row.set(Some(RECT {
                         left: left + s(8),

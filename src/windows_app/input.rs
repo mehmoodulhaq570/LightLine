@@ -1910,9 +1910,9 @@ impl App {
                 }
 
                 // 4. Card action button click
-                let card_h = s(116);
+                let card_h = s(132);
                 let card_step = card_h + s(8);
-                let start_y = s(194);
+                let start_y = s(186);
                 let visible = self.filtered_extensions();
                 let bottom = (panel_bottom - self.scale(STATUS)).max(0);
                 if y >= start_y {
@@ -1929,10 +1929,10 @@ impl App {
                         } else {
                             72
                         });
-                        let btn_h = s(26);
+                        let btn_h = s(34);
                         let btn_left = card_right - btn_w - s(10);
                         let btn_right = card_right - s(10);
-                        let btn_top = ey + s(80);
+                        let btn_top = ey + s(82);
                         let btn_bottom = btn_top + btn_h;
 
                         // Generous hit box around the button
