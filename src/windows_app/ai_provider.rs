@@ -1017,26 +1017,18 @@ impl App {
                 );
             }
             let middle = (row.top + row.bottom) / 2;
-            let dot = RECT {
-                left: row.left + s(12),
-                top: middle - s(7),
-                right: row.left + s(26),
-                bottom: middle + s(7),
-            };
-            self.panel_card(hdc, dot, s(14), theme.muted, theme.editor_bg);
-            if chosen {
-                Self::rounded_fill(
-                    hdc,
-                    RECT {
-                        left: dot.left + s(4),
-                        top: dot.top + s(4),
-                        right: dot.right - s(4),
-                        bottom: dot.bottom - s(4),
-                    },
-                    s(6),
-                    theme.violet,
-                );
-            }
+            // Fractional sizes keep the circle round at 125% and 150%.
+            let unit = s(100) as f32 / 100.0;
+            super::image_view::smooth_radio(
+                hdc,
+                (row.left + s(19)) as f32,
+                middle as f32,
+                8.0 * unit,
+                1.5 * unit,
+                if chosen { theme.violet } else { theme.muted },
+                theme.editor_bg,
+                chosen.then_some((4.0 * unit, theme.violet)),
+            );
             let name = PROVIDERS[index].name;
             self.label_mid(hdc, name, row.left + s(38), middle, theme.text, row);
             let note_left = row.left + s(38) + s(110).max(self.text_width(hdc, name) + s(16));

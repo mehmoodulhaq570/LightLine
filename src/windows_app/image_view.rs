@@ -46,6 +46,70 @@ fn ensure_gdiplus() {
     });
 }
 
+// A GDI color (0x00BBGGRR) as GDI+'s opaque ARGB.
+fn argb_of(color: u32) -> u32 {
+    argb(color as u8, (color >> 8) as u8, (color >> 16) as u8)
+}
+
+/// An anti-aliased radio button centered on (`cx`, `cy`): a disc of `body`
+/// with a `ring`-colored outline `width` thick, and an inner dot of `dot`
+/// (radius, color) when chosen. GDI's own ellipses have jagged edges at
+/// this size; GDI+ is already loaded for images, and this runs only for
+/// the few radios on screen.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn smooth_radio(
+    hdc: HDC,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    width: f32,
+    ring: u32,
+    body: u32,
+    dot: Option<(f32, u32)>,
+) {
+    ensure_gdiplus();
+    unsafe {
+        let mut graphics = null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) != 0 {
+            return;
+        }
+        GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+        GdipSetPixelOffsetMode(graphics, PixelOffsetModeHalf);
+        let mut brush = null_mut();
+        GdipCreateSolidFill(argb_of(body), &mut brush);
+        GdipFillEllipse(
+            graphics,
+            brush as *mut GpBrush,
+            cx - radius,
+            cy - radius,
+            radius * 2.0,
+            radius * 2.0,
+        );
+        GdipDeleteBrush(brush as *mut GpBrush);
+        // The pen is centered on the path: inset it so the ring stays
+        // inside `radius`.
+        let mut pen = null_mut();
+        GdipCreatePen1(argb_of(ring), width, UnitPixel, &mut pen);
+        let r = radius - width / 2.0;
+        GdipDrawEllipse(graphics, pen, cx - r, cy - r, r * 2.0, r * 2.0);
+        GdipDeletePen(pen);
+        if let Some((dot_radius, color)) = dot {
+            let mut brush = null_mut();
+            GdipCreateSolidFill(argb_of(color), &mut brush);
+            GdipFillEllipse(
+                graphics,
+                brush as *mut GpBrush,
+                cx - dot_radius,
+                cy - dot_radius,
+                dot_radius * 2.0,
+                dot_radius * 2.0,
+            );
+            GdipDeleteBrush(brush as *mut GpBrush);
+        }
+        GdipDeleteGraphics(graphics);
+    }
+}
+
 pub(super) struct ImageAsset {
     bitmap: HBITMAP,
     pub(super) width: i32,
