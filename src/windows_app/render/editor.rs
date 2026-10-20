@@ -1045,6 +1045,7 @@ impl App {
                         }
                     }
                 }
+                self.paint_run_choice_button(hwnd, hdc);
             }
 
             // Persistent command center: a compact, clickable Ctrl+P surface
@@ -1645,7 +1646,7 @@ impl App {
             self.paint_completion(hdc, rect, editor_bottom);
             self.paint_editor_context_menu(hdc, hwnd);
             self.paint_more_menu(hdc, hwnd);
-            self.paint_run_choice(hwnd, hdc);
+            self.paint_run_choice_list(hwnd, hdc);
             self.paint_run_configurations(hwnd, hdc);
             self.paint_hot_tip(hdc, hwnd);
             SelectObject(hdc, old_font);

@@ -1,6 +1,9 @@
 use super::*;
 use lightline::run_config::Configurations;
 
+// run.json's path, its modified time and length, and the selected name in it.
+pub(super) type ShownName = (PathBuf, Option<(std::time::SystemTime, u64)>, String);
+
 impl App {
     pub(super) fn run_choice_rect(&self, hwnd: HWND) -> Option<RECT> {
         if self.welcome || self.run_configuration_root().is_none() {
@@ -152,17 +155,39 @@ impl App {
         true
     }
 
-    pub(super) fn paint_run_choice(&self, hwnd: HWND, hdc: HDC) {
+    // The selected configuration's name, reloaded only when run.json changes
+    // (a stat per paint instead of reading and parsing the file).
+    fn run_choice_name(&self, root: &Path) -> String {
+        let path = Configurations::path(root);
+        let stamp = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| Some((m.modified().ok()?, m.len())));
+        let mut cache = self.run_choice_name.borrow_mut();
+        if let Some((cached, cached_stamp, name)) = cache.as_ref()
+            && *cached == path
+            && *cached_stamp == stamp
+        {
+            return name.clone();
+        }
+        let name = Configurations::load(root)
+            .ok()
+            .and_then(|s| s.selected)
+            .unwrap_or_else(|| "Automatic".to_string());
+        *cache = Some((path, stamp, name.clone()));
+        name
+    }
+
+    // The closed button, drawn with the tab strip so popups such as Quick Open
+    // cover it.
+    pub(super) fn paint_run_choice_button(&self, hwnd: HWND, hdc: HDC) {
         let Some(button) = self.run_choice_rect(hwnd) else {
             return;
         };
-        let saved = self
-            .run_configuration_root()
-            .and_then(|root| Configurations::load(&root).ok());
-        let name = saved
-            .as_ref()
-            .and_then(|s| s.selected.as_deref())
-            .unwrap_or("Automatic");
+        let Some(root) = self.run_configuration_root() else {
+            return;
+        };
+        let name = self.run_choice_name(&root);
+        let old_font = unsafe { SelectObject(hdc, self.ui_font) };
         self.panel_card(
             hdc,
             button,
@@ -172,7 +197,7 @@ impl App {
         );
         self.label_mid(
             hdc,
-            name,
+            &name,
             button.left + self.scale(9),
             (button.top + button.bottom) / 2,
             self.theme.text,
@@ -189,6 +214,13 @@ impl App {
             self.theme.muted,
             button,
         );
+        unsafe {
+            SelectObject(hdc, old_font);
+        }
+    }
+
+    // The open list, drawn over everything else.
+    pub(super) fn paint_run_choice_list(&self, hwnd: HWND, hdc: HDC) {
         if let Some((saved, selected, first)) = &self.run_choice {
             for (row, rect) in self.run_choice_rows(hwnd).into_iter().enumerate() {
                 let index = row + first;

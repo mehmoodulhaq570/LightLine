@@ -754,6 +754,9 @@ pub(super) struct App {
     // The menu behind a pane's "..." button.
     pub(super) more_menu: Option<MoreMenu>,
     pub(super) run_choice: Option<(lightline::run_config::Configurations, usize, usize)>,
+    // The name the Run dropdown shows, keyed by run.json's path and stamp, so
+    // painting doesn't read and parse the file every frame.
+    pub(super) run_choice_name: RefCell<Option<run_choice::ShownName>>,
     pub(super) run_config_panel: Option<run_config_ui::RunConfigPanel>,
     // How far the Settings view in the side panel is scrolled, in pixels.
     pub(super) settings_scroll: i32,
@@ -1359,6 +1362,7 @@ impl App {
             editor_context: None,
             more_menu: None,
             run_choice: None,
+            run_choice_name: RefCell::new(None),
             run_config_panel: None,
             settings_scroll: 0,
             dragging: false,

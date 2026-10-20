@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Fixed
+
+- **Run Dropdown Showing Through Popups**: In a narrow editor (with the AI Assistant open, say), the **Automatic** box beside Run was drawn on top of Quick Open and other popups. Popups now cover it; its open list still shows above everything. It also no longer reads `.lightline/run.json` on every redraw, only when the file has changed.
+
 ## [v0.6.0] - 2026-10-15
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.6.0-windows-x86_64.zip`, `lightline-v0.6.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
