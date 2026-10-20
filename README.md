@@ -33,8 +33,8 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 - **Git built in**: see changed lines in the margin and who last changed the current line, then stage, commit, push and review diffs without leaving the editor.
 - **Terminal**: PowerShell, Command Prompt, Git Bash or WSL, in tabs.
 - **Markdown preview**: see your README rendered beside the file as you type.
-- **AI Assistant (optional)**: ask about your code using a model on your own PC through [Ollama](https://ollama.com), or bring your own API key for OpenAI or another OpenAI-compatible service. Off until you turn it on.
-- **Themes and icons**: install color and icon themes from the Zed extension registry.
+- **AI Assistant (optional)**: ask about your code using a model on your own PC through [Ollama](https://ollama.com), or bring your own API key for OpenAI, OpenRouter, Groq or another OpenAI-compatible service. **AI: Choose Provider** sets it up in one card: pick the service, paste the key, and it checks the connection and lists the models. Off until you turn it on.
+- **Extensions, themes and icons**: browse featured extensions, themes and formatters; search the marketplace, install or review extensions, and see the active formatter, file icon theme and color theme in the workspace summary. Color themes can be changed from that summary.
 - **Picks up where you left off**: your folder, tabs and cursor positions come back when you reopen it.
 
 ## Get started

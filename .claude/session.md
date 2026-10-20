@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-10-14 (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: wheel scrolling moves rows instead of redrawing them" at the end.
+Updated: 2026-10-20 (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: Run dropdown under popups, AI provider card" at the end.
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -54,7 +54,7 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 
 ## Current handoff
 
-- As of 2026-10-14, `main` is at `9851f97` (v0.5.0 released, Scoop bot commit on top). The scroll work in the last section is not committed.
+- As of 2026-10-20, v0.6.0 is released (2026-10-15, `0cb0a0a` notes, `21b32a7` Scoop bot) and `main` is at `0790012`. The Run dropdown fix (`d7813b3`), AI provider card (`94ba847`) and smooth radios (`14da2df`) are committed; the docs updates in the last two sections (CHANGELOG, README, this file) are not. Open GitHub issues: #43, #35, #13.
 - The sections below are in date order; the last one is the newest.
 - Preserve concurrent/user changes and inspect Git status before editing. Do not commit or publish unless requested.
 - User prefers direct implementation and live app verification, and wants new UI to match LightLine's own design.
@@ -215,3 +215,20 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 - Measured (release, perf crate, UI-thread Mcycles): per wheel notch baseline ~15.6 → ~13 with everything on (~11 with the four off); per keystroke (keys ~0.33 s apart) baseline ~25 → ~30–31 all on, ~25 all off; the extra is the minimap catching up after each pause (the other three cost ~0–1). Burst-typing measurements were too noisy (rust-analyzer) to use.
 - Pre-existing, not fixed: typing a second burst mid-line in a plain .txt leaves ClearType fringe differences on the line above (also on HEAD: 2,096 px with minimap_timer_click.py). Something redraws that row's text without clearing its background.
 - Fixture lesson: `git stash` round-trips rewrite files CRLF here (autocrlf); the working tree is LF — strip CRs after a pop. `cargo fmt` (whole crate) strips the user's two trailing blank lines in build.rs; run rustfmt on single files.
+
+## Follow-up: Extensions panel redesign (2026-10-20, uncommitted)
+
+- Updated `src/windows_app/render/panels.rs` to match the approved Extensions panel design: the Marketplace section is titled **PICKS FOR YOU** with a right-aligned result count; extension cards have more vertical breathing room and align the icon, title/version, description, publisher, category chip and install state; the status card is now **YOUR WORKSPACE** with a Ready badge, concise formatter/icon-theme state and clickable color-theme row.
+- Updated `src/windows_app/input.rs` card geometry to match the taller cards and repositioned install buttons, preserving their click targets.
+- Added a standalone visual reference at `design/extensions-cards-design.svg`; the full workbench concept is `design/extensions-redesign.svg`.
+- Updated README's feature list and the Unreleased Added changelog entry. No build or tests were run for this UI/documentation change.
+
+## Follow-up: Run dropdown under popups, AI provider card (2026-10-20, committed)
+
+- Run dropdown (`d7813b3`): run_choice.rs split into `paint_run_choice_button` (drawn with the tab strip in render/editor.rs, inside its `shows(...)` block, so Quick Open and other popups cover it) and `paint_run_choice_list` (still last). The shown name is cached in `App::run_choice_name` (type `run_choice::ShownName`), keyed by run.json's path, modified time and length: one stat per paint instead of reading and parsing the file. Visible bug only in a narrow editor (AI panel open), where the button sits under the centered Quick Open; checked off-screen at 1150 px (driver `run_choice_check.py`, env `W` for width).
+- AI provider card (`94ba847`): windows_app/ai_provider.rs, `App::ai_provider: Option<ProviderCard>`, a modal card over the workbench like Run Configurations (covers it with shell_bg; routed at every `run_config_panel` check: key, char, click, drag, right-click, hover, WM_SETCURSOR, wheel, hot.rs, scroll_blit `nothing_over_panes`, editor.rs fast-path guard, both paint paths). `PROVIDERS`: Ollama, OpenAI (`https://api.openai.com`), OpenRouter (`https://openrouter.ai/api`), Groq (`https://api.groq.com/openai`), Other (URL field); `provider_for` maps an endpoint back. Key field shows dots; Ctrl+V into it checks at once; Enter in URL/key checks. Check = `ai_check_provider` (ai_chat.rs) → `AiEvent::Provider(generation, result)` → `provider_checked`; stale generations ignored. Opens and provider changes auto-check when nothing is missing (local, or a key is saved/typed). Save & Connect before a passed check runs the check and saves on success (`save_when_passed`); saving writes the key (`ai::save_key`), `aiEndpoint`, `aiModel`, `ai.models`, then opens/focuses the AI panel. Fields are append-only (type, Backspace, Ctrl+Backspace, Ctrl+V), no caret movement or selection.
+- Entry points: palette **AI: Choose Provider…** (64) and **AI: Set API Key…** (60, opens with the key field focused); `AiHits::provider` (setup screen's **Change provider…** button) and `model_provider` (third action row of the model menu, menu now 451 px max); Settings **Server** row is now `Row::Choice(AiEndpoint)`. The old in-composer key box (`AiChat::key_entry`, `ai_save_key`, `ai_key_entry_key`, `ai_start_key_entry`) is gone. ai.rs 401 messages no longer name a command; chat errors containing "API key" get " Change it with AI: Choose Provider…" appended in poll_ai.
+- Smooth radios (`14da2df`): `image_view::smooth_radio` draws an anti-aliased disc/ring/dot with GDI+ (already started for images; `ensure_gdiplus`), fractional sizes from `scale(100)/100`. GDI RoundRect (and panel_card's two stacked RoundRects) looked jagged at this size.
+- Verified (debug, off-screen, own APPDATA, no clipboard use): driver `provider_check.py` (scratchpad) with a fake OpenAI-style server reached as `lightline.localtest.me:<port>`: wrong key → plain refusal, no key text; right key → 3 of 5 models (embedding/whisper filtered), gpt-4.1-mini picked; Ctrl+Enter saved endpoint and model, key not in settings.json; reopening auto-checked with the saved key. `MODE=ollama` run: Ollama not running → "Is Ollama running?…" with **Get Ollama**; OpenAI shows the key field and **Get a key** without any request. Screenshots under target/live-verification/ai-provider/ (run2, ollama, radio). Tests: 220 lib, 101 bin (2 new in ai_provider.rs), 9 integration; all-target Clippy `-D warnings` and fmt clean.
+- Live-test lesson: the test writes a real Credential Manager entry `LightLine AI API key: lightline.localtest.me:<port>`. `cmdkey /delete` can't take a target with spaces; delete with `CredDeleteW(target, 1, 0)` from Python ctypes and confirm with `cmdkey /list`. Also: Bash heredocs here drop `\u` escapes, so edit Rust files containing `\u{...}` with the Edit tool, not a heredoc'd Python script.
+- Not done: Ollama success path not seen live (Ollama wasn't running); the user's open release build (`target\release\lightline.exe`) predates these changes until rebuilt.
