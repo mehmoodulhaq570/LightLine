@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.7.0-windows-x86_64.zip`, `lightline-v0.7.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
 
+As fast as v0.6.0: the new provider card and Extensions panel cost nothing until they're opened. Measured on the release builds of both versions (x64; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running): about 7 million CPU cycles of work on the window's thread per keystroke on both, a start of about 0.11 s to a responding window, and 0–1 wakeups a second while idle in the background.
+
 #### Added
 
 - **A Clearer Extensions Panel**: Browse featured extensions, themes and formatters in redesigned cards with publisher, version, category and install status. The workspace summary shows the formatter, file icon theme and color theme in use; click the color theme to change it. The Installed tab and extension search remain available.
