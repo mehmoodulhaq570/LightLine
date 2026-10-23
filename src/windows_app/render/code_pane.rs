@@ -182,6 +182,18 @@ impl App {
             let active_guide = self.active_guide(pane);
             let active_guide_brush =
                 CreateSolidBrush(blend(self.theme.editor_bg, self.theme.muted, 0.85));
+            // Sticky scroll's pinned lines, drawn over the top rows after
+            // them: the rows they cover entirely aren't drawn at all. A wheel
+            // notch redraws that strip, so those rows were drawn and then
+            // hidden on every notch.
+            let sticky = self.sticky_lines(hwnd, pane);
+            // Their strip ends with a one-pixel line, which covers the top of
+            // the next row: that sliver alone being redrawn doesn't draw it.
+            let sticky_bottom = if sticky.is_empty() {
+                0
+            } else {
+                self.editor_top() + sticky.len() as i32 * self.line_height + self.scale(1).max(1)
+            };
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
@@ -259,11 +271,12 @@ impl App {
                     }
                     screen_row += 1;
                     if !line_shows
+                        || y + self.line_height <= sticky_bottom
                         || RectVisible(
                             hdc,
                             &RECT {
                                 left,
-                                top: y,
+                                top: y.max(sticky_bottom),
                                 right: rows_right,
                                 bottom: y + self.line_height,
                             },
@@ -927,7 +940,7 @@ impl App {
             }
             // Sticky scroll's pinned lines go over the top rows (and any
             // caret there).
-            self.paint_sticky(hdc, hwnd, pane, left, right);
+            self.paint_sticky(hdc, pane, sticky, left, right);
             // The minimap goes over the text's right end, like the scrollbar.
             self.paint_minimap(hdc, hwnd, pane);
             // The scrollbar goes over the text: a track with a thin edge, and

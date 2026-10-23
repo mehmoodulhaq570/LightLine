@@ -199,6 +199,14 @@ mod tests {
             .join("target")
             .join(format!("run-config-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
+        // Deleted when the test ends, pass or fail.
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
         std::fs::write(Configurations::path(&root), "{}")
             .or_else(|_| {
                 std::fs::create_dir_all(root.join(".lightline"))?;

@@ -5,6 +5,17 @@ use std::fs;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+/// Deletes a test's folder under target/ when the test ends, pass or fail.
+/// A language server still running in it can keep files open; then the
+/// folder stays, as before.
+struct Cleanup(std::path::PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 #[ignore = "requires a local rust-analyzer binary"]
 fn rust_analyzer_publishes_diagnostics_and_hover() {
@@ -12,6 +23,7 @@ fn rust_analyzer_publishes_diagnostics_and_hover() {
         .unwrap()
         .join("target")
         .join(format!("lsp-live-{}", std::process::id()));
+    let _cleanup = Cleanup(root.clone());
     let source = root.join("src").join("main.rs");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
@@ -153,6 +165,7 @@ fn pyright_publishes_diagnostics_and_hover() {
         .unwrap()
         .join("target")
         .join(format!("lsp-python-live-{}", std::process::id()));
+    let _cleanup = Cleanup(root.clone());
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("pyproject.toml"),

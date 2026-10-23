@@ -102,8 +102,15 @@ impl App {
 
     /// Draws `pane`'s pinned lines over the top of its code, with their
     /// numbers and colors, and a line under them.
-    pub(super) fn paint_sticky(&self, hdc: HDC, hwnd: HWND, pane: usize, left: i32, right: i32) {
-        let lines = self.sticky_lines(hwnd, pane);
+    /// `lines` is `sticky_lines` for the pane, worked out once by its paint.
+    pub(super) fn paint_sticky(
+        &self,
+        hdc: HDC,
+        pane: usize,
+        lines: Vec<usize>,
+        left: i32,
+        right: i32,
+    ) {
         if let Some(shown) = self.sticky_shown.borrow_mut().get_mut(pane) {
             shown.clone_from(&lines);
         }

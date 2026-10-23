@@ -564,33 +564,45 @@ impl App {
             let present = |hdc: HDC| {
                 RestoreDC(hdc, clip_state);
                 if hdc != window_dc {
-                    BitBlt(
-                        window_dc,
-                        dirty.left,
-                        dirty.top,
-                        dirty.right - dirty.left,
-                        dirty.bottom - dirty.top,
-                        hdc,
-                        dirty.left,
-                        dirty.top,
-                        SRCCOPY,
-                    );
-                    // BeginPaint's DC draws only inside the update region,
-                    // which leaves out most of the moved rows.
-                    if let Some(moved) = moved {
-                        let screen = GetDC(hwnd);
-                        BitBlt(
-                            screen,
-                            moved.left,
-                            moved.top,
-                            moved.right - moved.left,
-                            moved.bottom - moved.top,
-                            hdc,
-                            moved.left,
-                            moved.top,
-                            SRCCOPY,
-                        );
-                        ReleaseDC(hwnd, screen);
+                    match moved {
+                        // BeginPaint's DC draws only inside the update region,
+                        // which leaves out most of the moved rows. A window DC
+                        // copies them and what was drawn in one go: copying
+                        // each separately sent most of the pane twice.
+                        Some(moved) => {
+                            let both = RECT {
+                                left: dirty.left.min(moved.left),
+                                top: dirty.top.min(moved.top),
+                                right: dirty.right.max(moved.right),
+                                bottom: dirty.bottom.max(moved.bottom),
+                            };
+                            let screen = GetDC(hwnd);
+                            BitBlt(
+                                screen,
+                                both.left,
+                                both.top,
+                                both.right - both.left,
+                                both.bottom - both.top,
+                                hdc,
+                                both.left,
+                                both.top,
+                                SRCCOPY,
+                            );
+                            ReleaseDC(hwnd, screen);
+                        }
+                        None => {
+                            BitBlt(
+                                window_dc,
+                                dirty.left,
+                                dirty.top,
+                                dirty.right - dirty.left,
+                                dirty.bottom - dirty.top,
+                                hdc,
+                                dirty.left,
+                                dirty.top,
+                                SRCCOPY,
+                            );
+                        }
                     }
                 }
             };

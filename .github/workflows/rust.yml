@@ -16,7 +16,7 @@ jobs:
         runner: [windows-latest, windows-11-arm]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The ARM image may come without rustup; the x86_64 one has it
       # preinstalled.

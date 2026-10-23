@@ -328,7 +328,24 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-    fn fixture() -> PathBuf {
+    /// A test's own folder under target/, deleted when the test ends, pass
+    /// or fail: every run used to leave five behind.
+    struct Fixture(PathBuf);
+
+    impl std::ops::Deref for Fixture {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn fixture() -> Fixture {
         let root = std::env::current_dir()
             .unwrap()
             .join("target")
@@ -338,7 +355,7 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
         std::fs::create_dir_all(&root).unwrap();
-        root
+        Fixture(root)
     }
 
     fn write(root: &Path, name: &str, text: &str) -> PathBuf {
@@ -362,7 +379,7 @@ mod tests {
         );
         let file = write(&root, "src/helper.ts", "export const value = 42;");
         let plan = prepare_with(&file, tool).unwrap();
-        assert_eq!(plan.cwd, root);
+        assert_eq!(plan.cwd, *root);
         assert_eq!(plan.commands[0].program, Path::new("npm.exe"));
         assert_eq!(plan.commands[0].arguments, ["run", "start"]);
     }
@@ -383,7 +400,7 @@ mod tests {
         let ts = write(&root, "src/main.tsx", "const element = <div/>;");
         let plan = prepare_with(&ts, tool).unwrap();
         assert_eq!(plan.commands[0].program, executable);
-        assert_eq!(plan.cwd, root);
+        assert_eq!(plan.cwd, *root);
         let js = write(&root, "main.mjs", "console.log(42)");
         assert_eq!(
             prepare_with(&js, tool).unwrap().commands[0].program,

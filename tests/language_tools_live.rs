@@ -7,6 +7,17 @@ use std::fs;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+/// Deletes a test's folder under target/ when the test ends, pass or fail.
+/// A language server still running in it can keep files open; then the
+/// folder stays, as before.
+struct Cleanup(std::path::PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 #[ignore = "requires installed external formatters"]
 fn external_formatters_format_real_source() {
@@ -32,6 +43,7 @@ fn language_servers_publish_diagnostics_and_hover() {
         .unwrap()
         .join("target")
         .join(format!("language-tools-live-{}", std::process::id()));
+    let _cleanup = Cleanup(base.clone());
     for (language, file, source, line, character) in [
         (
             Language::C,

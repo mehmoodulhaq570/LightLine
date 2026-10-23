@@ -62,7 +62,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -211,7 +211,7 @@ jobs:
     steps:
       # For the Scoop manifest update at the end.
       - name: Check out main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 

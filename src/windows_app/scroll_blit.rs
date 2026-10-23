@@ -147,17 +147,41 @@ impl App {
         // bottom corners.
         // The minimap doesn't move with the rows: it's drawn again.
         let minimap = self.minimap_rect(hwnd, pane);
+        // It ends on a row boundary: rows scrolled in at the bottom then fill
+        // whole rows, and only one row (cut by the corners) is drawn below.
+        let top = self.editor_top();
+        let rows = (bottom - self.scale(CARD_RADIUS) - top) / self.line_height.max(1);
         let area = RECT {
             left: self.pane_left(hwnd, pane),
-            top: self.editor_top(),
+            top,
             right: minimap.map_or(track.left, |strip| strip.left),
-            bottom: bottom - self.scale(CARD_RADIUS),
+            bottom: top + rows * self.line_height,
         };
         let shift = -(moved as i32) * self.line_height;
-        let kept = area.bottom - area.top - shift.abs();
+        // Sticky scroll's pinned lines, before and after, are drawn anew.
+        // Only rows that were below the old ones and land below the new ones
+        // are moved: moving the old pinned lines along with the rows meant
+        // redrawing the rows they landed on, about as many again as the
+        // notch brought into view.
+        let strip = |count: usize| {
+            if count == 0 {
+                0
+            } else {
+                count as i32 * self.line_height + self.scale(1).max(1)
+            }
+        };
+        let sticky_after = self.sticky_lines(hwnd, pane).len();
+        let to_top = (area.top + strip(sticky_after)).max(area.top + strip(sticky_before) + shift);
+        let to_bottom = area.bottom.min(area.bottom + shift);
+        let kept = to_bottom - to_top;
         if kept <= 0 || area.right <= area.left {
             return false;
         }
+        let moved_rows = RECT {
+            top: to_top,
+            bottom: to_bottom,
+            ..area
+        };
         unsafe {
             // Parts waiting to be redrawn move with the rows they're on.
             let pending = CreateRectRgn(0, 0, 0, 0);
@@ -178,28 +202,26 @@ impl App {
             BitBlt(
                 buffer.dc,
                 area.left,
-                area.top + shift.max(0),
+                to_top,
                 area.right - area.left,
                 kept,
                 buffer.dc,
                 area.left,
-                area.top - shift.min(0),
+                to_top - shift,
                 SRCCOPY,
             );
         }
         let pane_right = self.pane_right(hwnd, pane);
         let mut redraw = vec![
-            // The rows scrolled into view...
-            if shift < 0 {
-                RECT {
-                    top: area.top + kept,
-                    ..area
-                }
-            } else {
-                RECT {
-                    bottom: area.top + shift,
-                    ..area
-                }
+            // The pinned lines and the rows scrolled into view under them...
+            RECT {
+                bottom: to_top,
+                ..area
+            },
+            // ...or at the bottom...
+            RECT {
+                top: to_bottom,
+                ..area
             },
             // ...the strip along the bottom corners, which shows part of a
             // row...
@@ -216,31 +238,19 @@ impl App {
             },
         ];
         redraw.extend(minimap);
-        // The pinned lines, before and after: the old ones moved with the
-        // rows.
-        let sticky_after = self.sticky_lines(hwnd, pane).len();
-        if sticky_before > 0 || sticky_after > 0 {
-            let edge = self.scale(1).max(1);
-            let height = (sticky_before as i32 * self.line_height + edge + shift.max(0))
-                .max(sticky_after as i32 * self.line_height + edge);
-            redraw.push(RECT {
-                bottom: (area.top + height).min(area.bottom),
-                ..area
-            });
-        }
-        for rect in &redraw {
+        for rect in redraw.iter().filter(|rect| rect.bottom > rect.top) {
             unsafe { InvalidateRect(hwnd, rect, 0) };
         }
         // The moved rows are in the backbuffer but not yet on screen: paint
         // copies them out with what it draws.
         self.blitted = Some(match self.blitted {
             Some(earlier) => RECT {
-                left: earlier.left.min(area.left),
-                top: earlier.top.min(area.top),
-                right: earlier.right.max(area.right),
-                bottom: earlier.bottom.max(area.bottom),
+                left: earlier.left.min(moved_rows.left),
+                top: earlier.top.min(moved_rows.top),
+                right: earlier.right.max(moved_rows.right),
+                bottom: earlier.bottom.max(moved_rows.bottom),
             },
-            None => area,
+            None => moved_rows,
         });
         true
     }

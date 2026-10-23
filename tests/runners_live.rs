@@ -10,14 +10,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-fn fixture(name: &str) -> PathBuf {
+/// A test's folder under target/, deleted when the test ends (pass or
+/// fail), with the run's parent folder once the last test is done with it.
+struct Fixture(PathBuf);
+
+impl std::ops::Deref for Fixture {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+        if let Some(parent) = self.0.parent() {
+            // Fails, harmlessly, while another test still has a folder in it.
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
+fn fixture(name: &str) -> Fixture {
     let root = std::env::current_dir()
         .unwrap()
         .join("target")
         .join(format!("runners-live-{}", std::process::id()))
         .join(name);
     fs::create_dir_all(&root).unwrap();
-    root
+    Fixture(root)
 }
 
 fn write(root: &Path, name: &str, text: &str) -> PathBuf {
