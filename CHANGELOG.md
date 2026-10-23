@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-10-23
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.7.0-windows-x86_64.zip`, `lightline-v0.7.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
 #### Added
 
 - **A Clearer Extensions Panel**: Browse featured extensions, themes and formatters in redesigned cards with publisher, version, category and install status. The workspace summary shows the formatter, file icon theme and color theme in use; click the color theme to change it. The Installed tab and extension search remain available.

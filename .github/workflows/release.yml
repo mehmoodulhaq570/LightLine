@@ -230,17 +230,37 @@ jobs:
           mv ../SHA256SUMS.txt SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # The release description is this version's section of CHANGELOG.md
+      # (everything under "## [vX.Y.Z]" up to the next "## [" heading), so the
+      # release page says what changed instead of pointing elsewhere.
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.release-request.outputs.version }}
+        run: |
+          awk -v heading="## [v$VERSION]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no section for v$VERSION"
+            exit 1
+          fi
+          cat release-notes.md
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.release-request.outputs.version }}
         run: |
           # --target: the tag goes on the commit that was built and tested,
-          # even if main has moved on since.
+          # even if main has moved on since. --generate-notes appends the
+          # "Full Changelog" compare link below the notes file.
           gh release create "v$VERSION" dist/* \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "LightLine v$VERSION" \
+            --notes-file release-notes.md \
             --generate-notes
 
       # This repository is also a Scoop bucket (bucket/lightline.json), so
