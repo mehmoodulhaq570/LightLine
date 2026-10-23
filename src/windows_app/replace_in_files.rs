@@ -19,6 +19,7 @@ pub(super) struct ReplaceRequest {
     pub(super) root: PathBuf,
     pub(super) query: String,
     pub(super) with: String,
+    pub(super) options: SearchOptions,
     pub(super) cancel: Arc<AtomicBool>,
 }
 
@@ -67,11 +68,15 @@ impl App {
         };
         let query = self.project_query.clone();
         let with = self.search_replacement.clone();
+        let options = self.search_options;
+        let matcher = Matcher::new(&query, options);
         if query.is_empty() {
             self.status = "Type what to find first".into();
-        } else if query == with {
+        } else if let Err(error) = &matcher {
+            self.status = error.clone();
+        } else if query == with && !options.regex {
             self.status = "The replacement is the same as the text".into();
-        } else {
+        } else if let Ok(matcher) = matcher {
             if let Some(request) = self.replace_request.take() {
                 request.cancel.store(true, Ordering::Relaxed);
             }
@@ -86,12 +91,13 @@ impl App {
                 root: root.clone(),
                 query: query.clone(),
                 with,
+                options,
                 cancel: cancel.clone(),
             });
             self.status = format!("Finding \u{201c}{query}\u{201d} in the workspace...");
             let tx = self.worker_tx.clone();
             std::thread::spawn(move || {
-                let targets = workflow::replace_targets(&root, &query, &open, &cancel);
+                let targets = workflow::replace_targets(&root, &matcher, &open, &cancel);
                 tx.send(WorkerMessage::ReplaceTargets(cancel, targets));
             });
         }
@@ -118,13 +124,16 @@ impl App {
         if self.workspace_root.as_ref() != Some(&request.root) {
             return;
         }
+        let Ok(matcher) = Matcher::new(&request.query, request.options) else {
+            return;
+        };
         // Open files count by their text in memory, which is what changes.
         let mut places = 0;
         let mut files = Vec::new();
         for (path, on_disk) in targets {
             let uri = lsp::file_uri(&path);
             let found = match self.open_tab_for_uri(&uri) {
-                Some(index) => self.tabs[index].document.find_all(&request.query).len(),
+                Some(index) => self.tabs[index].document.find_matches(&matcher).len(),
                 None => on_disk,
             };
             if found > 0 {
@@ -165,6 +174,7 @@ impl App {
                     Edits::ReplaceAll {
                         query: request.query.clone(),
                         with: request.with.clone(),
+                        options: request.options,
                     },
                 )
             })

@@ -89,14 +89,14 @@ impl App {
 
     /// After the query changes, selects its first match from where the search
     /// started, so matches show while typing.
-    fn find_query_changed(&mut self, hwnd: HWND) {
+    pub(super) fn find_query_changed(&mut self, hwnd: HWND) {
         let origin = self.find_origin;
-        match self.doc().find_forward(origin, &self.find_query) {
-            Some(start) => {
-                let end = Pos {
-                    line: start.line,
-                    byte: start.byte + self.find_query.len(),
-                };
+        let found = self
+            .find_matcher()
+            .ok()
+            .and_then(|matcher| self.doc().find_next(origin, &matcher));
+        match found {
+            Some((start, end)) => {
                 self.view_mut().selection_anchor = Some(start);
                 self.view_mut().cursor = end;
             }
@@ -111,15 +111,22 @@ impl App {
     }
 
     pub(super) fn update_find_count(&mut self) {
-        let query = self.find_query.as_str();
-        // The selection is the current match when it is exactly one match long.
+        let matcher = match self.find_matcher() {
+            Ok(matcher) => matcher,
+            Err(error) => {
+                self.find_error = (!self.find_query.is_empty()).then_some(error);
+                self.find_count = (0, 0);
+                return;
+            }
+        };
+        self.find_error = None;
+        // The selection is the current match when it is exactly one match.
         let current = self
             .selection_range()
-            .filter(|(start, end)| start.line == end.line && end.byte - start.byte == query.len())
-            .map(|(start, _)| start);
+            .filter(|(start, end)| start.line == end.line);
         let doc = self.doc();
         let lines = (0..doc.line_count()).map(|line| doc.line(line));
-        self.find_count = count_matches(lines, query, current);
+        self.find_count = count_matches(lines, &matcher, current);
     }
 
     pub(super) fn find_layout(&self, hwnd: HWND) -> Option<FindLayout> {
@@ -190,6 +197,10 @@ impl App {
         if !contains(layout.card, x, y) {
             return false;
         }
+        if let Some(toggle) = self.option_toggle_at(layout.find, x, y) {
+            self.flip_find_option(hwnd, toggle);
+            return true;
+        }
         if layout.replace.is_some_and(|field| contains(field, x, y)) {
             self.replace_field = 1;
         } else if contains(layout.find, x, y) {
@@ -226,10 +237,13 @@ impl App {
             "Find",
             self.replace_field == 0,
             self.find_text_selected,
+            self.option_toggles_left(layout.find),
         );
+        self.paint_option_toggles(hdc, layout.find, self.find_options);
         let (current, total) = self.find_count;
         let (count, color) = match (current, total) {
             _ if self.find_query.is_empty() => (String::new(), self.theme.muted),
+            _ if self.find_error.is_some() => ("Invalid regex".to_string(), self.theme.pink),
             (_, 0) => ("No results".to_string(), self.theme.pink),
             (0, 1) => ("1 result".to_string(), self.theme.muted),
             (0, total) => (format!("{total} results"), self.theme.muted),
@@ -246,6 +260,7 @@ impl App {
                 "Replace",
                 self.replace_field == 1,
                 false,
+                field.right - self.scale(9),
             );
             let middle = (hint.top + hint.bottom) / 2;
             self.label_mid(
@@ -260,7 +275,9 @@ impl App {
     }
 
     // One input: its text (the end of it, when too long to fit) or a
-    // placeholder, and a caret when it has the focus.
+    // placeholder, and a caret when it has the focus. The text stops at
+    // `text_right`, leaving room for buttons inside the field.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_find_field(
         &self,
         hdc: HDC,
@@ -269,6 +286,7 @@ impl App {
         placeholder: &str,
         focused: bool,
         selected: bool,
+        text_right: i32,
     ) {
         let s = |value: i32| self.scale(value);
         let edge = if focused {
@@ -280,7 +298,7 @@ impl App {
         let inner = RECT {
             left: rect.left + s(9),
             top: rect.top,
-            right: rect.right - s(9),
+            right: text_right,
             bottom: rect.bottom,
         };
         let middle = (rect.top + rect.bottom) / 2;
@@ -328,21 +346,18 @@ fn contains(rect: RECT, x: i32, y: i32) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
 
-// (current, total): every non-overlapping match of `query` in `lines`, and
-// which of them (1-based) starts at `current`, or 0 when none does.
+// (current, total): every match in `lines`, and which of them (1-based) is
+// exactly the range `current`, or 0 when none is.
 fn count_matches<'a>(
     lines: impl Iterator<Item = &'a str>,
-    query: &str,
-    current: Option<Pos>,
+    matcher: &Matcher,
+    current: Option<(Pos, Pos)>,
 ) -> (usize, usize) {
-    if query.is_empty() {
-        return (0, 0);
-    }
     let (mut index, mut total) = (0, 0);
     for (line, text) in lines.enumerate() {
-        for (byte, _) in text.match_indices(query) {
+        for (start, end) in matcher.matches(text) {
             total += 1;
-            if current == Some(Pos { line, byte }) {
+            if current == Some((Pos { line, byte: start }, Pos { line, byte: end })) {
                 index = total;
             }
         }
@@ -370,13 +385,36 @@ mod tests {
     #[test]
     fn count_matches_finds_the_current_match() {
         let lines = ["foo bar foo", "", "foofoo"];
-        let at = |line, byte| Some(Pos { line, byte });
-        assert_eq!(count_matches(lines.into_iter(), "foo", None), (0, 4));
-        assert_eq!(count_matches(lines.into_iter(), "foo", at(0, 8)), (2, 4));
-        assert_eq!(count_matches(lines.into_iter(), "foo", at(2, 3)), (4, 4));
-        assert_eq!(count_matches(lines.into_iter(), "foo", at(0, 1)), (0, 4));
-        assert_eq!(count_matches(lines.into_iter(), "", at(0, 0)), (0, 0));
-        assert_eq!(count_matches(lines.into_iter(), "baz", None), (0, 0));
+        let plain = |q| Matcher::new(q, Default::default()).unwrap();
+        let at = |line, byte| {
+            Some((
+                Pos { line, byte },
+                Pos {
+                    line,
+                    byte: byte + 3,
+                },
+            ))
+        };
+        let foo = plain("foo");
+        assert_eq!(count_matches(lines.into_iter(), &foo, None), (0, 4));
+        assert_eq!(count_matches(lines.into_iter(), &foo, at(0, 8)), (2, 4));
+        assert_eq!(count_matches(lines.into_iter(), &foo, at(2, 3)), (4, 4));
+        assert_eq!(count_matches(lines.into_iter(), &foo, at(0, 1)), (0, 4));
+        assert_eq!(
+            count_matches(lines.into_iter(), &plain("baz"), None),
+            (0, 0)
+        );
+        // A pattern's matches differ in length.
+        let words = Matcher::new(
+            r"f\w+",
+            lightline::text_search::SearchOptions {
+                regex: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let range = Some((Pos { line: 2, byte: 0 }, Pos { line: 2, byte: 6 }));
+        assert_eq!(count_matches(lines.into_iter(), &words, range), (3, 3));
     }
 
     #[test]

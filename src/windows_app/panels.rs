@@ -5,6 +5,7 @@ impl App {
     pub(super) fn show_quick_open(&mut self, hwnd: HWND) {
         self.quick_open = true;
         self.language_pick = false;
+        self.history_pick = None;
         self.panel_focus = false;
         self.terminal_focus = false;
         self.quick_query.clear();
@@ -113,6 +114,11 @@ impl App {
             ("AI: Fix Error at Cursor", 45),
             ("AI: New Chat", 46),
             ("AI: Choose Provider\u{2026}", 64),
+            ("Local History: Show File History", 65),
+            ("Merge Conflict: Next Conflict", 66),
+            ("Merge Conflict: Accept All Current", 67),
+            ("Merge Conflict: Accept All Incoming", 68),
+            ("Merge Conflict: Accept All Both", 69),
             ("AI: Set API Key\u{2026}", 60),
             ("AI: Remove API Key", 61),
         ]
@@ -124,6 +130,8 @@ impl App {
     pub(super) fn quick_count(&self) -> usize {
         if self.language_pick {
             self.language_picks().len()
+        } else if self.history_pick.is_some() {
+            self.history_picks().len()
         } else if self.quick_query.starts_with('>') {
             self.quick_commands().len()
         } else if self.quick_query.starts_with('@') {
@@ -167,6 +175,10 @@ impl App {
     pub(super) fn activate_quick_item(&mut self, hwnd: HWND, index: usize) {
         if self.language_pick {
             self.pick_language(hwnd, index);
+            return;
+        }
+        if self.history_pick.is_some() {
+            self.pick_history(hwnd, index);
             return;
         }
         if self.quick_query.starts_with('>') {
@@ -277,6 +289,11 @@ impl App {
                 }
                 Some(60) => self.show_ai_provider(hwnd, true),
                 Some(64) => self.show_ai_provider(hwnd, false),
+                Some(65) => self.show_file_history(hwnd),
+                Some(66) => self.next_conflict(hwnd),
+                Some(67) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Current),
+                Some(68) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Incoming),
+                Some(69) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Both),
                 Some(61) => self.ai_remove_key(hwnd),
                 _ => {}
             }
@@ -322,6 +339,7 @@ impl App {
                 let font_changed = settings.font_size != self.settings.font_size
                     || settings.font_family != self.settings.font_family;
                 lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
+                lightline::local_history::set_enabled(settings.local_history);
                 self.settings = settings;
                 if font_changed {
                     self.set_metrics(self.dpi, self.zoom);
@@ -349,7 +367,7 @@ impl App {
         self.welcome = false;
         self.set_sidebar_visible(hwnd, true);
         self.side_view = SideView::Search;
-        self.review_file = None;
+        self.close_diff();
         self.search_input = true;
         self.replace_focus = false;
         self.panel_focus = true;
@@ -381,6 +399,15 @@ impl App {
             self.search_results.clear();
             return;
         }
+        let matcher = match Matcher::new(&query, self.search_options) {
+            Ok(matcher) => matcher,
+            Err(error) => {
+                self.cancel_search();
+                self.search_results.clear();
+                self.status = error;
+                return;
+            }
+        };
         // Submitting the query hands keyboard control to the results list so
         // Up/Down can move the selection and Enter can open the active hit.
         self.search_input = false;
@@ -393,7 +420,7 @@ impl App {
         self.panel_first = 0;
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
-            let hits = workflow::search_workspace_with_cancel(&root, &query, &cancel);
+            let hits = workflow::search_workspace_with_cancel(&root, &matcher, &cancel);
             tx.send(WorkerMessage::Search(root, query, cancel, hits));
         });
     }

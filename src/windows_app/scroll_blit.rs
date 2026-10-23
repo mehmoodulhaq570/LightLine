@@ -115,7 +115,7 @@ impl App {
             && self.hot.is_none()
             && self.transition.is_none()
             && !(self.side_view == SideView::Search && self.panel_focus && !self.search_input)
-            && !(self.side_view == SideView::Review && self.review_file.is_some())
+            && !self.showing_diff()
     }
 
     /// Moves what `pane` shows by `moved` screen rows (positive: the view

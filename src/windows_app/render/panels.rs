@@ -193,6 +193,7 @@ impl App {
                     }
                 )
             };
+            let query_box = self.search_query_box(left, editor_left);
             Self::label(
                 hdc,
                 &query_label,
@@ -203,8 +204,12 @@ impl App {
                 } else {
                     self.theme.text
                 },
-                clip,
+                RECT {
+                    right: self.option_toggles_left(query_box),
+                    ..clip
+                },
             );
+            self.paint_option_toggles(hdc, query_box, self.search_options);
             let replace_box = self.replace_box(left, editor_left);
             Self::fill(hdc, replace_box, self.theme.active_bg);
             let replace_label = if self.search_replacement.is_empty() && !typing_replacement {
@@ -359,14 +364,26 @@ impl App {
             },
             self.theme.edge,
         );
-        let name = self
-            .review_file
-            .as_ref()
-            .map(|path| display_path(path))
-            .unwrap_or_default();
+        let history = self.history_labels();
+        let (restore, close) = self.history_buttons(right);
+        let (before_label, after_label, after_right) = match &history {
+            Some((before, after)) => (before.clone(), after.clone(), restore.left - self.scale(8)),
+            None => {
+                let name = self
+                    .review_file
+                    .as_ref()
+                    .map(|path| display_path(path))
+                    .unwrap_or_default();
+                (
+                    format!("BEFORE  ·  {name}"),
+                    format!("AFTER  ·  {name}"),
+                    right,
+                )
+            }
+        };
         Self::label(
             hdc,
-            &format!("BEFORE  ·  {name}"),
+            &before_label,
             left + self.scale(16),
             top + self.scale(9),
             self.theme.muted,
@@ -379,17 +396,46 @@ impl App {
         );
         Self::label(
             hdc,
-            &format!("AFTER  ·  {name}"),
+            &after_label,
             mid + self.scale(16),
             top + self.scale(9),
             self.theme.muted,
             RECT {
                 left: mid,
                 top,
-                right,
+                right: after_right,
                 bottom: top + self.scale(36),
             },
         );
+        if history.is_some() {
+            // Restore is the action this view is for; Close (or Esc) leaves.
+            Self::rounded_fill(hdc, restore, self.scale(6), self.theme.violet);
+            let width = self.text_width(hdc, "Restore");
+            self.label_mid(
+                hdc,
+                "Restore",
+                (restore.left + restore.right - width) / 2,
+                (restore.top + restore.bottom) / 2,
+                label_on(self.theme.violet, 255, 255, 255),
+                restore,
+            );
+            self.panel_card(
+                hdc,
+                close,
+                self.scale(6),
+                self.theme.edge,
+                self.theme.editor_bg,
+            );
+            let width = self.text_width(hdc, "Close");
+            self.label_mid(
+                hdc,
+                "Close",
+                (close.left + close.right - width) / 2,
+                (close.top + close.bottom) / 2,
+                self.theme.text,
+                close,
+            );
+        }
         unsafe { SelectObject(hdc, self.font) };
         for (index, row) in self.diff_rows.iter().enumerate().skip(self.diff_first) {
             let y = top + self.scale(43) + (index - self.diff_first) as i32 * self.line_height;
@@ -481,7 +527,9 @@ impl App {
         if self.diff_rows.is_empty() {
             Self::label(
                 hdc,
-                if self.review_staged {
+                if history.is_some() {
+                    "This version is the same as the file now."
+                } else if self.review_staged {
                     "Nothing staged in this file."
                 } else {
                     "No unstaged text changes in this file."
@@ -608,12 +656,18 @@ impl App {
             },
             self.theme.violet,
         );
+        let history_title = match self.history_pick {
+            Some(_) => format!("Saved versions of {}", self.history_file_name()),
+            None => String::new(),
+        };
         Self::label(
             hdc,
             &format!(
                 "{}  ›  {}{}",
                 if self.language_pick {
                     "Run this file as"
+                } else if self.history_pick.is_some() {
+                    history_title.as_str()
                 } else {
                     "Quick Open"
                 },
@@ -638,6 +692,8 @@ impl App {
             hdc,
             if self.language_pick {
                 "Type to filter  ·  Enter chooses  ·  Esc closes"
+            } else if self.history_pick.is_some() {
+                "Type to filter  ·  Enter compares with the file now  ·  Esc closes"
             } else {
                 "Type to filter  ·  Enter opens  ·  Esc closes"
             },
@@ -655,6 +711,11 @@ impl App {
         // never shares its last row with the hint line below it.
         let items: Vec<String> = if self.language_pick {
             self.language_picks()
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect()
+        } else if self.history_pick.is_some() {
+            self.history_picks()
                 .into_iter()
                 .map(|(label, _)| label)
                 .collect()
@@ -725,6 +786,8 @@ impl App {
                 hdc,
                 if self.language_pick {
                     "No matching languages"
+                } else if self.history_pick.is_some() {
+                    "No matching versions"
                 } else if self.quick_query.starts_with('@') {
                     symbols_message = self.symbols_empty_message();
                     &symbols_message
@@ -755,7 +818,10 @@ impl App {
             );
         }
         let mut hints = Vec::new();
-        if !self.language_pick && !self.quick_query.starts_with(['>', '@', '#', ':']) {
+        if !self.language_pick
+            && self.history_pick.is_none()
+            && !self.quick_query.starts_with(['>', '@', '#', ':'])
+        {
             hints.push(
                 "> commands  ·  @ symbols in this file  ·  # in the project  ·  : line".to_string(),
             );

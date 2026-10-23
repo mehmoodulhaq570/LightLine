@@ -221,7 +221,7 @@ impl App {
             || self.run_config_panel.is_some()
             || self.ai_provider.is_some()
             || self.transition.is_some()
-            || (self.side_view == SideView::Review && self.review_file.is_some())
+            || self.showing_diff()
         {
             return false;
         }
@@ -1517,7 +1517,7 @@ impl App {
                 }
                 RestoreDC(hdc, sidebar_state);
             }
-            if self.side_view == SideView::Review && self.review_file.is_some() {
+            if self.showing_diff() {
                 self.paint_diff(hdc, editor_left, editor_card.right, code_bottom);
             } else {
                 let divider = if self.split_visible {

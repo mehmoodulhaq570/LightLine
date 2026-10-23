@@ -349,7 +349,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                         || app.scrollbar_at(hwnd, point.x, point.y).is_some()
                         || app.minimap_grab.is_some()
                         || app.minimap_at(hwnd, point.x, point.y).is_some()
-                        || (app.side_view == SideView::Review && app.review_file.is_some())
+                        || app.showing_diff()
                         || point.y < app.editor_top()
                         || point.x < app.editor_left()
                         || {
@@ -415,6 +415,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 || (shift && (key == 0x46 || key == 0x4F))
                 // Alt+Enter: Replace All in the find box.
                 || (key == VK_RETURN as u32 && app.find_mode)
+                // Alt+C, Alt+W, Alt+R: the find box's and Search panel's toggles.
+                || ((app.find_mode || app.search_input)
+                    && !shift
+                    && matches!(key, 0x43 | 0x57 | 0x52))
                 // Alt+Z: toggle word wrap, as in VS Code.
                 || (key == 0x5A && !shift && !app.terminal_focus)
                 // Alt+\: inline AI completion
@@ -666,10 +670,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 }
                 return 0;
             }
-            if app.side_view == SideView::Review
-                && app.review_file.is_some()
-                && point.x >= app.editor_left()
-            {
+            if app.showing_diff() && point.x >= app.editor_left() {
                 let visible = ((rect.bottom - app.scale(STATUS) - app.editor_top())
                     / app.line_height.max(1))
                 .max(1) as usize;

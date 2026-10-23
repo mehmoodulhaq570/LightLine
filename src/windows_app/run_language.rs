@@ -238,6 +238,7 @@ impl App {
     pub(super) fn show_language_pick(&mut self, hwnd: HWND) {
         self.quick_open = true;
         self.language_pick = true;
+        self.history_pick = None;
         self.panel_focus = false;
         self.terminal_focus = false;
         self.quick_query.clear();

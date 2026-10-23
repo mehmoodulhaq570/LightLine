@@ -199,23 +199,25 @@ fn tab_index_after_close(current: usize, closed: usize, remaining: usize) -> usi
 // the query (`foo` -> `self.foo`) can never be matched again.
 pub(super) fn replace_all_edit(
     doc: &Document,
-    query: &str,
+    matcher: &Matcher,
     replacement: &str,
 ) -> Option<(Pos, Pos, String, usize)> {
-    let matches = doc.find_all(query);
-    let (first, last) = (*matches.first()?, *matches.last()?);
-    let after = |start: Pos| Pos {
-        line: start.line,
-        byte: start.byte + query.len(),
-    };
+    let matches = doc.find_matches(matcher);
+    let (first, last) = (matches.first()?.0, matches.last()?.1);
     let mut text = String::new();
     let mut from = first;
-    for &start in &matches {
+    for &(start, end) in &matches {
         text.push_str(&doc.text_range(from, start));
-        text.push_str(replacement);
-        from = after(start);
+        // In regex mode `$1` and the like come from this match.
+        text.push_str(&matcher.replacement(
+            doc.line(start.line),
+            start.byte,
+            end.byte,
+            replacement,
+        ));
+        from = end;
     }
-    Some((first, after(last), text, matches.len()))
+    Some((first, last, text, matches.len()))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -765,6 +767,10 @@ pub(super) struct App {
     pub(super) dragging: bool,
     pub(super) find_mode: bool,
     pub(super) find_query: String,
+    // Match Case, Whole Word and Regex for the find box (search_options.rs).
+    pub(super) find_options: lightline::text_search::SearchOptions,
+    // Why the find text isn't a valid pattern, shown in place of the count.
+    pub(super) find_error: Option<String>,
     pub(super) replace_mode: bool,
     pub(super) replace_query: String,
     pub(super) replace_field: usize,
@@ -820,8 +826,14 @@ pub(super) struct App {
     pub(super) quick_loading: bool,
     // The Quick Open box is the language picker (run_language.rs).
     pub(super) language_pick: bool,
+    // The Quick Open box lists the active file's saved versions
+    // (local_history.rs).
+    pub(super) history_pick: Option<Vec<lightline::local_history::Version>>,
+    // A saved version shown in the diff view beside the file.
+    pub(super) history_compare: Option<super::local_history::HistoryCompare>,
     pub(super) search_input: bool,
     pub(super) project_query: String,
+    pub(super) search_options: lightline::text_search::SearchOptions,
     pub(super) search_results: Vec<SearchHit>,
     pub(super) search_cancel: Option<Arc<AtomicBool>>,
     // The Search panel's replacement; typing goes there while
@@ -1319,6 +1331,7 @@ impl App {
         let zoom = 100;
         let settings = lightline::settings::Settings::load();
         lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
+        lightline::local_history::set_enabled(settings.local_history);
         let font = Self::font_for_dpi(dpi, zoom, &settings);
         let line_height = Self::measured_line_height(font, dpi, zoom);
         let char_width = Self::measured_char_width(font, dpi, zoom);
@@ -1371,6 +1384,8 @@ impl App {
             dragging: false,
             find_mode: false,
             find_query: String::new(),
+            find_options: Default::default(),
+            find_error: None,
             replace_mode: false,
             replace_query: String::new(),
             replace_field: 0,
@@ -1412,8 +1427,11 @@ impl App {
             quick_files: Vec::new(),
             quick_loading: false,
             language_pick: false,
+            history_pick: None,
+            history_compare: None,
             search_input: false,
             project_query: String::new(),
+            search_options: Default::default(),
             search_results: Vec::new(),
             search_cancel: None,
             search_replacement: String::new(),
@@ -1903,7 +1921,7 @@ impl App {
         self.split_visible
             && !self.welcome
             && !self.quick_open
-            && !(self.side_view == SideView::Review && self.review_file.is_some())
+            && !self.showing_diff()
             && y >= self.tab_strip_bottom()
             && y < bottom
             && (x - self.pane_divider(hwnd)).abs() <= self.scale(6)
@@ -2188,7 +2206,7 @@ impl App {
         self.search_input = false;
         self.panel_focus = false;
         self.terminal_focus = false;
-        self.review_file = None;
+        self.close_diff();
         self.side_view = SideView::Files;
         if self.tab().is_placeholder() {
             // The hidden stand-in becomes the new file rather than staying
@@ -2348,7 +2366,7 @@ impl App {
             // The side panel keeps its view: switching to Explorer here made
             // opening a search result or a changed file (when already open)
             // swap the whole panel and throw away the search.
-            self.review_file = None;
+            self.close_diff();
             self.search_input = false;
             self.extensions_search_active = false;
             self.panel_focus = false;
@@ -2578,7 +2596,7 @@ impl App {
             || tab.image.is_some()
             || tab.markdown.is_some()
             || tab.is_placeholder()
-            || (self.side_view == SideView::Review && self.review_file.is_some())
+            || self.showing_diff()
         {
             return None;
         }
@@ -2918,6 +2936,12 @@ impl App {
         }
     }
 
+    /// The find box's text with its options; Err when it isn't a valid
+    /// regular expression.
+    pub(super) fn find_matcher(&self) -> Result<Matcher, String> {
+        Matcher::new(&self.find_query, self.find_options)
+    }
+
     pub(super) fn find(&mut self, hwnd: HWND, forward: bool) {
         if self.find_query.is_empty() {
             if !self.find_mode {
@@ -2926,21 +2950,24 @@ impl App {
             self.refresh(hwnd);
             return;
         }
+        let matcher = match self.find_matcher() {
+            Ok(matcher) => matcher,
+            Err(error) => {
+                self.status = error;
+                self.refresh(hwnd);
+                return;
+            }
+        };
         let match_at = if forward {
-            self.doc()
-                .find_forward(self.view().cursor, &self.find_query)
+            self.doc().find_next(self.view().cursor, &matcher)
         } else {
             let origin = self
                 .selection_range()
                 .map(|(start, _)| start)
                 .unwrap_or(self.view().cursor);
-            self.doc().find_backward(origin, &self.find_query)
+            self.doc().find_previous(origin, &matcher)
         };
-        if let Some(start) = match_at {
-            let end = Pos {
-                line: start.line,
-                byte: start.byte + self.find_query.len(),
-            };
+        if let Some((start, end)) = match_at {
             self.view_mut().selection_anchor = Some(start);
             self.view_mut().cursor = end;
             self.find_origin = start;
@@ -2963,10 +2990,15 @@ impl App {
             self.refresh(hwnd);
             return;
         }
-        let replacement = self.replace_query.clone();
-        if let Some((start, end)) = self.selection_range() {
-            let sel_text = self.doc().text_range(start, end);
-            if sel_text == self.find_query {
+        // The selection is replaced when it's exactly a match (the text
+        // around it still counts for Whole Word and the pattern).
+        if let (Ok(matcher), Some((start, end))) = (self.find_matcher(), self.selection_range())
+            && start.line == end.line
+        {
+            let line = self.doc().line(start.line);
+            if matcher.find_at(line, start.byte) == Some((start.byte, end.byte)) {
+                let replacement =
+                    matcher.replacement(line, start.byte, end.byte, &self.replace_query);
                 self.replace_selection(&replacement);
             }
         }
@@ -2979,7 +3011,15 @@ impl App {
             self.refresh(hwnd);
             return;
         }
-        let count = match replace_all_edit(self.doc(), &self.find_query, &self.replace_query) {
+        let matcher = match self.find_matcher() {
+            Ok(matcher) => matcher,
+            Err(error) => {
+                self.status = error;
+                self.refresh(hwnd);
+                return;
+            }
+        };
+        let count = match replace_all_edit(self.doc(), &matcher, &self.replace_query) {
             Some((start, end, text, count)) => {
                 // One edit: one undo step and one language-server change.
                 self.replace_range(start, end, &text);
@@ -3817,7 +3857,7 @@ impl App {
                 self.quick_open = false;
                 if from_welcome {
                     self.side_view = SideView::Files;
-                    self.review_file = None;
+                    self.close_diff();
                     self.search_input = false;
                 }
                 if !from_welcome {
@@ -3938,7 +3978,8 @@ mod split_tests {
     }
 
     fn replace_all(doc: &mut Document, query: &str, replacement: &str) -> usize {
-        let Some((start, end, text, count)) = replace_all_edit(doc, query, replacement) else {
+        let matcher = Matcher::new(query, Default::default()).unwrap();
+        let Some((start, end, text, count)) = replace_all_edit(doc, &matcher, replacement) else {
             return 0;
         };
         doc.replace(start, end, &text);

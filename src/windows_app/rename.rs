@@ -166,7 +166,15 @@ impl App {
         Self::rounded_fill(hdc, shadow, s(9), ui(3, 8, 18));
         self.panel_card(hdc, card, s(8), self.theme.edge, self.theme.sidebar_bg);
         unsafe { SelectObject(hdc, self.ui_font) };
-        self.paint_find_field(hdc, field, &rename.text, "New name", true, rename.selected);
+        self.paint_find_field(
+            hdc,
+            field,
+            &rename.text,
+            "New name",
+            true,
+            rename.selected,
+            field.right - self.scale(9),
+        );
     }
 
     /// Closes the box without renaming.

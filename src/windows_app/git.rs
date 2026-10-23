@@ -488,7 +488,7 @@ impl App {
             Some(root) if !relative.is_absolute() => root.join(relative),
             _ => relative,
         };
-        self.review_file = None;
+        self.close_diff();
         self.diff_rows.clear();
         self.diff_first = 0;
         self.panel_focus = true;

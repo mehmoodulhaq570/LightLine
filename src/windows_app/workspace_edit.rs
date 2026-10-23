@@ -20,7 +20,11 @@ type Resolved = Vec<(Pos, Pos, String)>;
 /// One file's changes: a language server's edits, or Replace All's.
 pub(super) enum Edits {
     Server(Vec<TextEdit>),
-    ReplaceAll { query: String, with: String },
+    ReplaceAll {
+        query: String,
+        with: String,
+        options: SearchOptions,
+    },
 }
 
 impl Edits {
@@ -30,7 +34,14 @@ impl Edits {
             Edits::Server(edits) => (resolve_edits(doc, edits), edits.len()),
             // One edit from the first match to the end of the last, as Find's
             // Replace All makes.
-            Edits::ReplaceAll { query, with } => match replace_all_edit(doc, query, with) {
+            Edits::ReplaceAll {
+                query,
+                with,
+                options,
+            } => match Matcher::new(query, *options)
+                .ok()
+                .and_then(|matcher| replace_all_edit(doc, &matcher, with))
+            {
                 Some((start, end, text, count)) => (vec![(start, end, text)], count),
                 None => (Vec::new(), 0),
             },

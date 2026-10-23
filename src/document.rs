@@ -1,3 +1,4 @@
+use crate::text_search::Matcher;
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -826,6 +827,59 @@ impl Document {
         pos
     }
 
+    /// The next match of `matcher` from `origin`, wrapping round the end of
+    /// the document as `find_forward` does: (start, end).
+    pub fn find_next(&self, origin: Pos, matcher: &Matcher) -> Option<(Pos, Pos)> {
+        let origin = self.clamp(origin);
+        let count = self.line_count();
+        (0..=count).find_map(|step| {
+            let line = (origin.line + step) % count;
+            let text = self.line(line);
+            let (start, end) = if step == count {
+                // Back on the first line: only what ends before the origin.
+                matcher
+                    .find_at(text, 0)
+                    .filter(|(_, end)| *end <= origin.byte)?
+            } else {
+                matcher.find_at(text, if step == 0 { origin.byte } else { 0 })?
+            };
+            Some((Pos { line, byte: start }, Pos { line, byte: end }))
+        })
+    }
+
+    /// The previous match of `matcher` before `origin`, wrapping round the
+    /// start of the document as `find_backward` does.
+    pub fn find_previous(&self, origin: Pos, matcher: &Matcher) -> Option<(Pos, Pos)> {
+        let origin = self.clamp(origin);
+        let count = self.line_count();
+        (0..=count).find_map(|step| {
+            let line = (origin.line + count - step % count) % count;
+            let text = self.line(line);
+            let mut found = matcher.matches(text).filter(|(start, end)| {
+                if step == 0 {
+                    *end <= origin.byte
+                } else if step == count {
+                    *start >= origin.byte
+                } else {
+                    true
+                }
+            });
+            let (start, end) = found.by_ref().last()?;
+            Some((Pos { line, byte: start }, Pos { line, byte: end }))
+        })
+    }
+
+    /// Every match of `matcher` from the top of the document down.
+    pub fn find_matches(&self, matcher: &Matcher) -> Vec<(Pos, Pos)> {
+        (0..self.line_count())
+            .flat_map(|line| {
+                matcher
+                    .matches(self.line(line))
+                    .map(move |(start, end)| (Pos { line, byte: start }, Pos { line, byte: end }))
+            })
+            .collect()
+    }
+
     pub fn find_forward(&self, origin: Pos, query: &str) -> Option<Pos> {
         if query.is_empty() {
             return None;
@@ -1090,6 +1144,7 @@ impl Document {
         // Written next to the file a symbolic link points at, then moved over
         // that file: moving it over the link replaced the link with a copy.
         let target = resolve_links(path);
+        crate::local_history::before_save(path);
         let parent = target.parent().unwrap_or_else(|| Path::new("."));
         let mut temporary = None;
         for n in 0..100 {
@@ -1143,6 +1198,7 @@ impl Document {
             let _ = fs::remove_file(&temp_path);
         }
         result?;
+        crate::local_history::after_save(path);
         let metadata = fs::metadata(path)?;
         self.path = Some(path.to_owned());
         self.last_saved = Some((metadata.modified()?, metadata.len()));
@@ -1537,6 +1593,33 @@ mod tests {
             Some(Pos { line: 1, byte: 7 })
         );
         assert_eq!(doc.find_forward(Pos::default(), "ABC"), None);
+    }
+
+    #[test]
+    fn pattern_search_wraps_both_ways_with_match_ends() {
+        use crate::text_search::{Matcher, SearchOptions};
+        let mut doc = Document::new();
+        doc.replace(Pos::default(), Pos::default(), "id 7\nnone\nid 42");
+        let digits = Matcher::new(
+            r"\d+",
+            SearchOptions {
+                regex: true,
+                ..SearchOptions::default()
+            },
+        )
+        .unwrap();
+        let at = |line, byte| Pos { line, byte };
+        assert_eq!(doc.find_next(at(0, 4), &digits), Some((at(2, 3), at(2, 5))));
+        assert_eq!(doc.find_next(at(2, 5), &digits), Some((at(0, 3), at(0, 4))));
+        assert_eq!(
+            doc.find_previous(at(2, 3), &digits),
+            Some((at(0, 3), at(0, 4)))
+        );
+        assert_eq!(
+            doc.find_previous(at(0, 3), &digits),
+            Some((at(2, 3), at(2, 5)))
+        );
+        assert_eq!(doc.find_matches(&digits).len(), 2);
     }
 
     #[test]

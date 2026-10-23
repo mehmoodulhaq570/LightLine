@@ -585,6 +585,13 @@ impl App {
                         if let Some(lens) = &lens {
                             let gap = self.text_width(hdc, "  ");
                             let mut x = after + self.scale(24);
+                            // A conflict's links need doing; Run's are optional.
+                            let color =
+                                if matches!(lens, crate::windows_app::codelens::Lens::Conflict) {
+                                    self.theme.sky
+                                } else {
+                                    self.theme.muted
+                                };
                             for (label, action) in self.lens_links(self.tab_for_pane(pane), lens) {
                                 let width = self.text_width(hdc, label);
                                 if x < text_right {
@@ -593,7 +600,7 @@ impl App {
                                         label,
                                         x,
                                         y,
-                                        self.theme.muted,
+                                        color,
                                         RECT {
                                             right: text_right,
                                             ..clip

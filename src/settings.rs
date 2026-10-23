@@ -37,6 +37,8 @@ pub struct Settings {
     pub git_blame: bool,
     /// Show Run and Debug above `main` and tests.
     pub code_lens: bool,
+    /// Keep a copy of a file each time it's saved (see local_history.rs).
+    pub local_history: bool,
     pub smooth_scrolling: bool,
     pub parse_limit_kb: usize,
     pub default_terminal_profile: ShellKind,
@@ -76,6 +78,7 @@ impl Default for Settings {
             bracket_pair_colors: true,
             git_blame: true,
             code_lens: true,
+            local_history: true,
             smooth_scrolling: false,
             parse_limit_kb: 4096,
             default_terminal_profile: ShellKind::PowerShell,
@@ -218,6 +221,9 @@ impl Settings {
         if let Some(b) = value.get("codeLens").and_then(|v| v.as_bool()) {
             settings.code_lens = b;
         }
+        if let Some(b) = value.get("localHistory").and_then(|v| v.as_bool()) {
+            settings.local_history = b;
+        }
         if let Some(b) = value.get("smoothScrolling").and_then(|v| v.as_bool()) {
             settings.smooth_scrolling = b;
         }
@@ -344,6 +350,10 @@ impl Settings {
         obj.insert("gitBlame".into(), serde_json::Value::Bool(self.git_blame));
         obj.insert("codeLens".into(), serde_json::Value::Bool(self.code_lens));
         obj.insert(
+            "localHistory".into(),
+            serde_json::Value::Bool(self.local_history),
+        );
+        obj.insert(
             "smoothScrolling".into(),
             serde_json::Value::Bool(self.smooth_scrolling),
         );
@@ -393,6 +403,7 @@ const OWN_KEYS: &[&str] = &[
     "bracketPairColorization",
     "gitBlame",
     "codeLens",
+    "localHistory",
     "smoothScrolling",
     "parseLimitKb",
     "colorTheme",

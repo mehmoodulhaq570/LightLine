@@ -108,7 +108,7 @@ impl App {
         self.git_untracked.clear();
         self.unwatch_git_files();
         self.gutter_done = None;
-        self.review_file = None;
+        self.close_diff();
         self.reset_terminal_sessions(hwnd);
         self.welcome = false;
         self.explorer_visible = true;
@@ -184,7 +184,7 @@ impl App {
         self.git_untracked.clear();
         self.unwatch_git_files();
         self.gutter_done = None;
-        self.review_file = None;
+        self.close_diff();
         self.reset_terminal_sessions(hwnd);
         self.lsp.clear();
         self.lsp_failed_at.clear();

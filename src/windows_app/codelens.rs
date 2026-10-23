@@ -8,7 +8,11 @@
 //! `Test` classes too (`python -m pytest file::Class::test`). Go: `func main`,
 //! and `TestXxx` in `_test.go` files (`go test -run ^TestXxx$`). C and C++:
 //! `main`.
+//!
+//! A merge conflict's `<<<<<<<` line gets links too, in any file and with
+//! `codeLens` off (merge_conflict.rs).
 
+use super::merge_conflict::{self, Choice};
 use super::run_language::RunLanguage;
 use super::*;
 
@@ -20,6 +24,7 @@ pub(super) enum Lens {
         // Python: the class the test is in.
         class: Option<String>,
     },
+    Conflict,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +32,7 @@ pub(super) enum LensAction {
     Run,
     Debug,
     RunTest,
+    Accept(Choice),
 }
 
 /// A link's left and right edge, and what it does.
@@ -188,6 +194,13 @@ impl App {
     /// The lens on `line` of tab `index`, if any.
     pub(super) fn lens_on_line(&self, index: usize, line: usize) -> Option<Lens> {
         let tab = &self.tabs[index];
+        if merge_conflict::starts_conflict(tab.document.line(line))
+            && !tab.read_only()
+            && !tab.is_placeholder()
+            && merge_conflict::conflict_at(&tab.document, line).is_some()
+        {
+            return Some(Lens::Conflict);
+        }
         let kind = self.lens_kind(tab)?;
         let doc = &tab.document;
         let text = doc.line(line);
@@ -206,6 +219,11 @@ impl App {
     /// the languages LightLine debugs: Rust and Python.
     pub(super) fn lens_links(&self, index: usize, lens: &Lens) -> Vec<(&'static str, LensAction)> {
         match lens {
+            Lens::Conflict => vec![
+                ("Accept Current", LensAction::Accept(Choice::Current)),
+                ("Accept Incoming", LensAction::Accept(Choice::Incoming)),
+                ("Accept Both", LensAction::Accept(Choice::Both)),
+            ],
             Lens::Test { .. } => vec![("\u{25b6} Run test", LensAction::RunTest)],
             Lens::Main => {
                 let mut links = vec![("\u{25b6} Run", LensAction::Run)];
@@ -235,7 +253,7 @@ impl App {
 
     /// The link at (`x`, `y`) in `pane`, if one was drawn there.
     pub(super) fn lens_at(&self, hwnd: HWND, pane: usize, x: i32, y: i32) -> Option<LensAction> {
-        if !self.settings.code_lens || y < self.editor_top() {
+        if y < self.editor_top() {
             return None;
         }
         let index = self.tab_for_pane(pane);
@@ -264,6 +282,7 @@ impl App {
         match (action, lens) {
             (LensAction::Run, _) => self.run_active_file(hwnd),
             (LensAction::Debug, _) => self.start_debug_session(hwnd),
+            (LensAction::Accept(choice), _) => self.accept_conflict(hwnd, line, choice),
             (LensAction::RunTest, Some(Lens::Test { name, class })) => {
                 self.run_test(hwnd, &name, class.as_deref())
             }

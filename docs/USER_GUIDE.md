@@ -5,6 +5,8 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Settings](#settings)
 - [Unsaved-work recovery](#unsaved-work-recovery)
+- [Local History](#local-history)
+- [Merge conflicts](#merge-conflicts)
 - [Languages, formatting and debugging](#languages-formatting-and-debugging)
 - [AI Assistant](#ai-assistant)
 - [Extensions and themes](#extensions-and-themes)
@@ -24,6 +26,30 @@ Recovery is a periodic checkpoint: edits made after the latest completed checkpo
 
 Arrow movement, Backspace and Delete treat combining characters and joined emoji as complete characters. This does not add bidirectional layout or change the renderer's font shaping.
 
+### Merge conflicts
+
+When a merge, pull or rebase stops with conflicts, Git writes both versions into the file between markers:
+
+```text
+<<<<<<< HEAD
+your version (current)
+=======
+the version being merged in (incoming)
+>>>>>>> feature
+```
+
+Each `<<<<<<<` line shows three links. **Accept Current** keeps your version, **Accept Incoming** keeps the other, and **Accept Both** keeps yours followed by theirs; the markers are removed and `Ctrl+Z` undoes it. The status bar counts the conflicts left. The Command Palette has **Merge Conflict: Next Conflict** and **Merge Conflict: Accept All Current / Incoming / Both** for the whole file. When none are left, save the file and stage it in Source Control to finish the merge. A diff3 base section (`||||||| base`) is dropped whichever side you keep.
+
+### Local History
+
+Each time you save a file, LightLine keeps a copy of it, so you can go back to an earlier version even if you never committed it: after an accidental **Replace all**, a formatter that mangled the file, or an edit you regret. The first save of a file also keeps the file as it was before, so the version you opened is never lost.
+
+1. Run **Local History: Show File History** from the Command Palette (`Ctrl+Shift+P`). The saved versions of the active file are listed, newest first, with when each was saved and its size.
+2. Pick one and press `Enter`. It appears beside the file as it is now, with the changed lines colored. `F7` and `Shift+F7` jump between changes; click a line to go to it in the file.
+3. Click **Restore** to put that version in the editor. It's an ordinary edit: `Ctrl+Z` undoes it, and nothing is written until you save. **Close** or `Esc` leaves without changing anything.
+
+Versions are kept in `%APPDATA%\LightLine\history`, never next to your files: the last 50 versions of each file up to 1 MB. Saving a file without changing it adds nothing. Turn it off with `"localHistory": false`; versions already kept stay until you delete that folder.
+
 ### Files and workspace
 
 | Shortcut | Action |
@@ -35,6 +61,8 @@ Arrow movement, Backspace and Delete treat combining characters and joined emoji
 | `Ctrl+Shift+W` | Close the workspace and return to the Welcome screen (also `>Close Workspace`) |
 | `F2` / `Delete` | In the Explorer: rename / delete the selected file or folder |
 
+Find (`Ctrl+F`) and **Search** (`Ctrl+Shift+F`) have three switches at the right of the text: `Aa` **Match Case** (on to start with), `ab` **Whole Word** and `.*` **Regular Expression**. With `.*` on, the text is a [regular expression](https://docs.rs/regex/latest/regex/#syntax), such as `fn \w+_test` or `^\s*//`, and a replacement can use what it captured: find `(\w+)@(\w+)` and replace with `$2: $1`, or `${name}` for a named group. A pattern matches within a line, never across a line break. While the pattern isn't valid, the find box says **Invalid regex** and nothing is searched or replaced. The switches stay as set until LightLine closes.
+
 Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patterns in each folder's `.gitignore`, the repository's `.git/info/exclude` and your own excludes file (`~/.config/git/ignore`, or `core.excludesFile`), as well as `.git`, `target`, `node_modules`, `.venv` and `__pycache__`. Build output, logs and downloaded packages don't crowd the results. The Explorer still shows every file.
 
 ### Editing and navigation
@@ -44,6 +72,7 @@ Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patte
 | `Ctrl+F` | Find in the current file. `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) go to the next / previous match; `Esc` closes |
 | `Ctrl+H` | Find and replace. `Tab` switches fields, `Enter` replaces the current match, `Alt+Enter` replaces all (one `Ctrl+Z` undoes it) |
 | `Ctrl+Shift+F` | Search all files in the workspace; `Enter` moves to the results. `Tab` goes to **Replace with**; `Enter` there (or **Replace all**) replaces every occurrence in the workspace after asking. Open files undo with `Ctrl+Z`; files that aren't open are saved |
+| `Alt+C` / `Alt+W` / `Alt+R` | In the find box or the Search panel's query: **Match Case**, **Whole Word**, **Regular Expression** (the `Aa`, `ab` and `.*` buttons at the right of the field) |
 | `Ctrl+G` (or `Ctrl+P`, then `:`) | Go to a line: `42`, or `42:7` for its 7th character |
 | `Ctrl+Space` | Show completions. A function goes in with its arguments as places to fill: type over the selected one, `Tab` / `Shift+Tab` move between them |
 | `Tab` / `Shift+Tab` | Indent (spaces to the next tab stop) / outdent; with several lines selected, indent or outdent them all |
@@ -166,6 +195,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "showMinimap": false,
   "gitBlame": true,
   "codeLens": true,
+  "localHistory": true,
   "markdownLoadRemoteImages": false,
   "colorTheme": "Dracula",
   "aiEndpoint": "http://localhost:11434",
@@ -192,6 +222,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `showMinimap` | Show the file in miniature at the right of the editor (off by default; it costs some typing speed) |
 | `gitBlame` | After the caret's line, show who last changed it, when, and the commit message |
 | `codeLens` | Show **▶ Run** / **Debug** after `main` and **▶ Run test** after test functions (Rust, Python, Go, C/C++) |
+| `localHistory` | Keep a copy of a file each time it's saved, for [Local History](#local-history) |
 | `formatOnSave` | Format the file before each save |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `occurrencesHighlight` | Highlight the other uses of the name at the caret |

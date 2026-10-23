@@ -15,7 +15,9 @@ mod find_widget;
 mod git;
 mod goto_line;
 mod image_view;
+mod local_history;
 mod markdown_view;
+mod merge_conflict;
 mod more_menu;
 mod rename;
 mod replace_in_files;
@@ -49,6 +51,7 @@ mod run_choice;
 mod run_config_panel;
 mod run_config_ui;
 mod run_language;
+mod search_options;
 mod session;
 mod settings_panel;
 mod terminal;
@@ -96,6 +99,7 @@ use lightline::terminal::{
     Modifiers as TermModifiers, SessionId, SessionKind, SessionStatus, ShellKind, Snapshot,
     TerminalService, TerminalSize,
 };
+use lightline::text_search::{Matcher, SearchOptions};
 pub use lightline::workflow::{
     self, Change, CommitEntry, DiffHunk, DiffRow, DiffScope, GutterDiff, RepoState, SearchHit,
 };

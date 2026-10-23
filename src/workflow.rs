@@ -1,3 +1,4 @@
+use crate::text_search::{Matcher, SearchOptions};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -522,22 +523,23 @@ fn workspace_files_inner(root: &Path, cancel: Option<&AtomicBool>) -> Vec<PathBu
     files
 }
 
+/// `query` as plain text, matching case.
 pub fn search_workspace(root: &Path, query: &str) -> Vec<SearchHit> {
-    search_workspace_with_cancel(root, query, &AtomicBool::new(false))
+    match Matcher::new(query, SearchOptions::default()) {
+        Ok(matcher) => search_workspace_with_cancel(root, &matcher, &AtomicBool::new(false)),
+        Err(_) => Vec::new(),
+    }
 }
 
-/// The first `MAX_RESULTS` lines containing `query`, in file order. Files
+/// The first `MAX_RESULTS` lines with a match, in file order. Files
 /// are read on several threads; each takes the next file in order, and none
 /// starts a new one once enough lines are found, so the files read are
 /// always a leading run of the list.
 pub fn search_workspace_with_cancel(
     root: &Path,
-    query: &str,
+    matcher: &Matcher,
     cancel: &AtomicBool,
 ) -> Vec<SearchHit> {
-    if query.is_empty() {
-        return Vec::new();
-    }
     let files = workspace_files_inner(root, Some(cancel));
     let next = std::sync::atomic::AtomicUsize::new(0);
     let found = std::sync::atomic::AtomicUsize::new(0);
@@ -554,7 +556,7 @@ pub fn search_workspace_with_cancel(
                         let Some(path) = files.get(index) else {
                             break;
                         };
-                        let file_hits = search_file(path, query, cancel);
+                        let file_hits = search_file(path, matcher, cancel);
                         if !file_hits.is_empty() {
                             found.fetch_add(file_hits.len(), Ordering::Relaxed);
                             hits.push((index, file_hits));
@@ -578,20 +580,17 @@ pub fn search_workspace_with_cancel(
 }
 
 /// What Replace All in the Search panel changes: every workspace file whose
-/// text on disk contains `query` (no result limit, unlike the search), with
+/// text on disk has a match (no result limit, unlike the search), with
 /// how many times, plus those of `open` that are workspace files whatever
 /// they hold, since their unsaved text is what gets replaced. Files the
 /// search skips (too large, not UTF-8) are skipped here too. In workspace
 /// order; empty if cancelled.
 pub fn replace_targets(
     root: &Path,
-    query: &str,
+    matcher: &Matcher,
     open: &[PathBuf],
     cancel: &AtomicBool,
 ) -> Vec<(PathBuf, usize)> {
-    if query.is_empty() {
-        return Vec::new();
-    }
     let files = workspace_files_inner(root, Some(cancel));
     // Open tabs' paths can be in another form (`\\?\`, `/`, case).
     let plain = |path: &Path| {
@@ -617,8 +616,16 @@ pub fn replace_targets(
                         };
                         let count =
                             if fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_FILE_BYTES) {
-                                fs::read_to_string(path)
-                                    .map_or(0, |content| content.matches(query).count())
+                                fs::read_to_string(path).map_or(0, |content| {
+                                    if matcher.may_match(&content) {
+                                        content
+                                            .lines()
+                                            .map(|line| matcher.matches(line).count())
+                                            .sum()
+                                    } else {
+                                        0
+                                    }
+                                })
                             } else {
                                 0
                             };
@@ -645,7 +652,7 @@ pub fn replace_targets(
         .collect()
 }
 
-fn search_file(path: &Path, query: &str, cancel: &AtomicBool) -> Vec<SearchHit> {
+fn search_file(path: &Path, matcher: &Matcher, cancel: &AtomicBool) -> Vec<SearchHit> {
     if !fs::metadata(path).is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES) {
         return Vec::new();
     }
@@ -653,7 +660,7 @@ fn search_file(path: &Path, query: &str, cancel: &AtomicBool) -> Vec<SearchHit> 
         return Vec::new();
     };
     // Most files have no match; one scan of the whole text rules them out.
-    if !content.contains(query) {
+    if !matcher.may_match(&content) {
         return Vec::new();
     }
     let lines: Vec<&str> = content.lines().collect();
@@ -662,7 +669,7 @@ fn search_file(path: &Path, query: &str, cancel: &AtomicBool) -> Vec<SearchHit> 
         if line_index % 128 == 0 && cancel.load(Ordering::Relaxed) {
             break;
         }
-        if let Some(byte) = line.find(query) {
+        if let Some((byte, _)) = matcher.find_at(line, 0) {
             hits.push(SearchHit {
                 path: path.to_path_buf(),
                 line: line_index,
@@ -1515,6 +1522,111 @@ fn parse_diff(text: &str) -> Vec<DiffRow> {
     rows
 }
 
+/// Rows for the side-by-side diff of two texts, laid out like Git's (two
+/// unchanged lines around each change): for comparing a file with one of
+/// its Local History versions, without running Git.
+pub fn text_diff_rows(before: &str, after: &str) -> Vec<DiffRow> {
+    const CONTEXT: usize = 2;
+    const MAX_ROWS: usize = 5_000;
+    let split = |text: &'_ str| -> Vec<String> {
+        text.split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned())
+            .collect()
+    };
+    let (old, new) = (split(before), split(after));
+    let (n, m) = (old.len(), new.len());
+    let mut prefix = 0;
+    while prefix < n && prefix < m && old[prefix] == new[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < n - prefix && suffix < m - prefix && old[n - 1 - suffix] == new[m - 1 - suffix] {
+        suffix += 1;
+    }
+    let old_mid: Vec<&str> = old[prefix..n - suffix].iter().map(String::as_str).collect();
+    let new_mid: Vec<&str> = new[prefix..m - suffix].iter().map(String::as_str).collect();
+    let max_d = (GUTTER_DIFF_BUDGET / (old_mid.len() + new_mid.len()).max(1)).max(8);
+    let middle = myers_line_ops(&old_mid, &new_mid, max_d).unwrap_or_else(|| {
+        // Too different to line up: everything between reads as replaced.
+        let mut ops = vec![LineOp::Delete; old_mid.len()];
+        ops.resize(old_mid.len() + new_mid.len(), LineOp::Insert);
+        ops
+    });
+    let mut ops = vec![LineOp::Equal; prefix];
+    ops.extend(middle);
+    ops.extend(std::iter::repeat_n(LineOp::Equal, suffix));
+
+    // An unchanged line is shown when a change is within CONTEXT lines.
+    let near_change: Vec<bool> = {
+        let changed: Vec<bool> = ops.iter().map(|op| *op != LineOp::Equal).collect();
+        (0..ops.len())
+            .map(|i| {
+                let from = i.saturating_sub(CONTEXT);
+                let to = (i + CONTEXT + 1).min(ops.len());
+                changed[from..to].iter().any(|c| *c)
+            })
+            .collect()
+    };
+    let mut rows = Vec::new();
+    let (mut old_at, mut new_at) = (0, 0);
+    let (mut removed, mut added): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+    // `next_new` is the after side's next line, where a pure deletion sits.
+    let flush = |rows: &mut Vec<DiffRow>,
+                 removed: &mut Vec<usize>,
+                 added: &mut Vec<usize>,
+                 next_new: usize| {
+        for index in 0..removed.len().max(added.len()) {
+            let before = removed.get(index).copied();
+            let after = added.get(index).copied();
+            rows.push(DiffRow {
+                changed: true,
+                before_number: before.map(|line| line + 1),
+                before: before.map(|line| old[line].clone()).unwrap_or_default(),
+                after_number: after.map(|line| line + 1),
+                after: after.map(|line| new[line].clone()).unwrap_or_default(),
+                deleted_at: added.is_empty().then_some(next_new + 1),
+            });
+        }
+        removed.clear();
+        added.clear();
+    };
+    for (index, op) in ops.iter().enumerate() {
+        match op {
+            LineOp::Delete => {
+                removed.push(old_at);
+                old_at += 1;
+            }
+            LineOp::Insert => {
+                added.push(new_at);
+                new_at += 1;
+            }
+            LineOp::Equal => {
+                if !removed.is_empty() || !added.is_empty() {
+                    flush(&mut rows, &mut removed, &mut added, new_at);
+                }
+                if near_change[index] {
+                    rows.push(DiffRow {
+                        changed: false,
+                        before_number: Some(old_at + 1),
+                        before: old[old_at].clone(),
+                        after_number: Some(new_at + 1),
+                        after: new[new_at].clone(),
+                        deleted_at: None,
+                    });
+                }
+                old_at += 1;
+                new_at += 1;
+            }
+        }
+        if rows.len() >= MAX_ROWS {
+            break;
+        }
+    }
+    flush(&mut rows, &mut removed, &mut added, new_at);
+    rows.truncate(MAX_ROWS);
+    rows
+}
+
 /// Reads the HEAD content of `path` from git in `root`.
 pub fn git_head_text(root: &Path, path: &Path) -> Result<String, String> {
     let spec = format!("HEAD:{}", path.to_string_lossy().replace('\\', "/"));
@@ -2234,6 +2346,49 @@ mod tests {
     }
 
     #[test]
+    fn text_diff_rows_show_changes_with_two_lines_around_them() {
+        let before = "a\nb\nc\nd\ne\nf\ng\nh\n";
+        let after = "a\nb\nc\nd\nE\nf\ng\nh\nnew\n";
+        let rows = text_diff_rows(before, after);
+        let shown: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.before_number,
+                    r.before.as_str(),
+                    r.after_number,
+                    r.after.as_str(),
+                    r.changed,
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (Some(3), "c", Some(3), "c", false),
+                (Some(4), "d", Some(4), "d", false),
+                (Some(5), "e", Some(5), "E", true),
+                (Some(6), "f", Some(6), "f", false),
+                (Some(7), "g", Some(7), "g", false),
+                (Some(8), "h", Some(8), "h", false),
+                (None, "", Some(9), "new", true),
+                (Some(9), "", Some(10), "", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn text_diff_rows_mark_where_lines_were_deleted() {
+        let rows = text_diff_rows("keep\ngone\nstay", "keep\nstay");
+        let deleted: Vec<_> = rows.iter().filter(|r| r.changed).collect();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].before, "gone");
+        assert_eq!(deleted[0].after_number, None);
+        assert_eq!(deleted[0].deleted_at, Some(2));
+        assert!(text_diff_rows("same\r\ntext", "same\ntext").is_empty());
+    }
+
+    #[test]
     fn parses_aligned_change_hunks() {
         let diff = "@@ -4,2 +4,3 @@\n-old one\n-old two\n+new one\n+new two\n+new three\n";
         let rows = parse_diff(diff);
@@ -2273,7 +2428,8 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].byte, 0);
-        assert!(search_workspace_with_cancel(&root, "find", &AtomicBool::new(true)).is_empty());
+        let find = Matcher::new("find", SearchOptions::default()).unwrap();
+        assert!(search_workspace_with_cancel(&root, &find, &AtomicBool::new(true)).is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2297,7 +2453,8 @@ mod tests {
         // An open tab's path as canonicalize() gives it.
         let verbatim = PathBuf::from(format!(r"\\?\{}", root.join(r"src\b.rs").display()));
         let open = [verbatim, root.join("target/gen.rs")];
-        let targets = replace_targets(&root, "old", &open, &AtomicBool::new(false));
+        let old = Matcher::new("old", SearchOptions::default()).unwrap();
+        let targets = replace_targets(&root, &old, &open, &AtomicBool::new(false));
         assert_eq!(
             targets,
             vec![
@@ -2306,8 +2463,7 @@ mod tests {
                 (root.join("src/c.rs"), 1)
             ]
         );
-        assert!(replace_targets(&root, "old", &[], &AtomicBool::new(true)).is_empty());
-        assert!(replace_targets(&root, "", &[], &AtomicBool::new(false)).is_empty());
+        assert!(replace_targets(&root, &old, &[], &AtomicBool::new(true)).is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

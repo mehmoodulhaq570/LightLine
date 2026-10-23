@@ -104,7 +104,7 @@ impl App {
         if tab.image.is_some()
             || tab.markdown.is_some()
             || tab.is_placeholder()
-            || (self.side_view == SideView::Review && self.review_file.is_some())
+            || self.showing_diff()
         {
             return None;
         }

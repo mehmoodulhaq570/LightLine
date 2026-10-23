@@ -275,6 +275,13 @@ impl App {
             return true;
         }
         if self.search_input {
+            if alt
+                && !ctrl
+                && let Some(toggle) = search_options::toggle_for_key(key)
+            {
+                self.flip_search_option(hwnd, toggle);
+                return true;
+            }
             match key {
                 x if x == VK_ESCAPE as u32 => {
                     self.search_input = false;
@@ -408,7 +415,7 @@ impl App {
                         self.cancel_search();
                         self.side_view = SideView::Files;
                         self.set_sidebar_visible(hwnd, false);
-                        self.review_file = None;
+                        self.close_diff();
                         self.keep_cursor_visible(hwnd);
                     } else {
                         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -468,11 +475,7 @@ impl App {
         if self.tab().markdown.is_some() && !ctrl && self.markdown_key(hwnd, key) {
             return true;
         }
-        if self.side_view == SideView::Review
-            && self.review_file.is_some()
-            && !self.panel_focus
-            && !ctrl
-        {
+        if self.showing_diff() && !self.panel_focus && !ctrl {
             match key {
                 x if x == VK_UP as u32 => self.diff_first = self.diff_first.saturating_sub(1),
                 x if x == VK_DOWN as u32 => {
@@ -480,8 +483,10 @@ impl App {
                         (self.diff_first + 1).min(self.diff_rows.len().saturating_sub(1))
                 }
                 x if x == VK_ESCAPE as u32 => {
-                    self.review_file = None;
-                    self.panel_focus = true;
+                    // A Git diff hands the keyboard back to its panel; a
+                    // Local History one back to the file.
+                    self.panel_focus = self.history_compare.is_none();
+                    self.close_diff();
                 }
                 x if x == VK_F7 as u32 && shift => {
                     let prev_hunk = (0..self.diff_first).rev().find(|&i| {
@@ -519,6 +524,12 @@ impl App {
             match key {
                 x if x == VK_ESCAPE as u32 => {
                     self.close_find(hwnd);
+                    return true;
+                }
+                // Alt+C, Alt+W, Alt+R: Match Case, Whole Word, Regex.
+                _ if alt && !ctrl && search_options::toggle_for_key(key).is_some() => {
+                    let toggle = search_options::toggle_for_key(key).unwrap_or_default();
+                    self.flip_find_option(hwnd, toggle);
                     return true;
                 }
                 x if x == VK_TAB as u32 && self.replace_mode => {
@@ -918,7 +929,7 @@ impl App {
                     }
                     self.side_view = SideView::Files;
                     self.set_sidebar_visible(hwnd, false);
-                    self.review_file = None;
+                    self.close_diff();
                     self.keep_cursor_visible(hwnd);
                     return true;
                 }
@@ -1174,7 +1185,7 @@ impl App {
         if self.panel_focus {
             return;
         }
-        if self.side_view == SideView::Review && self.review_file.is_some() {
+        if self.showing_diff() {
             return;
         }
         if self.tab().read_only() {
@@ -1707,6 +1718,10 @@ impl App {
                 }
                 let query_box = self.search_query_box(left, editor_left);
                 let replace_box = self.replace_box(left, editor_left);
+                if let Some(toggle) = self.option_toggle_at(query_box, x, y) {
+                    self.flip_search_option(hwnd, toggle);
+                    return;
+                }
                 if contains(query_box) || contains(replace_box) {
                     self.search_input = true;
                     self.replace_focus = contains(replace_box);
@@ -2069,13 +2084,14 @@ impl App {
             self.start_terminal_selection(hwnd, x, y);
             return;
         }
-        if self.side_view == SideView::Review
-            && self.review_file.is_some()
-            && y >= self.editor_top()
-        {
+        if self.showing_diff() && y >= self.editor_top() {
             // The two panes mirror a file that is also open in the editor, so a
             // click jumps to the line under the pointer instead of doing nothing.
-            self.open_diff_line(hwnd, y);
+            if self.history_compare.is_none() {
+                self.open_diff_line(hwnd, y);
+            } else if !self.history_header_click(hwnd, x, y) {
+                self.history_diff_click(hwnd, y);
+            }
             return;
         }
         // The split control is drawn at the right edge of each pane's breadcrumb
