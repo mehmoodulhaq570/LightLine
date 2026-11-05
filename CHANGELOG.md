@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Smoother Scrolling Under Sticky Lines**: Scrolling up with the mouse wheel no longer redraws the rows the pinned sticky lines moved onto, and rows hidden under them aren't drawn at all, so each notch draws only the rows it brings into view. The frame also goes to the screen in one copy instead of two. About 5% less work per notch in a 3,000-line Rust file, and more where several lines are pinned.
 
+#### Fixed
+
+- **Installing html, glsl or proto No Longer Hangs**: These three registry extensions live inside the Zed editor's own repository. Clicking **Install** on one downloaded a large copy of that repository, left the card on **Checking...** for minutes, and then failed anyway. LightLine now says straight away that it can't install them, without downloading anything.
+
 ## [v0.7.0] - 2026-10-23
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.7.0-windows-x86_64.zip`, `lightline-v0.7.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.

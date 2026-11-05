@@ -22,6 +22,22 @@ const LIST_REUSE: Duration = Duration::from_secs(10 * 60);
 struct RegistryEntry {
     submodule: String,
     version: String,
+    /// Set when the extension is a folder inside a larger repository (a few
+    /// live inside Zed's own repository), not a repository of its own.
+    path: Option<String>,
+}
+
+// Only whole-repository extensions can be installed: a `path` entry would
+// mean downloading the containing repository (for Zed's own, a very large
+// download) just to fail validation at its root.
+fn check_installable(id: &str, entry: &RegistryEntry) -> Result<(), String> {
+    match &entry.path {
+        Some(_) => Err(format!(
+            "\"{id}\" is part of the Zed editor's own repository, so LightLine can't install it \
+             (LightLine can only use icon-theme and color-theme extensions right now)"
+        )),
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +56,7 @@ pub fn resolve(id: &str) -> Result<ResolvedExtension, String> {
     let entry = entries
         .get(id)
         .ok_or_else(|| format!("\"{id}\" is not in the Zed extensions registry"))?;
+    check_installable(id, entry)?;
     let contents = fetch(&format!("{CONTENTS_API}/{}?ref=main", entry.submodule))?;
     let (git_url, commit) = parse_submodule(&contents).ok_or_else(|| {
         format!("the registry lists \"{id}\" but its repository could not be resolved")
@@ -137,6 +154,26 @@ mod tests {
         ] {
             assert_eq!(parse_submodule(&bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn extensions_inside_another_repository_are_refused_before_downloading() {
+        let registry: HashMap<String, RegistryEntry> = toml::from_str(
+            r#"
+            [html]
+            submodule = "extensions/zed"
+            path = "extensions/html"
+            version = "0.3.2"
+
+            [dracula]
+            submodule = "extensions/dracula"
+            version = "1.1.2"
+            "#,
+        )
+        .unwrap();
+        let refused = check_installable("html", &registry["html"]).unwrap_err();
+        assert!(refused.contains("Zed editor's own repository"), "{refused}");
+        assert!(check_installable("dracula", &registry["dracula"]).is_ok());
     }
 
     // Live network tests, same spirit as the LSP live tests: skipped by
