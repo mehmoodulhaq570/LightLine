@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 
 - **Half the Wakeups When Other Programs List Windows**: Some programs that list open windows (taskbar tools, window switchers) ask every window for its icon about once a second. LightLine had no answer to the first question, so they asked a second time, waking LightLine twice a second while it sat idle in the background. It now answers straight away: on a PC running such a program, an idle LightLine woke about once a second (1.0–1.05) instead of twice (2.0–2.55), over three alternating runs of each.
+- **Faster Typing on Very Long Lines**: Typing or deleting on a very long line, such as a minified JavaScript or JSON file, no longer copies the whole line on each keystroke. On a 512 KiB line each keystroke now costs about 30 µs instead of about 1 ms, and typing with 100 carets on such lines about 5 ms instead of about 20 ms. Typing in ordinary files is a little quicker too (about 0.5 µs per keystroke instead of about 1 µs). Measured with the new `measure_text_model` benchmark; the results are in `docs/TEXT_MODEL_BENCHMARK.md`.
 
 ## [v0.8.0] - 2026-11-07
 

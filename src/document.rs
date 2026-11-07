@@ -702,7 +702,15 @@ impl Document {
 
     pub fn utf16_column(&self, pos: Pos) -> usize {
         let pos = self.clamp(pos);
-        self.lines[pos.line][..pos.byte].encode_utf16().count()
+        let before = &self.lines[pos.line][..pos.byte];
+        // Every edit asks for two of these. ASCII is one UTF-16 unit a byte,
+        // and checking for it is far quicker than encoding: on a 512 KiB
+        // minified line, encoding made each keystroke cost about 0.3 ms.
+        if before.is_ascii() {
+            before.len()
+        } else {
+            before.encode_utf16().count()
+        }
     }
 
     fn record_change(&mut self, start: Pos, end: Pos, text: String) {
@@ -951,6 +959,21 @@ impl Document {
     }
 
     fn replace_raw(&mut self, start: Pos, end: Pos, replacement: &str) -> Pos {
+        // Typing, deleting or pasting within one line: edited in place, which
+        // moves only the text after the edit. Copying the line's two halves
+        // and rebuilding it cost each keystroke the whole line, about 0.2 ms
+        // on a 512 KiB minified line. The line count doesn't change, so line
+        // endings stay as they are; folds and breakpoints are updated the
+        // same way as below.
+        if start.line == end.line && !replacement.contains('\n') {
+            self.lines[start.line].replace_range(start.byte..end.byte, replacement);
+            self.shift_folds(start.line, end.line, start.line);
+            self.shift_breakpoints(start, end, start.line);
+            return Pos {
+                line: start.line,
+                byte: start.byte + replacement.len(),
+            };
+        }
         let prefix = self.lines[start.line][..start.byte].to_owned();
         let suffix = self.lines[end.line][end.byte..].to_owned();
         let parts: Vec<&str> = replacement.split('\n').collect();
@@ -1365,6 +1388,43 @@ mod tests {
         assert!(undone.serial > serial);
         doc.redo();
         assert_eq!(doc.last_change().unwrap().text, "é");
+    }
+
+    #[test]
+    fn edits_within_a_line_keep_endings_and_utf16_columns() {
+        let path =
+            std::env::temp_dir().join(format!("lightline-inline-{}.txt", std::process::id()));
+        std::fs::write(&path, "one\r\ntwo 🦀 two\nthree\r\nfour").unwrap();
+        let mut doc = Document::open(path.clone()).unwrap();
+        // ASCII before the edit: the UTF-16 column is the byte offset.
+        doc.replace(Pos { line: 0, byte: 1 }, Pos { line: 0, byte: 2 }, "N");
+        let change = doc.last_change().unwrap();
+        assert_eq!((change.start_utf16, change.end_utf16), (1, 2));
+        // After the crab (4 bytes, 2 UTF-16 units).
+        let after_crab = Pos { line: 1, byte: 8 };
+        assert_eq!(
+            doc.replace(after_crab, after_crab, "é"),
+            Pos { line: 1, byte: 10 }
+        );
+        let change = doc.last_change().unwrap();
+        assert_eq!((change.start_utf16, change.end_utf16), (6, 6));
+        // Delete within a line, and type at the end of the last one.
+        doc.replace(Pos { line: 2, byte: 0 }, Pos { line: 2, byte: 2 }, "");
+        doc.replace(Pos { line: 3, byte: 4 }, Pos { line: 3, byte: 4 }, "!");
+        assert_eq!(doc.text(), "oNe\ntwo 🦀é two\nree\nfour!");
+        doc.save(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "oNe\r\ntwo 🦀é two\nree\r\nfour!"
+        );
+        // Undo walks back through the same in-place edits.
+        for _ in 0..4 {
+            doc.undo();
+        }
+        assert_eq!(doc.text(), "one\ntwo 🦀 two\nthree\nfour");
+        let change = doc.last_change().unwrap();
+        assert_eq!((change.start_utf16, change.end_utf16), (1, 2));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
