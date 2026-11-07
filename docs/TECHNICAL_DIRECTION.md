@@ -54,7 +54,7 @@ The binary crate (`src/main.rs` and `src/windows_app/`) is the whole Windows UI.
 | Target platform | Windows 10 and 11, x64 and ARM64 | In use. macOS is not planned for now (issue #35); the portable path is kept in [macOS support](#macos-support) |
 | UI | Self-drawn through Win32, no GUI toolkit | In use. GPUI was the first candidate and was not adopted |
 | Rendering | GDI into a persistent backbuffer; redraw only the invalid region; scroll by moving rows in the backbuffer | In use. `tiny-skia` + `softbuffer` is the portable replacement if a port happens |
-| Text buffer | One `String` per line (`Vec<String>`), files up to 128 MB | In use as a prototype. Gap buffer, piece table and rope remain open until benchmarked; a benchmark is in progress |
+| Text buffer | One `String` per line (`Vec<String>`), files up to 128 MB | In use. Benchmarked up to 121 MiB ([results](TEXT_MODEL_BENCHMARK.md)): kept, because typing costs about 1 µs at every size. If line-splitting edits in very large files need to get faster, chunk the lines rather than switch to a byte rope |
 | Syntax parsing | Tree-sitter with incremental edits, on a worker thread | In use for Rust, Python, C and C++ (C grammar), JavaScript, TypeScript/TSX and JSON; Markdown has its own highlighter |
 | Language intelligence | Existing language servers through LSP | In use: rust-analyzer, Pyright, clangd, typescript-language-server, gopls |
 | Debugging | Debug Adapter Protocol | In use: lldb-dap for native code, debugpy for Python |
@@ -66,7 +66,7 @@ The binary crate (`src/main.rs` and `src/windows_app/`) is the whole Windows UI.
 | Persistent cache | SQLite only if a measured need for persistent indexing appears | Not needed so far |
 | Zig | Consider only for a measured bottleneck with a meaningful improvement | Not needed so far |
 | AI | Optional, opt-in HTTP chat with any OpenAI-compatible server | In use. Ollama by default; keys in Windows Credential Manager |
-| Extensions | Catalogue from the Zed extension registry, consumed through adapters | Partly in use: color and icon themes only. Language extensions are in progress |
+| Extensions | Catalogue from the Zed extension registry, consumed through adapters | Partly in use: color and icon themes, and syntax colors from language extensions (the grammar is compiled with the user's C compiler at install). Language servers from extensions and extensions that run code are not supported |
 
 Rust is the default throughout: native binaries, memory safety, concurrency, and a strong developer-tooling ecosystem fit a long-running editor. We do not add another systems language merely because it is fast. A Zig component would require profiling, an alternative implementation, a benchmarked gain, and a justified FFI boundary.
 
@@ -81,7 +81,7 @@ Text model: buffer, cursor, selection, undo/redo, edit operations, file state
 Rendering: layout, glyphs, syntax colors, cursor, selection, viewport
 ```
 
-The buffer decision is open. Benchmark insertion and deletion at the beginning, middle, and end of small and large files; line access; navigation; undo memory; parsing integration; and total memory overhead. A rope or rope-like structure is promising, but it must earn its place on our workloads. The current `Vec<String>` model is a prototype and is not a large-file strategy: it opens files up to 128 MB (`MAX_OPEN_BYTES`), and `examples/measure.rs` and `examples/measure_editing.rs` record document-level costs. A fuller benchmark against the alternatives is in progress; the model changes only if that benchmark shows a real gain on real workloads.
+The buffer was benchmarked from 3,000 lines up to 121 MiB (`examples/measure_text_model.rs`; results and method in [TEXT_MODEL_BENCHMARK.md](TEXT_MODEL_BENCHMARK.md)). `Vec<String>` stays: typing a character costs about 1 µs at every size, and 114 call sites read the text a line at a time. Its one structural weakness is that Enter, a Backspace that joins lines and multi-line paste move every line below the edit, which exceeds the 3 ms keystroke budget above about 650,000 lines. If that starts to matter, store lines in chunks of about 1,024 (which keeps line access) rather than switching to a byte rope. Re-run the benchmark before changing the model.
 
 Only visible lines should be laid out and painted. A 100,000-line document must not create 100,000 UI widgets. Scrolling changes the viewport and requests work for the newly visible area. Long lines, wrapped lines, selections, cursor movement, and syntax colors need their own measurements; a GPU alone does not guarantee low latency.
 
@@ -138,7 +138,7 @@ Performance is a constraint on each architectural decision, not a cleanup phase.
 | File open | TBD | Document-only numbers from `examples/measure.rs` | 10 KB, 100,000 lines, and very large files |
 | Search | TBD | Not recorded | Query to first and complete results in representative projects |
 | Project loading | TBD | Not recorded | Time until usable in a 100,000-file workspace |
-| Background activity | TBD | 0–1 wakeups a second at v0.7.0; about 2 a second on both v0.7.0 and v0.8.0 in the v0.8.0 check, under investigation | CPU, disk I/O, and processes while idle |
+| Background activity | TBD | About 1 wakeup a second after the window icons fix (was about 2 on v0.7.0 and v0.8.0). The rest is another program polling every window with `WM_GETICON`; LightLine runs no timers of its own while idle | CPU, disk I/O, and processes while idle |
 
 Targets remain TBD until we benchmark existing editors and target hardware. Record hardware, OS scaling, file/project fixtures, cold versus warm runs, and percentiles where latency matters. Each release is compared with the previous one on release builds, on the same PC and workload (a 3,148-line Rust file with rust-analyzer running), and the results go in its `CHANGELOG.md` section. The document-only measurements in `examples/` are not a UI latency budget. A 500 MB file is a distinct workload that will need bounded memory and work, not merely the same path with a larger input.
 
@@ -169,9 +169,9 @@ These are proposals for the maintainer to accept, reorder or drop, in suggested 
 
 | Order | Stage | Intended scope | Decision rules it serves | State |
 | --- | --- | --- | --- | --- |
-| 1 | Keep the performance budget honest | Find what wakes the idle UI thread about twice a second (an ETW trace on a quiet PC), then fix it or correct the README claim. Fill in the "Last measured" column above for every release, including idle memory, scrolling and search. Keep comparing each release with the previous one before it ships | 2, 5, 8 | In progress |
-| 2 | Benchmark the text model | Measure typing, line access, undo memory, search, open and save from small files up to the 128 MB limit, comparing `Vec<String>` with a rope and a piece table. Change the model only if the gain is real on real workloads | 3, 6, 8 | In progress |
-| 3 | Language extensions from the Zed registry | Load Tree-sitter grammars and language configuration (highlight queries, brackets, comments, indentation) from Zed language extensions, only when a file needs them, so more languages get colors without growing the exe. Then let an extension name the language server to start, still spoken to by LightLine's own LSP client | 2, 7 | In progress |
+| 1 | Keep the performance budget honest | Fill in the "Last measured" column above for every release, including idle memory, scrolling and search, and compare each release with the previous one before it ships. Next from the text-model benchmark: count Find matches without rescanning the whole file on every typed character, and move saving off the UI thread | 2, 4, 5, 8 | Ongoing. The idle wakeups are explained and halved (see above) |
+| 2 | Benchmark the text model | Measure typing, line access, undo memory, search, open and save from small files up to the 128 MB limit. Change the model only if the gain is real on real workloads | 3, 6, 8 | Done: `Vec<String>` kept ([results](TEXT_MODEL_BENCHMARK.md)); typing on very long lines now edits in place |
+| 3 | Language extensions from the Zed registry | Load Tree-sitter grammars and language configuration from Zed language extensions, only when a file needs them, so more languages get colors without growing the exe. Then comments, brackets and indentation from the extension, the new languages in the language picker, and letting an extension name the language server to start, still spoken to by LightLine's own LSP client | 2, 7 | First step done: grammars compiled at install, syntax colors from `highlights.scm`. The rest is not started |
 | 4 | Code signing | Sign release builds through SignPath (already wired into `release.yml`, off until `SIGNPATH_ENABLED` is set) so SmartScreen stops warning; closes issue #13 | 9 | Waiting on SignPath approval |
 | 5 | Extensions that run code | A WASM adapter (Zed's extensions target `wasm32-wasip2` with `wasmtime`) or separate processes, with explicit capabilities, so a broken extension can't stall typing or crash the editor | 1, 7 | Not started; depends on 3 |
 | 6 | Another platform | Only if the maintainer revives issue #35. Follow the [macOS plan](#macos-support); its step 1 (a `Canvas` trait in front of GDI) should cost nothing measurable on Windows before it lands | 9, 10 | Not planned |

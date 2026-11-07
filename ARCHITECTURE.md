@@ -54,7 +54,7 @@ node_language_servers["Language servers"]
 node_formatter_tool["Prettier"]
 node_zed_service["Zed registry service"]
 node_git_service["Git tools"]
-node_debug_adapter["lldb-dap"]
+node_debug_adapter["Debug adapters (lldb-dap, debugpy)"]
 node_shell["Shell or program"]
 
 node_user -->|"interacts"| node_window
@@ -111,6 +111,6 @@ class node_extensions,node_registry,node_installer,node_theme,node_os,node_forma
 
 * **`src/terminal/`**: Houses the backend logic for Windows ConPTY integration, managing shell sessions and standard I/O passing.
 
-* **`src/extensions/`**: Manages the plugin architecture, theme application, and API integration with the Zed registry.
+* **`src/extensions/`**: Looks up and installs extensions from the Zed registry: color and icon themes, and language extensions whose grammars are compiled at install.
 
 * **`src/` (Root)**: Contains core application state, document object models (`document.rs`), Debug Adapter Protocol (DAP) logic, and Language Server Protocol (LSP) integrations.

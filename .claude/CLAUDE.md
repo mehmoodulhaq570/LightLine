@@ -105,7 +105,7 @@ Two crates in one package.
 
 | Area | Files | Notes |
 | --- | --- | --- |
-| Text model | `document.rs` | `Vec<String>` lines (a prototype, kept until benchmarks justify a rope); undo groups; grapheme-aware movement and deletion; largest editable file `MAX_OPEN_BYTES` = 128 MB |
+| Text model | `document.rs` | `Vec<String>` lines, kept after benchmarking up to 121 MiB (`docs/TEXT_MODEL_BENCHMARK.md`); undo groups; grapheme-aware movement and deletion; largest editable file `MAX_OPEN_BYTES` = 128 MB |
 | Syntax | `syntax.rs`, `markdown_syntax.rs` | Tree-sitter for Rust, Python, C, JavaScript, TypeScript and JSON, on a worker with incremental edits. Recolors only edited lines plus the tree's changed ranges. Parse limit set by the `parseLimitKb` setting (default 4 MB); Rust files over 128 KB use a bounded lexical fallback |
 | Language servers | `lsp.rs` | rust-analyzer, Pyright, clangd, typescript-language-server, gopls. One client per (language, workspace root), started lazily; handles crashes, versions, cancellation and UTF-16 positions |
 | Debugger | `debug.rs` | DAP client: lldb-dap for native code, debugpy for Python |
@@ -183,7 +183,7 @@ Background work runs on threads and wakes the window.
 | `WM_APP+12` | File watcher |
 
 - Results carry ids or generations, so stale ones are dropped (for example the Explorer request ids and workspace generations).
-- The only timers are one-shots: the caret blink, the session recovery snapshot armed from `paint()`, and the status-bar timer. Don't add repeating timers.
+- The only repeating timer is the caret blink (530 ms), and only while the window has focus. Everything else is one-shot: the session recovery snapshot armed from `paint()`, the status-bar timer, and short debounces (hover, inlay hints, occurrences, gutter diff). Don't add repeating timers.
 
 ### Child processes
 
