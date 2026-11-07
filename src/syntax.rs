@@ -8,6 +8,7 @@ use tree_sitter::{
     InputEdit, Language, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub const DEFAULT_PARSE_LIMIT: usize = 4 * 1024 * 1024;
@@ -70,6 +71,8 @@ pub enum Syntax {
     TypeScript(TreeSitterSyntax),
     Tsx(TreeSitterSyntax),
     Json(TreeSitterSyntax),
+    /// A language from an installed extension.
+    Extension(TreeSitterSyntax),
     Markdown(crate::markdown_syntax::MarkdownSyntax),
 }
 
@@ -106,6 +109,24 @@ impl Syntax {
         Syntax::Markdown(crate::markdown_syntax::MarkdownSyntax::new())
     }
 
+    pub fn new_extension(language: Arc<crate::extensions::language::ExtensionLanguage>) -> Self {
+        Syntax::Extension(TreeSitterSyntax::new(Grammar {
+            source: GrammarSource::Extension(language),
+            color: crate::extensions::language::capture_color,
+        }))
+    }
+
+    /// The installed language this tab is colored as, if it's one.
+    pub fn extension_language(&self) -> Option<&str> {
+        match self {
+            Syntax::Extension(syntax) => match &syntax.grammar.source {
+                GrammarSource::Extension(language) => Some(&language.name),
+                GrammarSource::Builtin { .. } => None,
+            },
+            _ => None,
+        }
+    }
+
     pub fn invalidate_from(&mut self, line: usize) {
         match self {
             Syntax::Rust(syntax) => syntax.invalidate_from(line),
@@ -114,7 +135,8 @@ impl Syntax {
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
             | Syntax::Tsx(syntax)
-            | Syntax::Json(syntax) => syntax.invalidate_from(),
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => syntax.invalidate_from(),
             Syntax::Markdown(syntax) => syntax.invalidate_from(line),
         }
     }
@@ -130,7 +152,8 @@ impl Syntax {
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
             | Syntax::Tsx(syntax)
-            | Syntax::Json(syntax) => syntax.edited(change),
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => syntax.edited(change),
             // Colored line by line: only the fence state from here on changes.
             Syntax::Markdown(syntax) => syntax.invalidate_from(change.start.line),
         }
@@ -144,7 +167,8 @@ impl Syntax {
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
             | Syntax::Tsx(syntax)
-            | Syntax::Json(syntax) => syntax.advance_to(document),
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => syntax.advance_to(document),
             Syntax::Markdown(syntax) => syntax.advance_to(document, target, budget),
         }
     }
@@ -157,7 +181,8 @@ impl Syntax {
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
             | Syntax::Tsx(syntax)
-            | Syntax::Json(syntax) => syntax.spans(line),
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => syntax.spans(line),
             Syntax::Markdown(syntax) => syntax.spans(document, line),
         }
     }
@@ -172,7 +197,8 @@ impl Syntax {
             | Syntax::JavaScript(syntax)
             | Syntax::TypeScript(syntax)
             | Syntax::Tsx(syntax)
-            | Syntax::Json(syntax) => &mut syntax.recolored,
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => &mut syntax.recolored,
             Syntax::Markdown(syntax) => &mut syntax.recolored,
         };
         std::mem::replace(recolored, Recolored::Nothing)
@@ -238,15 +264,55 @@ pub fn highlight_snippet(language: &str, source: &str) -> Option<Vec<Vec<Span>>>
         "json" | "jsonc" => JSON,
         _ => return None,
     };
-    Parsed::new(grammar, source.to_string()).map(|parsed| parsed.spans)
+    Parsed::new(&grammar, source.to_string()).map(|parsed| parsed.spans)
 }
 
 /// A tree-sitter grammar and how its highlight captures map to colors.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Grammar {
-    language: fn() -> Language,
-    highlights: fn() -> &'static str,
+    source: GrammarSource,
     color: fn(&str) -> Option<Color>,
+}
+
+#[derive(Clone)]
+enum GrammarSource {
+    // Compiled into LightLine.
+    Builtin {
+        language: fn() -> Language,
+        highlights: fn() -> &'static str,
+    },
+    // Built by an extension install; loaded on the parser thread.
+    Extension(Arc<crate::extensions::language::ExtensionLanguage>),
+}
+
+impl Grammar {
+    const fn builtin(
+        language: fn() -> Language,
+        highlights: fn() -> &'static str,
+        color: fn(&str) -> Option<Color>,
+    ) -> Self {
+        Self {
+            source: GrammarSource::Builtin {
+                language,
+                highlights,
+            },
+            color,
+        }
+    }
+
+    // The grammar and its highlight query; None when an extension's grammar
+    // can't be loaded, which leaves the file uncolored.
+    fn load(&self) -> Option<(Language, std::borrow::Cow<'static, str>)> {
+        match &self.source {
+            GrammarSource::Builtin {
+                language,
+                highlights,
+            } => Some((language(), std::borrow::Cow::Borrowed(highlights()))),
+            GrammarSource::Extension(language) => crate::extensions::language::load(language)
+                .ok()
+                .map(|(grammar, query)| (grammar, std::borrow::Cow::Owned(query))),
+        }
+    }
 }
 
 fn rust_language() -> Language {
@@ -308,47 +374,21 @@ fn json_highlights() -> &'static str {
     tree_sitter_json::HIGHLIGHTS_QUERY
 }
 
-const RUST: Grammar = Grammar {
-    language: rust_language,
-    highlights: rust_highlights,
-    color: rust_capture_color,
-};
+const RUST: Grammar = Grammar::builtin(rust_language, rust_highlights, rust_capture_color);
 
-const PYTHON: Grammar = Grammar {
-    language: python_language,
-    highlights: python_highlights,
-    color: python_capture_color,
-};
+const PYTHON: Grammar = Grammar::builtin(python_language, python_highlights, python_capture_color);
 
-const C: Grammar = Grammar {
-    language: c_language,
-    highlights: c_highlights,
-    color: c_capture_color,
-};
+const C: Grammar = Grammar::builtin(c_language, c_highlights, c_capture_color);
 
-const JAVASCRIPT: Grammar = Grammar {
-    language: javascript_language,
-    highlights: javascript_highlights,
-    color: js_capture_color,
-};
+const JAVASCRIPT: Grammar =
+    Grammar::builtin(javascript_language, javascript_highlights, js_capture_color);
 
-const TYPESCRIPT: Grammar = Grammar {
-    language: typescript_language,
-    highlights: typescript_highlights,
-    color: js_capture_color,
-};
+const TYPESCRIPT: Grammar =
+    Grammar::builtin(typescript_language, typescript_highlights, js_capture_color);
 
-const TSX: Grammar = Grammar {
-    language: tsx_language,
-    highlights: typescript_highlights,
-    color: js_capture_color,
-};
+const TSX: Grammar = Grammar::builtin(tsx_language, typescript_highlights, js_capture_color);
 
-const JSON: Grammar = Grammar {
-    language: json_language,
-    highlights: json_highlights,
-    color: json_capture_color,
-};
+const JSON: Grammar = Grammar::builtin(json_language, json_highlights, json_capture_color);
 
 /// One document's parse on the worker thread, kept up to date edit by edit:
 /// its text, tree and colors. Each keystroke used to send the worker a copy
@@ -370,11 +410,11 @@ struct Parsed {
 }
 
 impl Parsed {
-    fn new(grammar: Grammar, source: String) -> Option<Self> {
-        let language = (grammar.language)();
+    fn new(grammar: &Grammar, source: String) -> Option<Self> {
+        let (language, highlights) = grammar.load()?;
         let mut parser = Parser::new();
         parser.set_language(&language).ok()?;
-        let query = Query::new(&language, (grammar.highlights)()).ok()?;
+        let query = Query::new(&language, &highlights).ok()?;
         let tree = parser.parse(&source, None)?;
         let spans = spans_from_query(&query, &tree, &source, grammar.color);
         let line_starts = std::iter::once(0)
@@ -789,7 +829,7 @@ impl Worker {
                             source,
                         } => {
                             revision = next;
-                            parsed = Parsed::new(grammar, source);
+                            parsed = Parsed::new(&grammar, source);
                             edited = false;
                         }
                         Job::Edit {
@@ -1054,7 +1094,7 @@ impl TreeSitterSyntax {
         if !self.parser_attempted {
             self.parser_attempted = true;
             if within_parse_limit(document) {
-                self.worker = Some(Worker::start(self.grammar));
+                self.worker = Some(Worker::start(self.grammar.clone()));
                 self.reset = true;
             }
         }
@@ -1514,7 +1554,7 @@ mod tests {
     fn check_incremental(grammar: Grammar, text: &str, edits: &[(Pos, Pos, &str)], batched: bool) {
         let mut doc = Document::new();
         doc.replace(Pos::default(), Pos::default(), text);
-        let mut parsed = Parsed::new(grammar, doc.text()).unwrap();
+        let mut parsed = Parsed::new(&grammar, doc.text()).unwrap();
         for (index, &(start, end, insert)) in edits.iter().enumerate() {
             doc.replace(start, end, insert);
             assert!(
@@ -1626,7 +1666,7 @@ mod tests {
         };
         let mut doc = Document::new();
         doc.replace(Pos::default(), Pos::default(), RUST_SAMPLE);
-        let mut parsed = Parsed::new(RUST, doc.text()).unwrap();
+        let mut parsed = Parsed::new(&RUST, doc.text()).unwrap();
         for step in 0..300 {
             let line = next(doc.line_count());
             let text = doc.line(line);
@@ -1660,7 +1700,7 @@ mod tests {
 
     #[test]
     fn an_edit_that_does_not_fit_is_refused() {
-        let mut parsed = Parsed::new(RUST, "fn a() {}\n".into()).unwrap();
+        let mut parsed = Parsed::new(&RUST, "fn a() {}\n".into()).unwrap();
         let change = TextChange {
             serial: 1,
             start: at(5, 0),
@@ -1839,7 +1879,7 @@ mod tests {
     #[test]
     fn tsx_parses_type_annotations_and_jsx_elements() {
         let source = "const title: string = 'hello';\nconst element = <div>{title}</div>;\n";
-        let parsed = Parsed::new(TSX, source.into()).expect("TSX grammar and query");
+        let parsed = Parsed::new(&TSX, source.into()).expect("TSX grammar and query");
         assert!(!parsed.tree.root_node().has_error());
         let spans = highlight_snippet("tsx", source).unwrap();
         assert!(spans[0].iter().any(|span| span.color == Color::Type));

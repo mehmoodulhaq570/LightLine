@@ -293,14 +293,15 @@ Inserted code is indented to fit where it lands, and one **Ctrl+Z** undoes it.
 
 ## Extensions and themes
 
-The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extension registry](https://github.com/zed-industries/extensions) into `%APPDATA%\LightLine\extensions`. Two kinds work today. Neither runs code inside LightLine.
+The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extension registry](https://github.com/zed-industries/extensions) into `%APPDATA%\LightLine\extensions`. Three kinds work today.
 
-Updates download and validate a staged copy before replacing an installed theme. A failed download, invalid manifest, malformed theme or missing icon asset leaves the existing installation intact. If replacement fails, LightLine attempts to restore the previous copy; any backup it cannot restore is retained and its location is reported.
+Updates download and validate a staged copy before replacing an installed extension. A failed download, invalid manifest, malformed theme, missing icon asset or a grammar that doesn't build leaves the existing installation intact. If replacement fails, LightLine attempts to restore the previous copy; any backup it cannot restore is retained and its location is reported.
 
 - **Color themes** recolor all of LightLine, dark or light, including the terminal. Installing one, such as **Dracula**, switches to it at once and it's remembered. Themes with several variants (Catppuccin Latte, Frappé, Macchiato, Mocha) offer each in **Preferences: Color Theme**.
 - **Icon themes** change file and folder icons; **Material Icon Theme** is the popular one. Without one, LightLine uses its built-in icons.
+- **Languages** add syntax colors for files LightLine doesn't color itself. Installing one downloads the language's Tree-sitter grammar and builds it with the C compiler on your PC: the Visual Studio C++ Build Tools (found automatically, as Rust uses them), or `gcc` or `clang` on PATH. Without one, the install stops and says so. Building takes a few seconds; files of that language that are open change color as soon as it finishes. Only the colors come from the extension: a language server it declares isn't started (the status bar says so), and comment toggling, indentation and brackets follow LightLine's defaults. The grammar is native code loaded into LightLine, like a grammar in Helix or Neovim, so install language extensions you trust. After removing one, restart LightLine to free its grammar file if a file of that language was open.
 
-Other kinds of extensions, such as language servers, say they aren't supported yet rather than half-installing.
+Other kinds of extensions, such as debuggers or extensions that only add a language server, say they aren't supported yet rather than half-installing.
 
 ---
 

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Syntax Colors from Language Extensions**: Language extensions from the Zed registry can now be installed from the Extensions panel (`Ctrl+Shift+X`); until now only themes could. LightLine downloads the language's Tree-sitter grammar at the version the extension pins, builds it with the C compiler already on your PC (the Visual Studio C++ Build Tools, found automatically, or `gcc`/`clang` on PATH), and colors files of that language with the extension's own highlight rules. Files of that language that are already open change color as soon as the install finishes. If no C compiler is found, or the grammar doesn't build, the install stops with a message saying why and anything already installed is left as it was. Only the colors are used: a language server the extension declares isn't started yet, and the status bar says so. Nothing is loaded until a file of that language is opened.
+
 #### Changed
 
 - **Half the Wakeups When Other Programs List Windows**: Some programs that list open windows (taskbar tools, window switchers) ask every window for its icon about once a second. LightLine had no answer to the first question, so they asked a second time, waking LightLine twice a second while it sat idle in the background. It now answers straight away: on a PC running such a program, an idle LightLine woke about once a second (1.0–1.05) instead of twice (2.0–2.55), over three alternating runs of each.

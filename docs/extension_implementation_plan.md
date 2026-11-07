@@ -296,3 +296,108 @@ independent of where the extension description comes from):
   can be given host-function access that reaches further than an OS process boundary
   would, and that access needs a deliberate answer before it ships, not an
   afterthought.
+
+## 7. Language extensions: Tree-sitter grammars (decided 2026-11)
+
+A Zed language extension is mostly data around one piece of code, the
+grammar:
+
+```text
+extension.toml                    [grammars.<name>] repository = "...", rev = "<sha>" (or commit), path = "<subdir>"?
+                                  [language_servers.<id>] ...           (needs the extension's WASM)
+languages/<lang>/config.toml      name, grammar, path_suffixes, line_comments, brackets, ...
+languages/<lang>/highlights.scm   Tree-sitter query with Zed's capture names
+languages/<lang>/{injections,indents,outline,brackets}.scm
+```
+
+The grammar is a separate repository pinned by commit. Its `src/parser.c`
+(generated, committed by convention) plus an optional `src/scanner.c` or
+`scanner.cc` is the code. Zed compiles it to WebAssembly when the extension
+is published; the extension repository itself carries no built grammar.
+
+### Options considered
+
+| Option | What it needs | Verdict |
+| --- | --- | --- |
+| **Build the grammar's C sources at install time into a native library** and load it (`libloading`) | A C compiler on the user's PC; `libloading` (tiny) and `find-msvc-tools` (tiny, already in the lockfile through `cc`) | **Chosen.** Helix and Neovim do exactly this. No runtime cost beyond the grammar itself; parsing runs on the existing parser thread with the existing incremental-edit code. |
+| Tree-sitter's `wasm` feature (wasmtime) running grammars as WASM | `tree-sitter` with `wasm`, so wasmtime, plus prebuilt `.wasm` grammars, which only Zed's own download service provides (or a WASI SDK to build them) | Rejected for now. wasmtime is a very large dependency (not measured here: building it needed network and disk this machine didn't have that day), every parse pays the WASM boundary, and grammars would come from Zed's service rather than the registry. Revisit when WASM is needed anyway for extension code (§6). |
+| Ship nothing; use only `config.toml` and queries against grammars LightLine bundles | Nothing | Rejected as the main path: language extensions exist precisely for languages LightLine doesn't bundle. |
+
+The trade-off, taken knowingly: a grammar is native code loaded into
+LightLine's process, so a crash in it takes LightLine down (Zed's WASM sandbox
+avoids that). Grammars are generated tables plus small hand-written scanners
+from the extension's pinned commit, the same code Helix and Neovim users run
+natively, and installing is an explicit user action. The user guide says to
+install language extensions you trust.
+
+### How it works
+
+- **Install** (`installer.rs`, `language.rs`): after the extension's pinned
+  commit is fetched into the staging folder, each `[grammars.<name>]` is
+  fetched at its `rev` (the same `git fetch --depth 1` of exactly that
+  commit) into `.grammar-src-<name>`, compiled to `grammars/<name>.dll`, and
+  the sources are deleted. The staging copy is then validated and promoted
+  exactly as themes are: a failure anywhere leaves the previous install
+  intact.
+- **Compiler**: MSVC `cl.exe`, located through the Visual Studio installation
+  (`find-msvc-tools`, the lookup `cc` uses, so no Developer Prompt is
+  needed); else `gcc`/`g++`; else `clang`/`clang++` on PATH. `cl /O2 /LD`,
+  plus `/EXPORT:tree_sitter_<name>` because older generated parsers don't
+  mark their entry point exported. gcc gets `-static-libgcc` (and
+  `-static-libstdc++` for a C++ scanner) so the DLL doesn't depend on MinGW's
+  runtime DLLs. The build runs in the kill-on-close job like every other
+  child process. With no compiler the install stops with: "needs a C compiler
+  to build its grammar: install the Visual Studio C++ Build Tools, or put gcc
+  or clang on PATH".
+- **Validation**, before promotion: every language names a grammar that was
+  built; the library loads and exports `tree_sitter_<name>`; Tree-sitter
+  accepts its ABI (`Parser::set_language`); the language's `highlights.scm`
+  compiles against it (`Query::new`). The probe unloads the library again so
+  the folder can still be moved into place. Grammar names must match
+  `[A-Za-z0-9_-]+` and grammar `path`s must be relative, so nothing in a
+  manifest can name a file outside the extension folder.
+- **Use**: nothing happens at startup. The first time a file opens that no
+  built-in language claims, `extensions::language::for_path` lists the
+  installed languages (one `read_dir` plus a few small TOML files) and
+  matches `path_suffixes` against the file's extension or whole name. The
+  tab gets `Syntax::Extension`, an ordinary `TreeSitterSyntax`. Its parser
+  thread loads the grammar (once per process; it is never unloaded, since
+  trees and queries point into it) and the query, and from there it is the
+  same incremental parse and recolor as the built-in languages, under the
+  same `parseLimitKb` limit.
+- **Colors**: Zed's capture names map by their first segment:
+  `comment` → Comment; `string`, `character`, `escape`, `regex` → String;
+  `keyword`, `boolean` (and the Neovim-style `conditional`, `repeat`,
+  `include`, `exception`) → Keyword; `type`, `constructor`, `enum`, `tag`,
+  `namespace`, `module` → Type; `number`, `float`, `constant` → Number;
+  `preproc`, `macro`, `function.macro` → Macro; `function`, `method` →
+  Function; `operator` → Operator; `attribute`, `decorator`, `label` →
+  Attribute. Variables, properties and punctuation keep the text color, as in
+  the built-in languages. The active color theme decides what those nine
+  colors look like.
+- **Installing or removing while running**: the language list is re-read
+  after an install or removal, and open tabs pick their language again. A
+  loaded grammar stays mapped until LightLine exits, so removing or updating
+  an extension whose grammar is in use can't delete the DLL until a restart;
+  the removal reports that files remain.
+
+### Not supported yet, in rough order of value
+
+1. `config.toml` beyond `name`, `grammar` and `path_suffixes`: line and block
+   comments (LightLine has no comment toggle yet), brackets and autoclose
+   pairs, `tab_size`.
+2. `injections.scm` (languages embedded in others), `indents.scm`, and
+   `outline.scm` (which could feed `@` file symbols without a language
+   server).
+3. Language servers the extension declares. Zed finds and starts them through
+   the extension's compiled WASM (`language_server_command`), so they need the
+   WASM runtime of §6. A middle step is a LightLine-side table mapping a
+   language name to a server command the user has installed.
+4. File icons for the new languages, and listing them in the status bar's
+   language picker.
+5. Registry entries with a `path` (inside another repository) are still
+   refused before download (`zed_registry::check_installable`).
+6. Checked end to end only against a local fixture (tree-sitter-json's
+   sources from the Cargo cache, served from local git repositories) built
+   with MSVC. A real registry language extension, gcc/clang builds and
+   Windows ARM64 still need a live check.

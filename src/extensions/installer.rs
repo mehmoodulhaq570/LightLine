@@ -52,14 +52,26 @@ fn validate_download(dir: &Path, id: &str) -> Result<(), String> {
     if manifest.id != id || manifest.name.trim().is_empty() || manifest.version.trim().is_empty() {
         return Err("Extension manifest does not match the requested extension".into());
     }
+    let mut usable = false;
     if super::zed_manifest::is_icon_theme(dir) {
         crate::icon_theme::IconTheme::load(dir)
             .ok_or("Invalid icon theme files")?
             .validate_assets()?;
+        usable = true;
     } else if super::zed_manifest::is_color_theme(dir) {
         crate::color_theme::ZedColorTheme::load(dir).ok_or("Invalid color theme files")?;
-    } else {
-        return Err("Unsupported extension: only icon and color themes can be installed".into());
+        usable = true;
+    }
+    if super::language::is_language_extension(dir) {
+        super::language::validate(dir)?;
+        usable = true;
+    }
+    if !usable {
+        return Err(
+            "Unsupported extension: only themes and languages with a Tree-sitter grammar can be \
+             installed"
+                .into(),
+        );
     }
     Ok(())
 }
@@ -97,7 +109,12 @@ pub fn install(id: &str, git_url: &str, commit: &str) -> Result<PathBuf, String>
     install_in(&dir, id, git_url, commit)
 }
 
-fn install_in(dir: &Path, id: &str, git_url: &str, commit: &str) -> Result<PathBuf, String> {
+pub(crate) fn install_in(
+    dir: &Path,
+    id: &str,
+    git_url: &str,
+    commit: &str,
+) -> Result<PathBuf, String> {
     validate_id(id)?;
     let target = dir.join(id);
     if !crate::workflow::command_available("git") {
@@ -137,6 +154,11 @@ fn install_in(dir: &Path, id: &str, git_url: &str, commit: &str) -> Result<PathB
     }
     let result = (|| {
         fetch_commit(&staging, git_url, commit)?;
+        // A language's grammar is its own repository, built here so a
+        // failed build leaves the installed copy alone.
+        if super::language::is_language_extension(&staging) {
+            super::language::build_grammars(&staging, fetch_commit)?;
+        }
         validate_download(&staging, id)?;
         promote(&staging, &target, &backup)?;
         Ok(target)

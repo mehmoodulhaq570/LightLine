@@ -4,5 +4,6 @@
 //! marketplace/catalog. See `docs/extension_implementation_plan.md`.
 
 pub mod installer;
+pub mod language;
 pub mod zed_manifest;
 pub mod zed_registry;
