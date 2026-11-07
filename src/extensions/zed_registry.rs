@@ -202,4 +202,13 @@ mod tests {
         );
         assert!(ids.iter().any(|(id, _)| id == "material-icon-theme"));
     }
+
+    #[test]
+    fn registry_entries_parse_from_extensions_toml() {
+        let text = "[one]\nsubmodule = \"extensions/one\"\nversion = \"1.0.0\"\n\n[two]\nsubmodule = \"extensions/two\"\nversion = \"2.1.0\"\n";
+        let entries: HashMap<String, RegistryEntry> = toml::from_str(text).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries["one"].submodule, "extensions/one");
+        assert_eq!(entries["two"].version, "2.1.0");
+    }
 }
