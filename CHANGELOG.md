@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [v0.8.0] - 2026-11-07
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.8.0-windows-x86_64.zip`, `lightline-v0.8.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
+As fast as v0.7.0: Local History, the new Find switches and merge-conflict links cost nothing until they're used. Measured on release builds of both versions, made with the same compiler on the same PC (x64; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running; two runs each, alternating): about 7.5 million CPU cycles of work on the window's thread per keystroke on both, a start of about 0.13 s to a responding window over ten launches each, and the same few wakeups a second while idle in the background.
 
 #### Added
 
