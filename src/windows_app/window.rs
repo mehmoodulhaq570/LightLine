@@ -803,6 +803,22 @@ pub fn run() -> io::Result<()> {
         if hwnd.is_null() {
             return Err(io::Error::last_os_error());
         }
+        // Give the window its icons, not just its class. Programs that list
+        // windows (taskbars, switchers) poll them with WM_GETICON, often every
+        // second; with no answer to ICON_SMALL2 they ask again for ICON_SMALL,
+        // waking LightLine twice per poll instead of once.
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            ICON_SMALL as WPARAM,
+            app_icons.small as LPARAM,
+        );
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            ICON_BIG as WPARAM,
+            app_icons.large as LPARAM,
+        );
         let dark_titlebar: i32 = 1;
         DwmSetWindowAttribute(
             hwnd,

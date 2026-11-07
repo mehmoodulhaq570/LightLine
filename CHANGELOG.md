@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+#### Changed
+
+- **Half the Wakeups When Other Programs List Windows**: Some programs that list open windows (taskbar tools, window switchers) ask every window for its icon about once a second. LightLine had no answer to the first question, so they asked a second time, waking LightLine twice a second while it sat idle in the background. It now answers straight away: on a PC running such a program, an idle LightLine woke about once a second (1.0–1.05) instead of twice (2.0–2.55), over three alternating runs of each.
+
 ## [v0.8.0] - 2026-11-07
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.8.0-windows-x86_64.zip`, `lightline-v0.8.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
