@@ -90,26 +90,25 @@ selected Zed extension types"** — starting with icon themes, then themes/snipp
 then language/LSP-related extensions, and only much later (if ever) procedural/WASM
 extensions. Never a blanket "LightLine supports Zed extensions."
 
-## 3. Current State (as of this document)
+## 3. Current State (v0.8.0, updated 2026-11)
 
-LightLine already has one real extension mechanism and the beginning of a second:
-
-- **LSP client** (`src/lsp.rs`) — a genuine JSON-RPC client that talks to real language
-  servers over stdio. Currently wired to **rust-analyzer** (Rust) and **pyright**
-  (Python). Implemented requests: `didOpen`/`didChange`/`didSave`/`didClose`,
-  `hover`, `definition`, `references`, `formatting`, `completion`. Not yet implemented:
-  `rename`, `codeAction`. Not yet wired: **clangd** for C/C++. This LSP client is
-  LightLine's own, independent of Zed — a future `LanguageAdapter` would use a Zed
-  language extension only to *discover/configure* which server to run; LightLine's
-  existing `src/lsp.rs` still does the actual protocol speaking.
-- **CLI tool integration** — currently a single hardcoded case: Prettier. LightLine
-  shells out to `prettier` (falling back to `npx --yes prettier`) to format supported
-  file types. There is no generic "CLI extension" system yet — one special-cased Rust
-  function. This is the execution primitive a future `Process/CLI Adapter` would sit
-  in front of.
-- **No WASM runtime, no JS runtime.** LightLine cannot execute arbitrary extension
-  code today. The "Extensions" panel in the UI is a hardcoded 2-item list (Prettier,
-  Material Icon Theme), not backed by any registry.
+- **LSP client** (`src/lsp.rs`): LightLine's own JSON-RPC client over stdio, one
+  client per (language, workspace root), started when a file of that language opens.
+  Wired to **rust-analyzer**, **Pyright**, **clangd**, **typescript-language-server**
+  and **gopls**, with hover, definition, references, completion, signature help,
+  rename, code actions, formatting, inlay hints and symbols. A future
+  `LanguageAdapter` would use a Zed language extension only to *discover/configure*
+  which server to run; `src/lsp.rs` still speaks the protocol.
+- **Formatters** (`src/formatter.rs`): external tools run as processes in the
+  kill-on-close job: Prettier (local, global or `npx`), rustfmt, and Ruff with a Black
+  fallback. Still special-cased per tool rather than a generic CLI adapter.
+- **Extensions panel**: backed by the Zed registry (Phase 3 below). Featured shows
+  Prettier, Material Icon Theme and Dracula; search covers the whole registry.
+- **What installs**: color themes, icon themes, and (§7) language extensions whose
+  Tree-sitter grammars build with the user's C compiler. Entries that live inside
+  another repository (`html`, `glsl`, `proto`) are refused before downloading.
+- **No WASM runtime, no JS runtime.** LightLine still cannot run extension code, so
+  language servers declared by extensions and other code extensions are refused.
 
 ## 4. Phased Plan
 
