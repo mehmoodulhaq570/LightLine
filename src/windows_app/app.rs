@@ -41,6 +41,12 @@ pub(super) enum ExtensionInstallKind {
     IconTheme,
     // The installed variant to switch to, by name.
     ColorTheme(String),
+    // Languages now colored, and whether the extension also declared a
+    // language server LightLine can't start.
+    Languages {
+        names: Vec<String>,
+        servers_unused: bool,
+    },
 }
 
 pub(super) enum WorkerMessage {
@@ -427,7 +433,7 @@ impl Tab {
         } else if Self::is_json(&document) {
             Some(Syntax::new_json())
         } else {
-            None
+            Self::extension_language(&document).map(Syntax::new_extension)
         };
         Self {
             document,
@@ -621,6 +627,17 @@ impl Tab {
             })
     }
 
+    // A language from an installed extension, for a file no built-in
+    // language claims. The installed languages are listed the first time.
+    fn extension_language(
+        document: &Document,
+    ) -> Option<std::sync::Arc<lightline::extensions::language::ExtensionLanguage>> {
+        document
+            .path
+            .as_deref()
+            .and_then(lightline::extensions::language::for_path)
+    }
+
     pub(super) fn is_json(document: &Document) -> bool {
         document
             .path
@@ -655,7 +672,7 @@ impl Tab {
         }
     }
 
-    fn update_syntax_language(&mut self) {
+    pub(super) fn update_syntax_language(&mut self) {
         if Self::is_rust(&self.document) {
             if !matches!(self.syntax, Some(Syntax::Rust(_))) {
                 self.syntax = Some(Syntax::new_rust());
@@ -687,6 +704,11 @@ impl Tab {
         } else if Self::is_json(&self.document) {
             if !matches!(self.syntax, Some(Syntax::Json(_))) {
                 self.syntax = Some(Syntax::new_json());
+            }
+        } else if let Some(language) = Self::extension_language(&self.document) {
+            let current = self.syntax.as_ref().and_then(Syntax::extension_language);
+            if current != Some(language.name.as_str()) {
+                self.syntax = Some(Syntax::new_extension(language));
             }
         } else {
             self.syntax = None;
@@ -1715,6 +1737,7 @@ impl App {
                 if self.active_color_theme.as_deref() == Some(registry_id.as_str()) {
                     self.set_color_theme(hwnd, None);
                 }
+                self.reload_extension_languages();
                 self.status = match removed {
                     Ok(()) => format!("{name} removed"),
                     Err(error) => format!("{name} removed, but some files remain: {error}"),
@@ -1735,6 +1758,18 @@ impl App {
                             &resolved.git_url,
                             &resolved.commit,
                         )?;
+                        if lightline::extensions::language::is_language_extension(&dir) {
+                            // Already validated before it was moved into place.
+                            let names = lightline::extensions::language::language_configs(&dir)
+                                .into_iter()
+                                .map(|(_, config)| config.name)
+                                .collect();
+                            return Ok(ExtensionInstallKind::Languages {
+                                names,
+                                servers_unused:
+                                    lightline::extensions::language::has_language_servers(&dir),
+                            });
+                        }
                         if lightline::extensions::zed_manifest::is_icon_theme(&dir) {
                             return Ok(ExtensionInstallKind::IconTheme);
                         }
@@ -1750,8 +1785,8 @@ impl App {
                         // silently-half-installed entry behind.
                         let _ = lightline::extensions::installer::uninstall(&registry_id);
                         Err(
-                            "isn't supported yet (LightLine can only use icon-theme and \
-                             color-theme extensions right now)"
+                            "isn't supported yet (LightLine can use themes and languages with \
+                             a Tree-sitter grammar right now)"
                                 .to_string(),
                         )
                     },
@@ -2778,6 +2813,16 @@ impl App {
         self.update_title(hwnd);
         self.keep_cursor_visible(hwnd);
         self.advance_syntax(hwnd);
+    }
+
+    /// Lists the installed languages again after an extension is installed
+    /// or removed, so open files they now claim (or no longer do) change
+    /// colors.
+    pub(super) fn reload_extension_languages(&mut self) {
+        lightline::extensions::language::reload();
+        for tab in &mut self.tabs {
+            tab.update_syntax_language();
+        }
     }
 
     pub(super) fn selection_range(&self) -> Option<(Pos, Pos)> {

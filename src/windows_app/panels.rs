@@ -876,6 +876,24 @@ impl App {
                             let _ = registry_id;
                             self.set_color_theme(hwnd, Some(name));
                         }
+                        // Open files of these languages are colored now.
+                        Ok(ExtensionInstallKind::Languages {
+                            names,
+                            servers_unused,
+                        }) => {
+                            self.status = format!(
+                                "Syntax colors installed for {}{}",
+                                names.join(", "),
+                                if servers_unused {
+                                    " (its language server isn't supported yet)"
+                                } else {
+                                    ""
+                                }
+                            );
+                            self.reload_extension_languages();
+                            self.refresh(hwnd);
+                            unsafe { InvalidateRect(hwnd, null(), 0) };
+                        }
                         Err(_) => {}
                     }
                 }
