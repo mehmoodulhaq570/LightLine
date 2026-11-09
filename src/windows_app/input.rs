@@ -1353,8 +1353,7 @@ impl App {
         let (line, row) = self.row_at_y(hwnd, pane, y);
         let layout = self.line_rows(hwnd, pane, line);
         let text = tab.document.line(line);
-        let row_left = self.pane_left(hwnd, pane)
-            + self.scale(GUTTER + PAD)
+        let row_left = self.pane_left(hwnd, pane) + self.scale(GUTTER + PAD) - self.scroll_x(pane)
             + layout.indent(row, self.char_width);
         unsafe {
             let hdc = GetDC(hwnd);

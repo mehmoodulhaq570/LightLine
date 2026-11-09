@@ -24,7 +24,7 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 
 ## Features
 
-- **Smart editing**: syntax colors, colored bracket pairs, code folding, an optional minimap, find and replace in a file or across the project (with regular expressions, match case and whole word), go to line, multiple cursors, word wrap, and a split editor.
+- **Smart editing**: syntax colors, colored bracket pairs, code folding, an optional minimap, find and replace in a file or across the project (with regular expressions, match case and whole word), go to line, multiple cursors, word wrap or horizontal scrolling for long lines, and a split editor.
 - **Unsaved-work recovery**: periodic local checkpoints for modified files and untitled text, with a Restore/Discard choice after restarting. If LightLine ever crashes, it saves your unsaved work first.
 - **Local History**: every save keeps a copy of the file, so you can compare an earlier version with the file now and restore it, even if you never committed it. Cursor movement and deletion preserve combined characters and joined emoji.
 - **Stays in step with your files**: files changed by another program reload by themselves; if you have unsaved edits, saving asks whether to keep your version or reload.

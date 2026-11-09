@@ -170,7 +170,8 @@ impl App {
             let draw = |from: usize, to: usize, color: u32| {
                 let text = safe_slice_range(source, from, to).replace('\t', &tab_text);
                 let wide: Vec<u16> = text.encode_utf16().collect();
-                let x = code_left + self.text_width(hdc, safe_slice_range(source, 0, from));
+                let x = code_left - self.scroll_x(pane)
+                    + self.text_width(hdc, safe_slice_range(source, 0, from));
                 unsafe {
                     SetTextColor(hdc, color);
                     ExtTextOutW(

@@ -51,7 +51,7 @@ impl LineRows {
     }
 }
 
-fn char_columns(ch: char, tab_size: usize) -> usize {
+pub(super) fn char_columns(ch: char, tab_size: usize) -> usize {
     if ch == '\t' {
         tab_size
     } else {

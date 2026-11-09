@@ -143,6 +143,8 @@ impl App {
             // takes several: its gutter (number, breakpoint, fold) goes on
             // the first, and its text continues on the rest.
             let columns = self.wrap_columns(hwnd, pane);
+            // Without wrap, how far the text is scrolled sideways (hscroll.rs).
+            let scroll_x = self.scroll_x(pane);
             let (mut index, mut first_row) = self.view_top(hwnd, pane);
             let mut screen_row = 0usize;
             // A quiet boundary makes the three gutter lanes read as one
@@ -287,15 +289,27 @@ impl App {
                     let row_start = rows.start(row);
                     let row_end = rows.end(row, source.len());
                     let last_row = rows.is_last(row);
-                    let text_left = code_left + rows.indent(row, self.char_width);
-                    // Only the start of a very long row can be on screen
-                    // (wrap.rs::visible_end): nothing past `shown_end` is
-                    // measured or drawn.
+                    let text_left = code_left + rows.indent(row, self.char_width) - scroll_x;
+                    // Scrolled sideways, a long row is measured and drawn
+                    // from `anchor`, near the left edge (hscroll.rs), not
+                    // from its start; hints before it shift it right.
+                    let (anchor, anchor_x) =
+                        self.row_anchor(hdc, source, (row_start, row_end), scroll_x);
+                    let anchor_left = text_left
+                        + anchor_x
+                        + line_hints
+                            .iter()
+                            .filter(|hint| hint.byte >= row_start && hint.byte < anchor)
+                            .map(|hint| self.text_width(hdc, &hint.label))
+                            .sum::<i32>();
+                    // Only what fits before the right edge of a very long
+                    // row can show (wrap.rs::visible_end): nothing past
+                    // `shown_end` is measured or drawn.
                     let shown_end = super::super::wrap::visible_end(
                         source,
-                        row_start,
+                        anchor,
                         row_end,
-                        right - text_left,
+                        right - anchor_left,
                     );
                     let cut = shown_end < row_end;
                     // This row's inlay hints: at its end only on the line's
@@ -303,7 +317,7 @@ impl App {
                     let row_hints: Vec<&InlayHintAt> = line_hints
                         .iter()
                         .filter(|hint| {
-                            hint.byte >= row_start
+                            hint.byte >= anchor
                                 && hint.byte <= shown_end
                                 && (hint.byte < row_end || (last_row && hint.byte == row_end))
                         })
@@ -321,16 +335,23 @@ impl App {
                             .sum()
                     };
                     // Where `byte` of this row is drawn: before any hint at
-                    // it (the caret, the end of a range)...
+                    // it (the caret, the end of a range)... Bytes before the
+                    // anchor are off the left edge.
                     let x_of = |byte: usize| {
-                        text_left
-                            + self.text_width(hdc, safe_slice_range(source, row_start, byte))
+                        if byte < anchor {
+                            return anchor_left;
+                        }
+                        anchor_left
+                            + self.text_width(hdc, safe_slice_range(source, anchor, byte))
                             + hints_before(byte, false)
                     };
                     // ...and after it (text from `byte`).
                     let x_after = |byte: usize| {
-                        text_left
-                            + self.text_width(hdc, safe_slice_range(source, row_start, byte))
+                        if byte < anchor {
+                            return anchor_left;
+                        }
+                        anchor_left
+                            + self.text_width(hdc, safe_slice_range(source, anchor, byte))
                             + hints_before(byte, true)
                     };
                     // Where a range ending at `byte` stops: the right edge
@@ -477,7 +498,7 @@ impl App {
                             let active = active_guide.is_some_and(|guide| {
                                 guide.level == level && (guide.start..=guide.end).contains(&index)
                             });
-                            if guide_x < right {
+                            if guide_x >= code_left && guide_x < right {
                                 FillRect(
                                     hdc,
                                     &RECT {
@@ -539,7 +560,7 @@ impl App {
                     for &(from, to) in &line_occurrences {
                         let (from, to) = (from.max(row_start), to.min(row_end));
                         if from < to && !starts_hidden(from) {
-                            let (x1, x2) = (x_after(from), x_to(to));
+                            let (x1, x2) = (x_after(from).max(code_left), x_to(to));
                             if x2 > x1 && x1 < right {
                                 Self::fill(
                                     hdc,
@@ -559,7 +580,7 @@ impl App {
                         let to = to.min(row_end);
                         let past_end = continues && last_row;
                         if (from < to || (past_end && from <= to)) && !starts_hidden(from) {
-                            let x1 = x_after(from);
+                            let x1 = x_after(from).max(code_left);
                             let x2 = x_to(to) + if past_end { self.scale(8) } else { 0 };
                             if x2 > x1 && x1 < right {
                                 FillRect(
@@ -581,7 +602,7 @@ impl App {
                         right,
                         bottom,
                     };
-                    draw_text(row_start, shown_end, self.theme.text, &clip);
+                    draw_text(anchor, shown_end, self.theme.text, &clip);
                     // The hints themselves, muted on a faint background.
                     let mut drawn_at: Option<(usize, i32)> = None;
                     for (hint, width) in row_hints.iter().zip(&hint_widths) {
@@ -590,11 +611,11 @@ impl App {
                             Some((byte, end)) if byte == hint.byte => end,
                             _ => x_of(hint.byte),
                         };
-                        if x < right {
+                        if x < right && x + width > code_left {
                             Self::fill(
                                 hdc,
                                 RECT {
-                                    left: x,
+                                    left: x.max(code_left),
                                     top: y + self.scale(2),
                                     right: (x + width).min(right),
                                     bottom: (y + self.line_height - self.scale(2)).min(bottom),
@@ -630,7 +651,7 @@ impl App {
                                 };
                             for (label, action) in self.lens_links(self.tab_for_pane(pane), lens) {
                                 let width = self.text_width(hdc, label);
-                                if x < text_right {
+                                if x < text_right && x >= code_left {
                                     Self::label(
                                         hdc,
                                         label,
@@ -655,7 +676,7 @@ impl App {
                         && let Some(label) = &blame
                     {
                         let x = after + self.scale(36);
-                        if x < text_right {
+                        if x < text_right && x >= code_left {
                             Self::label(
                                 hdc,
                                 label,
@@ -669,8 +690,8 @@ impl App {
                             );
                         }
                     }
-                    if folded && !cut {
-                        let pill_x = x_after(row_end) + self.scale(6);
+                    let pill_x = x_after(row_end) + self.scale(6);
+                    if folded && !cut && pill_x >= code_left {
                         let pill_w = self.scale(22);
                         let pill_h = self.scale(13);
                         let pill_y = y + (self.line_height - pill_h) / 2;
@@ -701,7 +722,7 @@ impl App {
                     }
                     for span in &spans {
                         // The part of the span on this row.
-                        let (from, to) = (span.start.max(row_start), span.end.min(shown_end));
+                        let (from, to) = (span.start.max(anchor), span.end.min(shown_end));
                         if from >= to {
                             continue;
                         }
@@ -714,7 +735,7 @@ impl App {
                     }
                     // Brackets in their pair's color, over the text color.
                     for &(byte, color) in &bracket_colors {
-                        if byte >= row_start && byte < shown_end {
+                        if byte >= anchor && byte < shown_end {
                             draw_text(byte, byte + 1, color, &clip);
                         }
                     }
@@ -763,14 +784,14 @@ impl App {
                             continue;
                         }
                         let x1 = x_after(start_byte.max(row_start));
-                        let x2 = x_to(end_byte.min(row_end));
-                        if x1 < right {
+                        let x2 = x_to(end_byte.min(row_end)).max(x1 + self.scale(6));
+                        if x1 < right && x2 > code_left {
                             Self::fill(
                                 hdc,
                                 RECT {
-                                    left: x1,
+                                    left: x1.max(code_left),
                                     top: (y + self.line_height - self.scale(2)).min(bottom),
-                                    right: x2.max(x1 + self.scale(6)).min(right),
+                                    right: x2.min(right),
                                     bottom: row_bottom,
                                 },
                                 color,
@@ -815,13 +836,13 @@ impl App {
                         text,
                         row_start,
                         b,
-                        right - code_left - indent,
+                        right - code_left - indent + scroll_x,
                     ) < b
                     {
                         return;
                     }
                     let hints = self.hints_on_line(self.tab_for_pane(pane), line_idx);
-                    let x = code_left
+                    let x = code_left - scroll_x
                         + indent
                         + self.text_width(hdc, safe_slice_range(text, row_start, b))
                         + self.hint_shift(hdc, hints, row_start, b, true);
@@ -836,7 +857,7 @@ impl App {
                         .map(|c| &rest[..c.len_utf8()])
                         .unwrap_or(" ");
                     let w = self.text_width(hdc, ch_text);
-                    if x < right {
+                    if x < right && x >= code_left {
                         FillRect(
                             hdc,
                             &RECT {
@@ -890,18 +911,18 @@ impl App {
                         line,
                         row_start,
                         cursor.byte,
-                        right - code_left - indent,
+                        right - code_left - indent + scroll_x,
                     ) < cursor.byte
                     {
                         continue;
                     }
                     let hints = self.hints_on_line(self.tab_for_pane(pane), cursor.line);
-                    let x = code_left
+                    let x = code_left - scroll_x
                         + indent
                         + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte))
                         + self.hint_shift(hdc, hints, row_start, cursor.byte, false);
                     let y = self.editor_top() + row as i32 * self.line_height;
-                    if y < bottom && x < right {
+                    if y < bottom && x < right && x >= code_left {
                         FillRect(
                             hdc,
                             &RECT {
@@ -938,13 +959,13 @@ impl App {
                             line,
                             row_start,
                             cursor.byte,
-                            right - code_left - indent,
+                            right - code_left - indent + scroll_x,
                         ) < cursor.byte =>
                     {
                         (right, bottom)
                     }
                     Some((row, row_start, indent)) => (
-                        code_left
+                        code_left - scroll_x
                             + indent
                             + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte))
                             + self.hint_shift(
@@ -958,7 +979,7 @@ impl App {
                     ),
                     None => (right, bottom),
                 };
-                if y < bottom && x < right {
+                if y < bottom && x < right && x >= code_left {
                     let caret = CreateSolidBrush(self.theme.cursor);
                     FillRect(
                         hdc,

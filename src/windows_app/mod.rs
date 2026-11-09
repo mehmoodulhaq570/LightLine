@@ -14,6 +14,7 @@ mod file_dialog;
 mod find_widget;
 mod git;
 mod goto_line;
+mod hscroll;
 mod image_view;
 mod local_history;
 mod markdown_view;

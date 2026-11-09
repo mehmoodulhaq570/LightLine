@@ -108,7 +108,8 @@ impl App {
             ReleaseDC(hwnd, hdc);
             width
         };
-        let name_left = self.pane_left(hwnd, rename.pane) + s(GUTTER + PAD) + indent + prefix_width;
+        let name_left = self.pane_left(hwnd, rename.pane) + s(GUTTER + PAD) + indent + prefix_width
+            - self.scroll_x(rename.pane);
         let min_left = self.pane_left(hwnd, rename.pane) + s(GUTTER);
         let max_right = self.pane_right(hwnd, rename.pane) - s(20);
         let width = s(WIDTH).min(max_right - min_left);
