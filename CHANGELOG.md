@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Horizontal Scrolling**: With word wrap off, a line wider than the editor no longer runs out of sight. The view scrolls sideways to keep the cursor in view as you type, press End or click near the edge, jumping a quarter of the editor's width at a time so typing at the edge stays quick. Shift+Wheel, a tilt wheel or a sideways touchpad swipe scrolls by hand, and each split pane scrolls on its own. Until now the cursor and what you typed disappeared past the right edge.
 
+#### Changed
+
+- **Typing in the Find Box Stays Quick in Big Files**: In a file of more than 50,000 lines, each character typed into the find box (`Ctrl+F`) used to recount every match in the file, and a query with no match nearby searched the whole file for one, before the next key could show. The count now runs a slice at a time between keystrokes, showing "Counting..." or "120+ results" until it's done, and the first match far from the cursor is selected when the count reaches it. On a 1M-line file, each typed character now holds the window for about 4–18 ms instead of 80–150 ms. Smaller files are counted at once, as before.
+
 ## [v0.9.0] - 2026-11-09
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.9.0-windows-x86_64.zip`, `lightline-v0.9.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.

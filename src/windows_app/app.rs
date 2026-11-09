@@ -803,6 +803,8 @@ pub(super) struct App {
     // shown in the find box.
     pub(super) find_origin: Pos,
     pub(super) find_count: (usize, usize),
+    // A big file's count still going, a slice per FIND_COUNT_TIMER.
+    pub(super) find_counting: Option<find_widget::FindCounting>,
     // The find text came from the selection and shows as selected: the
     // first key typed replaces it.
     pub(super) find_text_selected: bool,
@@ -1416,6 +1418,7 @@ impl App {
             replace_field: 0,
             find_origin: Pos::default(),
             find_count: (0, 0),
+            find_counting: None,
             find_text_selected: false,
             pending_high_surrogate: None,
             explorer_visible: true,

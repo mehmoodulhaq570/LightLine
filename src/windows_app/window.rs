@@ -211,6 +211,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.request_inlay_hints();
             0
         }
+        WM_TIMER if wparam == find_widget::FIND_COUNT_TIMER => {
+            app.find_count_timer(hwnd);
+            0
+        }
         WM_TIMER if wparam == OCCURRENCE_TIMER => {
             unsafe { KillTimer(hwnd, OCCURRENCE_TIMER) };
             app.request_occurrences();

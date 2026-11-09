@@ -838,9 +838,20 @@ impl Document {
     /// The next match of `matcher` from `origin`, wrapping round the end of
     /// the document as `find_forward` does: (start, end).
     pub fn find_next(&self, origin: Pos, matcher: &Matcher) -> Option<(Pos, Pos)> {
+        self.find_next_within(origin, matcher, usize::MAX)
+    }
+
+    /// `find_next`, looking through at most `lines` lines from `origin`'s:
+    /// None when there's no match in them, whatever lies further on.
+    pub fn find_next_within(
+        &self,
+        origin: Pos,
+        matcher: &Matcher,
+        lines: usize,
+    ) -> Option<(Pos, Pos)> {
         let origin = self.clamp(origin);
         let count = self.line_count();
-        (0..=count).find_map(|step| {
+        (0..=count.min(lines.saturating_sub(1))).find_map(|step| {
             let line = (origin.line + step) % count;
             let text = self.line(line);
             let (start, end) = if step == count {
@@ -1680,6 +1691,12 @@ mod tests {
             Some((at(2, 3), at(2, 5)))
         );
         assert_eq!(doc.find_matches(&digits).len(), 2);
+        // Bounded: two lines from line 0 don't reach line 2's match.
+        assert_eq!(doc.find_next_within(at(0, 4), &digits, 2), None);
+        assert_eq!(
+            doc.find_next_within(at(0, 4), &digits, 3),
+            Some((at(2, 3), at(2, 5)))
+        );
     }
 
     #[test]
