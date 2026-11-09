@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-10-20 (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: Run dropdown under popups, AI provider card" at the end.
+Updated: 2026-11-08 evening (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: live checks of merged main finished; the PC's black screens (2026-11-08)" at the end. **Start there: it lists what is still open.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -54,7 +54,8 @@ These are results from the implementation session, not checks rerun on 2026-10-0
 
 ## Current handoff
 
-- As of 2026-10-20, v0.6.0 is released (2026-10-15, `0cb0a0a` notes, `21b32a7` Scoop bot) and `main` is at `0790012`. The Run dropdown fix (`d7813b3`), AI provider card (`94ba847`) and smooth radios (`14da2df`) are committed; the docs updates in the last two sections (CHANGELOG, README, this file) are not. Open GitHub issues: #43, #35, #13.
+- As of 2026-11-08, v0.8.0 is released (2026-11-07, `7b6f658` notes, `1e15fc6` Scoop bot) and `main` is at `6b15356` with PRs #70–#73 merged on top (unreleased). Open GitHub issues: #66, #67 (waiting on the reporter; close around 2026-11-21 if no reply), #35, #13.
+- (Historical, 2026-10-20: v0.6.0 released; `main` at `0790012`.)
 - The sections below are in date order; the last one is the newest.
 - Preserve concurrent/user changes and inspect Git status before editing. Do not commit or publish unless requested.
 - User prefers direct implementation and live app verification, and wants new UI to match LightLine's own design.
@@ -232,3 +233,87 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 - Verified (debug, off-screen, own APPDATA, no clipboard use): driver `provider_check.py` (scratchpad) with a fake OpenAI-style server reached as `lightline.localtest.me:<port>`: wrong key → plain refusal, no key text; right key → 3 of 5 models (embedding/whisper filtered), gpt-4.1-mini picked; Ctrl+Enter saved endpoint and model, key not in settings.json; reopening auto-checked with the saved key. `MODE=ollama` run: Ollama not running → "Is Ollama running?…" with **Get Ollama**; OpenAI shows the key field and **Get a key** without any request. Screenshots under target/live-verification/ai-provider/ (run2, ollama, radio). Tests: 220 lib, 101 bin (2 new in ai_provider.rs), 9 integration; all-target Clippy `-D warnings` and fmt clean.
 - Live-test lesson: the test writes a real Credential Manager entry `LightLine AI API key: lightline.localtest.me:<port>`. `cmdkey /delete` can't take a target with spaces; delete with `CredDeleteW(target, 1, 0)` from Python ctypes and confirm with `cmdkey /list`. Also: Bash heredocs here drop `\u` escapes, so edit Rust files containing `\u{...}` with the Edit tool, not a heredoc'd Python script.
 - Not done: Ollama success path not seen live (Ollama wasn't running); the user's open release build (`target\release\lightline.exe`) predates these changes until rebuilt.
+
+## Follow-up: v0.8.0, PRs #68–#73, live check of merged main (2026-11-07 to 2026-11-08)
+
+### Done and on `main`
+
+- **#68** (`9742989`, rebase-merged together with `df7f4d8`, which added `.claude/CLAUDE.md`): `zed_registry.rs` refuses registry entries that have a `path` (html, glsl and proto live inside Zed's own repository; installing one hung on "Checking..." for minutes).
+- **#69** (`0dbfaa5`): 11 unit tests salvaged from the old `cloud/add-unit-tests` branch (workflow, terminal model, registry). Two `.gitmodules` tests dropped (the function is gone); one wrong expectation fixed (`selected_text` on a 2-row screen gives `"hi\n\n"`).
+- **v0.8.0 released** 2026-11-07: Local History, regex/case/word Find switches, merge conflicts, sticky-scroll repaint, #68. Speed check: release builds of v0.7.0 (built locally from the tag, because GitHub downloads kept stalling) and v0.8.0, same compiler, alternating: ~7.5 M UI cycles per key, ~0.13 s start, same idle on both. Scoop hashes match GitHub's asset digests.
+- Replies posted on #66 and #67 (maintainer approved): fix shipped in v0.8.0 / please send version, screenshot, `git --version` or tool versions; close in two weeks if there's no reply.
+- **Four parallel agents in worktrees**, merged 2026-11-08 in this order (CHANGELOG Unreleased conflicts resolved by hand, Added before Changed):
+  - **#70** (`1f36c6e`) idle wakeups: the ~2/s idle wakeups were another process polling every window with `WM_GETICON` about once a second. LightLine set icons only on the class, so `ICON_SMALL2` went unanswered and it was asked again with `ICON_SMALL`. Fix: two `WM_SETICON` sends after `CreateWindowExW` (window.rs). 2.0–2.55/s → 1.0/s. README now says it wakes only when Windows or another program asks it something. The poller is unidentified (no API names the sender; ETW needs admin).
+  - **#71** (`115e3a9`) text model: `docs/TEXT_MODEL_BENCHMARK.md`, `examples/measure_text_model.rs`. Keep `Vec<String>`: typing costs ~1 µs at every size up to 121 MiB. Weak spot: Enter, a line-joining Backspace and multi-line paste are O(lines below): 4.5 ms at 1M lines, 17.8 ms at 121 MiB. If that matters, chunk lines (~1,024 per chunk), not a byte rope. Fix shipped: `utf16_column` skips encoding for ASCII, and `replace_raw` edits a single line in place (512 KiB line: ~1–2 ms → 29–51 µs per key). Found, not fixed: Find's match count rescans on every typed character (59 ms at 1M lines); save runs on the UI thread (0.9 s at 121 MiB); the recovery snapshot copies the text every 5 s while typing; the gutter diff re-splits HEAD.
+  - **#72** (`d64eb7d`) language extensions: Zed language extensions install. The grammar's C code is compiled at install (MSVC `cl.exe` via `find-msvc-tools`, or gcc/clang on PATH) into a DLL loaded with `libloading`; `highlights.scm` captures map onto LightLine's 9 colors; nothing runs at startup (languages are read when a file no built-in language claims opens). Exe +289 KB. **Trust-model change, flagged to the maintainer**: native third-party code in-process. Not yet tried with a real registry language extension, gcc/clang, or ARM64 hardware (ARM64 CI passed). Removing or updating a loaded grammar needs a restart. Plan in `docs/extension_implementation_plan.md` §7; §3 refreshed.
+  - **#73** (`d95bee5`, `6b15356`) docs: `docs/TECHNICAL_DIRECTION.md` refreshed for v0.8.0 (stale GPUI, ripgrep, one-server and no-terminal claims fixed), old roadmap marked done, **next stages proposed for the maintainer**: perf budget (Find count, save off the UI thread), text model (done), language extensions (next: comments/brackets/indent, language picker, extension-declared servers), code signing, code-running extensions (WASM or processes), another platform (not planned). Also fixed `.claude/CLAUDE.md` (the caret blink is the one repeating timer) and `ARCHITECTURE.md` (debugpy).
+
+### Verified on merged `main` (`6b15356`) so far
+
+- `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`: 255 lib, 109 app, 9 integration, 0 failed.
+- Release build: 17,912,832 bytes. Live (hidden window, isolated profile on D:), v0.8.0 vs merged, alternating, 2 rounds: both ~12.5–13.4 M UI cycles per key (the PC was busier than on 11-07), start 0.16–0.30 s (noisy), idle 0–0.2 wakeups/s on both (the icon poller wasn't active, so #70's halving couldn't be re-shown this way); rust-analyzer ran and the typed text landed in every run.
+
+### In progress when the session stopped (all picked up later on 2026-11-08: see the next section)
+
+1. **Long-line typing run (#71 live check)**: a background job typing into `D:\Projects\lightline-tmp\live\ws\src\big.min.json` (one 510,790-byte line, cursor 0,255000), v0.8.0 (`scratchpad/new/lightline.exe`) vs merged (`scratchpad/merged/lightline.exe`), env `LL_SOURCE=big.min.json LL_CURSOR=0,255000 LL_SETTLE=8`, 2 rounds. It was slow (painting a 512 KiB line) and its results were never read. **First check that no hidden `lightline.exe` is left running** (`tasklist /FI "IMAGENAME eq lightline.exe"`) and kill test instances if so. Rerun it if the numbers are needed.
+2. **#72 live check, not run yet**: `src/extensions/language.rs` has an **uncommitted TEMP edit** in `a_language_extension_installs_builds_its_grammar_and_colors_files` (copies the installed extension to `$LIGHTLINE_E2E_KEEP`). Plan: run `cargo test --lib a_language_extension -- --ignored` with `LIGHTLINE_E2E_KEEP=<profile>\LightLine\extensions\jsonx`, then open a `.jsonx` file via session.json in the release exe with and without that folder, capture with the scratchpad's `capture.py` (refuses unless the window is hidden) and compare colors. **Revert the TEMP edit afterwards** (`git checkout src/extensions/language.rs`); never commit it.
+3. Optionally show #70 directly: send `WM_GETICON(ICON_SMALL2)` to both builds (v0.8.0 returns 0, merged returns an icon handle).
+4. Then report pass/fail to the maintainer. Nothing is released past v0.8.0.
+
+### Environment state and lessons
+
+- **Disk and memory are tight.** C: had ~0.3–1.1 GB free (not ours; the linker's TEMP is there → LNK1102). Use `TMP`/`TEMP=D:\Projects\lightline-tmp` (outside any Cargo project; a temp folder inside the repo breaks the formatter test), `CARGO_INCREMENTAL=0`, and `CARGO_BUILD_JOBS=2` when free RAM is low. At 0.9 GB free, rustc crashed with `STATUS_STACK_BUFFER_OVERRUN` and left a corrupt `tiny_skia` rmeta (fix: delete that crate's files in `target/debug/deps` and `target/debug/.fingerprint`). A low-memory moment also made one live run fail for both builds (rust-analyzer absent, typing not landing); rerunning once memory recovered was clean.
+- `D:\Projects\lightline-tmp\live` holds the test workspace (`ws`: `Cargo.toml` plus `src/main.rs` = a copy of `src/lsp.rs`, and `big.min.json`). Delete the folder when done.
+- Scratchpad tools (session-specific; copy them if needed): `measure_driver.py` (startup median, UI and process cycles per key, idle wakeups from per-thread context switches via NtQuerySystemInformation, rust-analyzer count, typed-text check; env `LL_SOURCE`, `LL_CURSOR`, `LL_SETTLE`), `capture.py`, `shot_probe.py`, `alive_probe.py`, `focus_probe.py`, `idle_probe.py`; agent 1's `idle\msg_probe.py`, `geticon_probe.py`, `compare_idle.py`.
+- Hidden-window method that works: launch with `STARTUPINFO.wShowWindow = SW_SHOWNOACTIVATE`, then `WS_EX_LAYERED | WS_EX_TRANSPARENT`, alpha 0, `HWND_BOTTOM` with `SWP_NOACTIVATE`; check it is still hidden before each capture. A focus probe confirmed the window never took the foreground or keyboard focus.
+- Leftover worktrees: `.claude/worktrees/agent-a2f6eb4bcc12ca26d`, `agent-ac78773499ab381ca` and `agent-ae8b05bb002c34bb1` are **locked** (by the agent tool), with `perf/idle-wakeups`, `perf/text-model-benchmark` and `feat/language-extensions` checked out (all merged; remote branches deleted). `agent-a4e54ea0d0429fe6b` was unregistered but its folder couldn't be deleted. Clean up with `git worktree unlock <path>`, `git worktree remove --force <path>`, delete the leftover folder, then `git branch -D` the three branches.
+- GitHub was very slow and flaky on 2026-11-07 (TLS timeouts, stalled asset downloads); a truncated download first looked like a hash mismatch.
+- `gh pr merge` needs the maintainer's explicit go-ahead in the conversation (the permission check blocks it otherwise).
+
+## Follow-up: live checks of merged main finished; the PC's black screens (2026-11-08)
+
+### LightLine: results of the pending live checks (merged `main` = `6b15356`, release exe)
+
+- **#70 (WM_GETICON), passed.** `geticon_compare.py` asked each hidden window for `ICON_SMALL`, `ICON_BIG` and `ICON_SMALL2`, twice per build: v0.8.0 answered `0x0` to all three; merged answered real icon handles (`ICON_SMALL2` = `ICON_SMALL`).
+- **#72 (language extensions), passed.**
+  - `cargo test --lib a_language_extension -- --ignored` passed (36 s build, 2.8 s test; grammar built with MSVC `cl.exe`).
+  - Fixture extension `jsonx` copied into a fresh profile: `sample.jsonx` is colored (strings green, numbers/`true`/`false`/`null` orange, brackets colored); without the extension, and in v0.8.0 with it, the same file is plain. Captures: `D:\Projects\lightline-tmp\e2e-live\shot-merged-with.png`, `shot-merged-without.png`, `shot-v080-with.png`.
+  - **Real registry extension, driven through the UI** (`ui.py`: Ctrl+Shift+X, type `lua`, click Install): `lua` 0.1.11 went Checking... → ✓ Installed in under 45 s, and the already-open `sample.lua` recolored without reopening. Both grammars built (`grammars/lua.dll` 152 KB, `grammars/emmyluadoc.dll` 202 KB, which has an external `scanner.c`); no build folders or `.git` left behind; no `cl.exe`/`git.exe` left running. Captures `ui-1.png` to `ui-4.png` in the same folder.
+  - The "language server isn't supported yet" note shows in the status bar when the install finishes (`panels.rs:885`), not when a file opens, as the CHANGELOG says.
+  - Still not tried: gcc/clang instead of MSVC, ARM64 hardware.
+- **TEMP edit reverted.** `src/extensions/language.rs` matches `HEAD` again. `git checkout` was blocked by the permission check, so the four lines were removed with Edit.
+- **#71 long-line typing, only half done.** One run of v0.8.0 on the 512 KiB line (`LL_SOURCE=big.min.json LL_CURSOR=0,255000 LL_SETTLE=8`, 3 starts): starts of 10.1, 60.4 and 6.6 s; **137 M UI cycles per key** (13 M on the normal 3,148-line Rust file); `typed_text_in_recovery` false and idle numbers empty, so that run is suspect. **The merged build was not measured**: the run was stopped because the maintainer's PC was struggling. Windows logged LightLine hangs during these runs (`AppHangB1` at 00:02 and 00:29, `AppHangTransient` at 12:02), all from the test exes in the scratchpad, none from the maintainer's own profile. Even if #71 helps, **opening or painting a 512 KiB line freezes the window for seconds**: worth an issue of its own (probably paint cost per long row, not the text model).
+- Minor: the ignored #72 test leaves its fixture folder in `TMP` on Windows (`lightline-language-e2e-<pid>-<n>`), because the loaded grammar DLL can't be deleted while the test process runs.
+
+### The PC: "editor not responding, screen turns black" (not a LightLine bug)
+
+- **Cause: the Intel UHD Graphics 620 driver keeps timing out.** Application log Id 1001 `LiveKernelEvent` code **141** (GPU engine timeout/reset), 10–70 events a day since at least 2026-10-09; each reset is logged as two events. VS Code (GPU-accelerated) went black / "Not responding"; it was restarted at 11:50 right after resets at 11:47 and 11:51. The maintainer's LightLine profile hadn't been used since 2026-11-06. Laptop: **Dell Latitude 5300**.
+- **Done, with the maintainer's go-ahead:**
+  - Graphics driver 31.0.101.2130 (2024-08) → **31.0.101.2135** (2025-03) through Windows Update (`install_intel_driver.ps1`, elevated). The first try failed with `0x8024200B` because the download filled C: (9 MB free); it worked after Windows freed space. The old package `oem55.inf` (1.2 GB) was deleted with `pnputil /delete-driver`, so there's no driver rollback.
+  - VS Code: `"disable-hardware-acceleration": true` in `C:\Users\mehmo\.vscode\argv.json` (takes effect after a VS Code restart). Turn it back on if the resets stop.
+  - **Both Anaconda installs uninstalled** (`anaconda3`, Anaconda3 2024.06-1; `.ai-navigator\conda`, Miniconda3 py312_24.5.0-0), plus `.conda`, the conda block in `.bash_profile` (now empty), dead Start menu folders and a stale Miniconda uninstall entry. **C: went from 4.7 GB to ~42 GB free** (37.5 GB freed, not the 47 GB the file sizes added up to, because conda hard-links its package cache into environments). The maintainer's Python is `C:\Python314` (plus `uv`); `python` still works.
+- **Not fixed yet:** 2 GPU resets (13:02, 13:39) after the new driver. **BIOS 1.29.0 (2023-12) → 1.37.0** is downloaded in Windows Update but **not installed**: the install step never ran, and the laptop hadn't restarted since 2026-11-07 10:29. The maintainer is doing it themselves. **BitLocker is on for C:**, so they need the recovery key before the restart. Next time: check `Get-CimInstance Win32_BIOS` shows 1.37.0, and count event-141 resets since the update. If resets continue, ask about the USB display adapter driver that's installed (Actions Microelectronics `extensiondisplay.inf`, `oem114.inf`).
+
+### Still open for LightLine
+
+1. #71 merged half of the long-line run (above), when the PC is idle; and look into the multi-second freeze on a 512 KiB line.
+2. Decide on releasing #70–#73 (all checked now; #72 is the trust-model change: native grammar code from third parties runs in-process).
+3. Clean-up: the three worktrees are **no longer locked** (`git worktree list` shows no lock), so `git worktree remove --force <path>` then `git branch -D perf/idle-wakeups perf/text-model-benchmark feat/language-extensions`; the unregistered `agent-a4e54ea0d0429fe6b` folder; `D:\Projects\lightline-tmp\{e2e,e2e-live,icon,live,lightline-language-e2e-*}` and the old scratchpad `...\68d36804-...\scratchpad` (holds the v0.8.0 and merged exes, 35 MB).
+4. #66 and #67: close around 2026-11-21 if there's no reply.
+
+### Environment now
+
+- **C: has ~40 GB free** (it was the tight one). **D: has only ~2.5 GB free**: keep `CARGO_INCREMENTAL=0` and clean before big builds. `TMP`/`TEMP=D:\Projects\lightline-tmp` is still fine for builds.
+- Tools for this session are in the scratchpad `...\28cfc03d-a2fb-49a8-bad2-0933812c4f58\scratchpad`: the copied `measure_driver.py`, `capture.py` and probes, plus new `geticon_compare.py`, `langext_check.py` (open a file with or without an extension and capture), and `ui.py` (step-by-step hidden-window driver: `launch`, `chord cs X`, `chars`, `key`, `click x y`, `shot`, `kill`; refuses input unless the window is still hidden).
+- PowerShell's safety check rejects `Remove-Item` with quoted `C:\...` paths ("system path is blocked"); deleting from Bash with exact paths works.
+
+## Follow-up: the long-line freeze fixed (2026-11-09, uncommitted, on `main`)
+
+- **Clean-up done:** the three worktrees are removed (plain `git worktree remove`; all were clean) and so is the empty `agent-a4e54ea0d0429fe6b` folder. **Branches not deleted:** `git branch -D` was blocked by the auto-mode check; `-d` refuses because the PRs were squash-merged. Each tip equals its merged PR head (#70 `c47e32e`, #71 `81246ab`, #72 `786690a`), so `git branch -D perf/idle-wakeups perf/text-model-benchmark feat/language-extensions` is safe. `cargo clean --profile dev` freed 2.3 GB.
+- **Cause of the multi-second freeze on a 512 KiB line:** `paint_code_pane` drew the whole row with one `ExtTextOut`, and drew every colored bracket (36,004 in `big.min.json`) at `x_after(byte)`, which measured the line from its start each time: about 9 billion characters measured per paint. With wrap off there's no horizontal scroll, so none of it past ~200 columns can show.
+- **Fix:** `wrap.rs::visible_end` (two characters per pixel of row width, so it never cuts visible text); the row painter stops text, spans, brackets, hints, occurrences, selections and diagnostics there, and the caret, extra carets and bracket-match highlight skip the measurement when they're past it. Test `only_what_fits_of_a_long_row_is_drawn`. CHANGELOG `#### Fixed` entry added.
+- **Measured** (release builds, `longline_probe.py` in this session's scratchpad `...\56ff248a-...\scratchpad`, `big.min.json`, caret 0,100): fixed: first frame done 0.83 s, full repaint 22.6 M UI cycles, 24 M cycles/key. Merged `main` without the fix: the UI thread never went quiet within 120 s. Capture `fixed-longline.png` there looks right (brackets colored).
+- fmt, Clippy `-D warnings` and `cargo test --locked` pass (255 lib, 110 bin, 9 integration).
+- **Found, not fixed:** no horizontal scrolling. With wrap off, typing past ~the pane width puts the caret and text off screen (Ln 1, Col 106 in the capture, nothing visible there). Worth an issue or a feature.
+- **Next:** commit on a branch + PR when the maintainer asks; then release v0.9.0 (#70–#72 + this).
+- D: has ~2.1 GB free after the debug test build.

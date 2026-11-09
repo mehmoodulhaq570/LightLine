@@ -288,12 +288,23 @@ impl App {
                     let row_end = rows.end(row, source.len());
                     let last_row = rows.is_last(row);
                     let text_left = code_left + rows.indent(row, self.char_width);
+                    // Only the start of a very long row can be on screen
+                    // (wrap.rs::visible_end): nothing past `shown_end` is
+                    // measured or drawn.
+                    let shown_end = super::super::wrap::visible_end(
+                        source,
+                        row_start,
+                        row_end,
+                        right - text_left,
+                    );
+                    let cut = shown_end < row_end;
                     // This row's inlay hints: at its end only on the line's
                     // last row, since the next row starts there.
                     let row_hints: Vec<&InlayHintAt> = line_hints
                         .iter()
                         .filter(|hint| {
                             hint.byte >= row_start
+                                && hint.byte <= shown_end
                                 && (hint.byte < row_end || (last_row && hint.byte == row_end))
                         })
                         .collect();
@@ -322,6 +333,13 @@ impl App {
                             + self.text_width(hdc, safe_slice_range(source, row_start, byte))
                             + hints_before(byte, true)
                     };
+                    // Where a range ending at `byte` stops: the right edge
+                    // when `byte` is past the text that shows.
+                    let x_to = |byte: usize| {
+                        if byte > shown_end { right } else { x_of(byte) }
+                    };
+                    // Whether a range starting at `byte` begins off screen.
+                    let starts_hidden = |byte: usize| cut && byte >= shown_end;
                     // Draws `from..to` of this row in `color`, in pieces
                     // that leave room for the hints inside it.
                     let draw_text = |from: usize, to: usize, color: u32, clip: &RECT| {
@@ -520,8 +538,8 @@ impl App {
                     }
                     for &(from, to) in &line_occurrences {
                         let (from, to) = (from.max(row_start), to.min(row_end));
-                        if from < to {
-                            let (x1, x2) = (x_after(from), x_of(to));
+                        if from < to && !starts_hidden(from) {
+                            let (x1, x2) = (x_after(from), x_to(to));
                             if x2 > x1 && x1 < right {
                                 Self::fill(
                                     hdc,
@@ -540,9 +558,9 @@ impl App {
                         let from = from.max(row_start);
                         let to = to.min(row_end);
                         let past_end = continues && last_row;
-                        if from < to || (past_end && from <= to) {
+                        if (from < to || (past_end && from <= to)) && !starts_hidden(from) {
                             let x1 = x_after(from);
-                            let x2 = x_of(to) + if past_end { self.scale(8) } else { 0 };
+                            let x2 = x_to(to) + if past_end { self.scale(8) } else { 0 };
                             if x2 > x1 && x1 < right {
                                 FillRect(
                                     hdc,
@@ -563,7 +581,7 @@ impl App {
                         right,
                         bottom,
                     };
-                    draw_text(row_start, row_end, self.theme.text, &clip);
+                    draw_text(row_start, shown_end, self.theme.text, &clip);
                     // The hints themselves, muted on a faint background.
                     let mut drawn_at: Option<(usize, i32)> = None;
                     for (hint, width) in row_hints.iter().zip(&hint_widths) {
@@ -590,9 +608,14 @@ impl App {
                     let folded = last_row && doc.is_folded_start(index).is_some();
                     // After the text, its hints and a fold's pill: the Run
                     // links (codelens.rs), then the blame.
-                    let mut after = drawn_at
-                        .map_or(x_after(row_end), |(_, end)| end.max(x_after(row_end)))
-                        + if folded { self.scale(34) } else { 0 };
+                    // A cut row's text reaches the right edge: nothing fits
+                    // after it.
+                    let mut after = if cut {
+                        right
+                    } else {
+                        drawn_at.map_or(x_after(row_end), |(_, end)| end.max(x_after(row_end)))
+                            + if folded { self.scale(34) } else { 0 }
+                    };
                     if last_row {
                         let mut hits = Vec::new();
                         if let Some(lens) = &lens {
@@ -646,7 +669,7 @@ impl App {
                             );
                         }
                     }
-                    if folded {
+                    if folded && !cut {
                         let pill_x = x_after(row_end) + self.scale(6);
                         let pill_w = self.scale(22);
                         let pill_h = self.scale(13);
@@ -678,7 +701,7 @@ impl App {
                     }
                     for span in &spans {
                         // The part of the span on this row.
-                        let (from, to) = (span.start.max(row_start), span.end.min(row_end));
+                        let (from, to) = (span.start.max(row_start), span.end.min(shown_end));
                         if from >= to {
                             continue;
                         }
@@ -691,7 +714,7 @@ impl App {
                     }
                     // Brackets in their pair's color, over the text color.
                     for &(byte, color) in &bracket_colors {
-                        if byte >= row_start && byte < row_end {
+                        if byte >= row_start && byte < shown_end {
                             draw_text(byte, byte + 1, color, &clip);
                         }
                     }
@@ -736,11 +759,11 @@ impl App {
                         } else {
                             rows.row_of(start_byte) == row
                         };
-                        if !on_row {
+                        if !on_row || starts_hidden(start_byte.max(row_start)) {
                             continue;
                         }
                         let x1 = x_after(start_byte.max(row_start));
-                        let x2 = x_of(end_byte.min(row_end));
+                        let x2 = x_to(end_byte.min(row_end));
                         if x1 < right {
                             Self::fill(
                                 hdc,
@@ -788,6 +811,15 @@ impl App {
                         return;
                     }
                     let text = doc.line(line_idx);
+                    if super::super::wrap::visible_end(
+                        text,
+                        row_start,
+                        b,
+                        right - code_left - indent,
+                    ) < b
+                    {
+                        return;
+                    }
                     let hints = self.hints_on_line(self.tab_for_pane(pane), line_idx);
                     let x = code_left
                         + indent
@@ -854,6 +886,15 @@ impl App {
                         continue;
                     };
                     let line = doc.line(cursor.line);
+                    if super::super::wrap::visible_end(
+                        line,
+                        row_start,
+                        cursor.byte,
+                        right - code_left - indent,
+                    ) < cursor.byte
+                    {
+                        continue;
+                    }
                     let hints = self.hints_on_line(self.tab_for_pane(pane), cursor.line);
                     let x = code_left
                         + indent
@@ -891,6 +932,17 @@ impl App {
                     .then(|| self.locate(hwnd, pane, cursor, visible))
                     .flatten();
                 let (x, y) = match located {
+                    // Past what a very long row shows: off screen, unmeasured.
+                    Some((_, row_start, indent))
+                        if super::super::wrap::visible_end(
+                            line,
+                            row_start,
+                            cursor.byte,
+                            right - code_left - indent,
+                        ) < cursor.byte =>
+                    {
+                        (right, bottom)
+                    }
                     Some((row, row_start, indent)) => (
                         code_left
                             + indent

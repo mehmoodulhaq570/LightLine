@@ -59,6 +59,27 @@ fn char_columns(ch: char, tab_size: usize) -> usize {
     }
 }
 
+/// Where the part of `text[start..end]` that fits in `width` pixels ends.
+/// There is no horizontal scrolling, so with wrap off the rest of a long
+/// line is never on screen; measuring and drawing it anyway made a
+/// half-megabyte minified JSON line cost seconds per paint. No visible glyph
+/// is narrower than a pixel, and two characters per pixel leaves room for
+/// combining marks and other zero-width characters, so this never cuts off
+/// text that would show.
+pub(super) fn visible_end(text: &str, start: usize, end: usize, width: i32) -> usize {
+    let max_chars = (width.max(0) as usize).saturating_mul(2) + 2;
+    if end.saturating_sub(start) <= max_chars {
+        return end;
+    }
+    match text.get(start..end) {
+        Some(row) => row
+            .char_indices()
+            .nth(max_chars)
+            .map_or(end, |(offset, _)| start + offset),
+        None => end,
+    }
+}
+
 /// Breaks `text` into rows at most `columns` wide, preferring to break
 /// after whitespace. With `columns` None (wrap off) the line is one row.
 pub(super) fn layout_line(text: &str, columns: Option<usize>, tab_size: usize) -> LineRows {
@@ -428,6 +449,25 @@ mod tests {
         (0..layout.count())
             .map(|row| &text[layout.start(row)..layout.end(row, text.len())])
             .collect()
+    }
+
+    #[test]
+    fn only_what_fits_of_a_long_row_is_drawn() {
+        // Short rows are drawn whole.
+        assert_eq!(visible_end("let x = 1;", 0, 10, 100), 10);
+        // 10 pixels show at most 22 characters (two per pixel, plus two).
+        let long = "x".repeat(500_000);
+        assert_eq!(visible_end(&long, 0, long.len(), 10), 22);
+        assert_eq!(visible_end(&long, 1_000, long.len(), 10), 1_022);
+        // The end never goes past the row's end.
+        assert_eq!(visible_end(&long, 0, 30, 10), 22);
+        assert_eq!(visible_end(&long, 0, 15, 10), 15);
+        // Counted in characters, ending on a character boundary.
+        let wide = "é".repeat(100);
+        assert_eq!(visible_end(&wide, 0, wide.len(), 1), 8);
+        assert!(wide.is_char_boundary(visible_end(&wide, 0, wide.len(), 3)));
+        // A pane with no room still shows nothing more than a sliver.
+        assert_eq!(visible_end(&long, 0, long.len(), -5), 2);
     }
 
     #[test]
