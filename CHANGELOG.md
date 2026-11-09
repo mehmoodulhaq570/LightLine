@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Half the Wakeups When Other Programs List Windows**: Some programs that list open windows (taskbar tools, window switchers) ask every window for its icon about once a second. LightLine had no answer to the first question, so they asked a second time, waking LightLine twice a second while it sat idle in the background. It now answers straight away: on a PC running such a program, an idle LightLine woke about once a second (1.0–1.05) instead of twice (2.0–2.55), over three alternating runs of each.
 - **Faster Typing on Very Long Lines**: Typing or deleting on a very long line, such as a minified JavaScript or JSON file, no longer copies the whole line on each keystroke. On a 512 KiB line each keystroke now costs about 30 µs instead of about 1 ms, and typing with 100 carets on such lines about 5 ms instead of about 20 ms. Typing in ordinary files is a little quicker too (about 0.5 µs per keystroke instead of about 1 µs). Measured with the new `measure_text_model` benchmark; the results are in `docs/TEXT_MODEL_BENCHMARK.md`.
 
+#### Fixed
+
+- **No More Freeze on Files With Very Long Lines**: Opening a file with a very long line, such as a minified JSON or JavaScript file, could leave the window not responding for minutes, because every repaint measured and drew the whole line, bracket by bracket, although only its start fits on screen. LightLine now draws only the part of a line that can show. On a 510 KB one-line JSON file with 36,000 brackets, the window finishes its first paint in under a second; before, it was still busy painting after two minutes. A full repaint of that file now costs about 23 million CPU cycles, a few milliseconds.
+
 ## [v0.8.0] - 2026-11-07
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.8.0-windows-x86_64.zip`, `lightline-v0.8.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
