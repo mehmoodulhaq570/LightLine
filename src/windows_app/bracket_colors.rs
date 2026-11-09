@@ -263,6 +263,7 @@ impl App {
             + self.scale(GUTTER + PAD)
             + (level * self.settings.tab_size.max(1)) as i32 * space_width
             - self.scale(4)
+            - self.scroll_x(pane)
     }
 
     /// Message-loop hook: redraws the rows whose bracket depth changed (an

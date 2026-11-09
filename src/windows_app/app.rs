@@ -156,6 +156,9 @@ pub(super) struct EditorView {
     pub(super) first_line: usize,
     // With word wrap, which of first_line's screen rows is at the top.
     pub(super) first_row: usize,
+    // Without word wrap, how many pixels the text is scrolled to the left
+    // (hscroll.rs). Ignored while the tab wraps.
+    pub(super) scroll_x: i32,
     // Multiple cursors: the carets besides `cursor`, in no order. Empty
     // almost always; see multi_cursor.rs.
     pub(super) extra: Vec<Caret>,
@@ -2790,6 +2793,8 @@ impl App {
         } else {
             self.set_view_top(top);
         }
+        // And sideways, when a line is wider than the pane (hscroll.rs).
+        self.reveal_caret_x(hwnd, pane);
         self.caret_on = true;
         unsafe {
             InvalidateRect(hwnd, null(), 0);
@@ -3853,6 +3858,7 @@ impl App {
                     selection_anchor: view.selection_anchor.map(|anchor| doc.clamp(anchor)),
                     first_line: view.first_line.min(doc.line_count().saturating_sub(1)),
                     first_row: 0,
+                    scroll_x: 0,
                     extra: Vec::new(),
                 });
                 loaded.views = views;

@@ -90,6 +90,7 @@ Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patte
 | `Ctrl+D` | Select the word at the cursor; again, add the next match of the selection |
 | `Shift+Alt+F` | Format the document |
 | `Alt+Z` | Toggle word wrap for this file (on by default for Markdown) |
+| `Shift+Wheel` | Scroll sideways when a line is wider than the editor and word wrap is off; a tilt wheel or a sideways touchpad swipe does the same. The view also follows the cursor as you type or move it |
 | `Ctrl+Shift+V` | Preview a Markdown file (`>Markdown: Open Preview to the Side` shows it beside the file) |
 | Gutter chevron | Fold or unfold a block (`⌄` / `›`) |
 | Minimap | Click to jump there; drag the shaded part (the lines on screen) to scroll |

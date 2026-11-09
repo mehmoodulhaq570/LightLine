@@ -210,17 +210,24 @@ impl App {
             let line = self.doc().line(cursor.line);
             let prefix = safe_slice_range(line, row_start, cursor.byte);
             let hints = self.hints_on_line(self.tab_for_pane(self.focused_pane), cursor.line);
-            let x = self.code_left(hwnd)
+            let code_left = self.code_left(hwnd);
+            let x = code_left - self.scroll_x(self.focused_pane)
                 + indent
                 + self.text_width(hdc, prefix)
                 + self.hint_shift(hdc, hints, row_start, cursor.byte, false);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
             let y = self.editor_top() + row * self.line_height;
+            // Scrolled off the left edge: nothing to redraw there.
+            let (left, right) = if x < code_left {
+                (code_left, code_left)
+            } else {
+                (x, x + self.scale(2).max(2))
+            };
             RECT {
-                left: x,
+                left,
                 top: y,
-                right: x + self.scale(2).max(2),
+                right,
                 bottom: y + self.line_height,
             }
         }
@@ -299,6 +306,7 @@ impl App {
                 split: self.split_visible,
                 text: tab.image.is_none() && tab.markdown.is_none() && !tab.is_placeholder(),
                 top: self.view_top(hwnd, pane),
+                scroll_x: self.scroll_x(pane),
                 serial: doc.change_serial(),
                 lines: doc.line_count(),
                 shown_lines: doc.visible_line_count(),
@@ -1117,6 +1125,7 @@ struct CaretScene {
     split: bool,
     text: bool,
     top: (usize, usize),
+    scroll_x: i32,
     serial: u64,
     lines: usize,
     shown_lines: usize,

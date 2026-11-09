@@ -700,12 +700,28 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 app.scroll_markdown(hwnd, pane, pixels);
                 return 0;
             }
+            // Shift+wheel scrolls sideways, as in VS Code (hscroll.rs):
+            // turning it down goes towards the lines' ends.
+            if unsafe { GetKeyState(VK_SHIFT as i32) } < 0 {
+                app.wheel_sideways(hwnd, point, -(delta as i32));
+                return 0;
+            }
             // Scroll by screen rows: a wrapped line has several, a folded
             // block one. Only the code panes are redrawn, and mostly not
             // even those (scroll_blit.rs).
             if delta != 0 {
                 app.wheel_scroll(hwnd, pane, if delta > 0 { -3 } else { 3 });
             }
+            0
+        }
+        // A tilt wheel or a sideways touchpad swipe (positive: right).
+        WM_MOUSEHWHEEL => {
+            let mut point = POINT {
+                x: (lparam as u32 & 0xffff) as i16 as i32,
+                y: ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+            };
+            unsafe { ScreenToClient(hwnd, &mut point) };
+            app.wheel_sideways(hwnd, point, (wparam >> 16) as i16 as i32);
             0
         }
         WM_CLOSE => {

@@ -317,3 +317,12 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 - **Found, not fixed:** no horizontal scrolling. With wrap off, typing past ~the pane width puts the caret and text off screen (Ln 1, Col 106 in the capture, nothing visible there). Worth an issue or a feature.
 - **Next:** commit on a branch + PR when the maintainer asks; then release v0.9.0 (#70–#72 + this).
 - D: has ~2.1 GB free after the debug test build.
+
+## Follow-up: #74 merged, v0.9.0 released, horizontal scrolling (2026-11-09)
+
+- **#74** (long-line paint) squash-merged as `6ebf4a7`; local `main` reset onto it (`cc15ffd` had the identical tree). **#75** (v0.9.0 notes) merged as `5efff2d`.
+- **v0.9.0 released** 2026-11-09 15:22 UTC (run 42642700543, all jobs green): x64/ARM64 exes, zips, SHA256SUMS; notes from the CHANGELOG section. Scoop commit `e7e21bf` pulled into local `main`.
+  - Speed check in the notes (published v0.8.0 exe vs local release build of the merged code, main.rs, two alternating runs): 6.4–6.9 M UI cycles/key vs 7.2–9.9 M; start 0.104–0.105 s vs 0.105–0.128 s; idle 0 vs 0–0.15 wakeups/s.
+- **Branch `feat/horizontal-scroll`** (uncommitted when this was written): `EditorView::scroll_x` (pixels; ignored when the tab wraps), new `windows_app/hscroll.rs` (`scroll_x`, `text_view_width`, `row_anchor`, `reveal_caret_x` called from `keep_cursor_visible`, `wheel_sideways`, `scroll_pane_x`, `max_scroll_x` counted in columns). Painter, caret_rect, guide_x, position_at_pane, rename box and sticky lines subtract the offset; `CaretScene` includes it so a sideways scroll redraws the pane. Shift+wheel in `WM_MOUSEWHEEL`, new `WM_MOUSEHWHEEL` arm. Reveal jumps a quarter of the width past an edge (one full-pane redraw every few dozen typed characters, not every key).
+  - Live (release, big.min.json): TYPED visible at col 106, End reaches col 510,799 and typing there shows, Home + 5 tilt notches scrolls 30 chars. 50 keys at 0,100: 30–32 M cycles/key vs 21 M before hscroll (text was invisible before; this PC's numbers are noisy).
+- Scratchpad for this session: `...\56ff248a-...\scratchpad` (`longline_probe.py`, `hscroll_check.py`, `hscroll_repaint.py`, exes in `fixed\`, `hscroll\`). Test file added: `D:\Projects\lightline-tmp\live\ws\src\wide.json` (300 lines up to 363 chars).
