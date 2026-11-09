@@ -15,6 +15,34 @@ const INSET: i32 = 6;
 const ROW_GAP: i32 = 4;
 const SIDE_WIDTH: i32 = 96;
 
+/// The timer that counts a big file's matches a slice at a time. Timer
+/// messages come after keyboard input, so the find box keeps up with typing
+/// while the count catches up.
+pub(super) const FIND_COUNT_TIMER: usize = 24;
+/// Files up to this many lines are counted at once: about 3 ms for 50,000
+/// lines of code. Counting a 1M-line file took 59 ms per typed character.
+const COUNT_AT_ONCE_LINES: usize = 50_000;
+/// Lines counted per timer message.
+const COUNT_SLICE_LINES: usize = 50_000;
+/// In a big file, how many lines from the caret are searched for the first
+/// match while typing; past that the count finds it.
+const SEEK_AT_ONCE_LINES: usize = 50_000;
+
+/// A count of the find box's matches still going through a big file.
+pub(super) struct FindCounting {
+    document: u64,
+    serial: u64,
+    matcher: Matcher,
+    current: Option<(Pos, Pos)>,
+    next_line: usize,
+    counted: (usize, usize),
+    // Where the find box's first match is still being looked for, and the
+    // first matches (with their numbers) at or after it and before it.
+    seek: Option<Pos>,
+    before_seek: Option<((Pos, Pos), usize)>,
+    at_seek: Option<((Pos, Pos), usize)>,
+}
+
 pub(super) struct FindLayout {
     card: RECT,
     find: RECT,
@@ -91,10 +119,17 @@ impl App {
     /// started, so matches show while typing.
     pub(super) fn find_query_changed(&mut self, hwnd: HWND) {
         let origin = self.find_origin;
-        let found = self
-            .find_matcher()
-            .ok()
-            .and_then(|matcher| self.doc().find_next(origin, &matcher));
+        let matcher = self.find_matcher().ok();
+        // In a big file only the lines near the caret are searched now: a
+        // query with no match there would read the whole file on each key.
+        // The count, going through it a slice at a time, selects the first
+        // match when it gets to it.
+        let big = self.doc().line_count() > COUNT_AT_ONCE_LINES;
+        let reach = if big { SEEK_AT_ONCE_LINES } else { usize::MAX };
+        let found = matcher
+            .as_ref()
+            .and_then(|matcher| self.doc().find_next_within(origin, matcher, reach));
+        let seek = (big && found.is_none() && matcher.is_some()).then_some(origin);
         match found {
             Some((start, end)) => {
                 self.view_mut().selection_anchor = Some(start);
@@ -105,12 +140,20 @@ impl App {
                 self.view_mut().cursor = origin;
             }
         }
-        self.update_find_count();
+        self.start_find_count(seek);
         self.refresh(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn update_find_count(&mut self) {
+        self.start_find_count(None);
+    }
+
+    /// Counts the find box's matches: at once in a file of up to
+    /// COUNT_AT_ONCE_LINES lines, else the first slice now and the rest on
+    /// FIND_COUNT_TIMER. With `seek`, the first match from there (wrapping
+    /// round) is selected when the count reaches it.
+    fn start_find_count(&mut self, seek: Option<Pos>) {
         let matcher = match self.find_matcher() {
             Ok(matcher) => matcher,
             Err(error) => {
@@ -124,9 +167,98 @@ impl App {
         let current = self
             .selection_range()
             .filter(|(start, end)| start.line == end.line);
-        let doc = self.doc();
-        let lines = (0..doc.line_count()).map(|line| doc.line(line));
-        self.find_count = count_matches(lines, &matcher, current);
+        let doc = &self.tabs[self.active].document;
+        let mut counting = FindCounting {
+            seek,
+            ..FindCounting::new(doc, matcher, current)
+        };
+        let slice = if doc.line_count() <= COUNT_AT_ONCE_LINES {
+            COUNT_AT_ONCE_LINES
+        } else {
+            COUNT_SLICE_LINES
+        };
+        counting.step(doc, slice);
+        let done = counting.next_line >= doc.line_count();
+        self.select_found(&mut counting, done);
+        self.find_count = counting.counted;
+        self.find_counting = (!done).then_some(counting);
+        unsafe {
+            if done {
+                KillTimer(self.hwnd, FIND_COUNT_TIMER);
+            } else {
+                SetTimer(self.hwnd, FIND_COUNT_TIMER, 1, None);
+            }
+        }
+    }
+
+    /// FIND_COUNT_TIMER: counts the next slice of a big file. An edit, a
+    /// switch to another file or a closed box starts it over or ends it.
+    pub(super) fn find_count_timer(&mut self, hwnd: HWND) {
+        let Some(mut counting) = self.find_counting.take() else {
+            unsafe { KillTimer(hwnd, FIND_COUNT_TIMER) };
+            return;
+        };
+        let doc = &self.tabs[self.active].document;
+        if !self.find_mode
+            || doc.id() != counting.document
+            || doc.change_serial() != counting.serial
+        {
+            unsafe { KillTimer(hwnd, FIND_COUNT_TIMER) };
+            if self.find_mode {
+                self.update_find_count();
+                self.invalidate_find_count(hwnd);
+            }
+            return;
+        }
+        counting.step(doc, COUNT_SLICE_LINES);
+        let done = counting.next_line >= doc.line_count();
+        if self.select_found(&mut counting, done) {
+            self.refresh(hwnd);
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+        }
+        self.find_count = counting.counted;
+        if done {
+            unsafe { KillTimer(hwnd, FIND_COUNT_TIMER) };
+        } else {
+            self.find_counting = Some(counting);
+        }
+        self.invalidate_find_count(hwnd);
+    }
+
+    /// Selects the match a count was seeking once it's known: the first at
+    /// or after the seek position, or, when the count is `done` without one,
+    /// the first before it. Not if the caret has moved meanwhile. Returns
+    /// whether the selection changed.
+    fn select_found(&mut self, counting: &mut FindCounting, done: bool) -> bool {
+        let Some(origin) = counting.seek else {
+            return false;
+        };
+        let found = counting
+            .at_seek
+            .or(if done { counting.before_seek } else { None });
+        let Some(((start, end), ordinal)) = found else {
+            if done {
+                counting.seek = None;
+            }
+            return false;
+        };
+        counting.seek = None;
+        let view = self.view();
+        if view.cursor != origin || view.selection_anchor.is_some() {
+            return false;
+        }
+        self.view_mut().selection_anchor = Some(start);
+        self.view_mut().cursor = end;
+        counting.current = Some((start, end));
+        counting.counted.0 = ordinal;
+        true
+    }
+
+    /// Redraws the find box's count only.
+    fn invalidate_find_count(&self, hwnd: HWND) {
+        if let Some(layout) = self.find_layout(hwnd) {
+            unsafe { InvalidateRect(hwnd, &layout.count, 0) };
+        }
     }
 
     pub(super) fn find_layout(&self, hwnd: HWND) -> Option<FindLayout> {
@@ -241,10 +373,15 @@ impl App {
         );
         self.paint_option_toggles(hdc, layout.find, self.find_options);
         let (current, total) = self.find_count;
+        // A big file still being counted shows what's found so far.
+        let counting = self.find_counting.is_some();
         let (count, color) = match (current, total) {
             _ if self.find_query.is_empty() => (String::new(), self.theme.muted),
             _ if self.find_error.is_some() => ("Invalid regex".to_string(), self.theme.pink),
+            (_, 0) if counting => ("Counting...".to_string(), self.theme.muted),
             (_, 0) => ("No results".to_string(), self.theme.pink),
+            (0, total) if counting => (format!("{total}+ results"), self.theme.muted),
+            (current, total) if counting => (format!("{current} of {total}+"), self.theme.muted),
             (0, 1) => ("1 result".to_string(), self.theme.muted),
             (0, total) => (format!("{total} results"), self.theme.muted),
             (current, total) => (format!("{current} of {total}"), self.theme.muted),
@@ -346,23 +483,68 @@ fn contains(rect: RECT, x: i32, y: i32) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
 
-// (current, total): every match in `lines`, and which of them (1-based) is
-// exactly the range `current`, or 0 when none is.
+impl FindCounting {
+    fn new(document: &Document, matcher: Matcher, current: Option<(Pos, Pos)>) -> Self {
+        Self {
+            document: document.id(),
+            serial: document.change_serial(),
+            matcher,
+            current,
+            next_line: 0,
+            counted: (0, 0),
+            seek: None,
+            before_seek: None,
+            at_seek: None,
+        }
+    }
+
+    /// Counts up to `lines` more lines of `doc`.
+    fn step(&mut self, doc: &Document, lines: usize) {
+        let end = (self.next_line + lines).min(doc.line_count());
+        for line in self.next_line..end {
+            self.tally(line, doc.line(line));
+        }
+        self.next_line = end;
+    }
+
+    /// Counts line `line`'s matches: `counted` is (current, total), where
+    /// current is the 1-based number of the match that is exactly the range
+    /// `current`, or 0 when none is.
+    fn tally(&mut self, line: usize, text: &str) {
+        for (start, end) in self.matcher.matches(text) {
+            self.counted.1 += 1;
+            let range = (Pos { line, byte: start }, Pos { line, byte: end });
+            if self.current == Some(range) {
+                self.counted.0 = self.counted.1;
+            }
+            if let Some(origin) = self.seek
+                && self.at_seek.is_none()
+            {
+                if range.0 >= origin {
+                    self.at_seek = Some((range, self.counted.1));
+                } else if self.before_seek.is_none()
+                    && (line < origin.line || range.1.byte <= origin.byte)
+                {
+                    // Wrapped round, as find_next does: on the seek line
+                    // only what ends before it.
+                    self.before_seek = Some((range, self.counted.1));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 fn count_matches<'a>(
     lines: impl Iterator<Item = &'a str>,
     matcher: &Matcher,
     current: Option<(Pos, Pos)>,
 ) -> (usize, usize) {
-    let (mut index, mut total) = (0, 0);
+    let mut counting = FindCounting::new(&Document::new(), matcher.clone(), current);
     for (line, text) in lines.enumerate() {
-        for (start, end) in matcher.matches(text) {
-            total += 1;
-            if current == Some((Pos { line, byte: start }, Pos { line, byte: end })) {
-                index = total;
-            }
-        }
+        counting.tally(line, text);
     }
-    (index, total)
+    counting.counted
 }
 
 // The longest end of `text` no wider than `width`, so the part being typed
@@ -415,6 +597,56 @@ mod tests {
         .unwrap();
         let range = Some((Pos { line: 2, byte: 0 }, Pos { line: 2, byte: 6 }));
         assert_eq!(count_matches(lines.into_iter(), &words, range), (3, 3));
+    }
+
+    #[test]
+    fn a_count_in_slices_matches_one_pass() {
+        let text: String = (0..1_000)
+            .map(|i| format!("let x{i} = foo(); // foo\n"))
+            .collect();
+        let mut doc = Document::new();
+        doc.seed(&text);
+        let matcher = Matcher::new("foo", Default::default()).unwrap();
+        let line = doc.line(700);
+        let byte = line.find("foo").unwrap();
+        let current = Some((
+            Pos { line: 700, byte },
+            Pos {
+                line: 700,
+                byte: byte + 3,
+            },
+        ));
+        let lines: Vec<&str> = (0..doc.line_count()).map(|line| doc.line(line)).collect();
+        let whole = count_matches(lines.into_iter(), &matcher, current);
+        let mut counting = FindCounting::new(&doc, matcher.clone(), current);
+        while counting.next_line < doc.line_count() {
+            counting.step(&doc, 37);
+        }
+        assert_eq!(counting.counted, whole);
+        assert_eq!(whole, (1_401, 2_000));
+
+        // Seeking from line 500 finds that line's first match, number 1,001.
+        let seek = Pos { line: 500, byte: 0 };
+        let mut counting = FindCounting {
+            seek: Some(seek),
+            ..FindCounting::new(&doc, matcher.clone(), None)
+        };
+        counting.step(&doc, 1_000_000);
+        let (range, number) = counting.at_seek.unwrap();
+        assert_eq!(range.0.line, 500);
+        assert_eq!(number, 1_001);
+        // From past the last match it wraps round to the first.
+        let mut counting = FindCounting {
+            seek: Some(Pos {
+                line: 999,
+                byte: 30,
+            }),
+            ..FindCounting::new(&doc, matcher, None)
+        };
+        counting.step(&doc, 1_000_000);
+        assert!(counting.at_seek.is_none());
+        let (range, number) = counting.before_seek.unwrap();
+        assert_eq!((range.0.line, number), (0, 1));
     }
 
     #[test]

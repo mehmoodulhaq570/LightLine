@@ -81,7 +81,7 @@ Checked in `src/windows_app/` against the costs above:
 | Enter, Backspace joining lines, multi-line paste, multi-caret Enter, and their undo | Every such keystroke | O(lines below the edit): see the table. Over 1 ms near the top of files above ~220k lines; 18 ms at 3.5M lines |
 | Recovery snapshot (`Tab::recovery_text`, `text()`) | At most once per change, from a timer that fires 5 s after a repaint | 22 ms at 1M lines, 89 ms at 121 MiB: a pause every 5 s while typing in a very large file |
 | Gutter diff (`start_gutter_diff`) | 120 ms after typing stops; skipped above 50,000 lines | Up to about 8 ms at the 50,000-line cap; each run also re-splits HEAD's text into lines |
-| Find box match count (`update_find_count`) | Every character typed into the find box | 59 ms at 1M lines, 297 ms at 121 MiB |
+| Find box match count (`update_find_count`) | Every character typed into the find box | 59 ms at 1M lines, 297 ms at 121 MiB. Since v0.9.0, files over 50,000 lines are counted 50,000 lines per timer message between keystrokes |
 | Replace All (`replace_all_edit`) | On request | 382 ms at 1M lines, and its undo keeps old and new text: 122 MiB for a 35 MiB file |
 | Save | On request | 272 ms at 1M lines, 0.9 s at 121 MiB, including the flush to disk |
 | Opening in a language server (`text()`) | Once per file | Files over 2 MiB skip the language server |
@@ -95,7 +95,7 @@ Each keystroke sends only the edit to the language server (incremental `didChang
 2. **When a structural change is needed, use chunks of lines, not a byte rope.** Paint, syntax, search, folding and brackets work line by line through `line(i)` (114 call sites); only the gutter diff takes the whole `lines()` slice. A B-tree of line chunks keeps that API, makes Enter about 4 µs at any size, and lets a snapshot share unchanged chunks (`Arc`) instead of copying 89 ms of text. A byte rope (ropey, crop) would also bound Enter, but every `line(i)` would need a line-index lookup and a copy or a chunked `&str`, a much larger change for no measured gain on typing.
 3. **Smaller fixes that don't need a new model**, each measured above:
    - Cache HEAD's lines once per file for the gutter diff instead of splitting HEAD's text on every recompute: part of the up to ~8 ms each typing pause costs at the 50,000-line cap.
-   - Count find-box matches on a worker, or stop counting past a limit, for files over a few MB (297 ms per typed character at 121 MiB).
+   - ~~Count find-box matches on a worker, or stop counting past a limit, for files over a few MB (297 ms per typed character at 121 MiB).~~ Done after v0.9.0: counted in slices between keystrokes; a typed character on a 1M-line file holds the window for 4–18 ms instead of 80–150 ms.
    - Write the recovery snapshot of very large files less often, or from a shared snapshot once lines are chunked (89 ms every 5 s while typing at 121 MiB).
    - `slice` could reserve its result's size up front: `text_range` takes 1.5–2× as long as `text()` for the same bytes.
 
