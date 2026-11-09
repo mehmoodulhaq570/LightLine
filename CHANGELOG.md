@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-11-09
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.9.0-windows-x86_64.zip`, `lightline-v0.9.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
+At least as fast as v0.8.0, and files with very long lines no longer freeze the window. Measured against the published v0.8.0 exe on the same PC (x64 release builds; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running; two runs each, alternating): 6.4–6.9 million CPU cycles of work on the window's thread per keystroke (v0.8.0: 7.2–9.9 million), a start of about 0.10 s to a responding window over five launches each (v0.8.0: 0.10–0.13 s), and no wakeups while idle in the background (v0.8.0: 0–0.15 a second).
+
+Language extensions are new in this release, and they change what runs inside LightLine: installing one builds the language's Tree-sitter grammar from the extension's source with your C compiler and loads it into LightLine as native code, as Helix and Neovim do. Install language extensions you trust. Themes and icon themes are still data only.
+
 #### Added
 
 - **Syntax Colors from Language Extensions**: Language extensions from the Zed registry can now be installed from the Extensions panel (`Ctrl+Shift+X`); until now only themes could. LightLine downloads the language's Tree-sitter grammar at the version the extension pins, builds it with the C compiler already on your PC (the Visual Studio C++ Build Tools, found automatically, or `gcc`/`clang` on PATH), and colors files of that language with the extension's own highlight rules. Files of that language that are already open change color as soon as the install finishes. If no C compiler is found, or the grammar doesn't build, the install stops with a message saying why and anything already installed is left as it was. Only the colors are used: a language server the extension declares isn't started yet, and the status bar says so. Nothing is loaded until a file of that language is opened.
