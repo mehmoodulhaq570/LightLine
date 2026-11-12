@@ -79,6 +79,9 @@ impl App {
         language: Option<LspLanguage>,
         save_active: bool,
     ) -> Result<Applied, String> {
+        // Which tabs are unsaved, and so which get saved below, is known
+        // once a background save is done; and two saves mustn't overlap.
+        self.finish_background_save(self.hwnd);
         let mut in_tabs: Vec<(usize, Resolved)> = Vec::new();
         let mut on_disk: Vec<(PathBuf, String, Document)> = Vec::new();
         let mut places = 0;

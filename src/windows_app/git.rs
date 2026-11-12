@@ -618,6 +618,8 @@ impl App {
             self.status = "Waiting for the current Git command".into();
             return false;
         }
+        // Git reads (stage, commit) or rewrites (discard) the files on disk.
+        self.finish_background_save(hwnd);
         let message = self.commit_message.clone();
         self.status = match &action {
             GitAction::Stage(paths) => stage_text("Staging", paths),

@@ -1158,6 +1158,13 @@ impl Document {
     }
 
     pub fn save(&mut self, path: &Path) -> io::Result<()> {
+        self.check_unchanged_on_disk(path)?;
+        self.save_over_disk_changes(path)
+    }
+
+    /// The check `save` makes before writing: an error when `path` is this
+    /// document's file and it changed on disk since it was read or written.
+    pub fn check_unchanged_on_disk(&self, path: &Path) -> io::Result<()> {
         if self.path.as_deref() == Some(path)
             && let Some((modified, len)) = self.last_saved
         {
@@ -1169,76 +1176,146 @@ impl Document {
                 ));
             }
         }
-        self.save_over_disk_changes(path)
+        Ok(())
     }
 
     /// Like `save`, but writes even if the file changed on disk since it was
     /// read: for when the user chose to keep their version over that change.
     pub fn save_over_disk_changes(&mut self, path: &Path) -> io::Result<()> {
-        // Written next to the file a symbolic link points at, then moved over
-        // that file: moving it over the link replaced the link with a copy.
-        let target = resolve_links(path);
-        crate::local_history::before_save(path);
-        let parent = target.parent().unwrap_or_else(|| Path::new("."));
-        let mut temporary = None;
-        for n in 0..100 {
-            let name = format!(".lightline-{}-{n}.tmp", std::process::id());
-            let candidate = parent.join(name);
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)
-            {
-                Ok(file) => {
-                    temporary = Some((candidate, file));
-                    break;
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            }
-        }
-        let (temp_path, file) = temporary.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "Could not create temporary save file",
-            )
-        })?;
-        // Buffered: writing each line and line ending straight to the file
-        // was one system call apiece, which took seconds on large files.
-        let write_result = (|| -> io::Result<()> {
-            let mut writer = io::BufWriter::with_capacity(256 * 1024, file);
-            if self.bom {
-                writer.write_all(&[0xef, 0xbb, 0xbf])?;
-            }
-            for (i, line) in self.lines.iter().enumerate() {
-                if i > 0 {
-                    let crlf = self.crlf.as_ref().map(|crlf| crlf[i - 1]);
-                    let ending = match crlf {
-                        Some(true) => "\r\n",
-                        Some(false) => "\n",
-                        None => self.eol,
-                    };
-                    writer.write_all(ending.as_bytes())?;
-                }
-                writer.write_all(line.as_bytes())?;
-            }
-            writer
-                .into_inner()
-                .map_err(|error| error.into_error())?
-                .sync_all()
-        })();
-        let result = write_result.and_then(|_| replace_file(&temp_path, &target));
-        if result.is_err() {
-            let _ = fs::remove_file(&temp_path);
-        }
-        result?;
-        crate::local_history::after_save(path);
-        let metadata = fs::metadata(path)?;
-        self.path = Some(path.to_owned());
-        self.last_saved = Some((metadata.modified()?, metadata.len()));
-        self.saved_revision = self.revision;
+        let stamp = write_file(path, |writer| self.write_contents(writer))?;
+        self.finish_save(path, stamp, self.revision);
         Ok(())
     }
+
+    /// The bytes `save` would write, with this revision, for writing on
+    /// another thread (`SaveSnapshot::write`, then `finish_save`). It makes
+    /// no disk check: call `check_unchanged_on_disk` first where `save` would.
+    pub fn snapshot_for_save(&self, path: &Path) -> SaveSnapshot {
+        let mut bytes = Vec::with_capacity(self.byte_len() + 3 + self.lines.len());
+        // Writing into memory can't fail.
+        let _ = self.write_contents(&mut bytes);
+        SaveSnapshot {
+            path: path.to_owned(),
+            revision: self.revision,
+            bytes,
+        }
+    }
+
+    /// Records a finished write of revision `revision` to `path`, with the
+    /// file's modification time and length after it. The document stays
+    /// dirty if it was edited since that revision.
+    pub fn finish_save(&mut self, path: &Path, stamp: SaveStamp, revision: u64) {
+        self.path = Some(path.to_owned());
+        self.last_saved = Some(stamp);
+        self.saved_revision = revision;
+    }
+
+    /// The revision the text is at; `snapshot_for_save` records it.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    // The file's bytes: the BOM, then each line with its ending.
+    fn write_contents(&self, writer: &mut impl Write) -> io::Result<()> {
+        if self.bom {
+            writer.write_all(&[0xef, 0xbb, 0xbf])?;
+        }
+        for (i, line) in self.lines.iter().enumerate() {
+            if i > 0 {
+                let crlf = self.crlf.as_ref().map(|crlf| crlf[i - 1]);
+                let ending = match crlf {
+                    Some(true) => "\r\n",
+                    Some(false) => "\n",
+                    None => self.eol,
+                };
+                writer.write_all(ending.as_bytes())?;
+            }
+            writer.write_all(line.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+/// A file's modification time and length right after LightLine wrote it.
+pub type SaveStamp = (SystemTime, u64);
+
+/// A document's file contents as of one revision (`Document::snapshot_for_save`),
+/// to be written off the UI thread.
+pub struct SaveSnapshot {
+    pub path: PathBuf,
+    pub revision: u64,
+    bytes: Vec<u8>,
+}
+
+impl SaveSnapshot {
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    /// Writes the file exactly as `Document::save_over_disk_changes` does,
+    /// and returns the stamp to pass to `Document::finish_save`.
+    pub fn write(&self) -> io::Result<SaveStamp> {
+        write_file(&self.path, |writer| writer.write_all(&self.bytes))
+    }
+}
+
+// Writes `path` safely: into a new temporary file beside it, flushed to the
+// disk, then moved over it, so a failure at any point leaves the old file
+// whole. Returns the written file's modification time and length.
+fn write_file(
+    path: &Path,
+    contents: impl FnOnce(&mut io::BufWriter<fs::File>) -> io::Result<()>,
+) -> io::Result<SaveStamp> {
+    // Written next to the file a symbolic link points at, then moved over
+    // that file: moving it over the link replaced the link with a copy.
+    let target = resolve_links(path);
+    crate::local_history::before_save(path);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary = None;
+    for n in 0..100 {
+        let name = format!(".lightline-{}-{n}.tmp", std::process::id());
+        let candidate = parent.join(name);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let (temp_path, file) = temporary.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "Could not create temporary save file",
+        )
+    })?;
+    // Buffered: writing each line and line ending straight to the file
+    // was one system call apiece, which took seconds on large files.
+    let write_result = (|| -> io::Result<()> {
+        let mut writer = io::BufWriter::with_capacity(256 * 1024, file);
+        contents(&mut writer)?;
+        writer
+            .into_inner()
+            .map_err(|error| error.into_error())?
+            .sync_all()
+    })();
+    let result = write_result.and_then(|_| replace_file(&temp_path, &target));
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result?;
+    crate::local_history::after_save(path);
+    let metadata = fs::metadata(path)?;
+    Ok((metadata.modified()?, metadata.len()))
 }
 
 // A file's text as lines without their endings, the ending to use, and, when
@@ -1594,6 +1671,138 @@ mod tests {
             b"\xef\xbb\xbfhello\r\nworld!"
         );
         std::fs::remove_file(path).unwrap();
+    }
+
+    // A folder of its own per test, removed when the test ends.
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "lightline-{name}-{}-{}",
+                std::process::id(),
+                next_id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_background_save_writes_the_same_bytes_as_a_synchronous_one() {
+        let dir = TempDir::new("snapshot");
+        let cases: [&[u8]; 9] = [
+            b"",
+            b"one line",
+            b"lf\nlines\n",
+            b"crlf\r\nlines\r\nno final newline",
+            b"\xef\xbb\xbfbom\r\nand crlf\r\n",
+            b"\xef\xbb\xbf",
+            b"mixed\r\nendings\nkept\r\nper line\n",
+            b"\n\n\r\n",
+            "unicode \u{1f600}\r\n\u{e9}\n".as_bytes(),
+        ];
+        for (n, original) in cases.iter().enumerate() {
+            let sync_path = dir.0.join(format!("sync-{n}.txt"));
+            let background_path = dir.0.join(format!("background-{n}.txt"));
+            std::fs::write(&sync_path, original).unwrap();
+            std::fs::write(&background_path, original).unwrap();
+            let mut sync = Document::open(sync_path.clone()).unwrap();
+            let mut background = Document::open(background_path.clone()).unwrap();
+            // Unchanged, then with a line typed in the middle.
+            for edit in [false, true] {
+                if edit {
+                    for doc in [&mut sync, &mut background] {
+                        let line = doc.line_count() / 2;
+                        doc.replace(Pos { line, byte: 0 }, Pos { line, byte: 0 }, "typed\n");
+                    }
+                }
+                sync.save(&sync_path).unwrap();
+                background
+                    .check_unchanged_on_disk(&background_path)
+                    .unwrap();
+                let snapshot = background.snapshot_for_save(&background_path);
+                let stamp = snapshot.write().unwrap();
+                background.finish_save(&background_path, stamp, snapshot.revision);
+                let expected = std::fs::read(&sync_path).unwrap();
+                if !edit {
+                    assert_eq!(&expected, original, "case {n}");
+                }
+                assert_eq!(snapshot.len(), expected.len(), "case {n}");
+                assert_eq!(
+                    std::fs::read(&background_path).unwrap(),
+                    expected,
+                    "case {n}"
+                );
+                assert!(!background.is_dirty(), "case {n}");
+                assert!(background.disk_matches_last_save(), "case {n}");
+                assert!(!background.changed_on_disk(), "case {n}");
+            }
+        }
+        // Nothing but the files themselves is left behind.
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), cases.len() * 2);
+    }
+
+    #[test]
+    fn edits_made_during_a_background_save_stay_unsaved() {
+        let dir = TempDir::new("revision");
+        let path = dir.0.join("file.txt");
+        std::fs::write(&path, "start").unwrap();
+        let mut doc = Document::open(path.clone()).unwrap();
+        doc.replace(Pos::default(), Pos::default(), "saved ");
+        let snapshot = doc.snapshot_for_save(&path);
+        assert_eq!(snapshot.revision, doc.revision());
+        // Typed while the worker writes.
+        doc.replace(doc.end(), doc.end(), " typed");
+        let stamp = snapshot.write().unwrap();
+        doc.finish_save(&path, stamp, snapshot.revision);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved start");
+        assert!(doc.is_dirty(), "the typing isn't on disk");
+        assert_eq!(doc.text(), "saved start typed");
+        // The file on disk is the document's own write, not an outside change.
+        assert!(!doc.changed_on_disk());
+        // Undoing the typing gets back to exactly what was saved.
+        doc.undo();
+        assert!(!doc.is_dirty());
+        // And a later save picks up from there.
+        doc.redo();
+        doc.save(&path).unwrap();
+        assert!(!doc.is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved start typed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_background_save_into_a_locked_file_fails_and_keeps_it() {
+        let dir = TempDir::new("locked");
+        let path = dir.0.join("file.txt");
+        std::fs::write(&path, "on disk").unwrap();
+        let mut doc = Document::open(path.clone()).unwrap();
+        doc.replace(Pos::default(), Pos::default(), "edited ");
+        let snapshot = doc.snapshot_for_save(&path);
+        {
+            // Opened by another program with no sharing, as an editor or a
+            // virus scanner might.
+            use std::os::windows::fs::OpenOptionsExt;
+            let _lock = OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+            assert!(snapshot.write().is_err());
+        }
+        // Not marked saved, the file untouched, no temporary file left.
+        assert!(doc.is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "on disk");
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+        assert!(!doc.changed_on_disk());
+        // Once the other program lets go, saving works.
+        doc.save(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "edited on disk");
     }
 
     #[test]

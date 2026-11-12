@@ -445,7 +445,7 @@ impl App {
         } else if matches!(language, Some(RunLanguage::C | RunLanguage::Cpp)) {
             self.run_c_file(hwnd);
         } else if let Some(runner) = language.and_then(RunLanguage::runner) {
-            if self.doc().is_dirty() && !self.save(hwnd, false) {
+            if !self.save_if_dirty(hwnd) {
                 self.status = "Save the file before running it".into();
                 self.refresh(hwnd);
                 return;
@@ -466,6 +466,8 @@ impl App {
     }
 
     pub(super) fn run_project(&mut self, hwnd: HWND) {
+        // Cargo reads the files from disk.
+        self.finish_background_save(hwnd);
         let root = self
             .doc()
             .path
@@ -513,7 +515,7 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         }
-        if self.doc().is_dirty() && !self.save(hwnd, false) {
+        if !self.save_if_dirty(hwnd) {
             self.status = "Save the file before running it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
@@ -571,7 +573,7 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         }
-        if self.doc().is_dirty() && !self.save(hwnd, false) {
+        if !self.save_if_dirty(hwnd) {
             self.status = "Save the Python file before running it".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
@@ -994,6 +996,7 @@ impl App {
                         }
                     }
                 }
+                WorkerMessage::Saved(id) => self.background_save_done(hwnd, id),
                 _ => {}
             }
         }

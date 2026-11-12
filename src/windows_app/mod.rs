@@ -1,6 +1,7 @@
 mod ai_chat;
 mod ai_provider;
 mod app;
+mod background_save;
 mod binary_view;
 mod blame;
 mod bracket_colors;
