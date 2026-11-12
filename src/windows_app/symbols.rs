@@ -44,7 +44,7 @@ impl App {
         if !self.quick_open || self.language_pick || !self.quick_query.starts_with('@') {
             return;
         }
-        if self.welcome || self.tab().read_only() || Tab::lsp_language(self.doc()).is_none() {
+        if self.welcome || self.tab().read_only() || self.tab().lsp_language().is_none() {
             return;
         }
         if !self.tab().lsp_opened {
@@ -147,7 +147,7 @@ impl App {
 
     /// What the `@` list shows when it's empty.
     pub(super) fn symbols_empty_message(&self) -> String {
-        if Tab::lsp_language(self.doc()).is_none() {
+        if self.tab().lsp_language().is_none() {
             return "Symbols need a language server, and this file type has none".into();
         }
         match self.active_symbols() {

@@ -34,17 +34,41 @@ fn outdent_width(line: &str, tab_size: usize) -> usize {
 }
 
 impl App {
+    /// How the active file is indented: with spaces (else tabs), and how
+    /// wide a level is. An extension language's `tab_size` and `hard_tabs`
+    /// come before the settings.
+    pub(super) fn indent_style(&self) -> (bool, usize) {
+        let rules = self.tab().editing_rules();
+        let spaces = match rules.and_then(|rules| rules.hard_tabs) {
+            Some(hard_tabs) => !hard_tabs,
+            None => self.settings.insert_spaces,
+        };
+        let size = rules
+            .and_then(|rules| rules.tab_size)
+            .unwrap_or(self.settings.tab_size)
+            .max(1);
+        (spaces, size)
+    }
+
+    /// One level of indentation in the active file.
+    pub(super) fn indent_unit(&self) -> String {
+        match self.indent_style() {
+            (true, size) => " ".repeat(size),
+            (false, _) => "\t".into(),
+        }
+    }
+
     /// True when Tab (Shift+Tab with `shift`) was the editor's.
     pub(super) fn tab_key(&mut self, hwnd: HWND, shift: bool) -> bool {
         if !self.view().extra.is_empty() || self.tab().read_only() || self.tab().is_placeholder() {
             return false;
         }
-        let tab_size = self.settings.tab_size.max(1);
+        let (spaces, tab_size) = self.indent_style();
         let selection = self.selection_range();
         let several_lines = selection.is_some_and(|(start, end)| start.line != end.line);
         if !shift && !several_lines {
             let at = selection.map_or(self.view().cursor, |(start, _)| start);
-            let text = if self.settings.insert_spaces {
+            let text = if spaces {
                 let column = visual_column(self.doc().line(at.line), at.byte, tab_size);
                 " ".repeat(tab_size - column % tab_size)
             } else {
@@ -65,11 +89,7 @@ impl App {
         } else {
             end.line
         };
-        let unit = if self.settings.insert_spaces {
-            " ".repeat(tab_size)
-        } else {
-            "\t".into()
-        };
+        let unit = self.indent_unit();
         // Per line, the bytes added (or taken off) at its start.
         let mut changed: Vec<(usize, isize)> = Vec::new();
         self.doc_mut().begin_group();

@@ -61,11 +61,7 @@ impl App {
             .chars()
             .take_while(|ch| *ch == ' ' || *ch == '\t')
             .collect();
-        let tab = if self.settings.insert_spaces {
-            " ".repeat(self.settings.tab_size)
-        } else {
-            "\t".into()
-        };
+        let tab = self.indent_unit();
         let snippet = snippet.replace("\r\n", "\n");
         let (text, stops) = lsp::expand_snippet(&snippet, &indent, &tab);
         self.snippet = None;

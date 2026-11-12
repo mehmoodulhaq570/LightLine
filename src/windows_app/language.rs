@@ -1,4 +1,4 @@
-use super::app::{CompletionPopup, CompletionRequest, HoverCard, HoverTarget, NavTarget, Tab};
+use super::app::{CompletionPopup, CompletionRequest, HoverCard, HoverTarget, NavTarget};
 use super::*;
 use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as LspRange};
 
@@ -12,7 +12,7 @@ impl App {
     }
 
     pub(super) fn ensure_lsp(&mut self, hwnd: HWND) {
-        let Some(language) = Tab::lsp_language(self.doc()) else {
+        let Some(language) = self.tab().lsp_language() else {
             return;
         };
         let Some(path) = self.doc().path.as_deref() else {
@@ -161,6 +161,17 @@ impl App {
                         || folder.join("go.work").is_file()
                         || folder.join(".git").exists()
                 })
+                .or(self.workspace_root.as_deref())
+                .or_else(|| path.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            // An extension language's project files aren't known here: the
+            // repository, else the workspace.
+            LspLanguage::Extension(_) => path
+                .ancestors()
+                .skip(1)
+                .take(10)
+                .find(|folder| folder.join(".git").exists())
                 .or(self.workspace_root.as_deref())
                 .or_else(|| path.parent())
                 .unwrap_or(Path::new("."))
@@ -314,7 +325,7 @@ impl App {
             );
             match event {
                 LspEvent::Ready { language } => {
-                    if Tab::lsp_language(self.doc()) == Some(language) {
+                    if self.tab().lsp_language() == Some(language) {
                         self.status = format!("{} language support ready", language.name());
                     }
                 }

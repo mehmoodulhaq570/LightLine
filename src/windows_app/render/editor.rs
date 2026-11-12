@@ -63,11 +63,8 @@ impl App {
         let s = |v: i32| self.scale(v);
         let left_bound = chip_right + s(24);
         let clip_right = (branch_x - s(16)).max(left_bound);
-        let indent_label = if self.settings.insert_spaces {
-            "Spaces"
-        } else {
-            "Tab Size"
-        };
+        let (spaces, indent_size) = self.indent_style();
+        let indent_label = if spaces { "Spaces" } else { "Tab Size" };
         let prefix = format!(
             "Ln {}, Col {}    {indent_label}: {}    UTF-8    ",
             self.view().cursor.line + 1,
@@ -75,7 +72,7 @@ impl App {
                 .chars()
                 .count()
                 + 1,
-            self.settings.tab_size,
+            indent_size,
         );
         let prefix_width = self.text_width(hdc, &prefix);
         let language = self.language_name();

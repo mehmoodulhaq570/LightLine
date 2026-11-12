@@ -7,6 +7,7 @@ mod bracket_colors;
 mod builtin_icons;
 mod code_actions;
 mod codelens;
+mod comment;
 mod crash;
 mod dialog;
 mod editor_context;
