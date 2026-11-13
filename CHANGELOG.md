@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-11-13
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.10.0-windows-x86_64.zip`, `lightline-v0.10.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
+As fast as v0.9.0 while typing, and saving a big file no longer freezes the window. Measured against the published v0.9.0 exe on the same PC (x64 release builds; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running; four runs each, alternating):
+- **Typing:** 9.4–17.3 million CPU cycles of work on the window's thread per keystroke, against 9.6–18.2 million for v0.9.0. The PC was busy during these runs, so both ranges are wide, and they overlap.
+- **Start:** a responding window in 0.09–0.11 s (median of five launches), plus one run at 0.35 s while the PC was busy. v0.9.0 took 0.11–0.22 s.
+- **Idle:** no wakeups while in the background, in all four runs.
+- **Saving:** `Ctrl+S` on a 1M-line (36 MB) file held the window for 52–98 ms, against 86–354 ms for v0.9.0.
+
+Language extensions can now start a language server. LightLine only runs one that's already on your PATH or named in the `languageServers` setting, the same way it runs rust-analyzer or Pyright, and never downloads one.
+
 #### Added
 
 - **Horizontal Scrolling**: With word wrap off, a line wider than the editor no longer runs out of sight. The view scrolls sideways to keep the cursor in view as you type, press End or click near the edge, jumping a quarter of the editor's width at a time so typing at the edge stays quick. Shift+Wheel, a tilt wheel or a sideways touchpad swipe scrolls by hand, and each split pane scrolls on its own. Until now the cursor and what you typed disappeared past the right edge.
@@ -20,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 
 - **Typing in the Find Box Stays Quick in Big Files**: In a file of more than 50,000 lines, each character typed into the find box (`Ctrl+F`) used to recount every match in the file, and a query with no match nearby searched the whole file for one, before the next key could show. The count now runs a slice at a time between keystrokes, showing "Counting..." or "120+ results" until it's done, and the first match far from the cursor is selected when the count reaches it. On a 1M-line file, each typed character now holds the window for about 4–18 ms instead of 80–150 ms. Smaller files are counted at once, as before.
-- **Saving a Big File No Longer Freezes the Window**: Pressing `Ctrl+S` on a file of 4 MB or more now writes it in the background, so you can keep typing and scrolling while it goes to disk; the status bar shows "Saving..." and then "Saved" as before. Anything typed during the save stays marked unsaved until the next save. Closing the window, closing the tab, Run, Debug, Git actions and renames in the Explorer wait for the save to finish first, so nothing is lost or read half-written. If the save fails (the file is locked by another program, read-only, or the disk is full), you see the same error as before, the tab stays unsaved, and your text is still kept for recovery. Smaller files save on the spot, as before. On a 1M-line (36 MB) file, `Ctrl+S` now holds the window for about 45–80 ms instead of 100–360 ms, measured against the published v0.9.0 on the same PC.
+- **Saving a Big File No Longer Freezes the Window**: Pressing `Ctrl+S` on a file of 4 MB or more now writes it in the background, so you can keep typing and scrolling while it goes to disk; the status bar shows "Saving..." and then "Saved" as before. Anything typed during the save stays marked unsaved until the next save. Closing the window, closing the tab, Run, Debug, Git actions and renames in the Explorer wait for the save to finish first, so nothing is lost or read half-written. If the save fails (the file is locked by another program, read-only, or the disk is full), you see the same error as before, the tab stays unsaved, and your text is still kept for recovery. Smaller files save on the spot, as before. On a 1M-line (36 MB) file, `Ctrl+S` now holds the window for about 50–100 ms instead of 90–350 ms, measured against the published v0.9.0 on the same PC.
 
 ## [v0.9.0] - 2026-11-09
 

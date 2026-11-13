@@ -20,7 +20,7 @@
 
 ---
 
-LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth: in our tests it starts in about a tenth of a second, a keystroke reaches the screen in about 3 ms, and LightLine idling in the background runs no timers and does no work of its own: it wakes only when Windows or another program asks it something. New features are measured so they don't slow it down: v0.9.0 is at least as fast as v0.8.0 ([numbers](CHANGELOG.md#v090---2026-11-09)).
+LightLine is a code editor that feels like VS Code but starts fast and stays light. It's a single portable `.exe`: no installer, no Electron, no admin rights. It draws its own window straight through Windows, so it uses little memory and keeps typing and scrolling smooth: in our tests it starts in about a tenth of a second, a keystroke reaches the screen in about 3 ms, and LightLine idling in the background runs no timers and does no work of its own: it wakes only when Windows or another program asks it something. New features are measured so they don't slow it down: v0.10.0 is as fast as v0.9.0 ([numbers](CHANGELOG.md#v0100---2026-11-13)).
 
 ## Features
 
