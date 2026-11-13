@@ -775,7 +775,7 @@ impl App {
                     return true;
                 }
                 0x53 => {
-                    self.save(hwnd, shift);
+                    self.save_command(hwnd, shift);
                 }
                 0x57 if shift => {
                     self.close_workspace(hwnd);

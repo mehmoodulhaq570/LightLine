@@ -393,6 +393,9 @@ impl App {
         if res != dialog::DLG_OK {
             return;
         }
+        // A background save would otherwise write the file back after it's
+        // deleted, or leave its temporary file in a deleted folder.
+        self.finish_background_save(hwnd);
 
         let mut i = 0;
         while i < self.tabs.len() {
@@ -456,6 +459,8 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         }
+        // A background save would otherwise write the old name back.
+        self.finish_background_save(hwnd);
         match std::fs::rename(old_path, &new_path) {
             Ok(_) => {
                 for tab in &mut self.tabs {

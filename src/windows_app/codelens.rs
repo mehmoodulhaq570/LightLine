@@ -293,7 +293,7 @@ impl App {
 
     // Runs one test of the active file in the Output panel.
     fn run_test(&mut self, hwnd: HWND, name: &str, class: Option<&str>) {
-        if self.doc().is_dirty() && !self.save(hwnd, false) {
+        if !self.save_if_dirty(hwnd) {
             self.status = "Save the file before running its tests".into();
             self.refresh(hwnd);
             return;
