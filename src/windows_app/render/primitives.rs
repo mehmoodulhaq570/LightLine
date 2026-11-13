@@ -165,15 +165,136 @@ impl App {
     /// fixed-width box, #3). Centered on `middle`, `pad` either side of the
     /// text; returns its right edge.
     #[allow(clippy::too_many_arguments)]
+    /// The title bar's brand: the LightLine mark (drawn 1:1, never
+    /// stretched), the name and the IDE badge, centred in the `height`-tall
+    /// bar. Leaves the UI font selected.
+    pub(in crate::windows_app) fn paint_brand(&self, hdc: HDC, height: i32) {
+        let s = |value: i32| self.scale(value);
+        let middle = height / 2;
+        let mark = self.icons.draw_brand(hdc, s(12), middle, s(22));
+        let name_left = s(12) + mark + s(8);
+        unsafe { SelectObject(hdc, self.brand_font) };
+        let name_width = self.text_width(hdc, "LightLine");
+        self.label_mid(
+            hdc,
+            "LightLine",
+            name_left,
+            middle,
+            self.theme.text,
+            RECT {
+                left: name_left,
+                top: 0,
+                right: name_left + name_width,
+                bottom: height,
+            },
+        );
+        self.paint_ide_badge(
+            hdc,
+            self.ui_font,
+            (name_left + name_width + s(6), middle),
+            (s(18), s(5), s(4)),
+            ui(63, 47, 150),
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+    }
+
+    /// Minimize, maximize (restore while maximized) and close, at the title
+    /// bar's right end, `height` tall; the one under the mouse lit.
+    pub(in crate::windows_app) fn paint_title_controls(&self, hdc: HDC, hwnd: HWND, height: i32) {
+        self.paint_hot_title_button(hdc, hwnd);
+        let mut client = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let button = self.scale(46);
+        let left = client.right - button * 3;
+        let maximized = unsafe { IsZoomed(hwnd) } != 0;
+        let glyphs = [
+            DebugGlyph::Minimize,
+            if maximized {
+                DebugGlyph::Restore
+            } else {
+                DebugGlyph::Maximize
+            },
+            DebugGlyph::Close,
+        ];
+        for (index, glyph) in glyphs.into_iter().enumerate() {
+            let color = if index == 2 && self.hot == Some(Hot::TitleButton(2)) {
+                ui(255, 255, 255)
+            } else if self.hot == Some(Hot::TitleButton(index)) {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
+            let rect = RECT {
+                left: left + button * index as i32,
+                top: 0,
+                right: left + button * (index as i32 + 1),
+                bottom: height,
+            };
+            self.glyph_in(hdc, glyph, color, rect, self.scale(18));
+        }
+    }
+
+    /// The search box in the title bar (Quick Open, Ctrl+P).
+    pub(in crate::windows_app) fn paint_command_center(&self, hdc: HDC, hwnd: HWND) {
+        let s = |value: i32| self.scale(value);
+        let rect = self.command_center_rect(hwnd);
+        if rect.right <= rect.left {
+            return;
+        }
+        let middle = (rect.top + rect.bottom) / 2;
+        self.panel_card(hdc, rect, s(5), self.command_center_edge(), ui(12, 25, 48));
+        self.glyph_in(
+            hdc,
+            DebugGlyph::Search,
+            self.theme.muted,
+            RECT {
+                left: rect.left + s(4),
+                right: rect.left + s(28),
+                ..rect
+            },
+            s(16),
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+        self.label_mid(
+            hdc,
+            "Search files, symbols, commands...",
+            rect.left + s(30),
+            middle,
+            self.theme.muted,
+            RECT {
+                left: rect.left + s(30),
+                right: rect.right - s(52),
+                ..rect
+            },
+        );
+        let key = RECT {
+            left: rect.right - s(46),
+            top: rect.top + s(4),
+            right: rect.right - s(5),
+            bottom: rect.bottom - s(4),
+        };
+        Self::rounded_fill(hdc, key, s(4), ui(25, 43, 76));
+        unsafe { SelectObject(hdc, self.small_font) };
+        let width = self.text_width(hdc, "Ctrl P");
+        self.label_mid(
+            hdc,
+            "Ctrl P",
+            (key.left + key.right - width) / 2,
+            middle,
+            self.theme.text,
+            key,
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+    }
+
+    /// The "IDE" badge after the name: `at` is its left edge and middle,
+    /// `shape` its height, padding and corner radius. Returns its right edge.
     pub(in crate::windows_app) fn paint_ide_badge(
         &self,
         hdc: HDC,
         font: HFONT,
-        left: i32,
-        middle: i32,
-        height: i32,
-        pad: i32,
-        radius: i32,
+        (left, middle): (i32, i32),
+        (height, pad, radius): (i32, i32, i32),
         color: u32,
     ) -> i32 {
         unsafe {
@@ -246,11 +367,7 @@ impl App {
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
         let editor_bottom = (client.bottom - self.scale(STATUS)).max(0);
-        let terminal = if self.terminal_visible {
-            self.scale(self.terminal_height)
-        } else {
-            0
-        };
+        let terminal = self.terminal_panel();
         RECT {
             left: self.editor_left(),
             top: if with_tabs {
@@ -659,28 +776,41 @@ impl App {
         );
     }
 
-    pub(in crate::windows_app) fn chevron(&self, hdc: HDC, x: i32, y: i32, expanded: bool) {
-        unsafe {
-            let half = self.scale(4).max(4);
-            let pen = CreatePen(PS_SOLID, self.scale(2).max(2), self.theme.muted);
-            if pen.is_null() {
-                return;
-            }
-            let previous = SelectObject(hdc, pen);
-            if expanded {
-                MoveToEx(hdc, x - half, y - half / 2, null_mut());
-                LineTo(hdc, x, y + half / 2);
-                LineTo(hdc, x + half, y - half / 2);
-            } else {
-                MoveToEx(hdc, x - half / 2, y - half, null_mut());
-                LineTo(hdc, x + half / 2, y);
-                LineTo(hdc, x - half / 2, y + half);
-            }
-            SelectObject(hdc, previous);
-            DeleteObject(pen);
-        }
+    /// Draws `glyph` in `color`, `size` pixels square, centred in `rect`.
+    pub(in crate::windows_app) fn glyph_in(
+        &self,
+        hdc: HDC,
+        glyph: DebugGlyph,
+        color: u32,
+        rect: RECT,
+        size: i32,
+    ) {
+        let x = (rect.left + rect.right - size) / 2;
+        let y = (rect.top + rect.bottom - size) / 2;
+        self.icons.draw_glyph(hdc, glyph, color, x, y, size);
     }
 
+    /// A tree's fold chevron centred on (x, y): down when `expanded`.
+    pub(in crate::windows_app) fn chevron(&self, hdc: HDC, x: i32, y: i32, expanded: bool) {
+        let size = self.scale(16);
+        let glyph = if expanded {
+            DebugGlyph::ChevronDown
+        } else {
+            DebugGlyph::ChevronRight
+        };
+        self.icons.draw_glyph(
+            hdc,
+            glyph,
+            self.theme.muted,
+            x - size / 2,
+            y - size / 2,
+            size,
+        );
+    }
+
+    /// One of the activity icons, about 18 px, its top left at (x, y):
+    /// 0 Explorer, 1 Search, 2 Source Control, 3 Run and Debug,
+    /// 4 Extensions, 5 AI Assistant.
     pub(in crate::windows_app) fn rail_icon(
         &self,
         hdc: HDC,
@@ -689,180 +819,22 @@ impl App {
         y: i32,
         color: u32,
     ) {
-        if kind == 0
-            && self
-                .icons
-                .draw_generic(hdc, GenericIcon::FolderOpen, x, y, self.scale(17))
-        {
-            return;
-        }
-        unsafe {
-            let pen = CreatePen(PS_SOLID, self.scale(1).max(1), color);
-            let previous_pen = SelectObject(hdc, pen);
-            let previous_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            let s = |value| self.scale(value);
-            match kind {
-                0 => {
-                    // Back sheet
-                    let back_pts = [
-                        POINT {
-                            x: x + s(2),
-                            y: y + s(1),
-                        },
-                        POINT {
-                            x: x + s(9),
-                            y: y + s(1),
-                        },
-                        POINT {
-                            x: x + s(12),
-                            y: y + s(4),
-                        },
-                        POINT {
-                            x: x + s(12),
-                            y: y + s(12),
-                        },
-                        POINT {
-                            x: x + s(2),
-                            y: y + s(12),
-                        },
-                        POINT {
-                            x: x + s(2),
-                            y: y + s(1),
-                        },
-                    ];
-                    Polyline(hdc, back_pts.as_ptr(), back_pts.len() as i32);
-                    // Front sheet
-                    let front_pts = [
-                        POINT {
-                            x: x + s(5),
-                            y: y + s(4),
-                        },
-                        POINT {
-                            x: x + s(13),
-                            y: y + s(4),
-                        },
-                        POINT {
-                            x: x + s(16),
-                            y: y + s(7),
-                        },
-                        POINT {
-                            x: x + s(16),
-                            y: y + s(17),
-                        },
-                        POINT {
-                            x: x + s(5),
-                            y: y + s(17),
-                        },
-                        POINT {
-                            x: x + s(5),
-                            y: y + s(4),
-                        },
-                    ];
-                    Polyline(hdc, front_pts.as_ptr(), front_pts.len() as i32);
-                    // Dog-ear fold on front sheet
-                    MoveToEx(hdc, x + s(13), y + s(4), null_mut());
-                    LineTo(hdc, x + s(13), y + s(7));
-                    LineTo(hdc, x + s(16), y + s(7));
-                    // Content lines
-                    MoveToEx(hdc, x + s(8), y + s(9), null_mut());
-                    LineTo(hdc, x + s(13), y + s(9));
-                    MoveToEx(hdc, x + s(8), y + s(12), null_mut());
-                    LineTo(hdc, x + s(13), y + s(12));
-                }
-                1 => {
-                    Ellipse(hdc, x + s(2), y + s(2), x + s(11), y + s(11));
-                    MoveToEx(hdc, x + s(10), y + s(10), null_mut());
-                    LineTo(hdc, x + s(16), y + s(16));
-                }
-                2 => {
-                    MoveToEx(hdc, x + s(5), y + s(4), null_mut());
-                    LineTo(hdc, x + s(5), y + s(15));
-                    MoveToEx(hdc, x + s(5), y + s(12), null_mut());
-                    LineTo(hdc, x + s(13), y + s(7));
-                    for (cx, cy) in [(5, 3), (5, 16), (13, 6)] {
-                        Ellipse(
-                            hdc,
-                            x + s(cx - 2),
-                            y + s(cy - 2),
-                            x + s(cx + 2),
-                            y + s(cy + 2),
-                        );
-                    }
-                }
-                3 => {
-                    let points = [
-                        POINT {
-                            x: x + s(4),
-                            y: y + s(2),
-                        },
-                        POINT {
-                            x: x + s(14),
-                            y: y + s(9),
-                        },
-                        POINT {
-                            x: x + s(4),
-                            y: y + s(16),
-                        },
-                        POINT {
-                            x: x + s(4),
-                            y: y + s(2),
-                        },
-                    ];
-                    Polyline(hdc, points.as_ptr(), points.len() as i32);
-                }
-                4 => {
-                    Rectangle(hdc, x + s(2), y + s(2), x + s(9), y + s(9));
-                    Rectangle(hdc, x + s(10), y + s(2), x + s(17), y + s(9));
-                    Rectangle(hdc, x + s(2), y + s(10), x + s(9), y + s(17));
-                    Rectangle(hdc, x + s(10), y + s(10), x + s(17), y + s(17));
-                }
-                5 => {
-                    let points = [
-                        POINT {
-                            x: x + s(9),
-                            y: y + s(1),
-                        },
-                        POINT {
-                            x: x + s(11),
-                            y: y + s(7),
-                        },
-                        POINT {
-                            x: x + s(17),
-                            y: y + s(9),
-                        },
-                        POINT {
-                            x: x + s(11),
-                            y: y + s(11),
-                        },
-                        POINT {
-                            x: x + s(9),
-                            y: y + s(17),
-                        },
-                        POINT {
-                            x: x + s(7),
-                            y: y + s(11),
-                        },
-                        POINT {
-                            x: x + s(1),
-                            y: y + s(9),
-                        },
-                        POINT {
-                            x: x + s(7),
-                            y: y + s(7),
-                        },
-                        POINT {
-                            x: x + s(9),
-                            y: y + s(1),
-                        },
-                    ];
-                    Polyline(hdc, points.as_ptr(), points.len() as i32);
-                }
-                _ => {}
-            }
-            SelectObject(hdc, previous_brush);
-            SelectObject(hdc, previous_pen);
-            DeleteObject(pen);
-        }
+        let glyph = match kind {
+            0 => DebugGlyph::Files,
+            1 => DebugGlyph::Search,
+            2 => DebugGlyph::SourceControl,
+            3 => DebugGlyph::RunDebug,
+            4 => DebugGlyph::Extensions,
+            _ => DebugGlyph::Sparkle,
+        };
+        self.icons.draw_glyph(
+            hdc,
+            glyph,
+            color,
+            x - self.scale(1),
+            y - self.scale(1),
+            self.scale(20),
+        );
     }
 
     pub(in crate::windows_app) fn draw_vector_folder(

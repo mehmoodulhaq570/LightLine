@@ -331,114 +331,11 @@ impl App {
             },
             self.theme.edge,
         );
-        unsafe {
-            DrawIconEx(
-                hdc,
-                s(14),
-                s(9),
-                self.brand_icon,
-                s(32),
-                s(32),
-                0,
-                null_mut(),
-                DI_NORMAL,
-            );
-            SelectObject(hdc, self.brand_font);
-        }
-        let name_width = self.text_width(hdc, "LightLine");
-        Self::label(
-            hdc,
-            "LightLine",
-            s(56),
-            s(9),
-            self.theme.text,
-            RECT {
-                left: s(56),
-                top: 0,
-                right: s(56) + name_width,
-                bottom: layout.content_top,
-            },
-        );
-        self.paint_ide_badge(
-            hdc,
-            self.ui_font,
-            s(56) + name_width + s(6),
-            s(25),
-            s(20),
-            s(6),
-            s(5),
-            ui(63, 47, 150),
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
+        self.paint_brand(hdc, layout.content_top);
         self.paint_menu_titles(hdc, hwnd);
 
-        let command = self.command_center_rect(hwnd);
-        if command.right > command.left {
-            self.panel_card(
-                hdc,
-                command,
-                s(6),
-                self.command_center_edge(),
-                ui(12, 25, 48),
-            );
-            self.rail_icon(
-                hdc,
-                1,
-                command.left + s(10),
-                command.top + s(6),
-                self.theme.muted,
-            );
-            Self::label(
-                hdc,
-                "Search files, symbols, commands...",
-                command.left + s(36),
-                command.top + s(5),
-                self.theme.muted,
-                RECT {
-                    left: command.left + s(36),
-                    top: command.top,
-                    right: command.right - s(55),
-                    bottom: command.bottom,
-                },
-            );
-            let key = RECT {
-                left: command.right - s(48),
-                top: command.top + s(4),
-                right: command.right - s(7),
-                bottom: command.bottom - s(4),
-            };
-            Self::rounded_fill(hdc, key, s(4), ui(25, 43, 76));
-            Self::label(
-                hdc,
-                "Ctrl P",
-                key.left + s(5),
-                key.top + s(1),
-                self.theme.text,
-                key,
-            );
-        }
-
-        self.paint_hot_title_button(hdc, hwnd);
-        let button = s(46);
-        let controls_left = rect.right - button * 3;
-        let middle = layout.content_top / 2;
-        self.stroke(hdc, self.theme.muted, |hdc| unsafe {
-            MoveToEx(hdc, controls_left + s(17), middle + s(5), null_mut());
-            LineTo(hdc, controls_left + s(29), middle + s(5));
-            let max_left = controls_left + button + s(17);
-            Rectangle(
-                hdc,
-                max_left,
-                middle - s(6),
-                max_left + s(12),
-                middle + s(6),
-            );
-            let close_left = controls_left + button * 2 + s(17);
-            MoveToEx(hdc, close_left, middle - s(6), null_mut());
-            LineTo(hdc, close_left + s(12), middle + s(6));
-            MoveToEx(hdc, close_left + s(12), middle - s(6), null_mut());
-            LineTo(hdc, close_left, middle + s(6));
-        });
+        self.paint_command_center(hdc, hwnd);
+        self.paint_title_controls(hdc, hwnd, layout.content_top);
     }
 
     fn paint_welcome_nav(&self, hdc: HDC, layout: &WelcomeLayout) {
@@ -566,11 +463,8 @@ impl App {
         self.paint_ide_badge(
             hdc,
             self.title_font,
-            badge_left,
-            logo_top + logo_size / 2,
-            s(if compact { 34 } else { 36 }),
-            s(12),
-            s(7),
+            (badge_left, logo_top + logo_size / 2),
+            (s(if compact { 34 } else { 36 }), s(12), s(7)),
             ui(78, 56, 176),
         );
         unsafe { SelectObject(hdc, self.title_font) };

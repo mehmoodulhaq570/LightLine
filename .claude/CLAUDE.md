@@ -168,6 +168,8 @@ The goal is to redraw as little as possible.
 - `scroll_blit.rs` moves rows inside the backbuffer on a wheel notch, and only the rows that come into view are drawn.
 - Every drawn text row costs real time (GDI `ExtTextOut`, ~0.6 M cycles a row), so per-row work matters.
 - Any new glyph that Segoe UI lacks must be added to `warm_font_fallback`, or drawn as vector graphics. Otherwise the first paint stalls.
+- UI icons are SVG glyphs (`DebugGlyph` in `icons.rs`), drawn with `draw_glyph` / `glyph_in` at the exact size shown. Every icon is rasterized once into a shared atlas page and drawn with `AlphaBlend`; never make an HICON per icon (three GDI objects cost ~0.9 M cycles an icon, ~50 M on the first frame).
+- The layout's sizes are constants in `windows_app/mod.rs` (VS Code's proportions: 35 px title bar, tabs and panel headers; 22 px rows and status bar). The side panel is painted from `side_origin()`, which hides the top `SIDE_SHIFT` pixels of each panel's header; clicks convert with the same origin.
 
 ### No polling timers
 
@@ -184,6 +186,7 @@ Background work runs on threads and wakes the window.
 
 - Results carry ids or generations, so stale ones are dropped (for example the Explorer request ids and workspace generations).
 - The only repeating timer is the caret blink (530 ms), and only while the window has focus. Everything else is one-shot: the session recovery snapshot armed from `paint()`, the status-bar timer, and short debounces (hover, inlay hints, occurrences, gutter diff). Don't add repeating timers.
+- Animations (`motion.rs`: side panel and bottom panel easing, smooth scrolling, hover fade) run 16 ms frames only while something moves and stop at the end, so idle stays at 0 wakeups. They check `App::motion()`: the `animations` setting and Windows' Show animations. Never animate typing. The bottom panel's height on screen is `terminal_panel()`, not `terminal_height`.
 
 ### Child processes
 
@@ -236,7 +239,7 @@ Per-user state lives in `%APPDATA%\LightLine\`:
 Settings keys:
 - **Editor:** `fontFamily`, `fontSize`, `tabSize`, `insertSpaces`, `wordWrap`, `autoClosePairs`, `autoIndent`, `smoothScrolling`, `parseLimitKb`.
 - **Formatting:** `formatOnSave`, `prettierEnabled`.
-- **Visual aids:** `inlayHints`, `occurrencesHighlight`, `stickyScroll`, `bracketMatching`, `indentGuides`, `showMinimap`, `bracketPairColorization`, `gitBlame`, `codeLens`.
+- **Visual aids:** `animations`, `inlayHints`, `occurrencesHighlight`, `stickyScroll`, `bracketMatching`, `indentGuides`, `showMinimap`, `bracketPairColorization`, `gitBlame`, `codeLens`.
 - **Other:** `localHistory`, `colorTheme`, `aiEndpoint`, `aiModel`, `markdownLoadRemoteImages`, `terminalDefaultProfile`.
 
 **Adding a setting means editing `settings.rs` in five places:** the struct field, `Default`, parsing, serializing, and the `OWN_KEYS` list. Document it in the settings table in `docs/USER_GUIDE.md`.

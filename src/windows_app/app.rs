@@ -780,10 +780,11 @@ pub(super) struct App {
     pub(super) tab_first: usize,
     pub(super) font: HFONT,
     pub(super) ui_font: HFONT,
+    // 12 px Segoe UI: the status bar and breadcrumbs (22 px rows), key caps.
+    pub(super) small_font: HFONT,
     pub(super) brand_font: HFONT,
     pub(super) title_font: HFONT,
     pub(super) hero_font: HFONT,
-    pub(super) brand_icon: HICON,
     pub(super) hero_icon: HICON,
     pub(super) icons: IconSet,
     pub(super) theme: Theme,
@@ -868,6 +869,16 @@ pub(super) struct App {
     pub(super) sidebar_from: i32,
     pub(super) sidebar_target: i32,
     pub(super) sidebar_started: Option<Instant>,
+    // The terminal easing open or closed (motion.rs): its height on
+    // screen, unscaled, and when it started from where. Shown or hidden
+    // as of the last frame, to notice a change.
+    pub(super) terminal_shown: i32,
+    pub(super) terminal_anim: Option<(Instant, i32)>,
+    pub(super) terminal_was_visible: bool,
+    // A smooth scroll under way: the pane and the screen rows still to go.
+    pub(super) scroll_glide: Option<(usize, isize)>,
+    // Windows' "Show animations", read at start and when it changes.
+    pub(super) system_animations: bool,
     pub(super) sidebar_dragging: bool,
     pub(super) terminal_height: i32,
     pub(super) terminal_resizing: bool,
@@ -1059,6 +1070,8 @@ pub(super) struct App {
     pub(super) auto_outdent: Option<(u64, usize, String)>,
     // The button under the mouse (see hot.rs).
     pub(super) hot: Option<Hot>,
+    // When `hot` last changed, for its fade (motion.rs).
+    pub(super) hot_since: Instant,
     // Suppresses session snapshots while restore_session replays the last
     // run's tabs, so opening many files does not rewrite the file each time.
     // Also true from startup until the session is back (see run): a snapshot
@@ -1342,10 +1355,18 @@ impl App {
     }
 
     pub(super) fn ui_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
+        Self::segoe_ui(14, dpi, zoom)
+    }
+
+    pub(super) fn small_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
+        Self::segoe_ui(12, dpi, zoom)
+    }
+
+    fn segoe_ui(pixels: i32, dpi: u32, zoom: i32) -> HFONT {
         let font_name = wide("Segoe UI");
         unsafe {
             CreateFontW(
-                -scaled(14, dpi, zoom),
+                -scaled(pixels, dpi, zoom),
                 0,
                 0,
                 0,
@@ -1417,7 +1438,7 @@ impl App {
         }
     }
 
-    pub(super) fn new(hwnd: HWND, brand_icon: HICON, hero_icon: HICON) -> Self {
+    pub(super) fn new(hwnd: HWND, hero_icon: HICON) -> Self {
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         let zoom = 100;
         let settings = lightline::settings::Settings::load();
@@ -1444,10 +1465,10 @@ impl App {
             tab_first: 0,
             font,
             ui_font: Self::ui_font_for_dpi(dpi, zoom),
+            small_font: Self::small_font_for_dpi(dpi, zoom),
             brand_font: Self::brand_font_for_dpi(dpi, zoom),
             title_font: Self::title_font_for_dpi(dpi, zoom),
             hero_font: Self::hero_font_for_dpi(dpi, zoom),
-            brand_icon,
             hero_icon,
             icons: IconSet::new(dpi, zoom),
             theme,
@@ -1498,6 +1519,11 @@ impl App {
             sidebar_from: SIDEBAR,
             sidebar_target: SIDEBAR,
             sidebar_started: None,
+            terminal_shown: 0,
+            terminal_anim: None,
+            terminal_was_visible: false,
+            scroll_glide: None,
+            system_animations: super::motion::system_animations(),
             sidebar_dragging: false,
             terminal_height: 210,
             terminal_resizing: false,
@@ -1638,6 +1664,7 @@ impl App {
             multi_editing: false,
             auto_outdent: None,
             hot: None,
+            hot_since: Instant::now(),
             restoring: true,
             watcher: Some({
                 let hwnd = hwnd as isize;
@@ -2093,6 +2120,13 @@ impl App {
     // window background. These four are the single source of truth for that
     // geometry: painting and hit testing both derive from them, so a card can
     // never be drawn somewhere clicks do not follow.
+    /// Where the side panel's own coordinates start, in the window: its
+    /// header is drawn SIDE_SHIFT higher than the panel's top, so it shows
+    /// as tall as the tab strip. Painting and clicks both use this.
+    pub(super) fn side_origin(&self) -> i32 {
+        self.chrome_top() - self.scale(SIDE_SHIFT)
+    }
+
     pub(super) fn chrome_gap(&self) -> i32 {
         self.scale(CARD_GAP)
     }
@@ -2121,9 +2155,9 @@ impl App {
         let left = usable_left + (available - width) / 2;
         RECT {
             left,
-            top: self.scale(8),
+            top: self.scale(4),
             right: left + width,
-            bottom: self.scale(WORKBENCH_HEADER - 8),
+            bottom: self.scale(WORKBENCH_HEADER - 4),
         }
     }
 
@@ -2205,7 +2239,8 @@ impl App {
     pub(super) fn set_sidebar_visible(&mut self, hwnd: HWND, visible: bool) {
         let target = if visible { self.sidebar_user_width } else { 0 };
         self.explorer_visible = visible;
-        if self.sidebar_width == target {
+        if self.sidebar_width == target || !self.motion() {
+            self.sidebar_width = target;
             self.sidebar_target = target;
             self.sidebar_started = None;
             unsafe { KillTimer(hwnd, 5) };
@@ -2260,8 +2295,8 @@ impl App {
         let Some(started) = self.sidebar_started else {
             return;
         };
-        let elapsed = started.elapsed().as_millis().min(160) as f32 / 160.0;
-        let ease = 1.0 - (1.0 - elapsed).powi(3);
+        let elapsed = (started.elapsed().as_secs_f32() * 1000.0 / super::motion::PANEL_MS).min(1.0);
+        let ease = super::motion::ease_out(elapsed);
         self.sidebar_width = self.sidebar_from
             + ((self.sidebar_target - self.sidebar_from) as f32 * ease).round() as i32;
         let visible_tabs = self.visible_tab_count(hwnd);
@@ -2606,12 +2641,13 @@ impl App {
     pub(super) fn set_metrics(&mut self, dpi: u32, zoom: i32) {
         let font = Self::font_for_dpi(dpi, zoom, &self.settings);
         let ui_font = Self::ui_font_for_dpi(dpi, zoom);
+        let small_font = Self::small_font_for_dpi(dpi, zoom);
         let brand_font = Self::brand_font_for_dpi(dpi, zoom);
         let title_font = Self::title_font_for_dpi(dpi, zoom);
         let hero_font = Self::hero_font_for_dpi(dpi, zoom);
         // All or nothing: a partial swap would leave the app drawing with a
         // mix of old and new metrics, so drop everything and keep the old set.
-        let created = [font, ui_font, brand_font, title_font, hero_font];
+        let created = [font, ui_font, small_font, brand_font, title_font, hero_font];
         if created.iter().any(|handle| handle.is_null()) {
             for handle in created {
                 if !handle.is_null() {
@@ -2625,6 +2661,7 @@ impl App {
         unsafe {
             DeleteObject(self.font);
             DeleteObject(self.ui_font);
+            DeleteObject(self.small_font);
             DeleteObject(self.brand_font);
             DeleteObject(self.title_font);
             DeleteObject(self.hero_font);
@@ -2633,6 +2670,7 @@ impl App {
         self.char_width = Self::measured_char_width(font, dpi, zoom);
         self.font = font;
         self.ui_font = ui_font;
+        self.small_font = small_font;
         self.brand_font = brand_font;
         self.title_font = title_font;
         self.hero_font = hero_font;
@@ -2690,16 +2728,8 @@ impl App {
         unsafe {
             GetClientRect(hwnd, &mut rect);
         }
-        ((rect.bottom
-            - rect.top
-            - self.editor_top()
-            - self.scale(STATUS)
-            - if self.terminal_visible {
-                self.scale(self.terminal_height)
-            } else {
-                0
-            })
-        .max(1)
+        ((rect.bottom - rect.top - self.editor_top() - self.scale(STATUS) - self.terminal_panel())
+            .max(1)
             / self.line_height)
             .max(1) as usize
     }

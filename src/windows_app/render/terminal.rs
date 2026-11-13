@@ -15,7 +15,27 @@ impl App {
         right: i32,
         bottom: i32,
     ) {
-        let top = bottom - self.scale(self.terminal_height);
+        // While it eases open or closed (motion.rs) the panel is drawn at
+        // its full height from its eased top, and cut off at the status bar.
+        let top = bottom - self.terminal_panel();
+        let full_bottom = top + self.scale(self.terminal_height);
+        unsafe {
+            let saved = SaveDC(hdc);
+            IntersectClipRect(hdc, left, top, right, bottom);
+            self.paint_terminal_panel(hwnd, hdc, left, right, top, full_bottom);
+            RestoreDC(hdc, saved);
+        }
+    }
+
+    fn paint_terminal_panel(
+        &mut self,
+        hwnd: HWND,
+        hdc: HDC,
+        left: i32,
+        right: i32,
+        top: i32,
+        bottom: i32,
+    ) {
         Self::fill(
             hdc,
             RECT {
@@ -184,27 +204,18 @@ impl App {
             self.theme.card_edge,
             ui(15, 28, 49),
         );
-        Self::label(
+        let icon = self.scale(16);
+        self.glyph_in(hdc, DebugGlyph::Plus, self.theme.muted, layout.plus, icon);
+        self.glyph_in(
             hdc,
-            "+",
-            layout.plus.left + self.scale(6),
-            top + self.scale(8),
-            self.theme.muted,
-            layout.plus,
-        );
-        Self::label(
-            hdc,
-            "\u{25be}",
-            layout.chevron.left + self.scale(3),
-            top + self.scale(8),
+            DebugGlyph::ChevronDown,
             self.theme.muted,
             layout.chevron,
+            self.scale(14),
         );
-        Self::label(
+        self.glyph_in(
             hdc,
-            "\u{2715}",
-            layout.kill.left + self.scale(4),
-            top + self.scale(9),
+            DebugGlyph::Close,
             if match self.terminal_tab {
                 TerminalTab::Output => self.run_session.is_some(),
                 TerminalTab::Terminal => shell_open,
@@ -215,17 +226,11 @@ impl App {
                 ui(74, 80, 94)
             },
             layout.kill,
+            icon,
         );
 
         if problems_active {
-            Self::label(
-                hdc,
-                "\u{d7}",
-                layout.hide.left + self.scale(6),
-                top + self.scale(6),
-                self.theme.muted,
-                layout.hide,
-            );
+            self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
             self.paint_problems(hdc, hwnd);
             if let Some((track, slider)) = self.problems_scrollbar(hwnd) {
                 let edge = self.scale(1).max(1);
@@ -260,14 +265,7 @@ impl App {
             return;
         }
         if debug_active {
-            Self::label(
-                hdc,
-                "\u{d7}",
-                layout.hide.left + self.scale(6),
-                top + self.scale(6),
-                self.theme.muted,
-                layout.hide,
-            );
+            self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
             self.paint_debug_console(hdc, hwnd);
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
@@ -312,14 +310,7 @@ impl App {
                 },
             );
         }
-        Self::label(
-            hdc,
-            "\u{d7}",
-            layout.hide.left + self.scale(6),
-            top + self.scale(6),
-            self.theme.muted,
-            layout.hide,
-        );
+        self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
         let Some(snapshot) = active_snapshot else {
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);

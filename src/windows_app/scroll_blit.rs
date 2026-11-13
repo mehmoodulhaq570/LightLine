@@ -85,11 +85,12 @@ pub(super) fn check_for_test(hwnd: HWND, cell: &RefCell<App>) -> LRESULT {
 
 impl App {
     /// Scrolls `pane` by `rows` screen rows and asks for the redraw.
-    pub(super) fn wheel_scroll(&mut self, hwnd: HWND, pane: usize, rows: isize) {
+    /// How many it moved: fewer at either end of the file.
+    pub(super) fn wheel_scroll(&mut self, hwnd: HWND, pane: usize, rows: isize) -> isize {
         let sticky_before = self.sticky_shown.borrow()[pane].len();
         let moved = self.scroll_pane_rows(hwnd, pane, rows);
         if moved == 0 || self.blit_scroll(hwnd, pane, moved, sticky_before) {
-            return;
+            return moved;
         }
         // A popup or menu may reach past the panes.
         if self.keystroke_stays_in_editor() {
@@ -98,6 +99,7 @@ impl App {
         } else {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
+        moved
     }
 
     /// Whether nothing is drawn over the code panes that would move with

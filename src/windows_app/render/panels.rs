@@ -2,12 +2,6 @@ use super::super::*;
 
 impl App {
     pub(in crate::windows_app) fn paint_rail(&self, hdc: HDC, editor_bottom: i32) {
-        let clip = RECT {
-            left: 0,
-            top: 0,
-            right: self.scale(RAIL),
-            bottom: editor_bottom,
-        };
         let selected = match self.side_view {
             SideView::Files => self.explorer_visible.then_some(0),
             SideView::Search => self.explorer_visible.then_some(1),
@@ -16,81 +10,89 @@ impl App {
             SideView::Extensions => self.explorer_visible.then_some(4),
             SideView::Settings => None,
         };
-        // Under the mouse: a pill behind it (the selected one has its own).
-        if let Some(hot) = self.hot
-            && let Some(rect) = self.rail_item_rect(hot, editor_bottom)
-            && !matches!(hot, Hot::Rail(index) if selected == Some(index)
-                || (index == 5 && self.ai_assistant_visible))
-        {
-            Self::rounded_fill(hdc, rect, self.scale(7), hover_fill());
-        }
-        // ☰: three bars, centered in the rail.
-        let bar_left = self.scale(RAIL / 2 - 9);
-        for bar in 0..3 {
-            let bar_top = self.scale(RAIL_MENU_ROW + 14 + bar * 6);
-            Self::fill(
-                hdc,
-                RECT {
-                    left: bar_left,
-                    top: bar_top,
-                    right: bar_left + self.scale(18),
-                    bottom: bar_top + self.scale(2).max(1),
-                },
-                self.theme.muted,
-            );
-        }
+        // Flat, as VS Code's: the active view has a bar at the rail's edge
+        // and a bright icon; under the mouse an icon brightens.
+        let s = |value: i32| self.scale(value);
+        let size = s(22);
+        let row = s(RAIL_ROW);
+        let rail_width = s(RAIL);
+        let at_row = |top: i32| RECT {
+            left: 0,
+            top,
+            right: rail_width,
+            bottom: top + row,
+        };
+        let menu_color = if self.hot == Some(Hot::RailMenu) {
+            self.hot_color(self.theme.muted, self.theme.text)
+        } else {
+            self.theme.muted
+        };
+        self.glyph_in(
+            hdc,
+            DebugGlyph::Menu,
+            menu_color,
+            at_row(s(RAIL_MENU_ROW)),
+            size,
+        );
         for index in 0..6 {
-            let top = self.scale(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
+            let top = s(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
             let is_selected = selected == Some(index) || (index == 5 && self.ai_assistant_visible);
             if is_selected {
-                let pill = RECT {
-                    left: self.scale(7),
-                    top,
-                    right: self.scale(RAIL - 7),
-                    bottom: top + self.scale(42),
-                };
-                self.panel_card(hdc, pill, self.scale(7), ui(50, 84, 154), ui(18, 35, 72));
                 Self::fill(
                     hdc,
                     RECT {
                         left: 0,
-                        top: top + self.scale(5),
-                        right: self.scale(3),
-                        bottom: top + self.scale(37),
+                        top: top + s(6),
+                        right: s(2).max(2),
+                        bottom: top + row - s(6),
                     },
                     self.theme.violet,
                 );
             }
             let color = if is_selected {
-                label_on(ui(18, 35, 72), 240, 245, 255)
-            } else if self.hot == Some(Hot::Rail(index)) {
                 self.theme.text
+            } else if self.hot == Some(Hot::Rail(index)) {
+                self.hot_color(self.theme.muted, self.theme.text)
             } else {
                 self.theme.muted
             };
-            self.rail_icon(
-                hdc,
-                index,
-                self.scale(19),
-                top + self.scale(11),
-                if is_selected { ui(56, 189, 248) } else { color },
-            );
+            let glyph = match index {
+                0 => DebugGlyph::Files,
+                1 => DebugGlyph::Search,
+                2 => DebugGlyph::SourceControl,
+                3 => DebugGlyph::RunDebug,
+                4 => DebugGlyph::Extensions,
+                _ => DebugGlyph::Sparkle,
+            };
+            self.glyph_in(hdc, glyph, color, at_row(top), size);
         }
         let settings_open = self.side_view == SideView::Settings && self.explorer_visible;
-        Self::label(
-            hdc,
-            "⚙",
-            self.scale(20),
-            editor_bottom - self.scale(32),
-            if settings_open {
-                ui(56, 189, 248)
-            } else if self.hot == Some(Hot::RailSettings) {
-                self.theme.text
-            } else {
-                self.theme.muted
-            },
-            clip,
-        );
+        let gear = RECT {
+            left: 0,
+            top: editor_bottom - s(44),
+            right: rail_width,
+            bottom: editor_bottom,
+        };
+        if settings_open {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: 0,
+                    top: gear.top + s(6),
+                    right: s(2).max(2),
+                    bottom: gear.bottom - s(6),
+                },
+                self.theme.violet,
+            );
+        }
+        let gear_color = if settings_open {
+            self.theme.text
+        } else if self.hot == Some(Hot::RailSettings) {
+            self.hot_color(self.theme.muted, self.theme.text)
+        } else {
+            self.theme.muted
+        };
+        self.glyph_in(hdc, DebugGlyph::Gear, gear_color, gear, size);
     }
 
     pub(in crate::windows_app) fn paint_side_panel(
@@ -122,32 +124,40 @@ impl App {
             self.theme.muted,
             clip,
         );
+        // Header buttons, centred on the header's visible part (its top
+        // SIDE_SHIFT is hidden).
+        let s = |value: i32| self.scale(value);
+        let button = |x: i32| RECT {
+            left: x,
+            top: s(SIDE_SHIFT),
+            right: x + s(22),
+            bottom: s(40),
+        };
         if self.side_view == SideView::Debug {
-            Self::label(
+            let muted = self.theme.muted;
+            self.glyph_in(
                 hdc,
-                "\u{2699}",
-                editor_left - self.scale(62),
-                self.scale(10),
-                self.theme.muted,
-                clip,
+                DebugGlyph::Gear,
+                muted,
+                button(editor_left - s(65)),
+                s(16),
             );
-            Self::label(
+            self.glyph_in(
                 hdc,
-                "\u{2026}",
-                editor_left - self.scale(32),
-                self.scale(7),
-                self.theme.muted,
-                clip,
+                DebugGlyph::More,
+                muted,
+                button(editor_left - s(36)),
+                s(16),
             );
         }
         if self.side_view == SideView::Extensions {
-            Self::label(
+            let muted = self.theme.muted;
+            self.glyph_in(
                 hdc,
-                "\u{21bb}",
-                editor_left - self.scale(36),
-                self.scale(8),
-                self.theme.muted,
-                clip,
+                DebugGlyph::Refresh,
+                muted,
+                button(editor_left - s(38)),
+                s(16),
             );
         }
         Self::fill(
@@ -1491,17 +1501,11 @@ impl App {
                 },
                 ui(56, 189, 248),
             );
-            Self::label(
+            self.chevron(
                 hdc,
-                if self.debug_sections_expanded[index] {
-                    "\u{25be}"
-                } else {
-                    "\u{25b8}"
-                },
-                left + s(17),
-                *y + s(5),
-                ui(105, 180, 235),
-                clip,
+                left + s(21),
+                (header.top + header.bottom) / 2,
+                self.debug_sections_expanded[index],
             );
             Self::label(hdc, title, left + s(33), *y + s(5), ui(190, 208, 232), clip);
             let badge = RECT {

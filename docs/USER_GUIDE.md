@@ -210,6 +210,8 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
   "gitBlame": true,
   "codeLens": true,
   "localHistory": true,
+  "animations": true,
+  "smoothScrolling": false,
   "markdownLoadRemoteImages": false,
   "colorTheme": "Dracula",
   "aiEndpoint": "http://localhost:11434",
@@ -237,6 +239,8 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `gitBlame` | After the caret's line, show who last changed it, when, and the commit message |
 | `codeLens` | Show **▶ Run** / **Debug** after `main` and **▶ Run test** after test functions (Rust, Python, Go, C/C++) |
 | `localHistory` | Keep a copy of a file each time it's saved, for [Local History](#local-history) |
+| `animations` | Ease the side panel and the bottom panel open and closed, and fade in the button under the mouse. Short, and never while you type or while LightLine is idle. Windows' **Show animations** (Settings → Accessibility → Visual effects) turns it off too |
+| `smoothScrolling` | A mouse-wheel notch or Page Up/Down glides into place instead of jumping (off by default: a glide draws three frames where a jump draws one). Needs `animations` |
 | `formatOnSave` | Format the file before each save |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `occurrencesHighlight` | Highlight the other uses of the name at the caret |
@@ -246,8 +250,6 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |
 | `languageServers` | Commands for the language servers of [language extensions](#extensions), by the server's name or the language's, such as `{"lua-language-server": {"command": "C:\\tools\\lua-ls\\bin\\lua-language-server.exe", "args": []}, "Gleam": "gleam lsp"}`. A string is split at spaces; use `command` and `args` when a path has spaces. Used the next time a file of that language is opened |
 | `colors` | Override individual theme colors, on top of the color theme |
-
-`smoothScrolling` is accepted but doesn't do anything yet.
 
 ---
 

@@ -44,6 +44,9 @@ pub(super) fn decode_utf16_input(pending_high: &mut Option<u16>, unit: u16) -> O
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
         self.clear_hover(hwnd);
+        if !matches!(key as u16, VK_SHIFT | VK_CONTROL | VK_MENU) {
+            self.stop_glide(hwnd);
+        }
         let ctrl = self.modifier_down(VK_CONTROL);
         let shift = self.modifier_down(VK_SHIFT);
         let alt = self.modifier_down(VK_MENU);
@@ -975,12 +978,16 @@ impl App {
             x if x == VK_PRIOR as u32 => {
                 let page = self.visible_lines(hwnd) as isize;
                 let target = self.cursor_moved_by_rows(hwnd, -page);
+                let before = self.view_top(hwnd, self.focused_pane);
                 self.move_cursor(target, shift);
+                self.glide_from(hwnd, before);
             }
             x if x == VK_NEXT as u32 => {
                 let page = self.visible_lines(hwnd) as isize;
                 let target = self.cursor_moved_by_rows(hwnd, page);
+                let before = self.view_top(hwnd, self.focused_pane);
                 self.move_cursor(target, shift);
+                self.glide_from(hwnd, before);
             }
             x if x == VK_HOME as u32 => self.move_cursor(
                 Pos {
@@ -1476,6 +1483,7 @@ impl App {
     }
 
     pub(super) fn mouse_click(&mut self, hwnd: HWND, x: i32, y: i32, extend: bool) {
+        self.stop_glide(hwnd);
         if self.problem_focus {
             self.problem_focus = false;
             self.invalidate_problems(hwnd);
@@ -1644,7 +1652,7 @@ impl App {
         // click first, and clicking anywhere else dismisses it before normal
         // workbench hit-testing continues.
         if self.debug_config_menu_open {
-            let panel_y = y - self.chrome_top();
+            let panel_y = y - self.side_origin();
             let menu = self.debug_config_menu_rect(rail, editor_left);
             if x >= menu.left && x < menu.right && panel_y >= menu.top && panel_y < menu.bottom {
                 if let Some(index) = self.debug_config_menu_row(panel_y) {
@@ -1694,8 +1702,8 @@ impl App {
         }
         if self.sidebar_width > 0 && x < editor_left {
             self.terminal_focus = false;
-            let y = y - self.chrome_top();
-            let panel_bottom = rect.bottom - self.chrome_top();
+            let y = y - self.side_origin();
+            let panel_bottom = rect.bottom - self.side_origin();
             if !self.explorer_visible {
                 return;
             }
@@ -1884,7 +1892,7 @@ impl App {
             if self.side_view == SideView::Extensions {
                 // The "Color Theme" row under Active Capabilities, where it
                 // was last drawn (in window coordinates, as painted).
-                let window_y = y + self.chrome_top();
+                let window_y = y + self.side_origin();
                 if let Some(row) = self.color_theme_row.get()
                     && x >= row.left
                     && x < row.right
@@ -2429,7 +2437,7 @@ impl App {
         let mut target_path: Option<PathBuf> = None;
         let mut is_dir = true;
 
-        let panel_y = y - self.chrome_top();
+        let panel_y = y - self.side_origin();
         let row_top = self.scale(EXPLORER_TOP);
         if panel_y >= row_top {
             let row_idx =

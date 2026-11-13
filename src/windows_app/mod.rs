@@ -23,6 +23,7 @@ mod markdown_view;
 mod menu_bar;
 mod merge_conflict;
 mod more_menu;
+mod motion;
 mod rename;
 mod replace_in_files;
 mod workspace_edit;
@@ -136,11 +137,13 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-// Compact workbench proportions. The activity bar intentionally carries only
-// icons; the Explorer owns the readable labels and project hierarchy.
-const RAIL: i32 = 56;
+// Compact workbench proportions, as VS Code's (design/layout-smooth-design.html):
+// a 35 px title bar and tab strip, 22 px breadcrumbs and status bar, a 48 px
+// activity rail, flat panels meeting at 1 px lines. The activity bar carries
+// only icons; the Explorer owns the readable labels and project hierarchy.
+const RAIL: i32 = 48;
 const SIDEBAR: i32 = 286;
-const WORKBENCH_HEADER: i32 = 50;
+const WORKBENCH_HEADER: i32 = 35;
 // Editor gutter lanes, from left to right: folding, breakpoints, line numbers.
 // Keeping these positions shared also keeps pointer hit-testing aligned with
 // the painted controls at every DPI scale.
@@ -151,25 +154,31 @@ const GUTTER_BREAKPOINT_CENTER: i32 = 25;
 const GUTTER_DIAGNOSTIC_CENTER: i32 = 40;
 const GUTTER_NUMBER_RIGHT_INSET: i32 = 6;
 const TOP: i32 = 5;
-const STATUS: i32 = 29;
+const STATUS: i32 = 22;
 const PAD: i32 = 10;
 // The editor's vertical scrollbar, down the right edge of each code pane.
 const SCROLLBAR: i32 = 14;
-const TAB_HEIGHT: i32 = 42;
-const BREADCRUMB_HEIGHT: i32 = 30;
+const TAB_HEIGHT: i32 = 35;
+const BREADCRUMB_HEIGHT: i32 = 22;
 const TAB_WIDTH: i32 = 180;
-const EXPLORER_ROW: i32 = 27;
-const EXPLORER_TOP: i32 = 71;
+const EXPLORER_ROW: i32 = 22;
+// Where the Explorer's rows start, in the side panel's coordinates: under its
+// 40 px header (35 shown, see SIDE_SHIFT) and the 24 px workspace row.
+const EXPLORER_TOP: i32 = 65;
+// The side panels lay out a 40 px header; the panel is drawn (and clicked)
+// this much higher, so the header shows 35 px, level with the tab strip.
+const SIDE_SHIFT: i32 = 5;
 // The rail's ☰ (toggle the side panel) sits in the top row, where the
 // Welcome page's rail has Home, so the icons below line up on both.
-const RAIL_MENU_ROW: i32 = 18;
+const RAIL_MENU_ROW: i32 = 0;
 const RAIL_FIRST_ROW: i32 = RAIL_MENU_ROW + RAIL_ROW;
-const RAIL_ROW: i32 = 52;
+const RAIL_ROW: i32 = 48;
 // Height of the AI Assistant panel's header (title and close button).
 const AI_HEADER: i32 = 52;
-// Gutter between the floating side-panel / editor / terminal cards.
+// The 1 px line between the side panel, editor and terminal; they meet flat,
+// with square corners.
 const CARD_GAP: i32 = 1;
-const CARD_RADIUS: i32 = 4;
+const CARD_RADIUS: i32 = 0;
 const TRANSITION_MS: u128 = 150;
 // WM_TIMER id for the next session snapshot (see arm_recovery).
 const RECOVERY_TIMER: usize = 7;

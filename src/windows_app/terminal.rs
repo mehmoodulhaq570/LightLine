@@ -1097,7 +1097,7 @@ impl App {
     pub(super) fn terminal_top(&self, hwnd: HWND) -> i32 {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
-        (rect.bottom - self.scale(STATUS) - self.scale(self.terminal_height)).max(0)
+        (rect.bottom - self.scale(STATUS) - self.terminal_panel()).max(0)
     }
 
     // Pixel position to (column, row), matching the geometry paint_terminal

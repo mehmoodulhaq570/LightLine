@@ -60,13 +60,11 @@ impl App {
                         );
                     }
                     let collapsed = self.git_section_collapsed(*section);
-                    Self::label(
+                    self.chevron(
                         hdc,
-                        if collapsed { ">" } else { "v" },
-                        left + self.scale(13),
-                        top + self.scale(9),
-                        self.theme.muted,
-                        clip,
+                        left + self.scale(17),
+                        top + self.scale(9) + self.text_height(hdc) / 2,
+                        !collapsed,
                     );
                     Self::label(
                         hdc,
@@ -532,6 +530,18 @@ impl App {
     }
 
     fn git_glyph(&self, hdc: HDC, glyph: &str, rect: &RECT, color: u32, clip: RECT) {
+        // The row and header actions are drawn icons; anything else stays text.
+        let icon = match glyph {
+            "+" => Some(DebugGlyph::Plus),
+            "-" => Some(DebugGlyph::Minus),
+            REFRESH_GLYPH => Some(DebugGlyph::Refresh),
+            "\u{21b3}" => Some(DebugGlyph::Discard),
+            _ => None,
+        };
+        if let Some(icon) = icon {
+            self.glyph_in(hdc, icon, color, *rect, self.scale(16));
+            return;
+        }
         let width = self.text_width(hdc, glyph).max(1);
         Self::label(
             hdc,

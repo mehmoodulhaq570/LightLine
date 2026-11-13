@@ -9,6 +9,7 @@ mod primitives;
 mod terminal;
 mod welcome;
 
+pub(in crate::windows_app) use code_pane::blend;
 pub(in crate::windows_app) use editor::language_label;
 pub(in crate::windows_app) use primitives::{CaretFrame, safe_slice_prefix, safe_slice_range};
 pub(in crate::windows_app) use welcome::{WelcomeAction, welcome_rail_tip};

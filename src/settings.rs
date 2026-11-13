@@ -40,7 +40,12 @@ pub struct Settings {
     pub code_lens: bool,
     /// Keep a copy of a file each time it's saved (see local_history.rs).
     pub local_history: bool,
+    /// Wheel and Page Up/Down scrolls glide instead of jumping. Off by
+    /// default: a gliding notch paints three frames, ~2.4x a jump's cost.
     pub smooth_scrolling: bool,
+    /// Short motion: panels easing open, hover fades, smooth scrolling.
+    /// Windows' "Show animations" turns it off too.
+    pub animations: bool,
     pub parse_limit_kb: usize,
     pub default_terminal_profile: ShellKind,
     /// Load web images in Markdown previews without asking first.
@@ -85,6 +90,7 @@ impl Default for Settings {
             code_lens: true,
             local_history: true,
             smooth_scrolling: false,
+            animations: true,
             parse_limit_kb: 4096,
             default_terminal_profile: ShellKind::PowerShell,
             markdown_load_remote_images: false,
@@ -232,6 +238,9 @@ impl Settings {
         }
         if let Some(b) = value.get("smoothScrolling").and_then(|v| v.as_bool()) {
             settings.smooth_scrolling = b;
+        }
+        if let Some(b) = value.get("animations").and_then(|v| v.as_bool()) {
+            settings.animations = b;
         }
         if let Some(n) = value.get("parseLimitKb").and_then(|v| v.as_u64()) {
             settings.parse_limit_kb = (n as usize).clamp(32, 16384);
@@ -398,6 +407,10 @@ impl Settings {
             serde_json::Value::Bool(self.smooth_scrolling),
         );
         obj.insert(
+            "animations".into(),
+            serde_json::Value::Bool(self.animations),
+        );
+        obj.insert(
             "parseLimitKb".into(),
             serde_json::Value::Number(self.parse_limit_kb.into()),
         );
@@ -458,6 +471,7 @@ const OWN_KEYS: &[&str] = &[
     "codeLens",
     "localHistory",
     "smoothScrolling",
+    "animations",
     "parseLimitKb",
     "colorTheme",
     "aiEndpoint",
