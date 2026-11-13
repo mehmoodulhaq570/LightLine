@@ -197,6 +197,14 @@ impl App {
             } else {
                 self.editor_top() + sticky.len() as i32 * self.line_height + self.scale(1).max(1)
             };
+            // Bracket matching: the pair at the caret is highlighted after
+            // the rows, where they drew it (`pair_marks`: x, y, width, the
+            // bracket and its color).
+            let pair_at: Vec<Pos> = self
+                .bracket_pair(pane)
+                .map(|(bracket, matching)| std::iter::once(bracket).chain(matching).collect())
+                .unwrap_or_default();
+            let mut pair_marks: Vec<(i32, i32, i32, &str, u32)> = Vec::new();
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
@@ -226,10 +234,12 @@ impl App {
                 } else {
                     None
                 };
-                let bracket_colors = if line_shows {
-                    self.line_bracket_colors(self.tab_for_pane(pane), index, &spans)
+                // Each row's brackets are colored as it's drawn, from the
+                // part of it that shows (bracket_colors.rs).
+                let mut bracket_walker = if line_shows {
+                    self.bracket_walker(self.tab_for_pane(pane), index)
                 } else {
-                    Vec::new()
+                    None
                 };
                 // The selected byte ranges of this line, and whether each
                 // selection carries on past its end.
@@ -295,7 +305,7 @@ impl App {
                     // from `anchor`, near the left edge (hscroll.rs), not
                     // from its start; hints before it shift it right.
                     let (anchor, anchor_x) =
-                        self.row_anchor(hdc, source, (row_start, row_end), scroll_x);
+                        self.row_anchor(hdc, doc, index, (row_start, row_end), scroll_x);
                     let anchor_left = text_left
                         + anchor_x
                         + line_hints
@@ -313,6 +323,10 @@ impl App {
                         right - anchor_left,
                     );
                     let cut = shown_end < row_end;
+                    let bracket_colors = bracket_walker.as_mut().map_or_else(Vec::new, |walker| {
+                        self.walk_brackets_to(walker, doc, index, &spans, anchor);
+                        walker.colors(source, &spans, anchor, shown_end)
+                    });
                     // This row's inlay hints: at its end only on the line's
                     // last row, since the next row starts there.
                     let row_hints: Vec<&InlayHintAt> = line_hints
@@ -691,7 +705,13 @@ impl App {
                             );
                         }
                     }
-                    let pill_x = x_after(row_end) + self.scale(6);
+                    // Measured only for a folded row: on a long line,
+                    // x_after(row_end) measures all of it.
+                    let pill_x = if folded && !cut {
+                        x_after(row_end) + self.scale(6)
+                    } else {
+                        code_left - 1
+                    };
                     if folded && !cut && pill_x >= code_left {
                         let pill_w = self.scale(22);
                         let pill_h = self.scale(13);
@@ -739,6 +759,28 @@ impl App {
                         if byte >= anchor && byte < shown_end {
                             draw_text(byte, byte + 1, color, &clip);
                         }
+                    }
+                    for at in &pair_at {
+                        let byte = at.byte;
+                        if at.line != index || byte < anchor || byte >= shown_end {
+                            continue;
+                        }
+                        let Some(ch) = source.get(byte..).and_then(|rest| rest.chars().next())
+                        else {
+                            continue;
+                        };
+                        let bracket = &source[byte..byte + ch.len_utf8()];
+                        let color = bracket_colors
+                            .iter()
+                            .find(|(colored, _)| *colored == byte)
+                            .map_or(self.theme.text, |&(_, color)| color);
+                        pair_marks.push((
+                            x_after(byte),
+                            y,
+                            self.text_width(hdc, bracket),
+                            bracket,
+                            color,
+                        ));
                     }
                     for diagnostic in tab
                         .diagnostics
@@ -813,78 +855,26 @@ impl App {
             DeleteObject(git_mod_brush);
             DeleteObject(git_del_brush);
             // Bracket matching: highlight the matching bracket pair.
-            if let Some((bracket, matching)) = self.bracket_pair(pane) {
+            if !pair_marks.is_empty() {
                 let match_brush = CreateSolidBrush(ui(60, 80, 120));
-                // Draw the highlight rectangles for both brackets.
-                let draw_bracket_bg = |line_idx: usize, b: usize| {
-                    if doc.is_line_hidden(line_idx) {
-                        return;
-                    }
-                    let at = Pos {
-                        line: line_idx,
-                        byte: b,
-                    };
-                    let Some((row, row_start, indent)) = self.locate(hwnd, pane, at, visible)
-                    else {
-                        return;
-                    };
-                    let y = self.editor_top() + row as i32 * self.line_height;
-                    if y >= bottom {
-                        return;
-                    }
-                    let text = doc.line(line_idx);
-                    if super::super::wrap::visible_end(
-                        text,
-                        row_start,
-                        b,
-                        right - code_left - indent + scroll_x,
-                    ) < b
-                    {
-                        return;
-                    }
-                    let hints = self.hints_on_line(self.tab_for_pane(pane), line_idx);
-                    let x = code_left - scroll_x
-                        + indent
-                        + self.text_width(hdc, safe_slice_range(text, row_start, b))
-                        + self.hint_shift(hdc, hints, row_start, b, true);
-                    let rest = if b < text.len() && text.is_char_boundary(b) {
-                        &text[b..]
-                    } else {
-                        ""
-                    };
-                    let ch_text = rest
-                        .chars()
-                        .next()
-                        .map(|c| &rest[..c.len_utf8()])
-                        .unwrap_or(" ");
-                    let w = self.text_width(hdc, ch_text);
+                for &(x, y, width, bracket, color) in &pair_marks {
                     if x < right && x >= code_left {
                         FillRect(
                             hdc,
                             &RECT {
                                 left: x,
                                 top: y,
-                                right: (x + w).min(right),
+                                right: (x + width).min(right),
                                 bottom: (y + self.line_height).min(bottom),
                             },
                             match_brush,
                         );
-                        // The fill above paints over the bracket glyph
-                        // that the earlier syntax-color pass already
-                        // drew, leaving a blank highlighted box instead
-                        // of a highlighted character; redraw it on top.
-                        SetTextColor(
-                            hdc,
-                            self.bracket_color_at(self.tab_for_pane(pane), at)
-                                .unwrap_or(self.theme.text),
-                        );
-                        let chars: Vec<u16> = ch_text.encode_utf16().collect();
+                        // The fill paints over the bracket the row drew:
+                        // draw it again on top, in its color.
+                        SetTextColor(hdc, color);
+                        let chars: Vec<u16> = bracket.encode_utf16().collect();
                         TextOutW(hdc, x, y, chars.as_ptr(), chars.len() as i32);
                     }
-                };
-                draw_bracket_bg(bracket.line, bracket.byte);
-                if let Some(other) = matching {
-                    draw_bracket_bg(other.line, other.byte);
                 }
                 DeleteObject(match_brush);
             }
@@ -949,26 +939,16 @@ impl App {
                 // Its screen row, not its document line: rows above it can be
                 // wrapped (several per line) or folded (one per block).
                 let cursor = doc.clamp(view.cursor);
-                let line = doc.line(cursor.line);
                 let located = (!doc.is_line_hidden(cursor.line))
                     .then(|| self.locate(hwnd, pane, cursor, visible))
                     .flatten();
                 let (x, y) = match located {
-                    // Past what a very long row shows: off screen, unmeasured.
-                    Some((_, row_start, indent))
-                        if super::super::wrap::visible_end(
-                            line,
-                            row_start,
-                            cursor.byte,
-                            right - code_left - indent + scroll_x,
-                        ) < cursor.byte =>
-                    {
-                        (right, bottom)
-                    }
+                    // On a long line, the width before the caret is known
+                    // from scrolling to it (hscroll.rs): not measured again.
                     Some((row, row_start, indent)) => (
                         code_left - scroll_x
                             + indent
-                            + self.text_width(hdc, safe_slice_range(line, row_start, cursor.byte))
+                            + self.row_prefix_width(hdc, doc, cursor.line, row_start, cursor.byte)
                             + self.hint_shift(
                                 hdc,
                                 self.hints_on_line(self.tab_for_pane(pane), cursor.line),
@@ -1134,8 +1114,9 @@ impl App {
                 let end = if first { byte } else { text.len() };
                 first = false;
                 let bwd_text = safe_slice_prefix(text, end);
-                let indices: Vec<(usize, char)> = bwd_text.char_indices().collect();
-                for &(i, c) in indices.iter().rev() {
+                // From the bracket back: stops at the match, not walking
+                // the whole start of a long line first.
+                for (i, c) in bwd_text.char_indices().rev() {
                     if c == close {
                         depth += 1;
                     }

@@ -14,7 +14,207 @@ use super::*;
 /// edge instead (`row_anchor`).
 const DRAW_WHOLE_ROW_BYTES: usize = 4_096;
 
+/// How many measured line starts `line_prefix_width` keeps.
+const PREFIX_WIDTHS_KEPT: usize = 8;
+
+/// Lines longer than this are drawn without syntax colors, so which of their
+/// brackets count doesn't depend on a parse (render/code_pane.rs).
+const UNCOLORED_LINE_BYTES: usize = 16_384;
+
+/// The width of the first `end` bytes of `line` of a document, measured in
+/// `font` with tabs `tab_size` wide, as the document was at `serial`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PrefixWidth {
+    document: u64,
+    line: usize,
+    end: usize,
+    serial: u64,
+    font: usize,
+    tab_size: usize,
+    x: i32,
+    // When `end` was found as the byte this many columns in (`row_anchor`).
+    columns: Option<usize>,
+    // The bracket depth at `end` (`walk_brackets_to`), counting the bracket
+    // set and starting from the depth at the line's start given.
+    brackets: Option<BracketsAt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BracketsAt {
+    set: u8,
+    line_start: u32,
+    depth: u32,
+}
+
+impl PrefixWidth {
+    /// Whether the measured text is still the same in `doc`: nothing has
+    /// changed since, or only the latest change, which came after it (typing
+    /// at or past `end` on the line, or on a line below). Kept up to date by
+    /// being asked after each change.
+    fn still_holds(&mut self, doc: &Document, font: usize, tab_size: usize) -> bool {
+        if self.document != doc.id() || self.font != font || self.tab_size != tab_size {
+            return false;
+        }
+        let serial = doc.change_serial();
+        if self.serial == serial {
+            return true;
+        }
+        let after = doc.last_change().is_some_and(|change| {
+            self.serial + 1 == serial
+                && change.serial == serial
+                && change.start
+                    >= Pos {
+                        line: self.line,
+                        byte: self.end,
+                    }
+        });
+        if after {
+            self.serial = serial;
+        }
+        after
+    }
+}
+
 impl App {
+    /// The width of `doc.line(line)[..end]` in the editor font, which must be
+    /// selected into `hdc`. A long line's start is measured from the end of a
+    /// part of it measured before that hasn't changed since: typing in the
+    /// middle of a half-megabyte line then measures the few characters past
+    /// the last measurement, not everything before the caret.
+    pub(super) fn line_prefix_width(
+        &self,
+        hdc: HDC,
+        doc: &Document,
+        line: usize,
+        end: usize,
+    ) -> i32 {
+        let text = doc.line(line);
+        if end <= DRAW_WHOLE_ROW_BYTES {
+            return self.text_width(hdc, safe_slice_range(text, 0, end));
+        }
+        let mut kept = self.fresh_prefix_widths(doc);
+        if let Some(at) = kept
+            .iter()
+            .position(|known| known.document == doc.id() && known.line == line && known.end == end)
+        {
+            let known = kept.remove(at);
+            kept.insert(0, known);
+            return known.x;
+        }
+        let from = kept
+            .iter()
+            .filter(|known| known.document == doc.id() && known.line == line && known.end <= end)
+            .max_by_key(|known| known.end)
+            .map_or((0, 0), |known| (known.end, known.x));
+        let x = from.1 + self.text_width(hdc, safe_slice_range(text, from.0, end));
+        kept.insert(
+            0,
+            PrefixWidth {
+                document: doc.id(),
+                line,
+                end,
+                serial: doc.change_serial(),
+                font: self.font as usize,
+                tab_size: self.settings.tab_size,
+                x,
+                columns: None,
+                brackets: None,
+            },
+        );
+        kept.truncate(PREFIX_WIDTHS_KEPT);
+        x
+    }
+
+    // The measured line starts, with those of `doc` that changed dropped.
+    // Another file's are checked when it's asked about.
+    fn fresh_prefix_widths(&self, doc: &Document) -> std::cell::RefMut<'_, Vec<PrefixWidth>> {
+        let (font, tab_size) = (self.font as usize, self.settings.tab_size);
+        let mut kept = self.prefix_widths.borrow_mut();
+        kept.retain_mut(|known| {
+            known.document != doc.id() || known.still_holds(doc, font, tab_size)
+        });
+        kept
+    }
+
+    // The kept measurement of `doc.line(line)[..end]`, to note more on.
+    fn prefix_entry<'a>(
+        kept: &'a mut [PrefixWidth],
+        doc: &Document,
+        line: usize,
+        end: usize,
+    ) -> Option<&'a mut PrefixWidth> {
+        kept.iter_mut()
+            .find(|known| known.document == doc.id() && known.line == line && known.end == end)
+    }
+
+    /// The byte `columns` columns into a long `line` of `doc`, and the width
+    /// before it: what `row_anchor` asked for last time, while the line's
+    /// start hasn't changed (typing to the right of it), is known.
+    fn line_byte_at_column(
+        &self,
+        hdc: HDC,
+        doc: &Document,
+        line: usize,
+        columns: usize,
+    ) -> (usize, i32) {
+        let known = self
+            .fresh_prefix_widths(doc)
+            .iter()
+            .find(|known| {
+                known.document == doc.id() && known.line == line && known.columns == Some(columns)
+            })
+            .map(|known| known.end);
+        let byte = known
+            .unwrap_or_else(|| byte_at_column(doc.line(line), columns, self.settings.tab_size));
+        // Measured or found, which also keeps it at the front.
+        let x = self.line_prefix_width(hdc, doc, line, byte);
+        if let Some(entry) =
+            Self::prefix_entry(&mut self.prefix_widths.borrow_mut(), doc, line, byte)
+        {
+            entry.columns = Some(columns);
+        }
+        (byte, x)
+    }
+
+    /// Moves `walker` through `doc.line(line)` up to `byte`, where a row's
+    /// drawing starts. On a long line scrolled sideways the depth there is
+    /// known from the last paint while the line's start hasn't changed, so
+    /// the brackets before it aren't counted again on every keystroke.
+    pub(super) fn walk_brackets_to(
+        &self,
+        walker: &mut super::bracket_colors::BracketWalker,
+        doc: &Document,
+        line: usize,
+        spans: &[lightline::syntax::Span],
+        byte: usize,
+    ) {
+        let text = doc.line(line);
+        if text.len() <= UNCOLORED_LINE_BYTES || byte <= DRAW_WHOLE_ROW_BYTES || walker.at() != 0 {
+            walker.advance(text, spans, byte);
+            return;
+        }
+        let wanted =
+            |known: &BracketsAt| known.set == walker.set() && known.line_start == walker.depth();
+        let known = Self::prefix_entry(&mut self.fresh_prefix_widths(doc), doc, line, byte)
+            .and_then(|entry| entry.brackets)
+            .filter(|known| wanted(known));
+        if let Some(known) = known {
+            walker.jump(byte, known.depth);
+            return;
+        }
+        let line_start = walker.depth();
+        walker.advance(text, spans, byte);
+        if let Some(entry) =
+            Self::prefix_entry(&mut self.prefix_widths.borrow_mut(), doc, line, byte)
+        {
+            entry.brackets = Some(BracketsAt {
+                set: walker.set(),
+                line_start,
+                depth: walker.depth(),
+            });
+        }
+    }
+
     /// How far `pane`'s text is scrolled to the left, in pixels.
     pub(super) fn scroll_x(&self, pane: usize) -> i32 {
         if self.wraps(self.tab_for_pane(pane)) {
@@ -35,6 +235,24 @@ impl App {
         .max(self.char_width.max(1))
     }
 
+    /// The width of `doc.line(line)[row_start..byte]` in the editor font,
+    /// selected into `hdc`: through `line_prefix_width` for a row that starts
+    /// the line (the only row of a line scrolled sideways, which can be long).
+    pub(super) fn row_prefix_width(
+        &self,
+        hdc: HDC,
+        doc: &Document,
+        line: usize,
+        row_start: usize,
+        byte: usize,
+    ) -> i32 {
+        if row_start == 0 {
+            self.line_prefix_width(hdc, doc, line, byte)
+        } else {
+            self.text_width(hdc, safe_slice_range(doc.line(line), row_start, byte))
+        }
+    }
+
     /// Where to start measuring and drawing `text[row_start..row_end]` when
     /// it is scrolled `scroll_x` pixels left: a byte at or before the first
     /// one that shows, and its x from the row's start. Short rows start at
@@ -44,13 +262,15 @@ impl App {
     pub(super) fn row_anchor(
         &self,
         hdc: HDC,
-        text: &str,
+        doc: &Document,
+        line: usize,
         (row_start, row_end): (usize, usize),
         scroll_x: i32,
     ) -> (usize, i32) {
         if scroll_x <= 0 || row_end.saturating_sub(row_start) <= DRAW_WHOLE_ROW_BYTES {
             return (row_start, 0);
         }
+        let text = doc.line(line);
         let Some(row) = text.get(row_start..row_end) else {
             return (row_start, 0);
         };
@@ -59,8 +279,15 @@ impl App {
         let target = (scroll_x / self.char_width.max(1)) as usize;
         let mut columns = target.saturating_sub(8);
         loop {
-            let byte = row_start + byte_at_column(row, columns, self.settings.tab_size);
-            let x = self.text_width(hdc, &text[row_start..byte]);
+            // Scrolled sideways, a line has one row: it starts the line, and
+            // where the anchor is and the width before it are usually known
+            // (typing to the right of it).
+            let (byte, x) = if row_start == 0 {
+                self.line_byte_at_column(hdc, doc, line, columns)
+            } else {
+                let byte = row_start + byte_at_column(row, columns, self.settings.tab_size);
+                (byte, self.text_width(hdc, &text[row_start..byte]))
+            };
             if x <= scroll_x || columns == 0 {
                 return (byte, x);
             }
@@ -81,11 +308,10 @@ impl App {
         if doc.is_line_hidden(cursor.line) {
             return false;
         }
-        let line = doc.line(cursor.line);
         let x = unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.font);
-            let x = self.text_width(hdc, safe_slice_range(line, 0, cursor.byte))
+            let x = self.line_prefix_width(hdc, doc, cursor.line, cursor.byte)
                 + self.hint_shift(
                     hdc,
                     self.hints_on_line(tab, cursor.line),
@@ -230,6 +456,53 @@ fn byte_at_column(row: &str, columns: usize, tab_size: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_measured_line_start_holds_until_something_before_its_end_changes() {
+        let at = |line, byte| Pos { line, byte };
+        let mut doc = Document::new();
+        doc.replace(at(0, 0), at(0, 0), "first line\nsecond line here\nthird");
+        let measured = |doc: &Document| PrefixWidth {
+            document: doc.id(),
+            line: 1,
+            end: 6,
+            serial: doc.change_serial(),
+            font: 1,
+            tab_size: 4,
+            x: 60,
+            columns: None,
+            brackets: None,
+        };
+        let mut known = measured(&doc);
+        assert!(known.still_holds(&doc, 1, 4));
+        // Another font or tab width: measured differently.
+        assert!(!known.clone().still_holds(&doc, 2, 4));
+        assert!(!known.clone().still_holds(&doc, 1, 8));
+        // Typing at its end, past it, and on a line below, one change at a
+        // time: still the same text.
+        doc.replace(at(1, 6), at(1, 6), "x");
+        assert!(known.still_holds(&doc, 1, 4));
+        doc.replace(at(1, 9), at(1, 10), "");
+        assert!(known.still_holds(&doc, 1, 4));
+        doc.replace(at(2, 0), at(2, 0), "y");
+        assert!(known.still_holds(&doc, 1, 4));
+        // Inside it, or on a line above (which renumbers the lines): gone.
+        let mut inside = measured(&doc);
+        doc.replace(at(1, 5), at(1, 5), "z");
+        assert!(!inside.still_holds(&doc, 1, 4));
+        let mut below_an_edit = measured(&doc);
+        doc.replace(at(0, 0), at(0, 0), "new\n");
+        assert!(!below_an_edit.still_holds(&doc, 1, 4));
+        // Two changes since it was last asked about: not known to be safe.
+        let mut skipped = measured(&doc);
+        doc.replace(at(3, 0), at(3, 0), "a");
+        doc.replace(at(3, 1), at(3, 1), "b");
+        assert!(!skipped.still_holds(&doc, 1, 4));
+        // Another document with the same lines isn't this one.
+        let mut other = Document::new();
+        other.replace(at(0, 0), at(0, 0), "first line\nsecond line here\nthird");
+        assert!(!measured(&doc).still_holds(&other, 1, 4));
+    }
 
     #[test]
     fn columns_map_to_bytes() {

@@ -1023,6 +1023,8 @@ pub(super) struct App {
     pub(super) syntax_epoch: u64,
     // What check_brackets last saw in each pane.
     pub(super) brackets_shown: RefCell<[super::bracket_colors::BracketsShown; 2]>,
+    // Widths of long lines' starts measured lately (hscroll.rs).
+    pub(super) prefix_widths: RefCell<Vec<super::hscroll::PrefixWidth>>,
     // Run/Debug links (codelens.rs): where paint put them, and which lines
     // of each pane had one when check_lenses last looked.
     pub(super) lens_hits: RefCell<super::codelens::LensHits>,
@@ -1608,6 +1610,7 @@ impl App {
             minimap_waiting: std::cell::Cell::new(None),
             syntax_epoch: 0,
             brackets_shown: RefCell::default(),
+            prefix_widths: RefCell::default(),
             lens_hits: RefCell::default(),
             lenses_shown: RefCell::default(),
             chosen_languages: RefCell::default(),

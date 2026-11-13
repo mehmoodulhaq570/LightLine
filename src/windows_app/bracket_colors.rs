@@ -92,17 +92,115 @@ fn brackets<'a>(
     spans: &'a [lightline::syntax::Span],
     set: u8,
 ) -> impl Iterator<Item = (usize, bool)> + 'a {
-    text.bytes().enumerate().filter_map(move |(byte, ch)| {
-        let opens = match ch {
-            b'(' | b'[' | b'{' => true,
-            b')' | b']' | b'}' => false,
-            _ => return None,
-        };
-        if bracket_bit(ch).is_none_or(|bit| set & bit == 0) {
-            return None;
+    brackets_in(text, spans, set, 0, text.len())
+}
+
+// The brackets of `text[from..to]` that count, at their bytes in `text`.
+fn brackets_in<'a>(
+    text: &'a str,
+    spans: &'a [lightline::syntax::Span],
+    set: u8,
+    from: usize,
+    to: usize,
+) -> impl Iterator<Item = (usize, bool)> + 'a {
+    let bytes = text.as_bytes();
+    let to = to.min(bytes.len());
+    let from = from.min(to);
+    bytes[from..to]
+        .iter()
+        .enumerate()
+        .filter_map(move |(at, &ch)| {
+            let byte = from + at;
+            let opens = match ch {
+                b'(' | b'[' | b'{' => true,
+                b')' | b']' | b'}' => false,
+                _ => return None,
+            };
+            if bracket_bit(ch).is_none_or(|bit| set & bit == 0) {
+                return None;
+            }
+            (!in_string_or_comment(spans, byte)).then_some((byte, opens))
+        })
+}
+
+/// One line's bracket colors, worked out a part at a time from the line's
+/// start towards its end: the rows of a wrapped line, or the part of a long
+/// line that's in view. Brackets before a part are only counted, so a view
+/// of a half-megabyte minified line doesn't list every bracket in it.
+pub(super) struct BracketWalker {
+    // The depth at byte `at` of the line.
+    depth: u32,
+    at: usize,
+    set: u8,
+    palette: [u32; 3],
+}
+
+impl BracketWalker {
+    /// The colored brackets of `text[from..to]`, byte and color. Parts are
+    /// asked for in order; one starting before the end of the last starts
+    /// there instead.
+    pub(super) fn colors(
+        &mut self,
+        text: &str,
+        spans: &[lightline::syntax::Span],
+        from: usize,
+        to: usize,
+    ) -> Vec<(usize, u32)> {
+        let to = to.min(text.len());
+        let from = from.clamp(self.at, to.max(self.at));
+        self.advance(text, spans, from);
+        let colors = brackets_in(text, spans, self.set, from, to)
+            .map(|(byte, opens)| {
+                let level = if opens {
+                    self.depth += 1;
+                    self.depth - 1
+                } else {
+                    self.depth = self.depth.saturating_sub(1);
+                    self.depth
+                };
+                (byte, self.palette[level as usize % self.palette.len()])
+            })
+            .collect();
+        self.at = to.max(from);
+        colors
+    }
+
+    /// Counts the brackets from where the walk is up to `byte`.
+    pub(super) fn advance(&mut self, text: &str, spans: &[lightline::syntax::Span], byte: usize) {
+        let byte = byte.min(text.len());
+        if byte <= self.at {
+            return;
         }
-        (!in_string_or_comment(spans, byte)).then_some((byte, opens))
-    })
+        for (_, opens) in brackets_in(text, spans, self.set, self.at, byte) {
+            self.depth = if opens {
+                self.depth + 1
+            } else {
+                self.depth.saturating_sub(1)
+            };
+        }
+        self.at = byte;
+    }
+
+    /// Moves the walk to `byte` with the depth there already known.
+    pub(super) fn jump(&mut self, byte: usize, depth: u32) {
+        self.at = byte;
+        self.depth = depth;
+    }
+
+    /// The byte the walk has reached.
+    pub(super) fn at(&self) -> usize {
+        self.at
+    }
+
+    /// The bracket depth where the walk is.
+    pub(super) fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    /// Which of `()`, `[]` and `{}` count.
+    pub(super) fn set(&self) -> u8 {
+        self.set
+    }
 }
 
 /// Columns of indentation at the start of `text`, tabs to the next stop.
@@ -192,45 +290,15 @@ impl App {
         Some(cache.depths[line])
     }
 
-    /// The colored brackets of `line` of tab `index`: byte and color.
-    pub(super) fn line_bracket_colors(
-        &self,
-        index: usize,
-        line: usize,
-        spans: &[lightline::syntax::Span],
-    ) -> Vec<(usize, u32)> {
-        let Some(mut depth) = self.depth_at(index, line) else {
-            return Vec::new();
-        };
-        let palette = self.bracket_palette();
-        let text = self.tabs[index].document.line(line);
-        brackets(text, spans, tab_brackets(&self.tabs[index]))
-            .map(|(byte, opens)| {
-                let level = if opens {
-                    depth += 1;
-                    depth - 1
-                } else {
-                    depth = depth.saturating_sub(1);
-                    depth
-                };
-                (byte, palette[level as usize % palette.len()])
-            })
-            .collect()
-    }
-
-    /// The color of the bracket at `at` in tab `index`, if it's colored.
-    pub(super) fn bracket_color_at(&self, index: usize, at: Pos) -> Option<u32> {
-        let tab = &self.tabs[index];
-        let spans = match &tab.syntax {
-            Some(syntax) if tab.document.line(at.line).len() <= 16_384 => {
-                syntax.spans(&tab.document, at.line)
-            }
-            _ => Vec::new(),
-        };
-        self.line_bracket_colors(index, at.line, &spans)
-            .into_iter()
-            .find(|(byte, _)| *byte == at.byte)
-            .map(|(_, color)| color)
+    /// Colors the brackets of `line` of tab `index`, a part at a time
+    /// (`BracketWalker::colors`); None when brackets aren't colored there.
+    pub(super) fn bracket_walker(&self, index: usize, line: usize) -> Option<BracketWalker> {
+        Some(BracketWalker {
+            depth: self.depth_at(index, line)?,
+            at: 0,
+            set: tab_brackets(&self.tabs[index]),
+            palette: self.bracket_palette(),
+        })
     }
 
     /// The guide of the block holding `pane`'s caret: the caret line's own

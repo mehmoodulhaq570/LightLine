@@ -603,6 +603,24 @@ fn remap_spans(spans: &mut Vec<Vec<Span>>, change: &TextChange) -> bool {
     if old_end.line >= spans.len() {
         return false;
     }
+    let single_line = start.line == old_end.line && start.line == new_end.line;
+    if single_line
+        && remap_line_in_place(
+            &mut spans[start.line],
+            start.byte,
+            old_end.byte,
+            new_end.byte,
+        )
+    {
+        return true;
+    }
+    remap_spans_rebuilt(spans, change);
+    true
+}
+
+// `remap_spans` for any edit: the edited lines' spans are built anew.
+fn remap_spans_rebuilt(spans: &mut Vec<Vec<Span>>, change: &TextChange) {
+    let (start, old_end, new_end) = (change.start, change.end, change.new_end());
     let shift = |byte: usize| byte - old_end.byte + new_end.byte;
     let single_line = start.line == old_end.line && start.line == new_end.line;
     let mut head = Vec::new();
@@ -634,6 +652,59 @@ fn remap_spans(spans: &mut Vec<Vec<Span>>, change: &TextChange) -> bool {
     lines[0] = head;
     lines.last_mut().expect("at least one line").extend(tail);
     spans.splice(start.line..=old_end.line, lines);
+}
+
+// A one-line edit of `start..old_end`, now ending at `new_end`: moves the
+// line's spans where they are, as `remap_spans` would, without building new
+// lists. On a minified file's one long line (hundreds of thousands of spans)
+// that was most of a keystroke's cost. `remap_spans` puts the spans that
+// start before the edit ahead of the ones after it; when the line's spans
+// aren't in that order already, nothing changes and this returns false.
+fn remap_line_in_place(line: &mut Vec<Span>, start: usize, old_end: usize, new_end: usize) -> bool {
+    enum Part {
+        // Starts before the edit (and ends after it: the edit is inside).
+        Head { around: bool },
+        // Ends after the edit.
+        Tail,
+        // Inside the replaced text.
+        Gone,
+    }
+    let part = |span: &Span| {
+        if span.start < start {
+            Part::Head {
+                around: span.end > old_end,
+            }
+        } else if span.end > old_end {
+            Part::Tail
+        } else {
+            Part::Gone
+        }
+    };
+    let mut tail_seen = false;
+    for span in line.iter() {
+        match part(span) {
+            Part::Head { .. } if tail_seen => return false,
+            Part::Tail => tail_seen = true,
+            _ => {}
+        }
+    }
+    let shift = |byte: usize| byte - old_end + new_end;
+    line.retain_mut(|span| match part(span) {
+        Part::Head { around } => {
+            span.end = if around {
+                shift(span.end)
+            } else {
+                span.end.min(start)
+            };
+            true
+        }
+        Part::Tail => {
+            span.start = shift(span.start.max(old_end));
+            span.end = shift(span.end);
+            true
+        }
+        Part::Gone => false,
+    });
     true
 }
 
@@ -1511,6 +1582,66 @@ mod tests {
                 vec![span(0, 4, Color::Comment)],
             ]
         );
+    }
+
+    #[test]
+    fn one_line_edits_move_spans_in_place_exactly_as_rebuilding_does() {
+        // xorshift: the same cases every run.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |below: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % below as u64) as usize
+        };
+        let colors = [Color::Keyword, Color::String, Color::Comment, Color::Number];
+        let (mut in_place, mut refused) = (0, 0);
+        for case in 0..4_000 {
+            // Sorted by start (as a parse gives them) in most cases, nested
+            // spans included; shuffled in some, which must be refused.
+            let mut line: Vec<Span> = (0..next(12))
+                .map(|_| {
+                    let start = next(40);
+                    Span {
+                        start,
+                        end: start + 1 + next(10),
+                        color: colors[next(colors.len())],
+                    }
+                })
+                .collect();
+            if case % 5 != 0 {
+                line.sort_by_key(|span| span.start);
+            }
+            let start = next(45);
+            let old_end = start + next(6);
+            let inserted = "x".repeat(next(4));
+            let change = TextChange {
+                serial: 1,
+                start: Pos {
+                    line: 0,
+                    byte: start,
+                },
+                end: Pos {
+                    line: 0,
+                    byte: old_end,
+                },
+                start_utf16: start,
+                end_utf16: old_end,
+                text: inserted.clone(),
+            };
+            let mut rebuilt = vec![line.clone()];
+            remap_spans_rebuilt(&mut rebuilt, &change);
+            let mut moved = line.clone();
+            if remap_line_in_place(&mut moved, start, old_end, start + inserted.len()) {
+                in_place += 1;
+                assert_eq!(vec![moved], rebuilt, "case {case}: {line:?}");
+            } else {
+                refused += 1;
+                assert_eq!(moved, line, "a refusal changes nothing");
+            }
+        }
+        // Both paths were exercised.
+        assert!(in_place > 3_000 && refused > 0, "{in_place} {refused}");
     }
 
     #[test]
