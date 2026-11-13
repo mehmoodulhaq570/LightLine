@@ -283,6 +283,8 @@ impl App {
             && self.view().extra.is_empty()
             && self.editor_context.is_none()
             && self.more_menu.is_none()
+            && self.menu_bar.is_none()
+            && self.menu_bar_focus.is_none()
             && !self.ai_assistant_visible
     }
 

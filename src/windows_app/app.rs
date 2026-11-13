@@ -821,6 +821,18 @@ pub(super) struct App {
     pub(super) editor_context: Option<EditorContextMenu>,
     // The menu behind a pane's "..." button.
     pub(super) more_menu: Option<MoreMenu>,
+    // The menu bar in the title bar (menu_bar.rs): the open menu; the
+    // title with the keyboard after Alt was tapped; Alt held (access
+    // letters underlined) and pressed alone so far; the titles' widths for
+    // the font they were measured in.
+    pub(super) menu_bar: Option<MenuBar>,
+    pub(super) menu_bar_focus: Option<usize>,
+    pub(super) menu_alt_held: bool,
+    pub(super) menu_alt_tap: bool,
+    pub(super) menu_title_widths: RefCell<super::menu_bar::TitleWidths>,
+    // Ctrl, Shift, Alt as a menu item replaying its shortcut says, while
+    // `key` handles it (`modifier_down`).
+    pub(super) replayed_modifiers: Option<(bool, bool, bool)>,
     pub(super) run_choice: Option<(lightline::run_config::Configurations, usize, usize)>,
     // The name the Run dropdown shows, keyed by run.json's path and stamp, so
     // painting doesn't read and parse the file every frame.
@@ -1456,6 +1468,12 @@ impl App {
             caret_on: true,
             editor_context: None,
             more_menu: None,
+            menu_bar: None,
+            menu_bar_focus: None,
+            menu_alt_held: false,
+            menu_alt_tap: false,
+            menu_title_widths: RefCell::new(None),
+            replayed_modifiers: None,
             run_choice: None,
             run_choice_name: RefCell::new(None),
             run_config_panel: None,
@@ -2093,7 +2111,8 @@ impl App {
     pub(super) fn command_center_rect(&self, hwnd: HWND) -> RECT {
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let usable_left = self.scale(176);
+        // Right of the menu bar (menu_bar.rs).
+        let usable_left = self.menu_bar_right(hwnd) + self.scale(menu_bar::SEARCH_GAP);
         let usable_right = client.right - self.scale(46 * 3 + 16);
         let available = (usable_right - usable_left).max(0);
         let width = self

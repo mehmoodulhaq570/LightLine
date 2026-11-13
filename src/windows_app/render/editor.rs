@@ -255,6 +255,7 @@ impl App {
         self.paint_editor_context_menu(hdc, hwnd);
         self.paint_more_menu(hdc, hwnd);
         self.paint_hot_tip(hdc, hwnd);
+        self.paint_menu_bar(hdc, hwnd);
         true
     }
 
@@ -613,6 +614,7 @@ impl App {
                 self.paint_quick_open(hdc, rect);
                 self.paint_run_configurations(hwnd, hdc);
                 self.paint_ai_provider(hwnd, hdc);
+                self.paint_menu_bar(hdc, hwnd);
                 SelectObject(hdc, old_font);
                 present(hdc);
                 EndPaint(hwnd, &ps);
@@ -720,6 +722,7 @@ impl App {
                     ui(63, 47, 150),
                 );
                 SelectObject(hdc, self.ui_font);
+                self.paint_menu_titles(hdc, hwnd);
                 self.paint_hot_title_button(hdc, hwnd);
                 let title_button = self.scale(46);
                 let controls_left = rect.right - title_button * 3;
@@ -1661,6 +1664,7 @@ impl App {
             self.paint_run_configurations(hwnd, hdc);
             self.paint_ai_provider(hwnd, hdc);
             self.paint_hot_tip(hdc, hwnd);
+            self.paint_menu_bar(hdc, hwnd);
             SelectObject(hdc, old_font);
             present(hdc);
             EndPaint(hwnd, &ps);

@@ -813,7 +813,10 @@ impl App {
             self.ai_provider_hover(hwnd, x, y);
             return;
         }
-        if self.editor_context_hover(hwnd, x, y) || self.more_menu_hover(hwnd, x, y) {
+        if self.menu_bar_hover(hwnd, x, y)
+            || self.editor_context_hover(hwnd, x, y)
+            || self.more_menu_hover(hwnd, x, y)
+        {
             return;
         }
 

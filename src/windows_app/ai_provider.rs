@@ -190,7 +190,7 @@ fn contains(rect: RECT, x: i32, y: i32) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
 
-fn open_in_browser(hwnd: HWND, address: &str) {
+pub(super) fn open_in_browser(hwnd: HWND, address: &str) {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     let (operation, target) = (wide("open"), wide(address));
     unsafe {

@@ -59,9 +59,10 @@ Disk space on the dev machine is tight. Prefer `CARGO_INCREMENTAL=0` for long se
 - **Child processes** (LSP, DAP, formatters, runs, git clone) go into a kill-on-close job (`jobs.rs`). They die with LightLine. LSP clients are kept per (language, workspace root).
 - **Quick Open is several modes in one box**: `>` commands, `@` file symbols, `#` workspace symbols, `:` go to line. Picker flags such as `language_pick` and `history_pick` reuse the same box. Adding a mode means touching each of these:
   - `quick_count`
-  - `activate_quick_item`
+  - `activate_quick_item` (and `run_command` for a command)
   - the title, rows and hints in `render/panels.rs::paint_quick_open`
-- **Command Palette entries** are `(name, numeric id)` pairs in `panels.rs::quick_commands`, dispatched by id in `activate_quick_item`. Ids are global; pick an unused one.
+- **Command Palette entries** are `(name, numeric id)` pairs in `panels.rs::QUICK_COMMANDS`, run by id in `run_command` (which `activate_quick_item` calls). Ids are global; pick an unused one.
+- **The menu bar** (`menu_bar.rs`) lists its items as data: each replays its shortcut through `key` (with `replayed_modifiers`, never the thread's key state) or runs a palette id. A new command that belongs in a menu goes in its list there.
 - **"Links after a line"** (▶ Run, Debug, Run test, merge-conflict Accept…) all go through `codelens.rs`. `lens_on_line` decides, `lens_links` lists, paint records hit spans, and `lens_click` acts.
 - **The diff view** (Git review and Local History compare) is gated by `App::showing_diff()` and closed by `close_diff()`. Use these instead of checking `review_file` directly.
 - **Edits must go through `App::replace_range`**, which also notifies LSP and syntax. Wrap multi-step edits in `doc_mut().begin_group()`/`end_group()` so Ctrl+Z undoes them in one step.

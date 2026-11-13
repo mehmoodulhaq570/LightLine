@@ -44,9 +44,12 @@ pub(super) fn decode_utf16_input(pending_high: &mut Option<u16>, unit: u16) -> O
 impl App {
     pub(super) fn key(&mut self, hwnd: HWND, key: u32) -> bool {
         self.clear_hover(hwnd);
-        let ctrl = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
-        let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
-        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        let ctrl = self.modifier_down(VK_CONTROL);
+        let shift = self.modifier_down(VK_SHIFT);
+        let alt = self.modifier_down(VK_MENU);
+        if self.menu_bar_key(hwnd, key, ctrl) {
+            return true;
+        }
         if self.run_choice_key(hwnd, key) {
             return true;
         }
@@ -127,7 +130,7 @@ impl App {
             && !(self.side_view == SideView::Review && self.commit_focus)
             && self.explorer_input.is_none()
         {
-            let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+            let alt = self.modifier_down(VK_MENU);
             // Ctrl+` hides the panel even while the shell has focus.
             if ctrl && !shift && key == VK_OEM_3 as u32 {
                 self.hide_terminal(hwnd);
@@ -550,7 +553,7 @@ impl App {
                 }
                 x if x == VK_RETURN as u32 => {
                     if self.replace_mode {
-                        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+                        let alt = self.modifier_down(VK_MENU);
                         if alt || ctrl {
                             self.replace_all(hwnd);
                         } else {
@@ -844,7 +847,7 @@ impl App {
             return true;
         }
         let cursor = self.view().cursor;
-        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        let alt = self.modifier_down(VK_MENU);
         // Alt+\ asks the AI model for an inline completion at the caret.
         if alt && !shift && !ctrl && (key == VK_OEM_5 as u32 || key == 0xDC) {
             self.trigger_inline_ai(hwnd);
@@ -1062,6 +1065,9 @@ impl App {
     }
 
     pub(super) fn character(&mut self, hwnd: HWND, unit: u16) {
+        if self.menu_bar_char(hwnd, unit) {
+            return;
+        }
         if self.run_choice.is_some() {
             return;
         }
@@ -1487,6 +1493,9 @@ impl App {
         }
         if self.ai_provider.is_some() {
             self.ai_provider_click(hwnd, x, y);
+            return;
+        }
+        if self.menu_bar_click(hwnd, x, y) {
             return;
         }
         if self.editor_context_click(hwnd, x, y) {

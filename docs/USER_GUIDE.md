@@ -16,6 +16,18 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 
 ## Keyboard shortcuts
 
+### Menu bar
+
+The title bar has **File**, **Edit**, **Selection**, **View**, **Go**, **Run**, **Terminal** and **Help** menus, as in VS Code. Each item shows its shortcut, and does exactly what that shortcut (or its Command Palette command) does. Items that need a file open are greyed out on the Welcome screen.
+
+- Click a title to open its menu; while one is open, moving onto another title opens that one. A click on the open title, outside the menu, or the mouse wheel closes it.
+- `Alt+F`, `Alt+E`, `Alt+S`, `Alt+V`, `Alt+G`, `Alt+R`, `Alt+T` and `Alt+H` open a menu. Holding `Alt` underlines each menu's letter, and in an open menu the underlined letter of an item runs it.
+- Tapping `Alt` on its own puts the keyboard on the menu titles: `Left` / `Right` move between them, `Down` or `Enter` opens one, `Esc` leaves.
+- In a menu: `Up` / `Down` move, `Right` opens a submenu (or the next menu), `Left` closes it (or goes to the previous menu), `Home` / `End`, `Enter` runs, `Esc` closes.
+- **File → Open Recent** lists recently opened folders; **Help** opens the User Guide, the keyboard shortcuts, the release notes or a new issue in your browser, and shows LightLine's version.
+- In a narrow window the titles fold into one ☰ button next to the logo; its list opens each menu beside it.
+- In the terminal, `Alt` keys still go to the shell, and in the find box `Alt+R` still switches **Regular Expression**.
+
 ### Unsaved-work recovery
 
 LightLine checkpoints modified documents and untitled text approximately every five seconds when the session changes. Checkpoints are stored in `%APPDATA%\LightLine\session.json`; they do not save over your original files. The next launch offers **Restore** or **Discard**, including when you launch LightLine with a file argument.

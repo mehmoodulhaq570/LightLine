@@ -51,6 +51,7 @@ pub(super) const DLG_NO: isize = 7;
 pub(super) enum DialogIcon {
     Question,
     Error,
+    Info,
 }
 
 impl DialogIcon {
@@ -61,7 +62,7 @@ impl DialogIcon {
     // expanding this refactor into rewiring the dialog module's call chain.
     fn tint(self) -> u32 {
         match self {
-            DialogIcon::Question => ui(56, 189, 248),
+            DialogIcon::Question | DialogIcon::Info => ui(56, 189, 248),
             DialogIcon::Error => ui(205, 79, 79),
         }
     }
@@ -70,6 +71,7 @@ impl DialogIcon {
         match self {
             DialogIcon::Question => "?",
             DialogIcon::Error => "!",
+            DialogIcon::Info => "i",
         }
     }
 }
