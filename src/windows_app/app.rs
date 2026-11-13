@@ -101,6 +101,9 @@ pub(super) enum WorkerMessage {
         serial: u64,
         text: Result<String, String>,
     },
+    // A background save (background_save.rs) has finished, by its id; the
+    // result is collected from its thread.
+    Saved(u64),
 }
 
 // A document's text as of its (id, change_serial); see Tab::recovery_text.
@@ -941,6 +944,10 @@ pub(super) struct App {
     pub(super) gutter_request: Option<PathBuf>,
     // Absolute path whose gutter diff is already cached.
     pub(super) gutter_done: Option<PathBuf>,
+    // The large file being saved on a worker, if any (background_save.rs),
+    // and the id the last one was given.
+    pub(super) background_save: Option<super::background_save::BackgroundSave>,
+    pub(super) background_save_serial: u64,
     pub(super) git_generation: u64,
     // Bumped whenever the workspace is opened, switched or closed, so a
     // background result from an earlier workspace (Add File...) is dropped.
@@ -1542,6 +1549,8 @@ impl App {
             git_busy: false,
             gutter_request: None,
             gutter_done: None,
+            background_save: None,
+            background_save_serial: 0,
             git_generation: 0,
             workspace_generation: 0,
             git_ahead: 0,
@@ -2510,6 +2519,9 @@ impl App {
     }
 
     pub(super) fn can_close_window(&mut self, hwnd: HWND) -> bool {
+        // A file still being written is finished first: the process must not
+        // end halfway through, and the tabs' unsaved state is only known then.
+        self.finish_background_save(hwnd);
         let mut discarded = Vec::new();
         for index in 0..self.tabs.len() {
             if self.tabs[index].document.is_dirty() {
@@ -3201,10 +3213,13 @@ impl App {
                     // A tab not read yet reads the latest file when shown.
                     // LightLine's own save fires this event too; reloading
                     // then would wipe the undo history and the save's status.
+                    // A save still on its worker hasn't recorded the file's
+                    // new time and size yet, so its own write is skipped too.
                     let changed: Vec<usize> = (0..self.tabs.len())
                         .filter(|&index| {
                             let tab = &self.tabs[index];
                             !tab.unloaded
+                                && !self.saving_in_background(tab.document.id())
                                 && tab
                                     .document
                                     .path
@@ -3683,12 +3698,39 @@ impl App {
         )))
     }
 
+    /// Saves the active file; true once it's written.
     pub(super) fn save(&mut self, hwnd: HWND, save_as: bool) -> bool {
         self.save_with(hwnd, save_as, true)
     }
 
+    /// Ctrl+S: like `save`, but a large file is written on a worker
+    /// (background_save.rs), so the answer can come before it's on disk.
+    pub(super) fn save_command(&mut self, hwnd: HWND, save_as: bool) {
+        self.save_in(hwnd, save_as, true, true);
+    }
+
+    /// Saves the active file if it has unsaved changes, after any background
+    /// save has finished; true once the file on disk has the text. For
+    /// commands that read the file from disk, such as Run.
+    pub(super) fn save_if_dirty(&mut self, hwnd: HWND) -> bool {
+        self.finish_background_save(hwnd);
+        !self.doc().is_dirty() || self.save(hwnd, false)
+    }
+
     // `format` is false for the save that follows format-on-save.
     pub(super) fn save_with(&mut self, hwnd: HWND, save_as: bool, format: bool) -> bool {
+        self.save_in(hwnd, save_as, format, false)
+    }
+
+    // `background` lets a large file save on a worker; true then means the
+    // save has started.
+    fn save_in(&mut self, hwnd: HWND, save_as: bool, format: bool, background: bool) -> bool {
+        // One save at a time: a background one finishes first. If that was
+        // this file and nothing was typed since, it's saved already.
+        let doc_id = self.doc().id();
+        if self.finish_background_save(hwnd) == Some(doc_id) && !save_as && !self.doc().is_dirty() {
+            return true;
+        }
         // No file is open; Ctrl+S has nothing to write. A tab whose file
         // hasn't been read has only an empty stand-in, which must never be
         // written over the file (it's read whenever the tab is shown).
@@ -3735,6 +3777,28 @@ impl App {
             return false;
         }
         let format_after = format && self.format_before_save(&path);
+        // A large file already open from this path is written on a worker.
+        // An external formatter's run after the save stays on this path,
+        // since it changes the active document when it answers.
+        if background
+            && !save_as
+            && same_file
+            && !format_after
+            && self.doc().byte_len() >= super::background_save::BACKGROUND_SAVE_BYTES
+        {
+            let checked = if overwrite {
+                Ok(())
+            } else {
+                self.doc().check_unchanged_on_disk(&path)
+            };
+            if let Err(error) = checked {
+                self.error(hwnd, &error);
+                return false;
+            }
+            if self.start_background_save(hwnd, &path) {
+                return true;
+            }
+        }
         let written = if overwrite {
             self.doc_mut().save_over_disk_changes(&path)
         } else {
@@ -3742,34 +3806,7 @@ impl App {
         };
         match written {
             Ok(()) => {
-                self.lsp_after_save(hwnd, old_path.as_deref());
-                self.tab_mut().update_syntax_language();
-                self.check_c_syntax_on_save(&path);
-                self.reveal_file_in_explorer(&path);
-                if let Some(parent) = path.parent() {
-                    self.directory_cache.remove(parent);
-                    self.directory_requests.remove(parent);
-                    if self.expanded_dirs.contains(parent)
-                        || self.workspace_root.as_deref() == Some(parent)
-                    {
-                        self.load_directory(parent);
-                    }
-                }
-                self.status = format!(
-                    "Saved {}",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                );
-                if lightline::settings::Settings::settings_path()
-                    .is_some_and(|settings| Self::same_path(&settings, &path))
-                    && self.reload_settings()
-                {
-                    self.status = "Settings saved and applied".into();
-                }
-                self.gutter_done = None;
-                self.refresh_active_git_diff();
-                // A save is the moment a change appears or disappears, so the
-                // panel and the branch chip ask Git again rather than guessing.
-                self.refresh_git();
+                self.after_save(hwnd, self.active, old_path.as_deref(), &path);
                 if format_after {
                     self.format_with_external_formatter(hwnd, true);
                 }
@@ -3781,6 +3818,55 @@ impl App {
                 false
             }
         }
+    }
+
+    // What follows a successful save of tab `index` (the active one, except
+    // for a background save that finished after the user switched tabs),
+    // which was at `old_path` before and is now written to `path`.
+    pub(super) fn after_save(
+        &mut self,
+        hwnd: HWND,
+        index: usize,
+        old_path: Option<&Path>,
+        path: &Path,
+    ) {
+        if index == self.active {
+            self.lsp_after_save(hwnd, old_path);
+        } else if self.tabs[index].lsp_opened
+            && let Some(client) = self.tab_lsp(index)
+        {
+            // Only a save to the same path finishes in the background, so
+            // there's no server to move the file to; it's just told.
+            client.send(lightline::lsp::Command::Save {
+                uri: lsp::file_uri(path),
+            });
+        }
+        self.tabs[index].update_syntax_language();
+        self.check_c_syntax_on_save(path);
+        self.reveal_file_in_explorer(path);
+        if let Some(parent) = path.parent() {
+            self.directory_cache.remove(parent);
+            self.directory_requests.remove(parent);
+            if self.expanded_dirs.contains(parent) || self.workspace_root.as_deref() == Some(parent)
+            {
+                self.load_directory(parent);
+            }
+        }
+        self.status = format!(
+            "Saved {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        if lightline::settings::Settings::settings_path()
+            .is_some_and(|settings| Self::same_path(&settings, path))
+            && self.reload_settings()
+        {
+            self.status = "Settings saved and applied".into();
+        }
+        self.gutter_done = None;
+        self.refresh_active_git_diff();
+        // A save is the moment a change appears or disappears, so the
+        // panel and the branch chip ask Git again rather than guessing.
+        self.refresh_git();
     }
 
     // The active file changed or was deleted on disk since it was read, and
@@ -3851,6 +3937,10 @@ impl App {
     }
 
     pub(super) fn can_discard(&mut self, hwnd: HWND) -> bool {
+        // Whether it's unsaved is known once its background save is done.
+        if self.saving_in_background(self.doc().id()) {
+            self.finish_background_save(hwnd);
+        }
         if !self.doc().is_dirty() {
             return true;
         }

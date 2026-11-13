@@ -75,6 +75,8 @@ impl App {
             let Some(config) = saved.active() else {
                 return Ok(None);
             };
+            // A background save, of this tab or the entry's, finishes first.
+            self.finish_background_save(hwnd);
             if self.doc().is_dirty() && !self.tab().read_only() && !self.save(hwnd, false) {
                 return Err("Save the file before running this configuration".into());
             }

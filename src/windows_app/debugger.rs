@@ -167,7 +167,7 @@ impl App {
             self.debug_not_started(hwnd, "Open a Python file to debug it");
             return;
         }
-        if self.doc().is_dirty() && !self.save(hwnd, false) {
+        if !self.save_if_dirty(hwnd) {
             self.debug_not_started(hwnd, "Save the Python file before debugging it");
             return;
         }
@@ -228,6 +228,8 @@ impl App {
     // Builds the workspace, then launches it under lldb-dap (see
     // debug_build_finished) with the breakpoints set across all open tabs.
     fn start_rust_debug(&mut self, hwnd: HWND) {
+        // The build reads the files from disk.
+        self.finish_background_save(hwnd);
         let Some(root) = self.workspace_root.clone() else {
             self.debug_not_started(hwnd, "Open a Rust workspace to debug");
             return;
@@ -474,6 +476,8 @@ impl App {
                     .path
                     .as_deref()
                     .is_some_and(|open| Self::same_path(open, &file));
+                // A background save of the file, in any tab, finishes first.
+                self.finish_background_save(hwnd);
                 if editing && self.doc().is_dirty() && !self.save(hwnd, false) {
                     self.debug_not_started(hwnd, "Save the Python file before debugging it");
                     return;
