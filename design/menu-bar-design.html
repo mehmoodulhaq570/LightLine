@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Menu Bar Design</title>
+<style>
+  :root {
+    --shell: #050a16;
+    --title: #081122;
+    --rail: #070d1b;
+    --sidebar: #081020;
+    --editor: #070e1d;
+    --active: #111f3b;
+    --select: #1a3065;
+    --edge: #182f52;
+    --command-edge: #2b4c84;
+    --command-bg: #0c1930;
+    --text: #e2e8f0;
+    --label: #9fb0cc;
+    --muted: #7e92b2;
+    --blue: #5297ff;
+    --violet: #8b5cf6;
+    --green: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #02060f;
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .page { max-width: 1320px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 48px 0 12px; }
+  p.lead { color: var(--label); margin: 0 0 20px; max-width: 820px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; align-items: center; }
+  .toolbar button {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--active);
+    border: 1px solid var(--edge); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  }
+  .toolbar button[aria-pressed="true"] { background: var(--select); border-color: var(--blue); }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+  .stage { overflow-x: auto; padding-bottom: 6px; }
+
+  /* The window mockup */
+  .window {
+    position: relative; width: 1200px; height: 720px; overflow: hidden;
+    background: var(--shell); border: 1px solid #1b3052; border-radius: 10px;
+    display: flex; flex-direction: column; font-size: 13px; user-select: none;
+  }
+  .window.narrow { width: 900px; }
+  .titlebar {
+    height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+    padding-left: 14px; background: var(--title); border-bottom: 1px solid var(--active);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; background: #4f46e5; display: grid; place-items: center; }
+  .brand-name { font-size: 16px; font-weight: 600; }
+  .badge { font-size: 11px; font-weight: 600; color: #c7d2fe; background: #312e81; border-radius: 5px; padding: 2px 6px; }
+  .window.narrow .brand-name, .window.narrow .badge { display: none; }
+  .menubar { display: flex; gap: 2px; margin-left: 10px; }
+  .menubar button, .menu-button {
+    height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent;
+    color: var(--label); font: inherit; font-size: 13px; cursor: default;
+  }
+  .menubar button:hover { background: var(--active); color: var(--text); }
+  .menubar button.open, .menu-button.open { background: var(--select); color: var(--text); }
+  .menubar button.focused { outline: 1px solid var(--blue); outline-offset: -1px; }
+  .menu-button { display: none; width: 36px; padding: 0; place-items: center; }
+  .window.narrow .menubar { display: none; }
+  .window.narrow .menu-button { display: grid; }
+  .access { text-decoration: none; }
+  .window.alt .access { text-decoration: underline; }
+  .command-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; }
+  .command-center div {
+    width: 420px; max-width: 100%; height: 32px; display: flex; align-items: center; gap: 8px;
+    padding: 0 6px 0 12px; border: 1px solid var(--command-edge); border-radius: 8px;
+    background: var(--command-bg); color: var(--muted);
+  }
+  .command-center span.text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kbd { font-size: 11px; color: var(--label); background: #152544; border-radius: 4px; padding: 2px 6px; }
+  .caption-buttons { display: flex; flex-shrink: 0; }
+  .caption-buttons span { width: 46px; height: 52px; display: grid; place-items: center; }
+  .body { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 56px; flex-shrink: 0; background: var(--rail); display: flex; flex-direction: column; align-items: center; gap: 22px; padding-top: 18px; }
+  .rail .on { width: 40px; height: 40px; border-radius: 8px; background: var(--active); display: grid; place-items: center; }
+  .sidebar { width: 240px; flex-shrink: 0; background: var(--sidebar); border-right: 1px solid var(--active); padding: 14px 10px; }
+  .window.narrow .sidebar { display: none; }
+  .sidebar .heading { font-size: 12px; letter-spacing: .06em; color: var(--muted); padding: 0 8px 10px; }
+  .sidebar div.row { padding: 5px 8px; color: #c8d3e6; }
+  .sidebar div.row.sel { background: var(--active); border: 1px solid #1d3a6e; border-radius: 6px; color: var(--text); }
+  .editor { flex: 1; min-width: 0; background: var(--editor); display: flex; flex-direction: column; }
+  .tabs { height: 40px; display: flex; align-items: flex-end; background: var(--title); border-bottom: 1px solid var(--active); padding-left: 4px; }
+  .tab { height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--editor); border-top: 2px solid var(--violet); }
+  .crumbs { height: 32px; display: flex; align-items: center; padding: 0 20px; color: var(--label); border-bottom: 1px solid #0e1a33; }
+  pre.code { margin: 0; padding-top: 14px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 14px; line-height: 25px; }
+  .ln { color: #5c6f8f; }
+  .statusbar { height: 28px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 0 16px; background: var(--editor); border-top: 1px solid var(--active); color: var(--label); font-size: 12px; }
+
+  /* Menus: drawn like LightLine's existing "..." and right-click menus */
+  .menu {
+    position: absolute; min-width: 300px; padding: 6px; background: var(--sidebar);
+    border: 1px solid var(--edge); border-radius: 8px;
+    box-shadow: 4px 6px 0 #030812, 0 12px 28px rgba(0, 0, 0, .45); z-index: 5;
+  }
+  .menu .item {
+    height: 30px; display: flex; align-items: center; gap: 16px; padding: 0 10px; border-radius: 6px;
+    color: var(--text); white-space: nowrap;
+  }
+  .menu .item.hot { background: var(--select); }
+  .menu .item .key { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .menu .item .chev { margin-left: auto; color: var(--label); }
+  .menu .item .key + .chev { margin-left: 0; }
+  .menu .sep { height: 1px; margin: 5px 8px; background: var(--edge); }
+
+  /* Spec and reference */
+  table.spec { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13px; }
+  table.spec th, table.spec td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); vertical-align: top; }
+  table.spec th { color: var(--label); font-weight: 600; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #ffffff33; vertical-align: -1px; margin-right: 6px; }
+  .all { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .all h3 { margin: 0 0 8px; font-size: 15px; }
+  .all .menu { position: static; box-shadow: none; }
+  ul.notes { color: var(--label); max-width: 900px; padding-left: 20px; }
+  ul.notes li { margin: 4px 0; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; color: #c7d2fe; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>LightLine menu bar: design</h1>
+  <p class="lead">A VS Code-style menu bar in LightLine's title bar, between the logo and the search box. Every item runs a command LightLine already has (most are Command Palette commands), and shows its shortcut. Drawn in LightLine's own colors and in the style of its existing "..." and right-click menus.</p>
+
+  <div class="toolbar">
+    <button type="button" id="wide" aria-pressed="true">Wide window</button>
+    <button type="button" id="narrow" aria-pressed="false">Narrow window</button>
+    <span class="hint">Click a menu title, then hover to switch menus. Hold Alt to see access keys, then press a letter (F, E, S, V, G, R, T, H). Arrow keys move, Enter runs, Esc closes.</span>
+  </div>
+  <div class="stage">
+    <div class="window" id="window">
+      <div class="titlebar">
+        <div class="brand">
+          <div class="logo"><svg width="16" height="18" viewBox="0 0 16 18" aria-hidden="true"><path d="M9.5 1 2 10.2h5.2L6.2 17 14 7.6H8.8z" fill="#fde68a"/></svg></div>
+          <span class="brand-name">LightLine</span><span class="badge">IDE</span>
+        </div>
+        <button type="button" class="menu-button" id="menuButton" aria-label="Application menu"><svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M1 1h14M1 6h14M1 11h14" stroke="#e2e8f0" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+        <nav class="menubar" id="menubar" aria-label="Menu bar"></nav>
+        <div class="command-center"><div><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="#7e92b2" stroke-width="1.4"/><path d="m9.4 9.4 3.4 3.4" stroke="#7e92b2" stroke-width="1.4" stroke-linecap="round"/></svg><span class="text">Search files, symbols, commands...</span><span class="kbd">Ctrl P</span></div></div>
+        <div class="caption-buttons" aria-hidden="true">
+          <span><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 6h10" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+          <span><svg width="12" height="12" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+          <span><svg width="12" height="12" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+        </div>
+      </div>
+      <div class="body">
+        <div class="rail" aria-hidden="true">
+          <svg width="20" height="16" viewBox="0 0 20 16"><path d="M2 2h16M2 8h16M2 14h16" stroke="#7e92b2" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <div class="on"><svg width="20" height="18" viewBox="0 0 20 18"><path d="M2 3.5h6l2 2h8v10H2z" fill="none" stroke="#5297ff" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+          <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="7.5" cy="7.5" r="5" fill="none" stroke="#7e92b2" stroke-width="1.6"/><path d="m11.5 11.5 4.5 4.5" stroke="#7e92b2" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg width="16" height="18" viewBox="0 0 16 18"><path d="M3 2v14l11-7z" fill="none" stroke="#7e92b2" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="sidebar">
+          <div class="heading">EXPLORER</div>
+          <div class="row">⌄&nbsp; ws</div>
+          <div class="row" style="padding-left: 26px">›&nbsp; src</div>
+          <div class="row sel" style="margin-left: 36px">main.rs</div>
+          <div class="row" style="padding-left: 26px">Cargo.toml</div>
+        </div>
+        <div class="editor">
+          <div class="tabs"><div class="tab">main.rs <span style="color: var(--muted)">×</span></div></div>
+          <div class="crumbs">src &nbsp;›&nbsp; main.rs</div>
+<pre class="code"><span class="ln">  1  </span><span style="color:#5297ff">use</span> std::io;
+<span class="ln">  2  </span>
+<span class="ln">  3  </span><span style="color:#5297ff">fn</span> <span style="color:#dcd282">main</span>() {
+<span class="ln">  4  </span>    <span style="color:#5297ff">let</span> name = <span style="color:#34d399">"LightLine"</span>;
+<span class="ln">  5  </span>    <span style="color:#8b5cf6">println!</span>(<span style="color:#34d399">"hello, {name}"</span>);
+<span class="ln">  6  </span>}</pre>
+        </div>
+      </div>
+      <div class="statusbar"><span>⊗ 0 &nbsp; △ 0</span><span style="margin-left:auto" id="status">Ln 3, Col 12 &nbsp;&nbsp; Spaces: 4 &nbsp;&nbsp; UTF-8 &nbsp;&nbsp; <span style="color:#50a0dc">Rust</span></span><span style="color: var(--green)">●</span><span>Ready</span></div>
+    </div>
+  </div>
+
+  <h2>Layout and look</h2>
+  <table class="spec">
+    <tr><th>Part</th><th>Size</th><th>Look</th></tr>
+    <tr><td>Title bar</td><td>52 px high (as today)</td><td><span class="swatch" style="background:#081122"></span>#081122, 1 px line below <span class="swatch" style="background:#111f3b"></span>#111f3b</td></tr>
+    <tr><td>Menu titles</td><td>30 px high, 10 px side padding, 2 px apart, 10 px after the logo</td><td>Text <span class="swatch" style="background:#9fb0cc"></span>#9fb0cc; hover <span class="swatch" style="background:#111f3b"></span>#111f3b; open <span class="swatch" style="background:#1a3065"></span>#1a3065 with white text; 6 px corners</td></tr>
+    <tr><td>Search box</td><td>Stays centred in the space left; 420 px, shrinks first</td><td>Unchanged</td></tr>
+    <tr><td>Dropdown</td><td>At least 300 px wide, 6 px inset, opens 2 px under its title, left-aligned with it</td><td>Fill <span class="swatch" style="background:#081020"></span>#081020, border <span class="swatch" style="background:#182f52"></span>#182f52, 8 px corners, shadow as the "..." menu</td></tr>
+    <tr><td>Rows</td><td>30 px; label left, shortcut right-aligned; separators 1 px with 5 px around</td><td>Highlight <span class="swatch" style="background:#1a3065"></span>#1a3065, 6 px corners; shortcut <span class="swatch" style="background:#7e92b2"></span>#7e92b2</td></tr>
+    <tr><td>Narrow window</td><td>When the eight titles and a 240 px search box no longer fit (about 1000 px)</td><td>One ☰ button replaces them; its list opens each menu to the side</td></tr>
+    <tr><td>Themes</td><td></td><td>All colors come from the active color theme (<code>theme.rs</code>), so light themes and installed themes follow</td></tr>
+  </table>
+
+  <h2>Behaviour</h2>
+  <ul class="notes">
+    <li><strong>Mouse:</strong> a click on a title opens its menu; while one is open, moving onto another title opens that one; a click outside, or on the open title, closes it.</li>
+    <li><strong>Keyboard:</strong> <code>Alt+F</code>, <code>Alt+E</code>, <code>Alt+S</code>, <code>Alt+V</code>, <code>Alt+G</code>, <code>Alt+R</code>, <code>Alt+T</code>, <code>Alt+H</code> open a menu; holding Alt underlines the access letters; Up/Down move, Left/Right go to the next menu, Enter runs, Esc closes. <code>Alt+R</code> still toggles Regular Expression while the find box has focus.</li>
+    <li><strong>Commands:</strong> each item calls what the Command Palette or its shortcut already calls, so nothing behaves differently from a menu. Items that don't apply right now (Run with no file open) are greyed out.</li>
+    <li><strong>Speed:</strong> painted in the backbuffer like the other menus; nothing runs until a menu opens, no timers, no new work at startup. The titles are part of the chrome, redrawn only on full-frame paints, so typing and scrolling stay on the fast path.</li>
+  </ul>
+
+  <h2>Every menu</h2>
+  <div class="all" id="all"></div>
+</div>
+
+<script>
+  // [label, access letter, shortcut, submenu?]; "-" is a separator.
+  const MENUS = [
+    ["File", "F", [
+      ["New Tab", "N", "Ctrl+N"], ["New File in Workspace...", "W", ""], "-",
+      ["Open File...", "O", "Ctrl+O"], ["Open Folder...", "F", "Ctrl+Shift+O"], ["Open Recent", "R", "", true], "-",
+      ["Save", "S", "Ctrl+S"], ["Local History...", "H", ""], "-",
+      ["Preferences", "P", "", true], "-",
+      ["Close Editor", "C", "Ctrl+W"], ["Close Workspace", "k", "Ctrl+Shift+W"], "-",
+      ["Exit", "x", "Alt+F4"]]],
+    ["Edit", "E", [
+      ["Undo", "U", "Ctrl+Z"], ["Redo", "R", "Ctrl+Y"], "-",
+      ["Cut", "t", "Ctrl+X"], ["Copy", "C", "Ctrl+C"], ["Paste", "P", "Ctrl+V"], "-",
+      ["Find", "F", "Ctrl+F"], ["Replace", "e", "Ctrl+H"], "-",
+      ["Find in Files", "i", "Ctrl+Shift+F"], ["Replace in Files", "a", ""], "-",
+      ["Toggle Line Comment", "L", "Ctrl+/"], ["Format Document", "D", "Shift+Alt+F"]]],
+    ["Selection", "S", [
+      ["Select All", "A", "Ctrl+A"], "-",
+      ["Add Cursor Above", "b", "Ctrl+Alt+Up"], ["Add Cursor Below", "l", "Ctrl+Alt+Down"],
+      ["Add Next Occurrence", "N", "Ctrl+D"]]],
+    ["View", "V", [
+      ["Command Palette...", "C", "Ctrl+Shift+P"], ["Quick Open...", "Q", "Ctrl+P"], "-",
+      ["Explorer", "E", ""], ["Search", "S", "Ctrl+Shift+F"], ["Source Control", "u", "Ctrl+Shift+G"],
+      ["Run & Debug", "D", "Ctrl+Shift+D"], ["Extensions", "x", "Ctrl+Shift+X"], "-",
+      ["Problems", "P", "Ctrl+Shift+M"], ["Debug Console", "b", "Ctrl+Shift+Y"], ["Terminal", "T", "Ctrl+`"], "-",
+      ["Side Panel", "i", "Ctrl+B"], ["Split Editor", "l", "Ctrl+\\"], ["Word Wrap", "W", "Alt+Z"], "-",
+      ["Zoom In", "o", "Ctrl++"], ["Zoom Out", "m", "Ctrl+-"], ["Reset Zoom", "R", "Ctrl+0"], "-",
+      ["Markdown Preview", "k", "Ctrl+Shift+V"]]],
+    ["Go", "G", [
+      ["Go to File...", "F", "Ctrl+P"], ["Go to Symbol in File...", "S", "Ctrl+P, @"],
+      ["Go to Symbol in Workspace...", "W", "Ctrl+T"], ["Go to Line...", "L", "Ctrl+G"], "-",
+      ["Go to Definition", "D", "F12"], ["Find All References", "R", "Shift+F12"], "-",
+      ["Next Merge Conflict", "N", ""]]],
+    ["Run", "R", [
+      ["Run File", "R", "Ctrl+Shift+R"], ["Stop Running Program", "S", ""], ["Run Rust Tests", "T", "Ctrl+Shift+B"], "-",
+      ["Start Debugging", "D", "F5"], ["Stop Debugging", "g", "Shift+F5"], ["Step Over", "O", "F10"],
+      ["Step Into", "I", "F11"], ["Step Out", "u", "Shift+F11"], ["Toggle Breakpoint", "B", "F9"], "-",
+      ["Run Configurations...", "C", ""], ["Choose the File's Language...", "L", ""],
+      ["Python: Install debugpy", "P", ""]]],
+    ["Terminal", "T", [
+      ["New Terminal", "N", "Ctrl+Shift+`"], ["New Terminal With Profile", "W", "", true], "-",
+      ["Show or Hide Terminal", "S", "Ctrl+`"], ["Kill Terminal", "K", ""], ["Restart Terminal", "R", ""], "-",
+      ["Default Profile", "D", "", true]]],
+    ["Help", "H", [
+      ["Keyboard Shortcuts", "K", ""], ["User Guide", "U", ""], "-",
+      ["Release Notes", "N", ""], ["Report an Issue", "I", ""], "-",
+      ["About LightLine", "A", ""]]],
+  ];
+
+  const win = document.getElementById("window");
+  const bar = document.getElementById("menubar");
+  const menuButton = document.getElementById("menuButton");
+  let open = -1;       // index of the open menu
+  let hot = -1;        // highlighted row in it
+  let panel = null;    // the open dropdown element
+  let side = null;     // narrow mode: the list of menus
+
+  function labelWithAccess(label, access) {
+    const at = label.indexOf(access);
+    if (at < 0) return document.createTextNode(label);
+    const span = document.createElement("span");
+    span.append(label.slice(0, at));
+    const u = document.createElement("span");
+    u.className = "access";
+    u.textContent = access;
+    span.append(u, label.slice(at + access.length));
+    return span;
+  }
+
+  function buildMenu(items, hotIndex) {
+    const menu = document.createElement("div");
+    menu.className = "menu";
+    menu.setAttribute("role", "menu");
+    items.forEach((it, i) => {
+      if (it === "-") {
+        const s = document.createElement("div");
+        s.className = "sep";
+        menu.append(s);
+        return;
+      }
+      const row = document.createElement("div");
+      row.className = "item" + (i === hotIndex ? " hot" : "");
+      row.setAttribute("role", "menuitem");
+      row.append(labelWithAccess(it[0], it[1]));
+      if (it[2]) {
+        const k = document.createElement("span");
+        k.className = "key";
+        k.textContent = it[2];
+        row.append(k);
+      }
+      if (it[3]) {
+        const c = document.createElement("span");
+        c.className = "chev";
+        c.textContent = "›";
+        row.append(c);
+      }
+      row.addEventListener("mouseenter", () => { hot = i; render(); });
+      row.addEventListener("click", () => ran(it[0]));
+      menu.append(row);
+    });
+    return menu;
+  }
+
+  function ran(label) {
+    document.getElementById("status").textContent = "Ran: " + label;
+    close();
+  }
+
+  function close() { open = -1; hot = -1; render(); }
+
+  function render() {
+    if (panel) { panel.remove(); panel = null; }
+    if (side) { side.remove(); side = null; }
+    [...bar.children].forEach((b, i) => b.classList.toggle("open", i === open));
+    const narrow = win.classList.contains("narrow");
+    menuButton.classList.toggle("open", narrow && open >= 0);
+    if (open < 0) return;
+    const items = MENUS[open][2];
+    if (narrow) {
+      side = buildMenu(MENUS.map(([name, access]) => [name, access, "", true]), open);
+      side.style.minWidth = "200px";
+      side.style.left = (menuButton.offsetLeft - 4) + "px";
+      side.style.top = "50px";
+      [...side.children].forEach((row, i) => {
+        row.onmouseenter = () => { open = i; hot = -1; render(); };
+      });
+      win.append(side);
+      panel = buildMenu(items, hot);
+      panel.style.left = (side.offsetLeft + side.offsetWidth + 2) + "px";
+      panel.style.top = (50 + 6 + open * 30) + "px";
+    } else {
+      const title = bar.children[open];
+      panel = buildMenu(items, hot);
+      panel.style.left = title.offsetLeft + "px";
+      panel.style.top = "50px";
+    }
+    win.append(panel);
+  }
+
+  MENUS.forEach(([name, access], i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.append(labelWithAccess(name, access));
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); open = open === i ? -1 : i; hot = -1; render(); });
+    b.addEventListener("mouseenter", () => { if (open >= 0 && open !== i) { open = i; hot = -1; render(); } });
+    bar.append(b);
+  });
+  menuButton.addEventListener("mousedown", (e) => { e.preventDefault(); open = open >= 0 ? -1 : 0; hot = -1; render(); });
+
+  document.addEventListener("mousedown", (e) => {
+    if (open >= 0 && !e.target.closest(".menu") && !e.target.closest(".menubar") && !e.target.closest(".menu-button")) close();
+  });
+
+  function step(dir) {
+    const items = MENUS[open][2];
+    let i = hot;
+    for (let n = 0; n < items.length; n++) {
+      i = (i + dir + items.length) % items.length;
+      if (items[i] !== "-") { hot = i; return; }
+    }
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Alt") { win.classList.add("alt"); e.preventDefault(); return; }
+    if (e.altKey && !e.ctrlKey) {
+      const i = MENUS.findIndex(([, access]) => access.toLowerCase() === e.key.toLowerCase());
+      if (i >= 0) { open = i; hot = -1; step(1); render(); e.preventDefault(); }
+      return;
+    }
+    if (open < 0) return;
+    if (e.key === "Escape") { close(); }
+    else if (e.key === "ArrowDown") { step(1); render(); }
+    else if (e.key === "ArrowUp") { step(-1); render(); }
+    else if (e.key === "ArrowRight") { open = (open + 1) % MENUS.length; hot = -1; step(1); render(); }
+    else if (e.key === "ArrowLeft") { open = (open + MENUS.length - 1) % MENUS.length; hot = -1; step(1); render(); }
+    else if (e.key === "Enter" && hot >= 0) { ran(MENUS[open][2][hot][0]); }
+    else return;
+    e.preventDefault();
+  });
+  document.addEventListener("keyup", (e) => { if (e.key === "Alt") win.classList.remove("alt"); });
+  window.addEventListener("blur", () => win.classList.remove("alt"));
+
+  for (const [id, narrow] of [["wide", false], ["narrow", true]]) {
+    document.getElementById(id).addEventListener("click", () => {
+      win.classList.toggle("narrow", narrow);
+      document.getElementById("wide").setAttribute("aria-pressed", String(!narrow));
+      document.getElementById("narrow").setAttribute("aria-pressed", String(narrow));
+      close();
+    });
+  }
+
+  // The reference grid of every menu.
+  const all = document.getElementById("all");
+  MENUS.forEach(([name, , items]) => {
+    const box = document.createElement("section");
+    const h = document.createElement("h3");
+    h.textContent = name;
+    box.append(h, buildMenu(items, -1));
+    all.append(box);
+  });
+  all.querySelectorAll(".item").forEach((row) => row.replaceWith(row.cloneNode(true)));
+
+  // Start with the File menu open, as in the mockups.
+  open = 0; hot = 4; render();
+</script>
+</body>
+</html>

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Menu Bar**: The title bar now has **File**, **Edit**, **Selection**, **View**, **Go**, **Run**, **Terminal** and **Help** menus, as in VS Code, between the logo and the search box. Every item does what LightLine could already do from a shortcut or the Command Palette, and shows its shortcut beside it, so the menus also show you the keys. **File → Open Recent** reopens a recent folder; **Help** opens the User Guide, the keyboard shortcuts, the release notes or a new issue, and **About LightLine** shows the version. Click a title, or press `Alt` with its underlined letter (`Alt+F`, `Alt+E`...); tapping `Alt` alone puts the keyboard on the titles, and the arrow keys, `Enter` and `Esc` work in the menus. Items that need an open file are greyed out on the Welcome screen. In a narrow window the menus fold into one ☰ button. Nothing runs until a menu opens, so starting and typing are as fast as before; the terminal keeps its `Alt` keys and the find box keeps `Alt+R` for Regular Expression.
+
 #### Changed
 
 - **Faster Typing on Very Long Lines**: Typing on a very long line, such as a minified JSON or JavaScript file, no longer gets slower the further along the line you are. Each keystroke used to measure the line from its start several times, and it recolored and repositioned every bracket on the line even though only a screenful shows. Now LightLine reuses what it measured on the last keystroke, and colors only the part of the line in view. On a 510 KB one-line JSON file, a keystroke costs about 10–12 million CPU cycles of work on the window's thread, wherever the caret is on the line. With v0.10.0 it was 26–29 million near the line's start and 33–52 million halfway along. The screen looks exactly the same as before. Typing in ordinary files costs the same as before, about 8 million cycles per key in a 3,148-line Rust file with rust-analyzer running.

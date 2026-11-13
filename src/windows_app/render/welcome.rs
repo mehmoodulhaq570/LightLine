@@ -370,6 +370,7 @@ impl App {
             ui(63, 47, 150),
         );
         unsafe { SelectObject(hdc, self.ui_font) };
+        self.paint_menu_titles(hdc, hwnd);
 
         let command = self.command_center_rect(hwnd);
         if command.right > command.left {

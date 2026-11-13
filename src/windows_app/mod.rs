@@ -20,6 +20,7 @@ mod hscroll;
 mod image_view;
 mod local_history;
 mod markdown_view;
+mod menu_bar;
 mod merge_conflict;
 mod more_menu;
 mod rename;
@@ -66,6 +67,7 @@ use app::{
     WorkerMessage, is_c_family_path, is_cpp_path,
 };
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
+use menu_bar::MenuBar;
 use more_menu::MoreMenu;
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};

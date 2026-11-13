@@ -123,7 +123,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 && point.y < command.bottom;
             if point.y >= 0
                 && point.y < app.chrome_top()
-                && point.x >= app.scale(176)
+                && point.x >= app.menu_bar_right(hwnd)
                 && point.x < controls_left
                 && !over_command
             {
@@ -184,6 +184,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.focused = false;
             app.dismiss_editor_context(hwnd);
             app.dismiss_more_menu(hwnd);
+            app.menu_bar_focus_lost(hwnd);
             unsafe {
                 KillTimer(hwnd, 1);
                 InvalidateRect(hwnd, null(), 0);
@@ -386,6 +387,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         }
         WM_KEYDOWN => {
             let key = wparam as u32;
+            app.menu_alt_interrupted();
             if app.key(hwnd, key) {
                 // The editor inserts newlines and tabs from WM_CHAR. When a
                 // handler consumed Enter or Tab instead (running a palette
@@ -414,6 +416,16 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
         WM_SYSKEYDOWN => {
             let key = wparam as u32;
             let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
+            // The menu bar (menu_bar.rs): Alt held underlines the access
+            // letters (not again on auto-repeat), Alt+F, Alt+E... open menus.
+            if key == VK_MENU as u32 {
+                if lparam & (1 << 30) == 0 {
+                    app.menu_alt_down(hwnd);
+                }
+            } else if app.menu_bar_alt_key(hwnd, key, shift) {
+                SYSKEY_HANDLED.store(true, Ordering::Relaxed);
+                return 0;
+            }
             let routed = key == VK_F10 as u32
                 // Shift+Alt+F (Format Document), Shift+Alt+O (Organize Imports).
                 || (shift && (key == 0x46 || key == 0x4F))
@@ -434,6 +446,17 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             let handled = routed && app.key(hwnd, key);
             SYSKEY_HANDLED.store(handled, Ordering::Relaxed);
             if handled {
+                0
+            } else {
+                drop(app);
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+            }
+        }
+        // Alt released: tapped alone, it puts the keyboard on the menu bar
+        // instead of Windows' invisible system-menu mode. After Ctrl+Alt
+        // chords it arrives as WM_KEYUP.
+        WM_SYSKEYUP | WM_KEYUP if wparam as u32 == VK_MENU as u32 => {
+            if app.menu_alt_up(hwnd) {
                 0
             } else {
                 drop(app);
@@ -582,6 +605,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 return 0;
             }
             if app.editor_context.is_some() {
+                return 0;
+            }
+            if app.menu_bar.is_some() {
+                app.close_menu_bar(hwnd);
                 return 0;
             }
             app.cancel_rename(hwnd);

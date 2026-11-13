@@ -29,6 +29,9 @@ pub(super) enum Hot {
     // Minimize, maximize/restore, close.
     TitleButton(usize),
     CommandCenter,
+    // A menu title (menu_bar.rs), or the one button they fold into.
+    MenuTitle(usize),
+    MenuButton,
     // A Welcome screen target, by its index in `WelcomeLayout::targets`.
     Welcome(usize),
 }
@@ -41,6 +44,7 @@ impl App {
             || self.ai_provider.is_some()
             || self.editor_context.is_some()
             || self.more_menu.is_some()
+            || self.menu_bar.is_some()
             || self.quick_open
             || self.debug_config_menu_open
         {
@@ -56,6 +60,9 @@ impl App {
                 return Some(Hot::TitleButton(
                     ((x - controls_left) / button.max(1)).clamp(0, 2) as usize,
                 ));
+            }
+            if let Some(title) = self.menu_title_at(hwnd, x, y) {
+                return Some(title);
             }
             let command = self.command_center_rect(hwnd);
             return (x >= command.left
@@ -137,6 +144,7 @@ impl App {
                 })
             }
             Hot::CommandCenter => Some(self.command_center_rect(hwnd)),
+            Hot::MenuTitle(_) | Hot::MenuButton => self.menu_title_rect(hwnd, hot),
             Hot::Welcome(index) => self
                 .welcome_layout(client)
                 .targets
@@ -173,6 +181,7 @@ impl App {
                 unsafe { GetClientRect(hwnd, &mut client) };
                 return welcome_rail_tip(&self.welcome_layout(client).targets, index);
             }
+            Hot::MenuButton => "Menu (Alt)",
             _ => return None,
         })
     }

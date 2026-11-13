@@ -204,7 +204,8 @@ Background work runs on threads and wakes the window.
 
 ### Other UI patterns to follow
 
-- **Command Palette entries** are `(name, numeric id)` pairs in `panels.rs::quick_commands`, dispatched by id in `activate_quick_item`. Ids are global, so pick an unused one.
+- **Command Palette entries** are `(name, numeric id)` pairs in `panels.rs::QUICK_COMMANDS`, run by id in `run_command` (which `activate_quick_item` calls). Ids are global, so pick an unused one.
+- **The menu bar** (`menu_bar.rs`) lists its items as data: each replays its shortcut through `key` (with `replayed_modifiers`, never the thread's key state) or runs a palette id. A new command that belongs in a menu goes in its list there.
 - **"Links after a line"** (▶ Run, Debug, Run test, merge-conflict Accept…) all go through `codelens.rs`:
   1. `lens_on_line` decides whether a line gets links;
   2. `lens_links` lists them;

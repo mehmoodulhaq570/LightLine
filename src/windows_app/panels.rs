@@ -1,6 +1,83 @@
 use super::run_language::RunLanguage;
 use super::*;
 
+/// The Command Palette's commands: name and the id `run_command` runs.
+/// Ids are global (the menu bar uses them too); pick an unused one.
+pub(super) const QUICK_COMMANDS: &[(&str, u8)] = &[
+    ("Search in files", 0),
+    ("Replace in Files", 63),
+    ("Run Rust tests", 1),
+    ("Run Python File", 8),
+    ("Run Active File (Ctrl+Shift+R)", 48),
+    ("Stop Running Program", 49),
+    ("Run: Configure / Select Saved Configuration", 50),
+    ("Run: Choose the File's Language", 59),
+    ("Review Git changes", 2),
+    ("Open folder", 3),
+    ("New file", 4),
+    ("Select Python interpreter", 5),
+    ("Select Python virtual environment", 6),
+    // Named "Close editor split" while the editor is split (quick_commands).
+    ("Split editor", 7),
+    ("New Terminal (Default)", 9),
+    ("New Terminal: PowerShell", 25),
+    ("New Terminal: Command Prompt", 26),
+    ("New Terminal: Git Bash", 27),
+    ("New Terminal: WSL", 28),
+    ("Terminal: Set Default to PowerShell", 29),
+    ("Terminal: Set Default to Command Prompt", 30),
+    ("Terminal: Set Default to Git Bash", 31),
+    ("Terminal: Set Default to WSL", 32),
+    ("Kill Active Terminal", 15),
+    ("Restart Terminal", 10),
+    ("Restart Terminal (No Profile)", 11),
+    ("Go to Definition", 12),
+    ("Format Document", 13),
+    ("Trigger Completion", 14),
+    ("Preferences: Open Settings (Ctrl+,)", 47),
+    ("Open Settings (JSON)", 16),
+    ("Find in File", 17),
+    ("Toggle Line Comment (Ctrl+/)", 70),
+    ("Find and Replace", 18),
+    ("Run C/C++ File", 19),
+    ("Find All References", 20),
+    ("Rename Symbol (F2)", 51),
+    ("Quick Fix (Ctrl+.)", 52),
+    ("Go to Line (Ctrl+G, :)", 62),
+    ("Go to Symbol in File (@)", 53),
+    ("Go to Symbol in Workspace (Ctrl+T, #)", 56),
+    ("View: Problems (Ctrl+Shift+M)", 57),
+    ("View: Debug Console (Ctrl+Shift+Y)", 58),
+    ("Source Action...", 54),
+    ("Organize Imports (Shift+Alt+O)", 55),
+    ("Close Workspace", 21),
+    ("New File in Workspace", 22),
+    ("New Folder in Workspace", 23),
+    ("Refresh Explorer", 24),
+    ("Debug: Start Debugging", 33),
+    ("Debug: Select Configuration", 34),
+    ("Python: Install debugpy (for debugging)", 35),
+    ("Markdown: Open Preview", 36),
+    ("Markdown: Open Preview to the Side", 37),
+    ("View: Toggle Word Wrap (Alt+Z)", 38),
+    ("Preferences: Color Theme", 39),
+    ("AI: Explain Selection", 40),
+    ("AI: Fix Selection", 41),
+    ("AI: Write Tests for Selection", 42),
+    ("AI: Add Comments to Selection", 43),
+    ("AI: Explain Error at Cursor", 44),
+    ("AI: Fix Error at Cursor", 45),
+    ("AI: New Chat", 46),
+    ("AI: Choose Provider\u{2026}", 64),
+    ("Local History: Show File History", 65),
+    ("Merge Conflict: Next Conflict", 66),
+    ("Merge Conflict: Accept All Current", 67),
+    ("Merge Conflict: Accept All Incoming", 68),
+    ("Merge Conflict: Accept All Both", 69),
+    ("AI: Set API Key\u{2026}", 60),
+    ("AI: Remove API Key", 61),
+];
+
 impl App {
     pub(super) fn show_quick_open(&mut self, hwnd: HWND) {
         self.quick_open = true;
@@ -43,89 +120,14 @@ impl App {
             .trim_start_matches('>')
             .trim()
             .to_ascii_lowercase();
-        [
-            ("Search in files", 0),
-            ("Replace in Files", 63),
-            ("Run Rust tests", 1),
-            ("Run Python File", 8),
-            ("Run Active File (Ctrl+Shift+R)", 48),
-            ("Stop Running Program", 49),
-            ("Run: Configure / Select Saved Configuration", 50),
-            ("Run: Choose the File's Language", 59),
-            ("Review Git changes", 2),
-            ("Open folder", 3),
-            ("New file", 4),
-            ("Select Python interpreter", 5),
-            ("Select Python virtual environment", 6),
-            (
-                if self.split_visible {
-                    "Close editor split"
-                } else {
-                    "Split editor"
-                },
-                7,
-            ),
-            ("New Terminal (Default)", 9),
-            ("New Terminal: PowerShell", 25),
-            ("New Terminal: Command Prompt", 26),
-            ("New Terminal: Git Bash", 27),
-            ("New Terminal: WSL", 28),
-            ("Terminal: Set Default to PowerShell", 29),
-            ("Terminal: Set Default to Command Prompt", 30),
-            ("Terminal: Set Default to Git Bash", 31),
-            ("Terminal: Set Default to WSL", 32),
-            ("Kill Active Terminal", 15),
-            ("Restart Terminal", 10),
-            ("Restart Terminal (No Profile)", 11),
-            ("Go to Definition", 12),
-            ("Format Document", 13),
-            ("Trigger Completion", 14),
-            ("Preferences: Open Settings (Ctrl+,)", 47),
-            ("Open Settings (JSON)", 16),
-            ("Find in File", 17),
-            ("Toggle Line Comment (Ctrl+/)", 70),
-            ("Find and Replace", 18),
-            ("Run C/C++ File", 19),
-            ("Find All References", 20),
-            ("Rename Symbol (F2)", 51),
-            ("Quick Fix (Ctrl+.)", 52),
-            ("Go to Line (Ctrl+G, :)", 62),
-            ("Go to Symbol in File (@)", 53),
-            ("Go to Symbol in Workspace (Ctrl+T, #)", 56),
-            ("View: Problems (Ctrl+Shift+M)", 57),
-            ("View: Debug Console (Ctrl+Shift+Y)", 58),
-            ("Source Action...", 54),
-            ("Organize Imports (Shift+Alt+O)", 55),
-            ("Close Workspace", 21),
-            ("New File in Workspace", 22),
-            ("New Folder in Workspace", 23),
-            ("Refresh Explorer", 24),
-            ("Debug: Start Debugging", 33),
-            ("Debug: Select Configuration", 34),
-            ("Python: Install debugpy (for debugging)", 35),
-            ("Markdown: Open Preview", 36),
-            ("Markdown: Open Preview to the Side", 37),
-            ("View: Toggle Word Wrap (Alt+Z)", 38),
-            ("Preferences: Color Theme", 39),
-            ("AI: Explain Selection", 40),
-            ("AI: Fix Selection", 41),
-            ("AI: Write Tests for Selection", 42),
-            ("AI: Add Comments to Selection", 43),
-            ("AI: Explain Error at Cursor", 44),
-            ("AI: Fix Error at Cursor", 45),
-            ("AI: New Chat", 46),
-            ("AI: Choose Provider\u{2026}", 64),
-            ("Local History: Show File History", 65),
-            ("Merge Conflict: Next Conflict", 66),
-            ("Merge Conflict: Accept All Current", 67),
-            ("Merge Conflict: Accept All Incoming", 68),
-            ("Merge Conflict: Accept All Both", 69),
-            ("AI: Set API Key\u{2026}", 60),
-            ("AI: Remove API Key", 61),
-        ]
-        .into_iter()
-        .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
-        .collect()
+        QUICK_COMMANDS
+            .iter()
+            .map(|&(name, id)| match id {
+                7 if self.split_visible => ("Close editor split", id),
+                _ => (name, id),
+            })
+            .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
+            .collect()
     }
 
     pub(super) fn quick_count(&self) -> usize {
@@ -173,6 +175,124 @@ impl App {
         }
     }
 
+    /// Runs Command Palette command `id` (the numbers in `quick_commands`);
+    /// the menu bar runs its commands through here too.
+    pub(super) fn run_command(&mut self, hwnd: HWND, id: u8) {
+        match id {
+            0 => self.open_project_search(hwnd),
+            63 => {
+                self.open_project_search(hwnd);
+                self.replace_focus = !self.project_query.is_empty();
+            }
+            1 => self.run_project(hwnd),
+            8 => self.run_python_file(hwnd),
+            48 => self.run_active_file(hwnd),
+            49 => self.stop_running_program(hwnd),
+            50 => self.show_run_configurations(hwnd),
+            59 => self.show_language_pick(hwnd),
+            2 => self.show_review(hwnd),
+            3 => self.open_folder(hwnd),
+            4 => self.new_file(hwnd),
+            5 => self.select_python_interpreter(hwnd),
+            6 => self.select_python_environment(hwnd),
+            7 => self.toggle_split(hwnd),
+            9 => {
+                self.new_terminal(hwnd, false);
+            }
+            15 => self.close_active_terminal(hwnd),
+            10 => self.restart_terminal(hwnd, false),
+            11 => self.restart_terminal(hwnd, true),
+            12 => self.goto_definition(hwnd),
+            20 => self.find_references(hwnd),
+            51 => self.start_rename(hwnd),
+            52 => self.request_code_actions(hwnd),
+            56 => self.show_workspace_symbols(hwnd),
+            62 => self.show_goto_line(hwnd),
+            57 => self.show_problems(hwnd),
+            58 => self.show_debug_console(hwnd),
+            54 => self.request_source_actions(hwnd),
+            55 => self.organize_imports(hwnd),
+            53 => {
+                self.show_quick_open(hwnd);
+                self.quick_query = "@".into();
+                self.ensure_symbols(hwnd);
+            }
+            13 => self.format_document(hwnd),
+            14 => self.trigger_completion(hwnd),
+            16 => self.open_settings(hwnd),
+            47 => self.open_settings_panel(hwnd),
+            17 => self.open_find(hwnd, false),
+            70 => self.toggle_comment(hwnd),
+            18 => self.open_find(hwnd, true),
+            19 => self.run_c_file(hwnd),
+            21 => self.close_workspace(hwnd),
+            22 => {
+                if let Some(root) = self.workspace_root.clone() {
+                    self.start_explorer_input(root, false, false, None, hwnd);
+                }
+            }
+            23 => {
+                if let Some(root) = self.workspace_root.clone() {
+                    self.start_explorer_input(root, true, false, None, hwnd);
+                }
+            }
+            24 => {
+                self.directory_cache.clear();
+                self.directory_requests.clear();
+                if let Some(root) = self.workspace_root.clone() {
+                    self.load_directory(&root);
+                }
+                self.refresh(hwnd);
+            }
+            25 => self.new_terminal_with_shell(hwnd, ShellKind::PowerShell, false),
+            26 => self.new_terminal_with_shell(hwnd, ShellKind::CommandPrompt, false),
+            27 => self.new_terminal_with_shell(hwnd, ShellKind::GitBash, false),
+            28 => self.new_terminal_with_shell(hwnd, ShellKind::Wsl, false),
+            29 => self.set_default_terminal_profile(hwnd, ShellKind::PowerShell),
+            30 => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
+            31 => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
+            32 => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
+            33 => self.start_debug_session(hwnd),
+            34 => {
+                // Open the panel and drop the menu down from its selector.
+                if !(self.side_view == SideView::Debug && self.explorer_visible) {
+                    self.toggle_side_view(hwnd, SideView::Debug);
+                }
+                let config = self.debug_config_rect(self.scale(RAIL), self.editor_left());
+                self.show_debug_config_menu(hwnd, config.left, config.bottom);
+            }
+            35 => self.install_debugpy(hwnd),
+            36 => self.open_markdown_preview(hwnd, false),
+            37 => self.open_markdown_preview(hwnd, true),
+            38 => self.toggle_word_wrap(hwnd),
+            39 => {
+                let center = self.command_center_rect(hwnd);
+                self.show_color_theme_menu(hwnd, center.left, center.bottom);
+            }
+            40 => self.ai_run_task(hwnd, AiTask::Explain),
+            41 => self.ai_run_task(hwnd, AiTask::Fix),
+            42 => self.ai_run_task(hwnd, AiTask::Tests),
+            43 => self.ai_run_task(hwnd, AiTask::Comments),
+            44 => self.ai_run_task(hwnd, AiTask::ExplainError),
+            45 => self.ai_run_task(hwnd, AiTask::FixError),
+            46 => {
+                if !self.ai_assistant_visible {
+                    self.toggle_ai_assistant(hwnd);
+                }
+                self.ai_new_chat(hwnd);
+            }
+            60 => self.show_ai_provider(hwnd, true),
+            64 => self.show_ai_provider(hwnd, false),
+            65 => self.show_file_history(hwnd),
+            66 => self.next_conflict(hwnd),
+            67 => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Current),
+            68 => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Incoming),
+            69 => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Both),
+            61 => self.ai_remove_key(hwnd),
+            _ => {}
+        }
+    }
+
     pub(super) fn activate_quick_item(&mut self, hwnd: HWND, index: usize) {
         if self.language_pick {
             self.pick_language(hwnd, index);
@@ -186,118 +306,8 @@ impl App {
             let action = self.quick_commands().get(index).map(|(_, action)| *action);
             self.quick_open = false;
             self.backbuffer = None;
-            match action {
-                Some(0) => self.open_project_search(hwnd),
-                Some(63) => {
-                    self.open_project_search(hwnd);
-                    self.replace_focus = !self.project_query.is_empty();
-                }
-                Some(1) => self.run_project(hwnd),
-                Some(8) => self.run_python_file(hwnd),
-                Some(48) => self.run_active_file(hwnd),
-                Some(49) => self.stop_running_program(hwnd),
-                Some(50) => self.show_run_configurations(hwnd),
-                Some(59) => self.show_language_pick(hwnd),
-                Some(2) => self.show_review(hwnd),
-                Some(3) => self.open_folder(hwnd),
-                Some(4) => self.new_file(hwnd),
-                Some(5) => self.select_python_interpreter(hwnd),
-                Some(6) => self.select_python_environment(hwnd),
-                Some(7) => self.toggle_split(hwnd),
-                Some(9) => {
-                    self.new_terminal(hwnd, false);
-                }
-                Some(15) => self.close_active_terminal(hwnd),
-                Some(10) => self.restart_terminal(hwnd, false),
-                Some(11) => self.restart_terminal(hwnd, true),
-                Some(12) => self.goto_definition(hwnd),
-                Some(20) => self.find_references(hwnd),
-                Some(51) => self.start_rename(hwnd),
-                Some(52) => self.request_code_actions(hwnd),
-                Some(56) => self.show_workspace_symbols(hwnd),
-                Some(62) => self.show_goto_line(hwnd),
-                Some(57) => self.show_problems(hwnd),
-                Some(58) => self.show_debug_console(hwnd),
-                Some(54) => self.request_source_actions(hwnd),
-                Some(55) => self.organize_imports(hwnd),
-                Some(53) => {
-                    self.show_quick_open(hwnd);
-                    self.quick_query = "@".into();
-                    self.ensure_symbols(hwnd);
-                }
-                Some(13) => self.format_document(hwnd),
-                Some(14) => self.trigger_completion(hwnd),
-                Some(16) => self.open_settings(hwnd),
-                Some(47) => self.open_settings_panel(hwnd),
-                Some(17) => self.open_find(hwnd, false),
-                Some(70) => self.toggle_comment(hwnd),
-                Some(18) => self.open_find(hwnd, true),
-                Some(19) => self.run_c_file(hwnd),
-                Some(21) => self.close_workspace(hwnd),
-                Some(22) => {
-                    if let Some(root) = self.workspace_root.clone() {
-                        self.start_explorer_input(root, false, false, None, hwnd);
-                    }
-                }
-                Some(23) => {
-                    if let Some(root) = self.workspace_root.clone() {
-                        self.start_explorer_input(root, true, false, None, hwnd);
-                    }
-                }
-                Some(24) => {
-                    self.directory_cache.clear();
-                    self.directory_requests.clear();
-                    if let Some(root) = self.workspace_root.clone() {
-                        self.load_directory(&root);
-                    }
-                    self.refresh(hwnd);
-                }
-                Some(25) => self.new_terminal_with_shell(hwnd, ShellKind::PowerShell, false),
-                Some(26) => self.new_terminal_with_shell(hwnd, ShellKind::CommandPrompt, false),
-                Some(27) => self.new_terminal_with_shell(hwnd, ShellKind::GitBash, false),
-                Some(28) => self.new_terminal_with_shell(hwnd, ShellKind::Wsl, false),
-                Some(29) => self.set_default_terminal_profile(hwnd, ShellKind::PowerShell),
-                Some(30) => self.set_default_terminal_profile(hwnd, ShellKind::CommandPrompt),
-                Some(31) => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
-                Some(32) => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
-                Some(33) => self.start_debug_session(hwnd),
-                Some(34) => {
-                    // Open the panel and drop the menu down from its selector.
-                    if !(self.side_view == SideView::Debug && self.explorer_visible) {
-                        self.toggle_side_view(hwnd, SideView::Debug);
-                    }
-                    let config = self.debug_config_rect(self.scale(RAIL), self.editor_left());
-                    self.show_debug_config_menu(hwnd, config.left, config.bottom);
-                }
-                Some(35) => self.install_debugpy(hwnd),
-                Some(36) => self.open_markdown_preview(hwnd, false),
-                Some(37) => self.open_markdown_preview(hwnd, true),
-                Some(38) => self.toggle_word_wrap(hwnd),
-                Some(39) => {
-                    let center = self.command_center_rect(hwnd);
-                    self.show_color_theme_menu(hwnd, center.left, center.bottom);
-                }
-                Some(40) => self.ai_run_task(hwnd, AiTask::Explain),
-                Some(41) => self.ai_run_task(hwnd, AiTask::Fix),
-                Some(42) => self.ai_run_task(hwnd, AiTask::Tests),
-                Some(43) => self.ai_run_task(hwnd, AiTask::Comments),
-                Some(44) => self.ai_run_task(hwnd, AiTask::ExplainError),
-                Some(45) => self.ai_run_task(hwnd, AiTask::FixError),
-                Some(46) => {
-                    if !self.ai_assistant_visible {
-                        self.toggle_ai_assistant(hwnd);
-                    }
-                    self.ai_new_chat(hwnd);
-                }
-                Some(60) => self.show_ai_provider(hwnd, true),
-                Some(64) => self.show_ai_provider(hwnd, false),
-                Some(65) => self.show_file_history(hwnd),
-                Some(66) => self.next_conflict(hwnd),
-                Some(67) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Current),
-                Some(68) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Incoming),
-                Some(69) => self.accept_all_conflicts(hwnd, merge_conflict::Choice::Both),
-                Some(61) => self.ai_remove_key(hwnd),
-                _ => {}
+            if let Some(action) = action {
+                self.run_command(hwnd, action);
             }
         } else if self.quick_query.starts_with('@') {
             self.quick_open = false;
