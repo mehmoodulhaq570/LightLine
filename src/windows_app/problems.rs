@@ -9,7 +9,7 @@ use super::terminal::TERMINAL_HEADER;
 use super::*;
 
 // Each row's height, in logical pixels.
-const ROW: i32 = 24;
+const ROW: i32 = 22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProblemRow {
@@ -164,12 +164,14 @@ impl App {
                 ProblemRow::Item(tab_index, index) => {
                     let problem = &self.tabs[tab_index].diagnostics[index];
                     let (mark, color) = match problem.severity {
-                        1 => ("\u{2297}", self.theme.error),
-                        2 => ("\u{26a0}", self.theme.warning),
-                        _ => ("i", self.theme.info),
+                        1 => (DebugGlyph::Error, self.theme.error),
+                        2 => (DebugGlyph::Warning, self.theme.warning),
+                        _ => (DebugGlyph::Info, self.theme.info),
                     };
-                    let x = body.left + s(34);
-                    self.label_mid(hdc, mark, x, middle, color, body);
+                    let x = body.left + s(32);
+                    let size = s(16);
+                    self.icons
+                        .draw_glyph(hdc, mark, color, x, middle - size / 2, size);
                     let place = format!(
                         "[Ln {}, Col {}]",
                         problem.range.start.line + 1,

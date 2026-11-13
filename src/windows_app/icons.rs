@@ -4,11 +4,13 @@ use resvg::{tiny_skia, usvg};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const LIGHTLINE_ICON: &[u8] = include_bytes!("../../assets/lightline.ico");
+// The sizes assets/lightline.ico holds (the title bar draws one of them 1:1).
+const BRAND_SIZES: [i32; 5] = [16, 24, 32, 48, 64];
 
 pub(super) struct AppIcons {
     pub(super) small: HICON,
@@ -57,8 +59,11 @@ pub(super) enum GenericIcon {
     FolderSrc,
 }
 
-// The Run & Debug toolbar's controls, drawn from SVG so their curves and
-// diagonals are anti-aliased like the file icons.
+// The Run & Debug toolbar's controls and the workbench's own icons (rail,
+// title bar, panel headers, tabs, status bar), drawn from SVG so their
+// curves and diagonals are anti-aliased like the file icons, at the exact
+// pixel size they show at. GDI's 1 px pens drew them jagged, and font
+// characters standing in for icons came out small and smudged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum DebugGlyph {
     Start,
@@ -72,6 +77,37 @@ pub(super) enum DebugGlyph {
     // Editor gutter markers.
     GutterDot,
     ExecutionArrow,
+    // The activity rail.
+    Menu,
+    Files,
+    Search,
+    SourceControl,
+    RunDebug,
+    Extensions,
+    Sparkle,
+    Gear,
+    // Panel headers, tabs and the title bar.
+    NewFile,
+    NewFolder,
+    Refresh,
+    CollapseAll,
+    Close,
+    ChevronDown,
+    ChevronRight,
+    SplitEditor,
+    More,
+    Minimize,
+    Maximize,
+    Restore,
+    // The status bar and the Problems list.
+    Error,
+    Warning,
+    Info,
+    Branch,
+    // Panel header and row buttons.
+    Plus,
+    Minus,
+    Discard,
 }
 
 impl DebugGlyph {
@@ -80,7 +116,87 @@ impl DebugGlyph {
         let line = format!(
             r#"fill="none" stroke="{color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round""#
         );
+        // The workbench icons: lighter outlines, as VS Code's.
+        let ui = format!(
+            r#"fill="none" stroke="{color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round""#
+        );
         let body = match self {
+            DebugGlyph::Menu => format!(r#"<path {ui} d="M4 6.5h16M4 12h16M4 17.5h16"/>"#),
+            // Two sheets, the front one with a folded corner.
+            DebugGlyph::Files => format!(
+                r#"<path {ui} d="M8.5 6.5V4.8A1.8 1.8 0 0 1 10.3 3h5.2L20 7.5v9.7a1.8 1.8 0 0 1-1.8 1.8h-1.7"/><path {ui} d="M15.5 3v4.5H20"/><path {ui} d="M5.8 6.5h5.7l4 4v8.7a1.8 1.8 0 0 1-1.8 1.8H5.8A1.8 1.8 0 0 1 4 19.2V8.3a1.8 1.8 0 0 1 1.8-1.8z"/>"#
+            ),
+            DebugGlyph::Search => {
+                format!(
+                    r#"<circle {ui} cx="10.5" cy="10.5" r="6.2"/><path {ui} d="m15.2 15.2 5.3 5.3"/>"#
+                )
+            }
+            DebugGlyph::SourceControl | DebugGlyph::Branch => format!(
+                r#"<circle {ui} cx="6.5" cy="5.5" r="2.2"/><circle {ui} cx="6.5" cy="18.5" r="2.2"/><circle {ui} cx="17.5" cy="7.5" r="2.2"/><path {ui} d="M6.5 7.7v8.6"/><path {ui} d="M17.5 9.7c0 3.6-2.6 4.5-5.5 4.8-2.6.3-4.8.9-5.4 2.4"/>"#
+            ),
+            // A play triangle with a small bug's head: run and debug.
+            DebugGlyph::RunDebug => format!(
+                r#"<path {ui} d="M6 4.5v15l7.5-4.7"/><path {ui} d="M6 4.5l11.5 7.2"/><circle {ui} cx="17.5" cy="17" r="3.2"/><path {ui} d="M17.5 13.8v-1.6M14.3 17h-1.6M20.7 17h1.6"/>"#
+            ),
+            // Three squares and a fourth set apart.
+            DebugGlyph::Extensions => format!(
+                r#"<rect {ui} x="3.5" y="9.5" width="5.5" height="5.5" rx="1"/><rect {ui} x="9" y="9.5" width="5.5" height="5.5" rx="1"/><rect {ui} x="3.5" y="15" width="5.5" height="5.5" rx="1"/><rect {ui} x="9" y="15" width="5.5" height="5.5" rx="1"/><rect {ui} x="14.5" y="3.5" width="5.5" height="5.5" rx="1" transform="rotate(12 17.25 6.25)"/>"#
+            ),
+            // A four-point star and a small one: the AI Assistant.
+            DebugGlyph::Sparkle => format!(
+                r#"<path {ui} d="M11 4l1.7 5.3L18 11l-5.3 1.7L11 18l-1.7-5.3L4 11l5.3-1.7z"/><path {ui} d="M18.5 16v4M16.5 18h4"/>"#
+            ),
+            // A cog: a ring with eight teeth around a hub.
+            DebugGlyph::Gear => format!(
+                r#"<circle {ui} cx="12" cy="12" r="6"/><circle {ui} cx="12" cy="12" r="2.4"/><path {ui} d="M12 2.8v3.2M12 18v3.2M2.8 12H6M18 12h3.2M5.5 5.5l2.3 2.3M16.2 16.2l2.3 2.3M5.5 18.5l2.3-2.3M16.2 7.8l2.3-2.3"/>"#
+            ),
+            DebugGlyph::NewFile => format!(
+                r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5"/><path {ui} d="M12 11.5v5.5M9.25 14.25h5.5"/>"#
+            ),
+            DebugGlyph::NewFolder => format!(
+                r#"<path {ui} d="M3.5 7.3a1.8 1.8 0 0 1 1.8-1.8h3.9l2 2h7.5a1.8 1.8 0 0 1 1.8 1.8v8.4a1.8 1.8 0 0 1-1.8 1.8H5.3a1.8 1.8 0 0 1-1.8-1.8z"/><path {ui} d="M12 10.5v5M9.5 13h5"/>"#
+            ),
+            DebugGlyph::Refresh => format!(
+                r#"<path {ui} d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path {ui} d="M19.8 4.3v4.2h-4.2"/>"#
+            ),
+            // A box with a minus, over another: collapse every folder.
+            DebugGlyph::CollapseAll => format!(
+                r#"<rect {ui} x="7.5" y="7.5" width="13" height="13" rx="1.8"/><path {ui} d="M4 15.5V5.3A1.8 1.8 0 0 1 5.8 3.5H16"/><path {ui} d="M10.5 14h7"/>"#
+            ),
+            DebugGlyph::Close => format!(r#"<path {ui} d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>"#),
+            DebugGlyph::ChevronDown => format!(r#"<path {ui} d="M6.5 9.5l5.5 5.5 5.5-5.5"/>"#),
+            DebugGlyph::ChevronRight => format!(r#"<path {ui} d="M9.5 6.5l5.5 5.5-5.5 5.5"/>"#),
+            DebugGlyph::SplitEditor => format!(
+                r#"<rect {ui} x="3.5" y="4.5" width="17" height="15" rx="1.8"/><path {ui} d="M12 4.5v15"/>"#
+            ),
+            DebugGlyph::More => format!(
+                r#"<circle fill="{color}" cx="5.5" cy="12" r="1.7"/><circle fill="{color}" cx="12" cy="12" r="1.7"/><circle fill="{color}" cx="18.5" cy="12" r="1.7"/>"#
+            ),
+            // Window controls: thin, as Windows draws them.
+            DebugGlyph::Minimize => {
+                format!(r#"<path fill="none" stroke="{color}" stroke-width="1.3" d="M6 12.5h12"/>"#)
+            }
+            DebugGlyph::Maximize => format!(
+                r#"<rect fill="none" stroke="{color}" stroke-width="1.3" x="6.5" y="6.5" width="11" height="11" rx=".8"/>"#
+            ),
+            DebugGlyph::Restore => format!(
+                r#"<rect fill="none" stroke="{color}" stroke-width="1.3" x="6" y="8.5" width="9.5" height="9.5" rx=".8"/><path fill="none" stroke="{color}" stroke-width="1.3" d="M8.5 6h8.7a.8.8 0 0 1 .8.8v8.7"/>"#
+            ),
+            DebugGlyph::Error => format!(
+                r#"<circle {ui} cx="12" cy="12" r="8.2"/><path {ui} d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>"#
+            ),
+            DebugGlyph::Info => format!(
+                r#"<circle {ui} cx="12" cy="12" r="8.2"/><path {ui} d="M12 11v5.5"/><circle fill="{color}" cx="12" cy="7.9" r="1.05"/>"#
+            ),
+            DebugGlyph::Plus => format!(r#"<path {ui} d="M12 5.5v13M5.5 12h13"/>"#),
+            DebugGlyph::Minus => format!(r#"<path {ui} d="M5.5 12h13"/>"#),
+            // Back to how it was: an arrow turning back.
+            DebugGlyph::Discard => format!(
+                r#"<path {ui} d="M9 6.5 4.5 11 9 15.5"/><path {ui} d="M4.5 11h9.5a5 5 0 0 1 0 10h-2.5"/>"#
+            ),
+            DebugGlyph::Warning => format!(
+                r#"<path {ui} d="M10.4 4.6a1.85 1.85 0 0 1 3.2 0l6.9 12.2a1.85 1.85 0 0 1-1.6 2.7H5.1a1.85 1.85 0 0 1-1.6-2.7z"/><path {ui} d="M12 9.5v4"/><circle fill="{color}" cx="12" cy="16.6" r="1.05"/>"#
+            ),
             DebugGlyph::Start => format!(
                 r#"<path fill="{color}" d="M8 5.2v13.6a1.1 1.1 0 0 0 1.7.92l10.3-6.8a1.1 1.1 0 0 0 0-1.84L9.7 4.28A1.1 1.1 0 0 0 8 5.2z"/>"#
             ),
@@ -124,37 +240,266 @@ impl DebugGlyph {
     }
 }
 
+// What an atlas slot holds: a debug or UI glyph in one color, a built-in
+// file icon, or an icon theme's SVG file.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum AtlasKey {
+    Glyph(DebugGlyph, u32),
+    Builtin(BuiltinIcon),
+    Themed(PathBuf),
+}
+
+// Where a rasterized icon sits: which page, at which corner.
+#[derive(Clone, Copy, Debug)]
+struct Slot {
+    page: usize,
+    x: i32,
+    y: i32,
+}
+
+/// A 32bpp DIB section that icons are rasterized straight into, side by
+/// side, and drawn from with AlphaBlend. Each icon used to be its own HICON:
+/// the three GDI objects that took cost ~0.9 M cycles an icon, two thirds of
+/// what the flat layout's 28 glyphs added to the first frame.
+struct AtlasPage {
+    dc: HDC,
+    bitmap: HBITMAP,
+    old: HGDIOBJ,
+    bits: *mut u8,
+    side: i32,
+    // The next free spot: left to right, then a row down.
+    x: i32,
+    y: i32,
+    row: i32,
+}
+
+const PAGE_SIDE: i32 = 256;
+
+impl AtlasPage {
+    fn new(side: i32) -> Option<Self> {
+        unsafe {
+            let mut bmi: BITMAPINFO = std::mem::zeroed();
+            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            bmi.bmiHeader.biWidth = side;
+            bmi.bmiHeader.biHeight = -side;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+            let mut bits: *mut core::ffi::c_void = null_mut();
+            let bitmap =
+                CreateDIBSection(null_mut(), &bmi, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+            if bitmap.is_null() || bits.is_null() {
+                if !bitmap.is_null() {
+                    DeleteObject(bitmap);
+                }
+                return None;
+            }
+            let dc = CreateCompatibleDC(null_mut());
+            if dc.is_null() {
+                DeleteObject(bitmap);
+                return None;
+            }
+            let old = SelectObject(dc, bitmap);
+            Some(Self {
+                dc,
+                bitmap,
+                old,
+                bits: bits.cast(),
+                side,
+                x: 0,
+                y: 0,
+                row: 0,
+            })
+        }
+    }
+
+    // A free `size`-pixel square, if one is left.
+    fn place(&mut self, size: i32) -> Option<(i32, i32)> {
+        if self.x + size > self.side {
+            self.x = 0;
+            self.y += self.row;
+            self.row = 0;
+        }
+        if size > self.side || self.y + size > self.side {
+            return None;
+        }
+        let at = (self.x, self.y);
+        self.x += size;
+        self.row = self.row.max(size);
+        Some(at)
+    }
+
+    // Copies `pixels` (premultiplied BGRA, `size` square) to (x, y).
+    fn write(&self, (x, y): (i32, i32), size: i32, pixels: &[u8]) {
+        let row_bytes = (size * 4) as usize;
+        // GDI may still be reading this bitmap for a batched AlphaBlend.
+        unsafe { GdiFlush() };
+        for row in 0..size as usize {
+            let offset = (((y as usize + row) * self.side as usize) + x as usize) * 4;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    pixels.as_ptr().add(row * row_bytes),
+                    self.bits.add(offset),
+                    row_bytes,
+                );
+            }
+        }
+    }
+}
+
+impl Drop for AtlasPage {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.old);
+            DeleteObject(self.bitmap);
+            DeleteDC(self.dc);
+        }
+    }
+}
+
 pub(super) struct IconSet {
     // An installed icon-theme extension (e.g. Material Icon Theme), loaded
     // from %APPDATA%\LightLine\extensions\material-icon-theme if installed
     // by the user via the Extensions marketplace. When not installed,
     // IconSet automatically uses our fast built-in authentic SVG suite.
     theme: Option<IconTheme>,
-    size: i32,
-    // SVGs are rasterized to HICON lazily, on first use, not all ~1000 of
-    // them up front: most users will only ever trigger a few dozen distinct
-    // icons in a session (whatever file types/folder names they actually
-    // have open), so eagerly converting the rest would be pure waste.
-    svg_cache: RefCell<HashMap<PathBuf, HICON>>,
-    builtin_cache: RefCell<HashMap<BuiltinIcon, HICON>>,
-    // Keyed by glyph, COLORREF and pixel size: the toolbar redraws the same
-    // few combinations (enabled, disabled, stop red) on every paint.
-    glyph_cache: RefCell<HashMap<(DebugGlyph, u32, i32), HICON>>,
+    // SVGs are rasterized lazily, on first use, not all ~1000 of them up
+    // front: most users will only ever trigger a few dozen distinct icons in
+    // a session (whatever file types/folder names they actually have open),
+    // so eagerly converting the rest would be pure waste. Each is rasterized
+    // at the size it's drawn, never stretched; None marks an SVG that
+    // didn't rasterize, so it isn't tried again on every paint.
+    slots: RefCell<HashMap<(AtlasKey, i32), Option<Slot>>>,
+    pages: RefCell<Vec<AtlasPage>>,
+    // The LightLine mark for the title bar, at one of the sizes the .ico
+    // holds, so it's drawn 1:1 and never stretched (stretching blurred it).
+    brand: RefCell<Option<(i32, HICON)>>,
 }
 
 impl IconSet {
-    pub(super) fn new(dpi: u32, zoom: i32) -> Self {
-        let size = super::scaled(18, dpi, zoom);
+    pub(super) fn new(_dpi: u32, _zoom: i32) -> Self {
         let theme = lightline::workflow::extensions_dir()
             .map(|dir| dir.join("material-icon-theme"))
             .and_then(|dir| IconTheme::load(&dir));
         Self {
             theme,
-            size,
-            svg_cache: RefCell::new(HashMap::new()),
-            builtin_cache: RefCell::new(HashMap::new()),
-            glyph_cache: RefCell::new(HashMap::new()),
+            slots: RefCell::new(HashMap::new()),
+            pages: RefCell::new(Vec::new()),
+            brand: RefCell::new(None),
         }
+    }
+
+    /// Draws the LightLine mark with its left edge at `x`, centred on
+    /// `middle`, at the size the icon file holds nearest to `wanted`.
+    /// Returns the size drawn.
+    pub(super) fn draw_brand(&self, hdc: HDC, x: i32, middle: i32, wanted: i32) -> i32 {
+        let size = BRAND_SIZES
+            .iter()
+            .copied()
+            .min_by_key(|size| (size - wanted).abs())
+            .unwrap_or(32);
+        let mut brand = self.brand.borrow_mut();
+        let icon = match *brand {
+            Some((known, icon)) if known == size => icon,
+            _ => {
+                if let Some((_, old)) = brand.take() {
+                    unsafe { DestroyIcon(old) };
+                }
+                let icon = Self::load_ico(LIGHTLINE_ICON, size);
+                if icon.is_null() {
+                    return 0;
+                }
+                *brand = Some((size, icon));
+                icon
+            }
+        };
+        unsafe {
+            DrawIconEx(
+                hdc,
+                x,
+                middle - size / 2,
+                icon,
+                size,
+                size,
+                0,
+                null_mut(),
+                DI_NORMAL,
+            );
+        }
+        size
+    }
+
+    // Draws the icon `key` names as a `size`-pixel square at (x, y),
+    // rasterizing `svg` into the atlas the first time.
+    fn draw_atlas(
+        &self,
+        hdc: HDC,
+        key: AtlasKey,
+        (x, y): (i32, i32),
+        size: i32,
+        svg: impl FnOnce() -> Option<Vec<u8>>,
+    ) -> bool {
+        let size = size.max(1);
+        let key = (key, size);
+        let known = self.slots.borrow().get(&key).copied();
+        let slot = match known {
+            Some(slot) => slot,
+            None => {
+                let slot = svg()
+                    .and_then(|bytes| Self::rasterize(&bytes, size))
+                    .and_then(|pixels| self.store(&pixels, size));
+                self.slots.borrow_mut().insert(key, slot);
+                slot
+            }
+        };
+        let Some(slot) = slot else {
+            return false;
+        };
+        let pages = self.pages.borrow();
+        let Some(page) = pages.get(slot.page) else {
+            return false;
+        };
+        unsafe {
+            AlphaBlend(
+                hdc,
+                x,
+                y,
+                size,
+                size,
+                page.dc,
+                slot.x,
+                slot.y,
+                size,
+                size,
+                BLENDFUNCTION {
+                    BlendOp: AC_SRC_OVER as u8,
+                    BlendFlags: 0,
+                    SourceConstantAlpha: 255,
+                    AlphaFormat: AC_SRC_ALPHA as u8,
+                },
+            ) != 0
+        }
+    }
+
+    // Puts `pixels` in the atlas, on a new page when the last one is full.
+    fn store(&self, pixels: &[u8], size: i32) -> Option<Slot> {
+        let mut pages = self.pages.borrow_mut();
+        let spot = pages.last_mut().and_then(|page| page.place(size));
+        let (page, at) = match spot {
+            Some(at) => (pages.len() - 1, at),
+            None => {
+                let mut page = AtlasPage::new(PAGE_SIDE.max(size))?;
+                let at = page.place(size)?;
+                pages.push(page);
+                (pages.len() - 1, at)
+            }
+        };
+        pages[page].write(at, size, pixels);
+        Some(Slot {
+            page,
+            x: at.0,
+            y: at.1,
+        })
     }
 
     // Draws `glyph` in `color` (a COLORREF) as a `size`-pixel square at (x, y).
@@ -167,25 +512,15 @@ impl IconSet {
         y: i32,
         size: i32,
     ) -> bool {
-        let key = (glyph, color, size);
-        let cached = self.glyph_cache.borrow().get(&key).copied();
-        let icon = match cached {
-            Some(icon) => icon,
-            None => {
-                let hex = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    color & 0xff,
-                    (color >> 8) & 0xff,
-                    (color >> 16) & 0xff
-                );
-                let Some(icon) = Self::svg_to_hicon(hdc, glyph.svg(&hex).as_bytes(), size) else {
-                    return false;
-                };
-                self.glyph_cache.borrow_mut().insert(key, icon);
-                icon
-            }
-        };
-        unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 }
+        self.draw_atlas(hdc, AtlasKey::Glyph(glyph, color), (x, y), size, || {
+            let hex = format!(
+                "#{:02x}{:02x}{:02x}",
+                color & 0xff,
+                (color >> 8) & 0xff,
+                (color >> 16) & 0xff
+            );
+            Some(glyph.svg(&hex).into_bytes())
+        })
     }
 
     // Draws the icon for `path` (or, for a folder, `is_dir`/`expanded`) at
@@ -204,10 +539,11 @@ impl IconSet {
         y: i32,
         size: i32,
     ) -> bool {
-        if use_theme && let Some(icon) = self.themed_icon(hdc, path, is_dir, expanded) {
-            return unsafe {
-                DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0
-            };
+        if use_theme
+            && let Some(svg_path) = self.themed_path(path, is_dir, expanded)
+            && self.draw_themed(hdc, svg_path, x, y, size)
+        {
+            return true;
         }
         let builtin = BuiltinIcon::resolve_for_path(path, is_dir, expanded);
         self.draw_builtin(hdc, builtin, x, y, size)
@@ -231,10 +567,10 @@ impl IconSet {
                 GenericIcon::FolderOpen => theme.generic_folder_icon(true),
                 GenericIcon::FolderSrc => theme.resolve_directory("src", false),
             };
-            if let Some(icon) = svg_path.and_then(|path| self.cached_icon(hdc, path)) {
-                return unsafe {
-                    DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0
-                };
+            if let Some(svg_path) = svg_path
+                && self.draw_themed(hdc, svg_path, x, y, size)
+            {
+                return true;
             }
         }
         let builtin = match kind {
@@ -254,48 +590,32 @@ impl IconSet {
         y: i32,
         size: i32,
     ) -> bool {
-        let Some(icon) = self.cached_builtin(hdc, kind) else {
-            return false;
-        };
-        unsafe { DrawIconEx(hdc, x, y, icon, size, size, 0, null_mut(), DI_NORMAL) != 0 }
+        self.draw_atlas(hdc, AtlasKey::Builtin(kind), (x, y), size, || {
+            Some(kind.svg_str().as_bytes().to_vec())
+        })
     }
 
-    fn cached_builtin(&self, hdc: HDC, kind: BuiltinIcon) -> Option<HICON> {
-        if let Some(&icon) = self.builtin_cache.borrow().get(&kind) {
-            return Some(icon);
-        }
-        let svg = kind.svg_str();
-        let icon = Self::svg_to_hicon(hdc, svg.as_bytes(), self.size)?;
-        self.builtin_cache.borrow_mut().insert(kind, icon);
-        Some(icon)
+    fn draw_themed(&self, hdc: HDC, svg_path: PathBuf, x: i32, y: i32, size: i32) -> bool {
+        let read = svg_path.clone();
+        self.draw_atlas(hdc, AtlasKey::Themed(svg_path), (x, y), size, || {
+            std::fs::read(read).ok()
+        })
     }
 
-    fn themed_icon(&self, hdc: HDC, path: &Path, is_dir: bool, expanded: bool) -> Option<HICON> {
+    fn themed_path(&self, path: &Path, is_dir: bool, expanded: bool) -> Option<PathBuf> {
         let theme = self.theme.as_ref()?;
         let name = path.file_name()?.to_str()?;
-        let svg_path = if is_dir {
+        if is_dir {
             theme.resolve_directory(name, expanded)
         } else {
             theme.resolve_file(name)
-        }?;
-        self.cached_icon(hdc, svg_path)
-    }
-
-    fn cached_icon(&self, hdc: HDC, svg_path: PathBuf) -> Option<HICON> {
-        if let Some(&icon) = self.svg_cache.borrow().get(&svg_path) {
-            return Some(icon);
         }
-        let bytes = std::fs::read(&svg_path).ok()?;
-        let icon = Self::svg_to_hicon(hdc, &bytes, self.size)?;
-        self.svg_cache.borrow_mut().insert(svg_path, icon);
-        Some(icon)
     }
 
-    // Rasterizes `svg_bytes` at `size`x`size` via resvg/tiny-skia, then wraps
-    // the resulting premultiplied-alpha bitmap as a Win32 HICON through a
-    // 32bpp DIB section — the standard technique for building an icon from
-    // an in-memory image rather than a pre-baked .ico resource.
-    fn svg_to_hicon(hdc: HDC, svg_bytes: &[u8], size: i32) -> Option<HICON> {
+    // Rasterizes `svg_bytes` at `size`x`size` via resvg/tiny-skia, as
+    // premultiplied BGRA rows top to bottom: what a 32bpp DIB holds and
+    // AlphaBlend's AC_SRC_ALPHA wants.
+    fn rasterize(svg_bytes: &[u8], size: i32) -> Option<Vec<u8>> {
         let size = size.max(1) as u32;
         let tree = usvg::Tree::from_data(svg_bytes, &usvg::Options::default()).ok()?;
         let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
@@ -304,47 +624,11 @@ impl IconSet {
             .min(size as f32 / tree_size.height().max(1.0));
         let transform = tiny_skia::Transform::from_scale(scale, scale);
         resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-        // tiny-skia's pixmap is premultiplied RGBA, top-to-bottom; Windows
-        // wants premultiplied BGRA for a top-down 32bpp DIB.
-        let mut bgra = vec![0u8; (size * size * 4) as usize];
-        let (bgra_pixels, bgra_tail) = bgra.as_chunks_mut::<4>();
-        let (rgba_pixels, rgba_tail) = pixmap.data().as_chunks::<4>();
-        debug_assert!(bgra_tail.is_empty() && rgba_tail.is_empty());
-        for (dst, src) in bgra_pixels.iter_mut().zip(rgba_pixels) {
-            dst[0] = src[2];
-            dst[1] = src[1];
-            dst[2] = src[0];
-            dst[3] = src[3];
+        let mut bgra = pixmap.take();
+        for pixel in bgra.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
         }
-
-        unsafe {
-            let mut bmi: BITMAPINFO = std::mem::zeroed();
-            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-            bmi.bmiHeader.biWidth = size as i32;
-            bmi.bmiHeader.biHeight = -(size as i32);
-            bmi.bmiHeader.biPlanes = 1;
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = BI_RGB;
-            let mut bits_ptr: *mut core::ffi::c_void = null_mut();
-            let color = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits_ptr, null_mut(), 0);
-            if color.is_null() || bits_ptr.is_null() {
-                return None;
-            }
-            std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits_ptr as *mut u8, bgra.len());
-            let mask = CreateBitmap(size as i32, size as i32, 1, 1, null());
-            let icon_info = ICONINFO {
-                fIcon: 1,
-                xHotspot: 0,
-                yHotspot: 0,
-                hbmMask: mask,
-                hbmColor: color,
-            };
-            let icon = CreateIconIndirect(&icon_info);
-            DeleteObject(color);
-            DeleteObject(mask);
-            if icon.is_null() { None } else { Some(icon) }
-        }
+        Some(bgra)
     }
 
     pub(super) fn load_ico(data: &[u8], size: i32) -> HICON {
@@ -397,20 +681,8 @@ impl IconSet {
 
 impl Drop for IconSet {
     fn drop(&mut self) {
-        for icon in self.svg_cache.borrow().values() {
-            if !icon.is_null() {
-                unsafe { DestroyIcon(*icon) };
-            }
-        }
-        for icon in self.builtin_cache.borrow().values() {
-            if !icon.is_null() {
-                unsafe { DestroyIcon(*icon) };
-            }
-        }
-        for icon in self.glyph_cache.borrow().values() {
-            if !icon.is_null() {
-                unsafe { DestroyIcon(*icon) };
-            }
+        if let Some((_, icon)) = self.brand.borrow_mut().take() {
+            unsafe { DestroyIcon(icon) };
         }
     }
 }
@@ -468,15 +740,25 @@ mod icon_tests {
         ];
         for icon_kind in all_icons {
             let svg = icon_kind.svg_str();
-            let icon = IconSet::svg_to_hicon(hdc, svg.as_bytes(), 18);
+            let pixels = IconSet::rasterize(svg.as_bytes(), 18);
             assert!(
-                icon.is_some(),
+                pixels
+                    .as_ref()
+                    .is_some_and(|p| p.chunks(4).any(|px| px[3] > 0)),
                 "failed to rasterize builtin icon {icon_kind:?}"
             );
-            let icon = icon.unwrap();
-            assert!(!icon.is_null());
-            unsafe { DestroyIcon(icon) };
         }
+        // And they draw from the atlas, at two sizes, onto a real DC.
+        let icons = IconSet::new(96, 100);
+        for icon_kind in all_icons {
+            assert!(icons.draw_builtin(hdc, icon_kind, 0, 0, 18));
+            assert!(icons.draw_builtin(hdc, icon_kind, 0, 0, 24));
+        }
+        assert!(icons.draw_glyph(hdc, DebugGlyph::Close, 0xffffff, 0, 0, 300));
+        assert!(
+            icons.pages.borrow().len() >= 2,
+            "a 300 px glyph gets a page of its own"
+        );
         unsafe { ReleaseDC(null_mut(), hdc) };
     }
 
@@ -509,11 +791,10 @@ mod icon_tests {
             eprintln!("skipped: real extension not installed at {svg_path:?}");
             return;
         };
-        let hdc = unsafe { GetDC(null_mut()) };
-        let icon = IconSet::svg_to_hicon(hdc, &bytes, 18);
-        unsafe { ReleaseDC(null_mut(), hdc) };
-        let icon = icon.expect("rust.svg should rasterize to an icon");
-        assert!(!icon.is_null());
-        unsafe { DestroyIcon(icon) };
+        let pixels = IconSet::rasterize(&bytes, 18).expect("rust.svg should rasterize");
+        assert!(
+            pixels.chunks(4).any(|px| px[3] > 0),
+            "rust.svg drew nothing"
+        );
     }
 }

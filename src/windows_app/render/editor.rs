@@ -46,7 +46,56 @@ pub(in crate::windows_app) fn language_label(path: Option<&Path>) -> String {
     }
 }
 
+/// The status bar's left side (`App::status_left`).
+pub(in crate::windows_app) struct StatusLeft {
+    pub(in crate::windows_app) branch: String,
+    pub(in crate::windows_app) errors: String,
+    pub(in crate::windows_app) warnings: String,
+    pub(in crate::windows_app) branch_x: i32,
+    pub(in crate::windows_app) branch_text_x: i32,
+    pub(in crate::windows_app) health_left: i32,
+    pub(in crate::windows_app) error_text_x: i32,
+    pub(in crate::windows_app) warning_x: i32,
+    pub(in crate::windows_app) warning_text_x: i32,
+    pub(in crate::windows_app) health_right: i32,
+}
+
 impl App {
+    /// The status bar's left side, measured in `hdc`'s font (the small
+    /// font): the branch, then the error and warning counts, each after its
+    /// icon. Shared by painting and clicks.
+    pub(in crate::windows_app) fn status_left(&self, hdc: HDC) -> StatusLeft {
+        let s = |v: i32| self.scale(v);
+        let icon = s(14);
+        let branch = self.git_head_label();
+        let (errors, warnings) = self.problem_counts();
+        let (errors, warnings) = (errors.to_string(), warnings.to_string());
+        let branch_x = s(10);
+        let branch_text_x = branch_x + icon + s(5);
+        let health_left = branch_text_x + self.text_width(hdc, &branch) + s(18);
+        let error_text_x = health_left + icon + s(4);
+        let warning_x = error_text_x + self.text_width(hdc, &errors) + s(12);
+        let warning_text_x = warning_x + icon + s(4);
+        let health_right = warning_text_x + self.text_width(hdc, &warnings);
+        StatusLeft {
+            branch,
+            errors,
+            warnings,
+            branch_x,
+            branch_text_x,
+            health_left,
+            error_text_x,
+            warning_x,
+            warning_text_x,
+            health_right,
+        }
+    }
+
+    /// Where "Ready" (and its dot) starts at the status bar's right end.
+    pub(in crate::windows_app) fn status_ready_x(&self, hdc: HDC, rect: RECT) -> i32 {
+        rect.right - self.text_width(hdc, "Ready") - self.scale(16 + 14)
+    }
+
     // Geometry for the trailing "{Language}" name in the bottom status bar's
     // "Ln X, Col Y  Spaces: 4  UTF-8  {Language}" line. Shared between
     // painting and the click handler (input.rs) so clicking it is guaranteed
@@ -104,15 +153,10 @@ impl App {
         let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
         let (health_left, health_right, language_rect) = unsafe {
             let hdc = GetDC(hwnd);
-            let old = SelectObject(hdc, self.ui_font);
-            let branch = self.git_head_label();
-            let left_branch = format!("\u{2442}  {branch}");
-            let (errors, warnings) = self.problem_counts();
-            let health = format!("⊗ {errors}    ⚠ {warnings}");
-            let health_left = self.scale(16) + self.text_width(hdc, &left_branch) + self.scale(24);
-            let left_info_right = health_left + self.text_width(hdc, &health);
-            let ready_width = self.text_width(hdc, "\u{25cf}  Ready");
-            let ready_x = rect.right - ready_width - self.scale(16);
+            let old = SelectObject(hdc, self.small_font);
+            let left = self.status_left(hdc);
+            let (health_left, left_info_right) = (left.health_left, left.health_right);
+            let ready_x = self.status_ready_x(hdc, rect);
             let (_, _, _, language_rect) =
                 self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
             SelectObject(hdc, old);
@@ -172,12 +216,7 @@ impl App {
     ) -> bool {
         let pane = self.focused_pane;
         let editor_bottom = (window.bottom - self.scale(STATUS)).max(0);
-        let code_bottom = editor_bottom
-            - if self.terminal_visible {
-                self.scale(self.terminal_height)
-            } else {
-                0
-            };
+        let code_bottom = editor_bottom - self.terminal_panel();
         let bounds = RECT {
             left: self.pane_left(hwnd, pane),
             top: self.editor_top(),
@@ -349,7 +388,7 @@ impl App {
                 },
                 self.theme.edge,
             );
-            SelectObject(hdc, self.ui_font);
+            SelectObject(hdc, self.small_font);
             // The status bar's contents; its background is filled above.
             if RectVisible(
                 hdc,
@@ -363,46 +402,89 @@ impl App {
             {
                 // Durable repository health stays on the left; editor-specific
                 // details sit on the right beside the Ready indicator.
-                let branch = self.git_head_label();
-                let left_branch = format!("\u{2442}  {branch}");
-                let left_x = self.scale(16);
-                Self::label(
+                let bar = RECT {
+                    top: editor_bottom,
+                    ..rect
+                };
+                let middle = (bar.top + bar.bottom) / 2;
+                let icon = self.scale(14);
+                let icon_at = |x: i32| RECT {
+                    left: x,
+                    right: x + icon,
+                    ..bar
+                };
+                let left = self.status_left(hdc);
+                self.glyph_in(
                     hdc,
-                    &left_branch,
-                    left_x,
-                    editor_bottom + self.scale(5),
+                    DebugGlyph::Branch,
+                    self.theme.text,
+                    icon_at(left.branch_x),
+                    icon,
+                );
+                self.label_mid(
+                    hdc,
+                    &left.branch,
+                    left.branch_text_x,
+                    middle,
                     self.theme.text,
                     rect,
                 );
-                let health_x = left_x + self.text_width(hdc, &left_branch) + self.scale(24);
                 let (errors, warnings) = self.problem_counts();
-                let health = format!("⊗ {errors}    ⚠ {warnings}");
-                Self::label(
+                self.glyph_in(
                     hdc,
-                    &health,
-                    health_x,
-                    editor_bottom + self.scale(5),
+                    DebugGlyph::Error,
+                    if errors > 0 {
+                        self.theme.error
+                    } else {
+                        self.theme.muted
+                    },
+                    icon_at(left.health_left),
+                    icon,
+                );
+                self.label_mid(
+                    hdc,
+                    &left.errors,
+                    left.error_text_x,
+                    middle,
                     self.theme.muted,
                     rect,
                 );
-                let left_info_right = health_x + self.text_width(hdc, &health);
-
-                let right_ready = "\u{25cf}  Ready";
-                let ready_width = self.text_width(hdc, right_ready);
-                let ready_x = rect.right - ready_width - self.scale(16);
-                Self::label(
+                self.glyph_in(
                     hdc,
-                    "\u{25cf}",
-                    ready_x,
-                    editor_bottom + self.scale(5),
-                    ui(52, 211, 153),
+                    DebugGlyph::Warning,
+                    if warnings > 0 {
+                        self.theme.warning
+                    } else {
+                        self.theme.muted
+                    },
+                    icon_at(left.warning_x),
+                    icon,
+                );
+                self.label_mid(
+                    hdc,
+                    &left.warnings,
+                    left.warning_text_x,
+                    middle,
+                    self.theme.muted,
                     rect,
                 );
-                Self::label(
+                let left_info_right = left.health_right;
+
+                let ready_x = self.status_ready_x(hdc, rect);
+                let dot = self.scale(8);
+                self.icons.draw_glyph(
+                    hdc,
+                    DebugGlyph::GutterDot,
+                    ui(52, 211, 153),
+                    ready_x,
+                    middle - dot / 2,
+                    dot,
+                );
+                self.label_mid(
                     hdc,
                     "Ready",
                     ready_x + self.scale(14),
-                    editor_bottom + self.scale(5),
+                    middle,
                     self.theme.text,
                     rect,
                 );
@@ -429,20 +511,13 @@ impl App {
                         right: clip_right,
                         bottom: rect.bottom,
                     };
-                    Self::label(
-                        hdc,
-                        &prefix,
-                        mid_x,
-                        editor_bottom + self.scale(5),
-                        self.theme.muted,
-                        label_clip,
-                    );
+                    self.label_mid(hdc, &prefix, mid_x, middle, self.theme.muted, label_clip);
                     let language = self.language_name();
-                    Self::label(
+                    self.label_mid(
                         hdc,
                         &language,
                         language_rect.left,
-                        editor_bottom + self.scale(5),
+                        middle,
                         ui(80, 160, 220),
                         label_clip,
                     );
@@ -466,11 +541,11 @@ impl App {
                         ]
                         .iter()
                         .any(|word| lower.contains(word));
-                        Self::label(
+                        self.label_mid(
                             hdc,
                             message,
                             left,
-                            editor_bottom + self.scale(5),
+                            middle,
                             if failed {
                                 self.theme.error
                             } else {
@@ -491,6 +566,7 @@ impl App {
 
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
         self.arm_recovery();
+        self.sync_terminal_motion(hwnd);
         unsafe {
             // The update region itself, read before BeginPaint validates it.
             let update = CreateRectRgn(0, 0, 0, 0);
@@ -630,12 +706,7 @@ impl App {
                 return;
             }
             let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-            let code_bottom = editor_bottom
-                - if self.terminal_visible {
-                    self.scale(self.terminal_height)
-                } else {
-                    0
-                };
+            let code_bottom = editor_bottom - self.terminal_panel();
             let editor_left = self.editor_left();
             let gap = self.chrome_gap();
             let chrome_top = self.chrome_top();
@@ -685,86 +756,9 @@ impl App {
                 bottom: chrome_top,
             };
             if shows(header) {
-                DrawIconEx(
-                    hdc,
-                    self.scale(14),
-                    self.scale(9),
-                    self.brand_icon,
-                    self.scale(32),
-                    self.scale(32),
-                    0,
-                    null_mut(),
-                    DI_NORMAL,
-                );
-                SelectObject(hdc, self.brand_font);
-                let name_width = self.text_width(hdc, "LightLine");
-                Self::label(
-                    hdc,
-                    "LightLine",
-                    self.scale(56),
-                    self.scale(12),
-                    self.theme.text,
-                    RECT {
-                        left: self.scale(56),
-                        top: 0,
-                        right: self.scale(56) + name_width,
-                        bottom: chrome_top,
-                    },
-                );
-                self.paint_ide_badge(
-                    hdc,
-                    self.ui_font,
-                    self.scale(56) + name_width + self.scale(6),
-                    self.scale(25),
-                    self.scale(20),
-                    self.scale(6),
-                    self.scale(5),
-                    ui(63, 47, 150),
-                );
-                SelectObject(hdc, self.ui_font);
+                self.paint_brand(hdc, chrome_top);
                 self.paint_menu_titles(hdc, hwnd);
-                self.paint_hot_title_button(hdc, hwnd);
-                let title_button = self.scale(46);
-                let controls_left = rect.right - title_button * 3;
-                let controls_mid_y = chrome_top / 2;
-                self.stroke(hdc, self.theme.muted, |hdc| {
-                    // Minimize
-                    MoveToEx(
-                        hdc,
-                        controls_left + self.scale(17),
-                        controls_mid_y + self.scale(5),
-                        null_mut(),
-                    );
-                    LineTo(
-                        hdc,
-                        controls_left + self.scale(29),
-                        controls_mid_y + self.scale(5),
-                    );
-                    // Maximize / restore
-                    let max_left = controls_left + title_button + self.scale(17);
-                    Rectangle(
-                        hdc,
-                        max_left,
-                        controls_mid_y - self.scale(6),
-                        max_left + self.scale(12),
-                        controls_mid_y + self.scale(6),
-                    );
-                    // Close
-                    let close_left = controls_left + title_button * 2 + self.scale(17);
-                    MoveToEx(hdc, close_left, controls_mid_y - self.scale(6), null_mut());
-                    LineTo(
-                        hdc,
-                        close_left + self.scale(12),
-                        controls_mid_y + self.scale(6),
-                    );
-                    MoveToEx(
-                        hdc,
-                        close_left + self.scale(12),
-                        controls_mid_y - self.scale(6),
-                        null_mut(),
-                    );
-                    LineTo(hdc, close_left, controls_mid_y + self.scale(6));
-                });
+                self.paint_title_controls(hdc, hwnd, chrome_top);
             }
             if self.sidebar_width > 0 {
                 let panel = RECT {
@@ -808,6 +802,8 @@ impl App {
                 },
                 tab_bg,
             );
+            // The breadcrumbs sit on the editor's own background; a line
+            // under the tab strip, which the active tab covers, as VS Code.
             Self::fill(
                 hdc,
                 RECT {
@@ -816,15 +812,15 @@ impl App {
                     right: editor_card.right - self.scale(1).max(1),
                     bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
                 },
-                self.theme.active_bg,
+                self.theme.editor_bg,
             );
             Self::fill(
                 hdc,
                 RECT {
                     left: editor_left + self.scale(1).max(1),
-                    top: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT - 1),
+                    top: tab_strip_bottom - self.scale(1).max(1),
                     right: editor_card.right - self.scale(1).max(1),
-                    bottom: tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT),
+                    bottom: tab_strip_bottom,
                 },
                 self.theme.edge,
             );
@@ -853,11 +849,13 @@ impl App {
                         .and_then(Path::file_name)
                         .map(|part| part.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "Editor".into());
-                    Self::label(
+                    let crumb_middle = tab_strip_bottom + self.scale(BREADCRUMB_HEIGHT) / 2;
+                    SelectObject(hdc, self.small_font);
+                    self.label_mid(
                         hdc,
-                        &format!("{}  >  {}", path_part, self.tab_label(tab_index)),
+                        &format!("{}  \u{203a}  {}", path_part, self.tab_label(tab_index)),
                         left + self.scale(18),
-                        tab_strip_bottom + self.scale(3),
+                        crumb_middle,
                         if pane == self.focused_pane {
                             self.theme.text
                         } else {
@@ -870,22 +868,12 @@ impl App {
                             bottom: self.editor_top(),
                         },
                     );
-                    for (rect, glyph) in [(&split_rect, "[\u{2502}]"), (&more_rect, "\u{2026}")] {
-                        let glyph_x =
-                            rect.left + (rect.right - rect.left - self.text_width(hdc, glyph)) / 2;
-                        Self::label(
-                            hdc,
-                            glyph,
-                            glyph_x,
-                            tab_strip_bottom + self.scale(3),
-                            self.theme.muted,
-                            RECT {
-                                left: split_rect.left,
-                                top: tab_strip_bottom,
-                                right,
-                                bottom: self.editor_top(),
-                            },
-                        );
+                    SelectObject(hdc, self.ui_font);
+                    for (rect, glyph) in [
+                        (split_rect, DebugGlyph::SplitEditor),
+                        (more_rect, DebugGlyph::More),
+                    ] {
+                        self.glyph_in(hdc, glyph, self.theme.muted, rect, self.scale(16));
                     }
                     if self.split_visible && pane == self.focused_pane {
                         Self::fill(
@@ -920,7 +908,7 @@ impl App {
                         bottom: tab_strip_bottom,
                     };
                     if index == self.active {
-                        FillRect(hdc, &bounds, active_bg);
+                        Self::fill(hdc, bounds, self.theme.editor_bg);
                         Self::fill(
                             hdc,
                             RECT {
@@ -942,14 +930,14 @@ impl App {
                                 false,
                                 use_theme,
                                 left + self.scale(11),
-                                chrome_top + self.scale(9),
+                                chrome_top + (self.scale(TAB_HEIGHT) - self.scale(18)) / 2,
                                 self.scale(18),
                             ) {
                                 self.draw_vector_file(
                                     hdc,
                                     path,
                                     left + self.scale(11),
-                                    chrome_top + self.scale(9),
+                                    chrome_top + (self.scale(TAB_HEIGHT) - self.scale(18)) / 2,
                                     self.scale(18),
                                 );
                             }
@@ -959,14 +947,14 @@ impl App {
                                 hdc,
                                 GenericIcon::File,
                                 left + self.scale(11),
-                                chrome_top + self.scale(9),
+                                chrome_top + (self.scale(TAB_HEIGHT) - self.scale(18)) / 2,
                                 self.scale(18),
                             ) {
                                 self.draw_vector_file(
                                     hdc,
                                     std::path::Path::new("untitled"),
                                     left + self.scale(11),
-                                    chrome_top + self.scale(9),
+                                    chrome_top + (self.scale(TAB_HEIGHT) - self.scale(18)) / 2,
                                     self.scale(18),
                                 );
                             }
@@ -991,20 +979,28 @@ impl App {
                     ExtTextOutW(
                         hdc,
                         clip.left,
-                        chrome_top + self.scale(5),
+                        chrome_top + (self.scale(TAB_HEIGHT) - self.text_height(hdc)) / 2,
                         ETO_CLIPPED,
                         &clip,
                         chars.as_ptr(),
                         chars.len() as u32,
                         null(),
                     );
-                    let close = wide("×");
-                    TextOutW(
+                    self.glyph_in(
                         hdc,
-                        left + tab_width - self.scale(23),
-                        chrome_top + self.scale(5),
-                        close.as_ptr(),
-                        1,
+                        DebugGlyph::Close,
+                        if index == self.active {
+                            self.theme.text
+                        } else {
+                            self.theme.muted
+                        },
+                        RECT {
+                            left: left + tab_width - self.scale(30),
+                            top: chrome_top,
+                            right: left + tab_width - self.scale(8),
+                            bottom: tab_strip_bottom,
+                        },
+                        self.scale(14),
                     );
                 }
                 // The active file's action button: run it, or preview Markdown.
@@ -1032,82 +1028,23 @@ impl App {
                             self.paint_preview_icon(hdc, button);
                         }
                         FileAction::Run => {
-                            let left = button.left + self.scale(4);
-                            let brush = CreateSolidBrush(self.theme.green);
-                            let pen = CreatePen(PS_SOLID, 1, self.theme.green);
-                            let old_brush = SelectObject(hdc, brush);
-                            let old_pen = SelectObject(hdc, pen);
-                            let points = [
-                                POINT {
-                                    x: left + self.scale(9),
-                                    y: chrome_top + self.scale(11),
-                                },
-                                POINT {
-                                    x: left + self.scale(9),
-                                    y: chrome_top + self.scale(27),
-                                },
-                                POINT {
-                                    x: left + self.scale(23),
-                                    y: chrome_top + self.scale(19),
-                                },
-                            ];
-                            Polygon(hdc, points.as_ptr(), 3);
-                            SelectObject(hdc, old_brush);
-                            SelectObject(hdc, old_pen);
-                            DeleteObject(brush);
-                            DeleteObject(pen);
+                            self.glyph_in(
+                                hdc,
+                                DebugGlyph::Start,
+                                self.theme.green,
+                                button,
+                                self.scale(18),
+                            );
                         }
                     }
                 }
                 self.paint_run_choice_button(hwnd, hdc);
             }
 
-            // Persistent command center: a compact, clickable Ctrl+P surface
-            // matching the approved workbench mockup.
+            // The search box (Ctrl+P), in the title bar.
             let command_rect = self.command_center_rect(hwnd);
             if command_rect.right > command_rect.left && shows(command_rect) {
-                self.panel_card(
-                    hdc,
-                    command_rect,
-                    self.scale(6),
-                    self.command_center_edge(),
-                    ui(12, 25, 48),
-                );
-                self.rail_icon(
-                    hdc,
-                    1,
-                    command_rect.left + self.scale(10),
-                    command_rect.top + self.scale(6),
-                    self.theme.muted,
-                );
-                Self::label(
-                    hdc,
-                    "Search files, symbols, commands...",
-                    command_rect.left + self.scale(36),
-                    command_rect.top + self.scale(5),
-                    self.theme.muted,
-                    RECT {
-                        left: command_rect.left + self.scale(36),
-                        top: command_rect.top,
-                        right: command_rect.right - self.scale(55),
-                        bottom: command_rect.bottom,
-                    },
-                );
-                let key_rect = RECT {
-                    left: command_rect.right - self.scale(48),
-                    top: command_rect.top + self.scale(4),
-                    right: command_rect.right - self.scale(7),
-                    bottom: command_rect.bottom - self.scale(4),
-                };
-                Self::rounded_fill(hdc, key_rect, self.scale(4), ui(25, 43, 76));
-                Self::label(
-                    hdc,
-                    "Ctrl P",
-                    key_rect.left + self.scale(5),
-                    key_rect.top + self.scale(1),
-                    self.theme.text,
-                    key_rect,
-                );
+                self.paint_command_center(hdc, hwnd);
             }
             if shows(RECT {
                 left: 0,
@@ -1136,8 +1073,10 @@ impl App {
                     self.sidebar_right(),
                     card_bottom,
                 );
-                SetViewportOrgEx(hdc, 0, chrome_top, null_mut());
-                let sidebar_bottom = card_bottom - chrome_top;
+                // The panel's header is laid out 40 px tall; drawn from
+                // side_origin, the clip above hides its top 5 px.
+                SetViewportOrgEx(hdc, 0, self.side_origin(), null_mut());
+                let sidebar_bottom = card_bottom - self.side_origin();
                 if self.sidebar_width > 0 && self.side_view != SideView::Files {
                     self.paint_side_panel(hdc, self.sidebar_right(), sidebar_bottom);
                 }
@@ -1193,24 +1132,26 @@ impl App {
                             .map(|name| name.to_string_lossy().into_owned())
                             .unwrap_or_else(|| display_path(root));
                         let root_expanded = self.expanded_dirs.contains(root);
-                        self.chevron(hdc, self.scale(RAIL + 16), self.scale(58), root_expanded);
+                        // The workspace row: 40 to EXPLORER_TOP, centred on 52.
+                        let root_middle = self.scale(52);
+                        self.chevron(hdc, self.scale(RAIL + 16), root_middle, root_expanded);
                         let root_clip = RECT {
                             left: self.scale(RAIL + 28),
                             top: self.scale(40),
                             right: editor_left - self.scale(96),
-                            bottom: self.scale(70),
+                            bottom: self.scale(EXPLORER_TOP),
                         };
-                        Self::label(
+                        self.label_mid(
                             hdc,
                             &root_name,
                             self.scale(RAIL + 28),
-                            self.scale(49),
+                            root_middle,
                             self.theme.text,
                             root_clip,
                         );
                         // Toolbar action buttons on the workspace header
                         let s = |v: i32| self.scale(v);
-                        let btn_y = s(48);
+                        let btn_y = root_middle - s(10);
                         let btn_h = s(20);
 
                         // New File button
@@ -1465,9 +1406,9 @@ impl App {
                                         hdc,
                                         RECT {
                                             left: caret_x,
-                                            top: top + self.scale(3),
+                                            top: top + self.scale(1),
                                             right: caret_x + self.scale(2),
-                                            bottom: top + self.scale(EXPLORER_ROW - 5),
+                                            bottom: top + self.scale(EXPLORER_ROW - 1),
                                         },
                                         self.theme.text,
                                     );
@@ -1571,7 +1512,7 @@ impl App {
                 self.pane_right(hwnd, self.focused_pane),
                 code_bottom,
             );
-            if self.terminal_visible
+            if self.terminal_panel() > 0
                 && shows(RECT {
                     left: editor_left,
                     top: code_bottom,
@@ -1671,158 +1612,24 @@ impl App {
         }
     }
 
+    // The Explorer's header buttons, centred in their rects.
     pub(in crate::windows_app) fn draw_new_file_icon(&self, hdc: HDC, rect: RECT, color: u32) {
-        let cx = (rect.left + rect.right) / 2;
-        let cy = (rect.top + rect.bottom) / 2;
-        let s = |v: i32| self.scale(v);
-        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
-        if pen.is_null() {
-            return;
-        }
-        unsafe {
-            let old_pen = SelectObject(hdc, pen);
-            let l = cx - s(5);
-            let r = cx + s(5);
-            let t = cy - s(6);
-            let b = cy + s(6);
-            let fold = s(3);
-
-            // Document outline with folded top-right corner
-            MoveToEx(hdc, l, t, null_mut());
-            LineTo(hdc, r - fold, t);
-            LineTo(hdc, r, t + fold);
-            LineTo(hdc, r, b);
-            LineTo(hdc, l, b);
-            LineTo(hdc, l, t);
-
-            // Corner fold crease
-            MoveToEx(hdc, r - fold, t, null_mut());
-            LineTo(hdc, r - fold, t + fold);
-            LineTo(hdc, r, t + fold);
-
-            // Plus mark inside
-            let pcx = cx - s(1);
-            let pcy = cy + s(1);
-            let pr = s(2).max(2);
-            MoveToEx(hdc, pcx - pr, pcy, null_mut());
-            LineTo(hdc, pcx + pr + 1, pcy);
-            MoveToEx(hdc, pcx, pcy - pr, null_mut());
-            LineTo(hdc, pcx, pcy + pr + 1);
-
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
+        self.glyph_in(hdc, DebugGlyph::NewFile, color, rect, self.scale(16));
     }
 
     pub(in crate::windows_app) fn draw_new_folder_icon(&self, hdc: HDC, rect: RECT, color: u32) {
-        let cx = (rect.left + rect.right) / 2;
-        let cy = (rect.top + rect.bottom) / 2;
-        let s = |v: i32| self.scale(v);
-        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
-        if pen.is_null() {
-            return;
-        }
-        unsafe {
-            let old_pen = SelectObject(hdc, pen);
-            let l = cx - s(6);
-            let r = cx + s(6);
-            let t = cy - s(4);
-            let b = cy + s(5);
-            let tab_w = s(4);
-
-            // Folder tab outline
-            MoveToEx(hdc, l, t, null_mut());
-            LineTo(hdc, l + tab_w, t);
-            LineTo(hdc, l + tab_w + s(2), t + s(2));
-            LineTo(hdc, r, t + s(2));
-            LineTo(hdc, r, b);
-            LineTo(hdc, l, b);
-            LineTo(hdc, l, t);
-
-            // Plus mark inside folder
-            let pcx = cx;
-            let pcy = cy + s(1);
-            let pr = s(2).max(2);
-            MoveToEx(hdc, pcx - pr, pcy, null_mut());
-            LineTo(hdc, pcx + pr + 1, pcy);
-            MoveToEx(hdc, pcx, pcy - pr, null_mut());
-            LineTo(hdc, pcx, pcy + pr + 1);
-
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
+        self.glyph_in(hdc, DebugGlyph::NewFolder, color, rect, self.scale(16));
     }
 
     pub(in crate::windows_app) fn draw_refresh_icon(&self, hdc: HDC, rect: RECT, color: u32) {
-        let cx = (rect.left + rect.right) / 2;
-        let cy = (rect.top + rect.bottom) / 2;
-        let s = |v: i32| self.scale(v);
-        let r = s(5).max(4);
-        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
-        if pen.is_null() {
-            return;
-        }
-        unsafe {
-            let old_pen = SelectObject(hdc, pen);
-            // 3/4 circular curve
-            MoveToEx(hdc, cx, cy - r, null_mut());
-            LineTo(hdc, cx + r, cy - r / 2);
-            LineTo(hdc, cx + r, cy + r / 2);
-            LineTo(hdc, cx, cy + r);
-            LineTo(hdc, cx - r, cy);
-            LineTo(hdc, cx - r / 2, cy - r / 2);
-
-            // Arrowhead at top pointing clockwise
-            MoveToEx(hdc, cx - s(3), cy - r - s(2), null_mut());
-            LineTo(hdc, cx, cy - r);
-            LineTo(hdc, cx - s(3), cy - r + s(2));
-
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
+        self.glyph_in(hdc, DebugGlyph::Refresh, color, rect, self.scale(16));
     }
 
     pub(in crate::windows_app) fn draw_close_icon(&self, hdc: HDC, rect: RECT, color: u32) {
-        let cx = (rect.left + rect.right) / 2;
-        let cy = (rect.top + rect.bottom) / 2;
-        let s = |v: i32| self.scale(v);
-        let r = s(4).max(3);
-        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
-        if pen.is_null() {
-            return;
-        }
-        unsafe {
-            let old_pen = SelectObject(hdc, pen);
-            MoveToEx(hdc, cx - r, cy - r, null_mut());
-            LineTo(hdc, cx + r + 1, cy + r + 1);
-            MoveToEx(hdc, cx + r, cy - r, null_mut());
-            LineTo(hdc, cx - r - 1, cy + r + 1);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
+        self.glyph_in(hdc, DebugGlyph::Close, color, rect, self.scale(16));
     }
 
     pub(in crate::windows_app) fn draw_collapse_all_icon(&self, hdc: HDC, rect: RECT, color: u32) {
-        let cx = (rect.left + rect.right) / 2;
-        let cy = (rect.top + rect.bottom) / 2;
-        let s = |v: i32| self.scale(v);
-        let r = s(4).max(3);
-        let pen = unsafe { CreatePen(PS_SOLID, s(1).max(1), color) };
-        if pen.is_null() {
-            return;
-        }
-        unsafe {
-            let old_pen = SelectObject(hdc, pen);
-            // Upper chevron
-            MoveToEx(hdc, cx - r, cy - s(1), null_mut());
-            LineTo(hdc, cx, cy - s(1) - r / 2);
-            LineTo(hdc, cx + r + 1, cy - s(1));
-            // Lower chevron
-            MoveToEx(hdc, cx - r, cy + s(3), null_mut());
-            LineTo(hdc, cx, cy + s(3) - r / 2);
-            LineTo(hdc, cx + r + 1, cy + s(3));
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
+        self.glyph_in(hdc, DebugGlyph::CollapseAll, color, rect, self.scale(16));
     }
 }

@@ -233,6 +233,22 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.advance_sidebar(hwnd);
             0
         }
+        WM_TIMER if wparam == motion::TERMINAL_TIMER => {
+            app.advance_terminal(hwnd);
+            0
+        }
+        WM_TIMER if wparam == motion::SCROLL_TIMER => {
+            app.advance_glide(hwnd);
+            0
+        }
+        WM_TIMER if wparam == motion::HOVER_TIMER => {
+            app.advance_hot_fade(hwnd);
+            0
+        }
+        WM_SETTINGCHANGE if wparam == SPI_SETCLIENTAREAANIMATION as usize => {
+            app.system_animations = motion::system_animations();
+            0
+        }
         WM_TIMER if wparam == 6 => {
             app.begin_mouse_hover(hwnd);
             0
@@ -741,7 +757,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             // block one. Only the code panes are redrawn, and mostly not
             // even those (scroll_blit.rs).
             if delta != 0 {
-                app.wheel_scroll(hwnd, pane, if delta > 0 { -3 } else { 3 });
+                app.glide_scroll(hwnd, pane, if delta > 0 { -3 } else { 3 });
             }
             0
         }
@@ -873,11 +889,7 @@ pub fn run() -> io::Result<()> {
             &dark_titlebar as *const i32 as *const std::ffi::c_void,
             size_of::<i32>() as u32,
         );
-        let mut app = Box::new(RefCell::new(App::new(
-            hwnd,
-            app_icons.large,
-            app_icons.hero,
-        )));
+        let mut app = Box::new(RefCell::new(App::new(hwnd, app_icons.hero)));
         SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,
@@ -944,6 +956,7 @@ pub fn run() -> io::Result<()> {
         }
         DeleteObject(app.borrow().font);
         DeleteObject(app.borrow().ui_font);
+        DeleteObject(app.borrow().small_font);
         DeleteObject(app.borrow().brand_font);
         if com_initialized {
             CoUninitialize();

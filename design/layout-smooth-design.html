@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Smoother Layout</title>
+<style>
+  :root {
+    --page: #02060f;
+    --panel: #081020;
+    --edge: #182f52;
+    --text: #e2e8f0;
+    --label: #9fb0cc;
+    --muted: #7e92b2;
+    --blue: #5297ff;
+    --violet: #8b5cf6;
+    --green: #34d399;
+    /* LightLine's default dark theme (theme.rs), sampled from the screenshot */
+    --ll-title: #081122;
+    --ll-rail: #070d1b;
+    --ll-side: #081020;
+    --ll-editor: #070e1d;
+    --ll-line: #0e1f3d;
+    --ll-select: #1a2c5a;
+    --ll-active: #111f3b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1800px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 10px; }
+  h3 { font-size: 15px; margin: 0 0 8px; }
+  p.lead { color: var(--label); max-width: 900px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+
+  /* Side by side */
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  @media (max-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+  .pair figure { margin: 0; }
+  .pair figcaption { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px; font-weight: 600; }
+  .pair figcaption span { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .shot { position: relative; width: 100%; aspect-ratio: 1600 / 1000; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; background: #000; }
+  .shot > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .shot > .frame { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .swipe { display: none; }
+  .swipe .shot { cursor: ew-resize; }
+  .swipe .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fde68a; box-shadow: 0 0 0 1px #0008; pointer-events: none; }
+  .swipe .tag { position: absolute; top: 8px; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #000a; color: #fff; pointer-events: none; }
+  body.swipe-mode .pair { display: none; }
+  body.swipe-mode .swipe { display: block; }
+
+  /* Size guides drawn over both */
+  .guides { position: absolute; inset: 0; pointer-events: none; display: none; }
+  body.show-guides .guides { display: block; }
+  .guide { position: absolute; left: 0; right: 0; border-top: 1px dashed #fde68a; border-bottom: 1px dashed #fde68a; background: #fde68a14; }
+  .guide b { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: 600 22px "Segoe UI", sans-serif; color: #fde68a; background: #000c; padding: 1px 8px; border-radius: 4px; }
+  .vguide { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #fde68a; border-right: 1px dashed #fde68a; background: #fde68a14; }
+  .vguide b { position: absolute; top: 46%; left: 50%; transform: translateX(-50%); font: 600 22px "Segoe UI", sans-serif; color: #fde68a; background: #000c; padding: 1px 6px; border-radius: 4px; }
+
+  /* The proposed LightLine, 1600 x 1000 px like the screenshot (125% display) */
+  .ll { position: relative; width: 1600px; height: 1000px; overflow: hidden; background: var(--ll-editor); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 17.5px; }
+  .ll .titlebar { position: absolute; left: 0; top: 0; right: 0; height: 44px; background: var(--ll-title); border-bottom: 1px solid var(--edge); display: flex; align-items: center; }
+  .ll .brand { display: flex; align-items: center; gap: 9px; padding-left: 14px; width: 210px; }
+  .ll .logo { width: 28px; height: 28px; border-radius: 7px; background: #4f46e5; display: grid; place-items: center; }
+  .ll .brand b { font-size: 19px; }
+  .ll .badge { font-size: 12.5px; font-weight: 600; color: #c7d2fe; background: #312e81; border-radius: 4px; padding: 0 6px; }
+  .ll .menus { display: flex; gap: 2px; }
+  .ll .menus span { padding: 3px 11px; border-radius: 5px; color: #9fb0cc; }
+  .ll .command { position: absolute; left: 820px; top: 6px; width: 520px; height: 32px; border: 1px solid #2b4c84; border-radius: 6px; background: #0c1930; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 12px; color: var(--muted); font-size: 16.5px; }
+  .ll .command .kbd { margin-left: auto; font-size: 14px; color: var(--label); background: #19294c; border-radius: 4px; padding: 0 7px; }
+  .ll .caption { position: absolute; right: 0; top: 0; display: flex; }
+  .ll .caption span { width: 57px; height: 44px; display: grid; place-items: center; }
+  .ll .rail { position: absolute; left: 0; top: 44px; bottom: 28px; width: 60px; background: var(--ll-rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; align-items: center; padding-top: 6px; }
+  .ll .rail .item { width: 60px; height: 58px; display: grid; place-items: center; position: relative; }
+  .ll .rail .item.on::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; background: var(--violet); border-radius: 0 2px 2px 0; }
+  .ll .rail .bottom { margin-top: auto; margin-bottom: 8px; }
+  .ll .side { position: absolute; left: 60px; top: 44px; bottom: 28px; width: 368px; background: var(--ll-side); border-right: 1px solid var(--edge); }
+  .ll .side .head { height: 44px; display: flex; align-items: center; padding: 0 14px 0 20px; font-size: 14.5px; letter-spacing: .06em; color: var(--muted); }
+  .ll .side .head .acts { margin-left: auto; display: flex; gap: 14px; }
+  .ll .tree .row { height: 28px; display: flex; align-items: center; gap: 8px; padding-right: 10px; color: #c8d3e6; white-space: nowrap; }
+  .ll .tree .row.sel { background: var(--ll-select); box-shadow: inset 0 0 0 1px #2f5aa8; color: var(--text); }
+  .ll .tree .row .tw { width: 16px; color: var(--label); display: grid; place-items: center; }
+  .ll .editor { position: absolute; left: 428px; right: 0; top: 44px; bottom: 285px; }
+  .ll .tabs { height: 44px; background: var(--ll-title); display: flex; align-items: stretch; border-bottom: 1px solid var(--edge); }
+  .ll .tab { width: 225px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--muted); border-right: 1px solid var(--edge); }
+  .ll .tab.on { background: var(--ll-editor); color: var(--text); box-shadow: inset 0 2px 0 var(--violet); margin-bottom: -1px; }
+  .ll .tab .x { margin-left: auto; color: var(--muted); font-size: 16px; }
+  .ll .tabs .right { margin-left: auto; display: flex; align-items: center; gap: 12px; padding-right: 16px; }
+  .ll .picker { height: 32px; width: 190px; border: 1px solid #22385f; border-radius: 6px; display: flex; align-items: center; padding: 0 10px; color: var(--text); font-size: 16.5px; }
+  .ll .picker i { margin-left: auto; font-style: normal; color: var(--muted); font-size: 12px; }
+  .ll .crumbs { height: 28px; display: flex; align-items: center; padding: 0 22px; gap: 10px; color: var(--muted); font-size: 16.5px; }
+  .ll .crumbs .here { color: var(--label); }
+  .ll .code { position: absolute; left: 0; right: 0; top: 72px; bottom: 0; font-family: "Cascadia Mono", Consolas, monospace; font-size: 18.75px; overflow: hidden; }
+  .ll .ln { height: 25px; display: flex; align-items: center; white-space: pre; }
+  .ll .ln .no { width: 72px; text-align: right; color: var(--muted); padding-right: 14px; flex-shrink: 0; }
+  .ll .ln .fold { width: 18px; color: var(--muted); flex-shrink: 0; font-size: 13px; }
+  .ll .ln .src { padding-left: 4px; }
+  .ll .ln.cur { background: var(--ll-line); }
+  .ll .ln.cur .no { color: var(--text); }
+  .ll .sticky { box-shadow: 0 6px 6px -6px #000; position: relative; z-index: 1; background: var(--ll-editor); }
+  .ll .panel { position: absolute; left: 428px; right: 0; bottom: 28px; height: 257px; background: var(--ll-side); border-top: 1px solid var(--edge); }
+  .ll .panel .head { height: 40px; display: flex; align-items: stretch; gap: 26px; padding: 0 20px; }
+  .ll .panel .head span { display: flex; align-items: center; color: var(--muted); font-size: 16px; letter-spacing: .02em; }
+  .ll .panel .head span.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--violet); }
+  .ll .panel .head .acts { margin-left: auto; gap: 18px; }
+  .ll .prow { height: 28px; display: flex; align-items: center; padding: 0 20px 0 28px; gap: 12px; white-space: nowrap; font-size: 17px; }
+  .ll .prow.file { background: #0d1a33; padding-left: 16px; }
+  .ll .prow .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #e05a6a; flex-shrink: 0; }
+  .ll .prow .at { margin-left: auto; color: var(--muted); }
+  .ll .status { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: var(--ll-editor); border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 22px; padding: 0 18px; font-size: 15.5px; color: var(--label); }
+  .ll .status .right { margin-left: auto; display: flex; gap: 24px; }
+  .k { color: #5297ff; } .t { color: #2dd4bf; } .s { color: #34d399; } .m { color: #8b5cf6; }
+  .f { color: #dcd282; } .c { color: #7e92b2; } .b0 { color: #ffd700; } .b1 { color: #da70d6; } .b2 { color: #179fff; }
+
+  /* Measurements */
+  table.spec { border-collapse: collapse; width: 100%; max-width: 1040px; font-size: 13.5px; }
+  table.spec th, table.spec td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge); vertical-align: top; }
+  table.spec th { color: var(--label); font-weight: 600; }
+  table.spec td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .better { color: var(--green); }
+  ul.notes { color: var(--label); max-width: 980px; padding-left: 20px; }
+  ul.notes li { margin: 5px 0; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; color: #c7d2fe; }
+
+  /* Motion demos */
+  .demos { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
+  .demo { background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; padding: 14px; }
+  .demo p { color: var(--label); margin: 0 0 10px; font-size: 13px; }
+  .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .duo .lab { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .demo button { font: inherit; font-size: 12.5px; color: var(--text); background: #111f3b; border: 1px solid var(--edge); border-radius: 6px; padding: 4px 10px; cursor: pointer; margin-top: 8px; }
+  .scrollbox { height: 150px; overflow: hidden; background: var(--ll-editor); border: 1px solid var(--edge); border-radius: 4px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; position: relative; }
+  .scrollbox .inner { position: absolute; left: 0; right: 0; top: 0; }
+  .scrollbox .line { height: 18px; padding-left: 8px; white-space: pre; color: var(--text); }
+  .scrollbox .line .n { color: var(--muted); display: inline-block; width: 30px; }
+  .slidebox { height: 150px; display: flex; background: var(--ll-editor); border: 1px solid var(--edge); border-radius: 4px; overflow: hidden; }
+  .slidebox .sp { background: var(--ll-side); border-right: 1px solid var(--edge); width: 90px; flex-shrink: 0; overflow: hidden; color: var(--muted); font-size: 11px; padding: 6px; white-space: nowrap; }
+  .slidebox .ed { flex: 1; padding: 6px; font-size: 11px; color: var(--muted); }
+  .slidebox.ease .sp { transition: width 120ms cubic-bezier(.2, 0, 0, 1); }
+  .slidebox.closed .sp { width: 0; padding-left: 0; padding-right: 0; border-right-width: 0; }
+  .hoverlist { background: var(--ll-side); border: 1px solid var(--edge); border-radius: 4px; padding: 4px; }
+  .hoverlist div { padding: 4px 8px; border-radius: 4px; font-size: 13px; color: #c8d3e6; cursor: default; }
+  .hoverlist div:hover { background: #1c2a44; }
+  .hoverlist.fade div { transition: background-color 90ms ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .slidebox.ease .sp, .hoverlist.fade div { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>LightLine layout: current and proposed</h1>
+  <p class="lead">Left is a real screenshot of LightLine today (current <code>main</code>, 1600 × 1000 at 125% scaling, rust-analyzer running, Problems panel open). Right is the proposed flatter, tighter layout at the same size with the same files, code and problems. Colors, fonts, icons and the menu bar stay the same; what changes is spacing and structure: thinner bars, panels that meet edge to edge with a 1 px line instead of floating cards, editor-coloured tabs and breadcrumbs, and denser lists. The code area gains two rows at this window size.</p>
+
+  <div class="toolbar">
+    <button type="button" id="modePair" aria-pressed="true">Side by side</button>
+    <button type="button" id="modeSwipe" aria-pressed="false">Swipe (full size)</button>
+    <button type="button" id="guidesBtn" aria-pressed="false">Show sizes</button>
+    <span class="hint">Swipe: drag across the picture to slide between current (left of the line) and proposed.</span>
+  </div>
+
+  <div class="pair">
+    <figure>
+      <figcaption>Current LightLine <span>real screenshot</span></figcaption>
+      <div class="shot" id="shotCurrent">
+        <img src="screens/layout-current.png" alt="Current LightLine: 50 px title bar, rounded panel cards with gaps, 42 px tabs, 30 px breadcrumb band, Explorer rows 34 px, Problems panel, 29 px status bar">
+        <div class="guides" data-for="current"></div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Proposed <span>mockup, same size and content</span></figcaption>
+      <div class="shot" id="shotProposed"><div class="frame" data-frame></div><div class="guides" data-for="proposed"></div></div>
+    </figure>
+  </div>
+
+  <div class="swipe">
+    <div class="shot" id="swipeShot">
+      <div class="frame" data-frame></div>
+      <img id="swipeCurrent" src="screens/layout-current.png" alt="Current LightLine" style="clip-path: inset(0 50% 0 0)">
+      <div class="divider" id="swipeLine" style="left: 50%"></div>
+      <span class="tag" style="left: 8px">Current</span>
+      <span class="tag" style="right: 8px">Proposed</span>
+    </div>
+  </div>
+
+  <h2>What changes, in sizes</h2>
+  <table class="spec">
+    <tr><th>Part</th><th>Current</th><th>Proposed</th><th>VS Code</th><th>Why</th></tr>
+    <tr><td>Title bar</td><td class="num">50 px</td><td class="num better">35 px</td><td class="num">35 px</td><td>Room for code; logo and menus fit at 35.</td></tr>
+    <tr><td>Panels</td><td>Rounded cards, 1 px gaps on a darker backdrop</td><td class="better">Flat, edge to edge, 1 px lines</td><td>Flat</td><td>Less visual noise; nothing wasted between panels.</td></tr>
+    <tr><td>Activity rail</td><td class="num">56 px, rounded tile behind the active icon</td><td class="num better">48 px, 3 px bar beside it</td><td class="num">48 px, bar</td><td>Lighter; the bar already marks the active view.</td></tr>
+    <tr><td>Side panel header</td><td class="num">42 px</td><td class="num better">35 px</td><td class="num">35 px</td><td></td></tr>
+    <tr><td>Explorer rows</td><td class="num">27 px</td><td class="num better">22 px</td><td class="num">22 px</td><td>More files visible without scrolling.</td></tr>
+    <tr><td>Tabs</td><td class="num">42 px, active tab a lighter card</td><td class="num better">35 px, active tab joins the editor</td><td class="num">35 px</td><td>The open file reads as one surface with its tab.</td></tr>
+    <tr><td>Breadcrumbs</td><td class="num">30 px band in its own colour</td><td class="num better">22 px on the editor background</td><td class="num">22 px</td><td></td></tr>
+    <tr><td>Problems rows</td><td class="num">24 px</td><td class="num better">22 px</td><td class="num">22 px</td><td></td></tr>
+    <tr><td>Status bar</td><td class="num">29 px</td><td class="num better">22 px</td><td class="num">22 px</td><td></td></tr>
+    <tr><td>Code area at 1280 × 800</td><td class="num">22 rows</td><td class="num better">24 rows</td><td></td><td>Same font and line height; only the frame is smaller.</td></tr>
+  </table>
+  <ul class="notes">
+    <li>Sizes are in Windows' unscaled pixels; the pictures are at 125% (one unscaled pixel is 1.25 pixels there).</li>
+    <li>Unchanged: colours and themes, the code font and line height, icons, the menu bar, the search box, every shortcut.</li>
+    <li>Focus: the panel with the keyboard gets a thin accent line (as the active tab and Problems tab show), instead of a whole lighter card.</li>
+    <li>Speed: thinner chrome is less to paint; nothing here adds work while typing or scrolling.</li>
+  </ul>
+
+  <h2>Smoother motion</h2>
+  <p class="lead">Short and only while something changes: nothing animates while idle (still 0 wakeups), typing is never animated, and all of it follows Windows' "Show animations" setting plus a LightLine setting to turn it off. Try each pair; left is how LightLine moves today.</p>
+  <div class="demos">
+    <div class="demo">
+      <h3>Smooth scrolling</h3>
+      <p>Page Down, a wheel notch or a jump glides over about 100 ms instead of moving at once (the existing <code>smoothScrolling</code> setting, which does nothing yet).</p>
+      <div class="duo">
+        <div><div class="lab">Today: instant</div><div class="scrollbox" id="scrollNow"><div class="inner"></div></div><button type="button" data-scroll="scrollNow">Page Down</button></div>
+        <div><div class="lab">Proposed: glide</div><div class="scrollbox" id="scrollGlide"><div class="inner"></div></div><button type="button" data-scroll="scrollGlide">Page Down</button></div>
+      </div>
+    </div>
+    <div class="demo">
+      <h3>Side panel and terminal</h3>
+      <p>Opening or closing the side panel (Ctrl+B) or the terminal eases over about 120 ms instead of jumping.</p>
+      <div class="duo">
+        <div><div class="lab">Today: jumps</div><div class="slidebox" id="slideNow"><div class="sp">EXPLORER<br>src<br>main.rs<br>Cargo.toml</div><div class="ed">fn main() { … }</div></div><button type="button" data-slide="slideNow">Ctrl+B</button></div>
+        <div><div class="lab">Proposed: eases</div><div class="slidebox ease" id="slideEase"><div class="sp">EXPLORER<br>src<br>main.rs<br>Cargo.toml</div><div class="ed">fn main() { … }</div></div><button type="button" data-slide="slideEase">Ctrl+B</button></div>
+      </div>
+    </div>
+    <div class="demo">
+      <h3>Hover</h3>
+      <p>Highlights under the mouse fade in quickly instead of snapping; one hover style in every list.</p>
+      <div class="duo">
+        <div><div class="lab">Today: snaps</div><div class="hoverlist"><div>main.rs</div><div>Cargo.toml</div><div>big.min.json</div><div>wide.json</div></div></div>
+        <div><div class="lab">Proposed: fades</div><div class="hoverlist fade"><div>main.rs</div><div>Cargo.toml</div><div>big.min.json</div><div>wide.json</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<template id="proposed">
+  <div class="ll" role="img" aria-label="Proposed LightLine layout">
+    <div class="titlebar">
+      <div class="brand">
+        <div class="logo"><svg width="15" height="17" viewBox="0 0 16 18" aria-hidden="true"><path d="M9.5 1 2 10.2h5.2L6.2 17 14 7.6H8.8z" fill="#fde68a"/></svg></div>
+        <b>LightLine</b><span class="badge">IDE</span>
+      </div>
+      <div class="menus"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span><span>Help</span></div>
+      <div class="command"><svg width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="#7e92b2" stroke-width="1.4"/><path d="m9.4 9.4 3.4 3.4" stroke="#7e92b2" stroke-width="1.4" stroke-linecap="round"/></svg>Search files, symbols, commands...<span class="kbd">Ctrl P</span></div>
+      <div class="caption">
+        <span><svg width="13" height="13" viewBox="0 0 12 12"><path d="M1 6h10" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+        <span><svg width="13" height="13" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+        <span><svg width="13" height="13" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" stroke="#c8d3e6" stroke-width="1.2"/></svg></span>
+      </div>
+    </div>
+    <div class="rail">
+      <div class="item"><svg width="24" height="18" viewBox="0 0 20 16"><path d="M2 2h16M2 8h16M2 14h16" stroke="#7e92b2" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="item on"><svg width="26" height="22" viewBox="0 0 20 18"><path d="M2 3.5h6l2 2h8v10H2z" fill="#5297ff" stroke="#5297ff" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+      <div class="item"><svg width="22" height="22" viewBox="0 0 18 18"><circle cx="7.5" cy="7.5" r="5" fill="none" stroke="#7e92b2" stroke-width="1.6"/><path d="m11.5 11.5 4.5 4.5" stroke="#7e92b2" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="item"><svg width="22" height="24" viewBox="0 0 18 20"><circle cx="5" cy="4" r="2" fill="none" stroke="#7e92b2" stroke-width="1.5"/><circle cx="5" cy="16" r="2" fill="none" stroke="#7e92b2" stroke-width="1.5"/><circle cx="13" cy="8" r="2" fill="none" stroke="#7e92b2" stroke-width="1.5"/><path d="M5 6v8M13 10c0 3-8 2-8 4" fill="none" stroke="#7e92b2" stroke-width="1.5"/></svg></div>
+      <div class="item"><svg width="20" height="22" viewBox="0 0 16 18"><path d="M3 2v14l11-7z" fill="none" stroke="#7e92b2" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+      <div class="item"><svg width="22" height="22" viewBox="0 0 18 18"><rect x="2" y="2" width="6" height="6" fill="none" stroke="#7e92b2" stroke-width="1.5"/><rect x="10" y="2" width="6" height="6" fill="none" stroke="#7e92b2" stroke-width="1.5"/><rect x="2" y="10" width="6" height="6" fill="none" stroke="#7e92b2" stroke-width="1.5"/><rect x="10" y="10" width="6" height="6" fill="none" stroke="#7e92b2" stroke-width="1.5"/></svg></div>
+      <div class="item"><svg width="22" height="22" viewBox="0 0 18 18"><path d="M9 1.5 10.6 7.4 16.5 9 10.6 10.6 9 16.5 7.4 10.6 1.5 9 7.4 7.4z" fill="none" stroke="#7e92b2" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+      <div class="item bottom"><svg width="22" height="22" viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.6" fill="none" stroke="#7e92b2" stroke-width="1.5"/><path d="M9 1.5v2.2M9 14.3v2.2M1.5 9h2.2M14.3 9h2.2M3.7 3.7l1.6 1.6M12.7 12.7l1.6 1.6M3.7 14.3l1.6-1.6M12.7 5.3l1.6-1.6" stroke="#7e92b2" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+    </div>
+    <div class="side">
+      <div class="head">EXPLORER<span class="acts"><svg width="15" height="15" viewBox="0 0 14 14"><path d="m3 9 4-4 4 4" fill="none" stroke="#7e92b2" stroke-width="1.4"/></svg><svg width="13" height="13" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" stroke="#7e92b2" stroke-width="1.3"/></svg></span></div>
+      <div class="tree" data-tree></div>
+    </div>
+    <div class="editor">
+      <div class="tabs">
+        <div class="tab on"><svg width="18" height="18" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="none" stroke="#f97316" stroke-width="1.8"/><circle cx="8" cy="8" r="1.8" fill="#f97316"/></svg>main.rs<span class="x">×</span></div>
+        <div class="tab"><svg width="16" height="18" viewBox="0 0 14 16"><path d="M2 1h7l3 3v11H2z" fill="#e0a030"/></svg>Cargo.toml<span class="x">×</span></div>
+        <div class="right"><div class="picker">Automatic<i>⌄</i></div><svg width="22" height="22" viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z" fill="#34d399"/></svg></div>
+      </div>
+      <div class="crumbs">src <span>›</span> <span class="here">main.rs</span></div>
+      <div class="code" data-code></div>
+    </div>
+    <div class="panel">
+      <div class="head"><span class="on">PROBLEMS&nbsp;&nbsp;7</span><span>OUTPUT</span><span>DEBUG CONSOLE</span><span class="acts">+ ⌄&nbsp;&nbsp;&nbsp;×</span></div>
+      <div data-problems></div>
+    </div>
+    <div class="status"><span>⊗ 7&nbsp;&nbsp;&nbsp;△ 0</span><span>This workspace is not inside a Git repository.</span><span class="right"><span>Ln 454, Col 34</span><span>Spaces: 4</span><span>UTF-8</span><span style="color:#50a0dc">Rust</span><span><span style="color:#34d399">●</span> Ready</span></span></div>
+  </div>
+</template>
+
+<script>
+  // ---- The proposed frame's content: the same as the screenshot ----
+  const TREE = [
+    [0, "open", "ws", "folder"], [1, "closed", "langext-test", "folder"], [1, "open", "src", "src"],
+    [2, "", "big.min.json", "json"], [2, "", "main.rs", "rust", true], [2, "", "wide.json", "json"],
+    [1, "closed", "target", "folder"], [1, "", "Cargo.lock", "lock"], [1, "", "Cargo.toml", "toml"],
+  ];
+  const ICONS = {
+    folder: '<svg width="19" height="16" viewBox="0 0 20 16"><path d="M1 2.5h6.5l2 2H19v10H1z" fill="#5297ff"/></svg>',
+    src: '<svg width="19" height="16" viewBox="0 0 20 16"><path d="M1 2.5h6.5l2 2H19v10H1z" fill="#5297ff"/><path d="m8 7-2 2 2 2m4-4 2 2-2 2" fill="none" stroke="#e2e8f0" stroke-width="1.2"/></svg>',
+    json: '<span style="color:#f5b85f;font:600 15px Consolas">{}</span>',
+    rust: '<svg width="18" height="18" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="none" stroke="#f97316" stroke-width="1.8"/><circle cx="8" cy="8" r="1.8" fill="#f97316"/></svg>',
+    lock: '<svg width="16" height="18" viewBox="0 0 14 16"><rect x="2" y="7" width="10" height="8" rx="1" fill="#9fb0cc"/><path d="M4.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="#9fb0cc" stroke-width="1.6"/></svg>',
+    toml: '<svg width="16" height="18" viewBox="0 0 14 16"><path d="M2 1h7l3 3v11H2z" fill="#e0a030"/></svg>',
+  };
+  const STICKY = [439, "struct Pending {", 0];
+  const CODE = [
+    [448, "    signatures: HashMap<u64, PendingHover>,"],
+    [449, "    workspace_symbols: std::collections::HashSet<u64>,"],
+    [450, "    inlay_hints: HashMap<u64, PendingHover>,"],
+    [451, "    highlights: HashMap<u64, PendingHover>,"],
+    [452, "    // The commands the server runs (executeCommandProvider), and the next"],
+    [453, "    // id for running one; nothing waits for their answers."],
+    [454, "    server_commands: Vec<String>,", "cur"],
+    [455, "    next_command_id: u64,"],
+    [456, "}"],
+    [457, ""],
+    [458, "fn hover_request(id: u64, hover: &PendingHover) -> Value {", "fold"],
+    [459, "    json!({\"jsonrpc\":\"2.0\",\"id\":id,\"method\":\"textDocument/hover\",\"params\":{", "fold"],
+    [460, "        \"textDocument\":{\"uri\":hover.uri},"],
+    [461, "        \"position\":{\"line\":hover.position.line,\"character\":hover.position.character}"],
+    [462, "    }})"],
+    [463, "}"],
+    [464, ""],
+    [465, "fn definition_request(id: u64, request: &PendingHover) -> Value {", "fold"],
+    [466, "    json!({\"jsonrpc\":\"2.0\",\"id\":id,\"method\":\"textDocument/definition\",\"params\":{", "fold"],
+    [467, "        \"textDocument\":{\"uri\":request.uri},"],
+    [468, "        \"position\":{\"line\":request.position.line,\"character\":request.position.character}"],
+    [469, "    }})"],
+    [470, "}"],
+    [471, ""],
+    [472, "fn references_request(id: u64, request: &PendingHover) -> Value {", "fold"],
+  ];
+  const PROBLEMS = [
+    ["unresolved import `serde_json`", "[Ln 3, Col 5]"],
+    ["cannot find `jobs` in `crate`", "[Ln 876, Col 25]"],
+    ["cannot find `workflow` in `crate`", "[Ln 956, Col 27]"],
+    ["cannot find `jobs` in `crate`", "[Ln 975, Col 20]"],
+    ["cannot find module or crate `serde_json` in this scope", "[Ln 2575, Col 16]"],
+    ["cannot find module or crate `serde_json` in this scope", "[Ln 2606, Col 5]"],
+    ["cannot find module or crate `serde_json` in this scope", "[Ln 2611, Col 9]"],
+  ];
+
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const KEYWORDS = new Set(["fn", "struct", "let", "pub", "use", "impl", "match", "Self", "self", "return", "mut"]);
+  // Rust colours as LightLine draws them, with bracket pairs by depth.
+  function highlight(src, depth) {
+    let out = "";
+    let i = 0;
+    let afterFn = false;
+    while (i < src.length) {
+      const rest = src.slice(i);
+      let m;
+      if (rest.startsWith("//")) { out += `<span class="c">${esc(rest)}</span>`; break; }
+      if ((m = rest.match(/^"(?:[^"\\]|\\.)*"/))) { out += `<span class="s">${esc(m[0])}</span>`; i += m[0].length; continue; }
+      if ((m = rest.match(/^[A-Za-z_][A-Za-z0-9_]*!/))) { out += `<span class="m">${esc(m[0])}</span>`; i += m[0].length; continue; }
+      if ((m = rest.match(/^[A-Za-z_][A-Za-z0-9_]*/))) {
+        const w = m[0];
+        let cls = "";
+        if (KEYWORDS.has(w)) cls = "k";
+        else if (afterFn) cls = "f";
+        else if (/^[A-Z]/.test(w) || /^(u64|u32|i32|usize|str|bool)$/.test(w)) cls = "t";
+        afterFn = w === "fn";
+        out += cls ? `<span class="${cls}">${w}</span>` : w;
+        i += w.length;
+        continue;
+      }
+      const ch = src[i];
+      if ("({[".includes(ch)) { out += `<span class="b${depth % 3}">${ch}</span>`; depth++; }
+      else if (")}]".includes(ch)) { depth = Math.max(0, depth - 1); out += `<span class="b${depth % 3}">${ch}</span>`; }
+      else out += esc(ch);
+      i++;
+    }
+    return [out, depth];
+  }
+
+  function buildFrame(host) {
+    host.appendChild(document.getElementById("proposed").content.cloneNode(true));
+    const tree = host.querySelector("[data-tree]");
+    for (const [level, twist, name, icon, sel] of TREE) {
+      const row = document.createElement("div");
+      row.className = "row" + (sel ? " sel" : "");
+      row.style.paddingLeft = (12 + level * 18) + "px";
+      const tw = twist === "open" ? "⌄" : twist === "closed" ? "›" : "";
+      row.innerHTML = `<span class="tw">${tw}</span>${ICONS[icon]}<span>${esc(name)}</span>`;
+      tree.appendChild(row);
+    }
+    const code = host.querySelector("[data-code]");
+    const line = (no, src, kind, depth) => {
+      const [html, next] = highlight(src, depth);
+      const div = document.createElement("div");
+      div.className = "ln" + (kind === "cur" ? " cur" : "");
+      div.innerHTML = `<span class="no">${no}</span><span class="fold">${kind === "fold" ? "⌄" : ""}</span><span class="src">${html}</span>`;
+      code.appendChild(div);
+      return [div, next];
+    };
+    const [sticky] = line(STICKY[0], STICKY[1], "", 0);
+    sticky.classList.add("sticky");
+    let depth = 1;
+    for (const [no, src, kind] of CODE) {
+      [, depth] = line(no, src, kind, depth);
+    }
+    const problems = host.querySelector("[data-problems]");
+    problems.innerHTML = `<div class="prow file">main.rs <span style="color:var(--muted)">src&nbsp;&nbsp;7</span></div>` +
+      PROBLEMS.map(([text, at]) => `<div class="prow"><span class="dot"></span>${esc(text)}<span class="at">${at}</span></div>`).join("");
+  }
+
+  // Scale a 1600 x 1000 frame to its box.
+  const frames = [...document.querySelectorAll("[data-frame]")];
+  frames.forEach(buildFrame);
+  function fit() {
+    for (const frame of frames) {
+      const box = frame.parentElement;
+      frame.style.transform = `scale(${box.clientWidth / 1600})`;
+    }
+    drawGuides();
+  }
+  new ResizeObserver(fit).observe(document.body);
+
+  // ---- Size guides: [top, height, label] in picture pixels ----
+  const GUIDES = {
+    current: { rows: [[0, 62, "title 50"], [62, 53, "tabs 42"], [115, 38, "crumbs 30"], [962, 38, "status 29"]], cols: [[0, 70, "56"]] },
+    proposed: { rows: [[0, 44, "title 35"], [44, 44, "tabs 35"], [88, 28, "crumbs 22"], [972, 28, "status 22"]], cols: [[0, 60, "48"]] },
+  };
+  function drawGuides() {
+    for (const layer of document.querySelectorAll(".guides")) {
+      const spec = GUIDES[layer.dataset.for];
+      const k = layer.parentElement.clientWidth / 1600;
+      layer.innerHTML = spec.rows.map(([top, h, label]) =>
+        `<div class="guide" style="top:${top * k}px;height:${h * k}px"><b style="font-size:${Math.max(10, 22 * k)}px">${label}</b></div>`).join("") +
+        spec.cols.map(([left, w, label]) =>
+        `<div class="vguide" style="left:${left * k}px;width:${w * k}px"><b style="font-size:${Math.max(10, 22 * k)}px">${label}</b></div>`).join("");
+    }
+  }
+
+  // ---- Modes ----
+  const pairBtn = document.getElementById("modePair");
+  const swipeBtn = document.getElementById("modeSwipe");
+  const guidesBtn = document.getElementById("guidesBtn");
+  function setMode(swipe) {
+    document.body.classList.toggle("swipe-mode", swipe);
+    pairBtn.setAttribute("aria-pressed", String(!swipe));
+    swipeBtn.setAttribute("aria-pressed", String(swipe));
+    fit();
+  }
+  pairBtn.addEventListener("click", () => setMode(false));
+  swipeBtn.addEventListener("click", () => setMode(true));
+  guidesBtn.addEventListener("click", () => {
+    const on = document.body.classList.toggle("show-guides");
+    guidesBtn.setAttribute("aria-pressed", String(on));
+    drawGuides();
+  });
+  const swipeShot = document.getElementById("swipeShot");
+  const setSwipe = (clientX) => {
+    const r = swipeShot.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    document.getElementById("swipeCurrent").style.clipPath = `inset(0 ${(1 - f) * 100}% 0 0)`;
+    document.getElementById("swipeLine").style.left = (f * 100) + "%";
+  };
+  let dragging = false;
+  swipeShot.addEventListener("pointerdown", (e) => { dragging = true; swipeShot.setPointerCapture(e.pointerId); setSwipe(e.clientX); });
+  swipeShot.addEventListener("pointermove", (e) => { if (dragging || e.pointerType === "mouse") setSwipe(e.clientX); });
+  swipeShot.addEventListener("pointerup", () => { dragging = false; });
+
+  // ---- Motion demos ----
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  for (const id of ["scrollNow", "scrollGlide"]) {
+    const inner = document.querySelector(`#${id} .inner`);
+    let html = "";
+    for (let n = 1; n <= 120; n++) {
+      html += `<div class="line"><span class="n">${n}</span>${n % 7 === 1 ? '<span class="k">fn</span> step_' + n + '() {' : n % 7 === 0 ? "}" : "    total += " + n + ";"}</div>`;
+    }
+    inner.innerHTML = html;
+    inner.dataset.y = "0";
+  }
+  document.querySelectorAll("[data-scroll]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const box = document.getElementById(button.dataset.scroll);
+      const inner = box.querySelector(".inner");
+      const from = Number(inner.dataset.y);
+      const max = inner.scrollHeight - box.clientHeight;
+      const to = from + 144 > max ? 0 : from + 144;
+      inner.dataset.y = String(to);
+      if (button.dataset.scroll === "scrollNow" || reduce) {
+        inner.style.transform = `translateY(${-to}px)`;
+        return;
+      }
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / 100);
+        const eased = 1 - Math.pow(1 - t, 3);
+        inner.style.transform = `translateY(${-(from + (to - from) * eased)}px)`;
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  });
+  document.querySelectorAll("[data-slide]").forEach((button) => {
+    button.addEventListener("click", () => document.getElementById(button.dataset.slide).classList.toggle("closed"));
+  });
+</script>
+</body>
+</html>

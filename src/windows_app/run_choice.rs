@@ -206,13 +206,16 @@ impl App {
                 ..button
             },
         );
-        self.label_mid(
+        self.glyph_in(
             hdc,
-            "⌄",
-            button.right - self.scale(18),
-            (button.top + button.bottom) / 2,
+            DebugGlyph::ChevronDown,
             self.theme.muted,
-            button,
+            RECT {
+                left: button.right - self.scale(24),
+                right: button.right - self.scale(4),
+                ..button
+            },
+            self.scale(14),
         );
         unsafe {
             SelectObject(hdc, old_font);

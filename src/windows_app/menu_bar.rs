@@ -21,8 +21,8 @@
 use super::*;
 
 // Sizes, unscaled.
-const BAR_LEFT: i32 = 178;
-const TITLE_HEIGHT: i32 = 30;
+const BAR_LEFT: i32 = 160;
+const TITLE_HEIGHT: i32 = 26;
 const TITLE_PAD: i32 = 10;
 const TITLE_GAP: i32 = 2;
 const COMPACT_WIDTH: i32 = 36;
@@ -1487,7 +1487,12 @@ impl App {
                         self.panel_card(hdc, *rect, s(6), self.theme.blue, self.theme.select_bg);
                         self.theme.text
                     } else if self.hot == Some(Hot::MenuTitle(index)) {
-                        Self::rounded_fill(hdc, *rect, s(6), hover_fill());
+                        Self::rounded_fill(
+                            hdc,
+                            *rect,
+                            s(6),
+                            self.hot_color(self.theme.tab_bg, hover_fill()),
+                        );
                         self.theme.text
                     } else {
                         label
@@ -1509,7 +1514,12 @@ impl App {
                 } else if lit {
                     Self::rounded_fill(hdc, button, s(6), self.theme.select_bg);
                 } else if self.hot == Some(Hot::MenuButton) {
-                    Self::rounded_fill(hdc, button, s(6), hover_fill());
+                    Self::rounded_fill(
+                        hdc,
+                        button,
+                        s(6),
+                        self.hot_color(self.theme.tab_bg, hover_fill()),
+                    );
                 }
                 let color = if lit || self.hot == Some(Hot::MenuButton) {
                     self.theme.text

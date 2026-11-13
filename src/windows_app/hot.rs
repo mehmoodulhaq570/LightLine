@@ -98,7 +98,7 @@ impl App {
             Some(Hot::Rail(
                 ((y - s(RAIL_FIRST_ROW)) / s(RAIL_ROW).max(1)) as usize,
             ))
-        } else if y >= bottom - s(STATUS + 40) {
+        } else if y >= bottom - s(STATUS + 44) {
             Some(Hot::RailSettings)
         } else {
             None
@@ -112,17 +112,17 @@ impl App {
         let top = match hot {
             Hot::RailMenu => s(RAIL_MENU_ROW),
             Hot::Rail(index) => s(RAIL_FIRST_ROW + index as i32 * RAIL_ROW),
-            Hot::RailSettings => editor_bottom - s(40),
+            Hot::RailSettings => editor_bottom - s(44),
             _ => return None,
         };
         let bottom = match hot {
-            Hot::RailSettings => editor_bottom - s(4),
-            _ => top + s(42),
+            Hot::RailSettings => editor_bottom,
+            _ => top + s(RAIL_ROW),
         };
         Some(RECT {
-            left: s(7),
+            left: 0,
             top,
-            right: s(RAIL - 7),
+            right: s(RAIL),
             bottom,
         })
     }
@@ -239,6 +239,7 @@ impl App {
         self.invalidate_hot(hwnd);
         self.hot = hot;
         self.invalidate_hot(hwnd);
+        self.start_hot_fade(hwnd);
         if hot.is_some() && track {
             // To hear when the mouse leaves the window, which would leave
             // the button lit.
@@ -266,7 +267,7 @@ impl App {
         }
     }
 
-    fn invalidate_hot(&self, hwnd: HWND) {
+    pub(super) fn invalidate_hot(&self, hwnd: HWND) {
         let Some(hot) = self.hot else {
             return;
         };
@@ -281,7 +282,7 @@ impl App {
     /// The command center's border: brighter under the mouse.
     pub(super) fn command_center_edge(&self) -> u32 {
         if self.hot == Some(Hot::CommandCenter) {
-            ui(86, 130, 210)
+            self.hot_color(ui(43, 76, 132), ui(86, 130, 210))
         } else {
             ui(43, 76, 132)
         }
@@ -296,11 +297,14 @@ impl App {
             Self::fill(
                 hdc,
                 rect,
-                if index == 2 {
-                    ui(196, 43, 28)
-                } else {
-                    hover_fill()
-                },
+                self.hot_color(
+                    self.theme.tab_bg,
+                    if index == 2 {
+                        ui(196, 43, 28)
+                    } else {
+                        hover_fill()
+                    },
+                ),
             );
         }
     }

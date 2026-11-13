@@ -32,6 +32,8 @@ enum Setting {
     FormatOnSave,
     ParseLimit,
     ColorTheme,
+    Animations,
+    SmoothScrolling,
     TerminalProfile,
     MarkdownImages,
     AiEndpoint,
@@ -68,6 +70,8 @@ const ROWS: &[Row] = &[
     Row::Choice(Setting::ParseLimit),
     Row::Heading("APPEARANCE"),
     Row::Choice(Setting::ColorTheme),
+    Row::Toggle(Setting::Animations),
+    Row::Toggle(Setting::SmoothScrolling),
     Row::Heading("TERMINAL"),
     Row::Choice(Setting::TerminalProfile),
     Row::Heading("MARKDOWN"),
@@ -102,6 +106,8 @@ fn label(setting: Setting) -> &'static str {
         Setting::FormatOnSave => "Format on save",
         Setting::ParseLimit => "Syntax parse limit",
         Setting::ColorTheme => "Color theme",
+        Setting::Animations => "Animations",
+        Setting::SmoothScrolling => "Smooth scrolling",
         Setting::TerminalProfile => "Default shell",
         Setting::MarkdownImages => "Load web images in previews",
         Setting::AiEndpoint => "Server",
@@ -144,6 +150,8 @@ impl App {
             Setting::CodeLens => settings.code_lens,
             Setting::FormatOnSave => settings.format_on_save,
             Setting::MarkdownImages => settings.markdown_load_remote_images,
+            Setting::Animations => settings.animations,
+            Setting::SmoothScrolling => settings.smooth_scrolling,
             _ => false,
         }
     }
@@ -229,7 +237,7 @@ impl App {
     pub(super) fn scroll_settings_panel(&mut self, hwnd: HWND, delta: i32) {
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let visible = client.bottom - self.scale(STATUS) - self.chrome_top();
+        let visible = client.bottom - self.scale(STATUS) - self.side_origin();
         let (_, content) = self.settings_rows(0, 0);
         let max = (content + self.scale(12) - visible).max(0);
         self.settings_scroll =
@@ -255,7 +263,7 @@ impl App {
             }
             Row::Choice(Setting::ColorTheme) => {
                 // The theme menu saves the choice itself.
-                let top = rect.bottom + self.chrome_top();
+                let top = rect.bottom + self.side_origin();
                 self.show_color_theme_menu(hwnd, rect.left, top);
             }
             Row::Choice(Setting::TerminalProfile) => {
@@ -300,6 +308,8 @@ impl App {
             Setting::CodeLens => &mut settings.code_lens,
             Setting::FormatOnSave => &mut settings.format_on_save,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
+            Setting::Animations => &mut settings.animations,
+            Setting::SmoothScrolling => &mut settings.smooth_scrolling,
             _ => return,
         };
         *value = !*value;
@@ -389,11 +399,9 @@ impl App {
                 }
                 Row::Stepper(setting) => {
                     let (minus, plus) = self.stepper_buttons(rect);
-                    for (button, glyph) in [(minus, "\u{2212}"), (plus, "+")] {
+                    for (button, glyph) in [(minus, DebugGlyph::Minus), (plus, DebugGlyph::Plus)] {
                         self.panel_card(hdc, button, s(6), self.theme.edge, self.theme.editor_bg);
-                        let width = self.text_width(hdc, glyph);
-                        let x = (button.left + button.right - width) / 2;
-                        self.label_mid(hdc, glyph, x, middle, self.theme.text, button);
+                        self.glyph_in(hdc, glyph, self.theme.text, button, s(14));
                     }
                     let value = self.setting_value(setting);
                     let width = self.text_width(hdc, &value);
