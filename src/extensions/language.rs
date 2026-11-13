@@ -3,8 +3,10 @@
 //! library, and the extension's `highlights.scm` mapped onto LightLine's
 //! colors. This is how Helix and Neovim use Tree-sitter grammars; Zed itself
 //! compiles them to WebAssembly instead, which would mean embedding a WASM
-//! runtime. Language servers declared by an extension need its compiled
-//! WASM code and are not used.
+//! runtime. The language's `config.toml` also gives its comment tokens,
+//! brackets and indentation rules (`editing.rs`), and a language server it
+//! declares is started from PATH when LightLine knows its command
+//! (`language_servers.rs`).
 //!
 //! An extension's layout (verified against zed-industries' own language
 //! extensions):
@@ -54,12 +56,78 @@ struct ManifestGrammars {
     #[serde(default)]
     grammars: HashMap<String, GrammarEntry>,
     #[serde(default)]
-    language_servers: HashMap<String, toml::Value>,
+    language_servers: HashMap<String, ServerEntry>,
+}
+
+/// One `[language_servers.<name>]` entry: the languages it serves (older
+/// extensions write a single `language`), those it serves only when the
+/// user opts in, and the LSP language ids it expects.
+#[derive(Deserialize, Default)]
+struct ServerEntry {
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default)]
+    opt_in_languages: Vec<String>,
+    #[serde(default)]
+    language_ids: HashMap<String, String>,
 }
 
 fn manifest(extension_dir: &Path) -> Option<ManifestGrammars> {
     let text = std::fs::read_to_string(extension_dir.join("extension.toml")).ok()?;
     toml::from_str(&text).ok()
+}
+
+/// A language server an extension declares for one of its languages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredServer {
+    pub name: String,
+    /// The server serves the language only when the user opts in (Zed's
+    /// `opt_in_languages`); tried after the others.
+    pub opt_in: bool,
+    pub language_id: Option<String>,
+}
+
+/// The servers `extension.toml` (its text) declares, by language name, in
+/// the order the file lists them with opt-in ones last.
+fn declared_servers(manifest_text: &str) -> HashMap<String, Vec<DeclaredServer>> {
+    let Ok(manifest) = toml::from_str::<ManifestGrammars>(manifest_text) else {
+        return HashMap::new();
+    };
+    // The table keeps no order; the file's does.
+    let mut servers: Vec<(String, ServerEntry)> = manifest.language_servers.into_iter().collect();
+    let position = |name: &str| {
+        [
+            format!("[language_servers.{name}]"),
+            format!("[language_servers.\"{name}\"]"),
+        ]
+        .iter()
+        .filter_map(|header| manifest_text.find(header.as_str()))
+        .min()
+        .unwrap_or(usize::MAX)
+    };
+    servers.sort_by_key(|(name, _)| position(name));
+    let mut by_language: HashMap<String, Vec<DeclaredServer>> = HashMap::new();
+    for (name, entry) in servers {
+        let mut languages = entry.languages.clone();
+        languages.extend(entry.language.clone());
+        for language in languages {
+            let list = by_language.entry(language.clone()).or_default();
+            if list.iter().any(|server| server.name == name) {
+                continue;
+            }
+            list.push(DeclaredServer {
+                name: name.clone(),
+                opt_in: entry.opt_in_languages.contains(&language),
+                language_id: entry.language_ids.get(&language).cloned(),
+            });
+        }
+    }
+    for list in by_language.values_mut() {
+        list.sort_by_key(|server| server.opt_in);
+    }
+    by_language
 }
 
 /// The grammars an extension declares, sorted by name.
@@ -107,8 +175,24 @@ pub fn is_language_extension(extension_dir: &Path) -> bool {
         && manifest(extension_dir).is_some_and(|manifest| !manifest.grammars.is_empty())
 }
 
-/// True when the extension also declares language servers, which LightLine
-/// can't start: they come from the extension's compiled WASM code.
+/// The language servers an extension declares, by name, in its order.
+pub fn language_servers(extension_dir: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(extension_dir.join("extension.toml")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = Vec::new();
+    for servers in declared_servers(&text).into_values() {
+        for server in servers {
+            if !names.contains(&server.name) {
+                names.push(server.name);
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// True when the extension also declares language servers.
 pub fn has_language_servers(extension_dir: &Path) -> bool {
     manifest(extension_dir).is_some_and(|manifest| !manifest.language_servers.is_empty())
 }
@@ -121,6 +205,38 @@ pub struct LanguageConfig {
     pub grammar: Option<String>,
     #[serde(default)]
     pub path_suffixes: Vec<String>,
+    #[serde(default)]
+    pub line_comments: Vec<String>,
+    #[serde(default)]
+    pub block_comment: Option<super::editing::BlockCommentEntry>,
+    #[serde(default)]
+    pub brackets: Option<Vec<super::editing::BracketEntry>>,
+    #[serde(default)]
+    pub autoclose_before: String,
+    #[serde(default)]
+    pub increase_indent_pattern: Option<String>,
+    #[serde(default)]
+    pub decrease_indent_pattern: Option<String>,
+    #[serde(default)]
+    pub tab_size: Option<u32>,
+    #[serde(default)]
+    pub hard_tabs: Option<bool>,
+}
+
+impl LanguageConfig {
+    /// Its comment, bracket and indentation rules.
+    pub fn editing_rules(&self) -> super::editing::EditingRules {
+        super::editing::EditingRules::from_config(
+            &self.line_comments,
+            self.block_comment.as_ref(),
+            self.brackets.as_deref(),
+            &self.autoclose_before,
+            self.increase_indent_pattern.as_deref(),
+            self.decrease_indent_pattern.as_deref(),
+            self.tab_size,
+            self.hard_tabs,
+        )
+    }
 }
 
 /// Each language folder of an extension with its parsed config, sorted by
@@ -351,35 +467,70 @@ fn language_from(library: &libloading::Library, grammar: &str) -> Result<Languag
 }
 
 /// An installed language a file can be colored as.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ExtensionLanguage {
     pub name: String,
     grammar: String,
     library: PathBuf,
     highlights: PathBuf,
     suffixes: Vec<String>,
+    /// Comments, brackets and indentation, from its `config.toml`.
+    pub editing: super::editing::EditingRules,
+    /// The servers its extension declares for it, in the order to try them.
+    pub servers: Vec<String>,
+    /// The language id its server expects in `textDocument/didOpen`.
+    pub lsp_language_id: String,
+}
+
+impl PartialEq for ExtensionLanguage {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.library == other.library
+    }
+}
+
+impl ExtensionLanguage {
+    /// The language as LightLine's LSP client knows it, when it has a
+    /// server to try (declared by the extension, or named in settings).
+    pub fn lsp_language(&self) -> Option<crate::lsp::Language> {
+        super::language_servers::has_server(&self.name, &self.servers).then(|| {
+            crate::lsp::extension_language(&self.name, &self.lsp_language_id, &self.servers)
+        })
+    }
 }
 
 // The installed languages, listed on first use and again after an install
 // or removal.
 static INSTALLED: Mutex<Option<Arc<Vec<Arc<ExtensionLanguage>>>>> = Mutex::new(None);
 
+/// The installed languages, by extension folder. Listed on first use, from the
+/// extensions' config files only: no grammar is loaded.
+pub fn installed() -> Arc<Vec<Arc<ExtensionLanguage>>> {
+    let Ok(mut installed) = INSTALLED.lock() else {
+        return Arc::default();
+    };
+    installed
+        .get_or_insert_with(|| {
+            Arc::new(
+                crate::workflow::extensions_dir()
+                    .map(|dir| installed_in(&dir))
+                    .unwrap_or_default(),
+            )
+        })
+        .clone()
+}
+
 /// The installed language for `path`, matched by its extension or whole
 /// file name against the languages' `path_suffixes`.
 pub fn for_path(path: &Path) -> Option<Arc<ExtensionLanguage>> {
-    let languages = {
-        let mut installed = INSTALLED.lock().ok()?;
-        installed
-            .get_or_insert_with(|| {
-                Arc::new(
-                    crate::workflow::extensions_dir()
-                        .map(|dir| installed_in(&dir))
-                        .unwrap_or_default(),
-                )
-            })
-            .clone()
-    };
-    match_path(&languages, path)
+    match_path(&installed(), path)
+}
+
+/// The installed language called `name`.
+pub fn by_name(name: &str) -> Option<Arc<ExtensionLanguage>> {
+    installed()
+        .iter()
+        .find(|language| language.name == name)
+        .cloned()
 }
 
 /// Forgets the listed languages, so the next lookup sees an install or
@@ -420,23 +571,42 @@ fn installed_in(extensions_dir: &Path) -> Vec<Arc<ExtensionLanguage>> {
         .filter(|dir| dir.join("languages").is_dir() && dir.join("grammars").is_dir())
         .collect();
     folders.sort();
-    let mut languages = Vec::new();
+    let mut languages: Vec<Arc<ExtensionLanguage>> = Vec::new();
     for folder in folders {
+        let servers = std::fs::read_to_string(folder.join("extension.toml"))
+            .map(|text| declared_servers(&text))
+            .unwrap_or_default();
         for (dir, config) in language_configs(&folder) {
-            let Some(grammar) = config.grammar else {
+            let Some(grammar) = config.grammar.clone() else {
                 continue;
             };
             let library = library_path(&folder, &grammar);
             let highlights = dir.join("highlights.scm");
-            if library.is_file() && highlights.is_file() && !config.path_suffixes.is_empty() {
-                languages.push(Arc::new(ExtensionLanguage {
-                    name: config.name,
-                    grammar,
-                    library,
-                    highlights,
-                    suffixes: config.path_suffixes,
-                }));
+            if !library.is_file() || !highlights.is_file() || config.path_suffixes.is_empty() {
+                continue;
             }
+            // Two extensions with one language: the first folder's wins.
+            if languages
+                .iter()
+                .any(|language| language.name == config.name)
+            {
+                continue;
+            }
+            let declared = servers.get(&config.name).cloned().unwrap_or_default();
+            let lsp_language_id = declared
+                .iter()
+                .find_map(|server| server.language_id.clone())
+                .unwrap_or_else(|| config.name.to_ascii_lowercase().replace(' ', ""));
+            languages.push(Arc::new(ExtensionLanguage {
+                editing: config.editing_rules(),
+                name: config.name,
+                grammar,
+                library,
+                highlights,
+                suffixes: config.path_suffixes,
+                servers: declared.into_iter().map(|server| server.name).collect(),
+                lsp_language_id,
+            }));
         }
     }
     languages
@@ -613,6 +783,174 @@ mod tests {
         assert_eq!(found("project/mix.lock").as_deref(), Some("Elixir"));
         assert_eq!(found("page.heex"), None);
         assert_eq!(found("main.rs"), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // languages/lua/config.toml from zed-extensions/lua, as published.
+    const LUA_CONFIG: &str = r##"name = "Lua"
+grammar = "lua"
+path_suffixes = ["lua"]
+line_comments = ["-- ", "--- "]
+block_comment = ["--[", "]"]
+autoclose_before = ";:.,=}])>"
+brackets = [
+    { start = "{", end = "}", close = true, newline = true },
+    { start = "[", end = "]", close = true, newline = true },
+    { start = "(", end = ")", close = true, newline = true },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = ["string"] },
+    { start = "'", end = "'", close = true, newline = false, not_in = ["string"] },
+]
+collapsed_placeholder = "--[ ... ]--"
+
+# Fallback indent rules to complement tree-sitter.
+increase_indent_pattern = "^\\s*(if|elseif|else|do|while|for|repeat|((local|global)\\s+)?function|.+=\\s*function|.*[,(]\\s*function)\\b"
+decrease_indent_pattern = "^\\s*(elseif|else|end|until)\\b"
+"##;
+
+    // languages/elixir/config.toml from zed-extensions/elixir (shortened).
+    const ELIXIR_CONFIG: &str = r##"name = "Elixir"
+grammar = "elixir"
+path_suffixes = ["ex", "exs", "mix.lock"]
+first_line_pattern = '^#!.*\belixir\b'
+line_comments = ["# "]
+autoclose_before = ";:.,=}])>"
+brackets = [
+    { start = "{", end = "}", close = true, newline = true, not_in = ["sigil_curly"] },
+    { start = "(", end = ")", close = true, newline = true, not_in = ["sigil_round"] },
+    { start = "<<", end = ">>", close = false, newline = true },
+    { start = "\"\"\"", end = "\n\"\"\"", close = true, newline = true, not_in = [
+        "comment",
+        "string",
+    ] },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = [
+        "comment",
+        "string",
+        "quoted_atom",
+    ] },
+]
+tab_size = 2
+decrease_indent_pattern = '^\s*(after|catch|else|rescue)$'
+scope_opt_in_language_servers = ["tailwindcss-language-server"]
+"##;
+
+    // extension.toml from zed-extensions/elixir (shortened): five servers,
+    // some only when the user opts in, with LSP language ids.
+    const ELIXIR_MANIFEST: &str = r##"id = "elixir"
+name = "Elixir"
+version = "0.7.1"
+schema_version = 1
+
+[language_servers.expert]
+name = "Expert"
+languages = ["Elixir", "EEx", "HEEx"]
+opt_in_languages = ["Elixir", "EEx", "HEEx"]
+
+[language_servers.expert.language_ids]
+"Elixir" = "elixir"
+
+[language_servers.elixir-ls]
+name = "ElixirLS"
+languages = ["Elixir", "EEx", "HEEx"]
+
+[language_servers.elixir-ls.language_ids]
+"Elixir" = "elixir"
+"HEEx" = "phoenix-heex"
+
+[language_servers.next-ls]
+name = "Next LS"
+languages = ["Elixir", "HEEx"]
+
+[grammars.elixir]
+repository = "https://github.com/elixir-lang/tree-sitter-elixir"
+commit = "a2861e88a730287a60c11ea9299c033c7d076e30"
+"##;
+
+    #[test]
+    fn real_language_configs_give_comments_brackets_and_indentation() {
+        let lua: LanguageConfig = toml::from_str(LUA_CONFIG).unwrap();
+        let rules = lua.editing_rules();
+        assert_eq!(rules.line_comments, ["-- ", "--- "]);
+        assert_eq!(rules.block_comment, Some(("--[".into(), "]".into())));
+        let brackets = rules.brackets.as_ref().unwrap();
+        assert_eq!(brackets.autoclose_before, ";:.,=}])>");
+        assert_eq!(brackets.matched, [('{', '}'), ('[', ']'), ('(', ')')]);
+        assert_eq!(brackets.indent_after, ['{', '[', '(']);
+        assert!(rules.auto_pair('"').unwrap().not_in_string);
+        assert_eq!(rules.indents_after("local function f(x)"), Some(true));
+        assert_eq!(rules.indents_after("for i = 1, 10 do"), Some(true));
+        assert_eq!(rules.indents_after("print(x)"), Some(false));
+        assert!(rules.outdents("  end"));
+        assert_eq!(rules.tab_size, None);
+
+        let elixir: LanguageConfig = toml::from_str(ELIXIR_CONFIG).unwrap();
+        let rules = elixir.editing_rules();
+        assert_eq!(rules.line_comments, ["# "]);
+        assert_eq!(rules.block_comment, None);
+        assert_eq!(rules.tab_size, Some(2));
+        let brackets = rules.brackets.as_ref().unwrap();
+        // `<<`/`>>` and the triple quotes are longer than one character.
+        assert_eq!(brackets.matched, [('{', '}'), ('(', ')')]);
+        assert_eq!(brackets.auto_pairs.len(), 3);
+        assert!(rules.outdents("  else"));
+        assert!(!rules.outdents("  else_branch()"));
+
+        // TOML's config, which lists no indentation pattern.
+        let toml_config: LanguageConfig = toml::from_str(
+            "name = \"TOML\"\ngrammar = \"toml\"\npath_suffixes = [\"toml\"]\n\
+             line_comments = [\"# \"]\nautoclose_before = \",]}\"\nbrackets = [\n\
+             { start = \"{\", end = \"}\", close = true, newline = true },\n\
+             { start = \"[\", end = \"]\", close = true, newline = true },\n]\n",
+        )
+        .unwrap();
+        let rules = toml_config.editing_rules();
+        assert_eq!(rules.indents_after("[table"), Some(false));
+        assert_eq!(rules.indents_after("x = ["), Some(true));
+        assert!(rules.auto_pair('(').is_none());
+    }
+
+    #[test]
+    fn declared_servers_keep_the_manifests_order_with_opt_in_ones_last() {
+        let servers = declared_servers(ELIXIR_MANIFEST);
+        let names = |language: &str| -> Vec<String> {
+            servers[language]
+                .iter()
+                .map(|server| server.name.clone())
+                .collect()
+        };
+        assert_eq!(names("Elixir"), ["elixir-ls", "next-ls", "expert"]);
+        assert_eq!(names("HEEx"), ["elixir-ls", "next-ls", "expert"]);
+        assert_eq!(names("EEx"), ["elixir-ls", "expert"]);
+        assert!(servers["Elixir"][2].opt_in);
+        assert_eq!(
+            servers["HEEx"][0].language_id.as_deref(),
+            Some("phoenix-heex")
+        );
+        // zed-extensions/zig writes the older single `language`.
+        let zig = declared_servers(
+            "id = \"zig\"\nname = \"Zig\"\nversion = \"1\"\n\
+             [language_servers.zls]\nname = \"zls\"\nlanguage = \"Zig\"\n",
+        );
+        assert_eq!(zig["Zig"][0].name, "zls");
+        assert!(declared_servers("not toml [").is_empty());
+    }
+
+    #[test]
+    fn installed_languages_carry_their_rules_and_servers() {
+        let dir = fixture("rules");
+        let ext = dir.join("elixir");
+        write(&ext.join("extension.toml"), ELIXIR_MANIFEST);
+        write(&ext.join("languages/elixir/config.toml"), ELIXIR_CONFIG);
+        write(&ext.join("languages/elixir/highlights.scm"), "");
+        write(&library_path(&ext, "elixir"), "");
+        let languages = installed_in(&dir);
+        let elixir = &languages[0];
+        assert_eq!(elixir.servers, ["elixir-ls", "next-ls", "expert"]);
+        assert_eq!(elixir.lsp_language_id, "elixir");
+        assert_eq!(elixir.editing.tab_size, Some(2));
+        assert_eq!(language_servers(&ext), ["elixir-ls", "expert", "next-ls"]);
+        let lsp = elixir.lsp_language().unwrap();
+        assert_eq!(lsp.name(), "Elixir");
+        assert_eq!(lsp.language_id(), "elixir");
         fs::remove_dir_all(dir).unwrap();
     }
 

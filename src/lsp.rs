@@ -17,6 +17,60 @@ pub enum Language {
     C,
     TypeScript,
     Go,
+    /// A language from an installed extension (see `extension_language`).
+    Extension(ExtensionLanguageId),
+}
+
+/// An extension language registered with `extension_language`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionLanguageId(u16);
+
+// Extension languages that have been given a server, by id. Their names live
+// for the rest of the process: there is one per installed language at most.
+struct ExtensionEntry {
+    name: &'static str,
+    language_id: &'static str,
+    servers: Vec<String>,
+}
+
+static EXTENSION_LANGUAGES: Mutex<Vec<ExtensionEntry>> = Mutex::new(Vec::new());
+
+/// The LSP language for the extension language `name`, whose server expects
+/// documents as `language_id` and which its extension serves with
+/// `servers`, in the order to try them. Registering it again keeps its id.
+pub fn extension_language(name: &str, language_id: &str, servers: &[String]) -> Language {
+    let mut entries = EXTENSION_LANGUAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let index = match entries.iter().position(|entry| entry.name == name) {
+        Some(index) => {
+            let entry = &mut entries[index];
+            if entry.language_id != language_id {
+                entry.language_id = Box::leak(language_id.to_string().into_boxed_str());
+            }
+            if entry.servers != servers {
+                entry.servers = servers.to_vec();
+            }
+            index
+        }
+        None => {
+            entries.push(ExtensionEntry {
+                name: Box::leak(name.to_string().into_boxed_str()),
+                language_id: Box::leak(language_id.to_string().into_boxed_str()),
+                servers: servers.to_vec(),
+            });
+            entries.len() - 1
+        }
+    };
+    Language::Extension(ExtensionLanguageId(index as u16))
+}
+
+fn extension_entry<T>(id: ExtensionLanguageId, read: impl FnOnce(&ExtensionEntry) -> T) -> T {
+    let entries = EXTENSION_LANGUAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Ids are only made by `extension_language`, and entries never go.
+    read(&entries[id.0 as usize])
 }
 
 impl Language {
@@ -27,6 +81,7 @@ impl Language {
             Self::C => "C/C++",
             Self::TypeScript => "TypeScript/JavaScript",
             Self::Go => "Go",
+            Self::Extension(id) => extension_entry(id, |entry| entry.name),
         }
     }
 
@@ -37,6 +92,7 @@ impl Language {
             Self::C => "c",
             Self::TypeScript => "typescript",
             Self::Go => "go",
+            Self::Extension(id) => extension_entry(id, |entry| entry.language_id),
         }
     }
 
@@ -419,7 +475,7 @@ enum Input {
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub language: Language,
-    pub display_name: &'static str,
+    pub display_name: String,
     pub command: String,
     pub args: Vec<String>,
     pub settings: Value,
@@ -575,7 +631,7 @@ pub fn server_config(language: Language, python_interpreter: Option<&Path>) -> S
     match language {
         Language::Rust => ServerConfig {
             language,
-            display_name: "rust-analyzer",
+            display_name: "rust-analyzer".into(),
             command: "rust-analyzer".into(),
             args: Vec::new(),
             // Go to Symbol in Workspace finds functions and the rest too, not
@@ -586,33 +642,60 @@ pub fn server_config(language: Language, python_interpreter: Option<&Path>) -> S
         },
         Language::Python => ServerConfig {
             language,
-            display_name: "Pyright",
+            display_name: "Pyright".into(),
             command: "pyright-langserver".into(),
             args: vec!["--stdio".into()],
             settings: python_settings(python_interpreter),
         },
         Language::C => ServerConfig {
             language,
-            display_name: "clangd",
+            display_name: "clangd".into(),
             command: "clangd".into(),
             args: Vec::new(),
             settings: Value::Null,
         },
         Language::TypeScript => ServerConfig {
             language,
-            display_name: "typescript-language-server",
+            display_name: "typescript-language-server".into(),
             command: "typescript-language-server".into(),
             args: vec!["--stdio".into()],
             settings: Value::Null,
         },
         Language::Go => ServerConfig {
             language,
-            display_name: "gopls",
+            display_name: "gopls".into(),
             command: "gopls".into(),
             args: Vec::new(),
             settings: Value::Null,
         },
+        // The command is chosen when the server starts (`extension_server`).
+        Language::Extension(_) => ServerConfig {
+            language,
+            display_name: format!("the {} language server", language.name()),
+            command: String::new(),
+            args: Vec::new(),
+            settings: Value::Null,
+        },
     }
+}
+
+// The command for an extension language's server: the first of its
+// extension's servers (or the one settings name) found on PATH. Err is the
+// status bar's message saying what was looked for.
+fn extension_server(config: &mut ServerConfig) -> Result<PathBuf, String> {
+    let Language::Extension(id) = config.language else {
+        return Err("not an extension language".into());
+    };
+    let (name, servers) = extension_entry(id, |entry| (entry.name, entry.servers.clone()));
+    let (candidate, program) = crate::extensions::language_servers::resolve(
+        name,
+        &servers,
+        crate::extensions::language_servers::find_command,
+    )?;
+    config.display_name = candidate.server;
+    config.command = candidate.command.command;
+    config.args = candidate.command.args;
+    Ok(program)
 }
 
 fn python_settings(interpreter: Option<&Path>) -> Value {
@@ -699,6 +782,7 @@ fn stop_message(config: &ServerConfig, error: &str, stderr: &str) -> String {
                     config.display_name
                 );
             }
+            Language::Extension(_) => {}
         }
     }
     if stderr.is_empty() {
@@ -883,7 +967,7 @@ fn install_pyright() -> Result<PathBuf, String> {
 
 fn run_server(
     root: PathBuf,
-    config: ServerConfig,
+    mut config: ServerConfig,
     commands: Receiver<Input>,
     // Tells the worker, waiting on `commands`, that a server message arrived.
     arrivals: Sender<Input>,
@@ -952,13 +1036,31 @@ fn run_server(
                 return;
             }
         }
+    } else if matches!(config.language, Language::Extension(_)) {
+        match extension_server(&mut config) {
+            Ok(program) => ProcessCommand::new(program),
+            Err(message) => {
+                emit(stopped(config.language, &root, message), &events, &wake);
+                return;
+            }
+        }
     } else {
         let prog = crate::workflow::resolve_command(&config.command)
             .unwrap_or_else(|| config.command.clone().into());
         ProcessCommand::new(prog)
     };
     #[cfg(not(windows))]
-    let mut process = ProcessCommand::new(&config.command);
+    let mut process = if matches!(config.language, Language::Extension(_)) {
+        match extension_server(&mut config) {
+            Ok(program) => ProcessCommand::new(program),
+            Err(message) => {
+                emit(stopped(config.language, &root, message), &events, &wake);
+                return;
+            }
+        }
+    } else {
+        ProcessCommand::new(&config.command)
+    };
     process
         .args(&config.args)
         .current_dir(&root)
@@ -988,6 +1090,7 @@ fn run_server(
                     ". Install typescript-language-server with `npm install -g typescript-language-server typescript`"
                 }
                 Language::Go => ". Install gopls with `go install golang.org/x/tools/gopls@latest`",
+                Language::Extension(_) => "",
             };
             emit(
                 stopped(
@@ -1022,7 +1125,7 @@ fn run_server(
         return;
     };
     let (incoming_tx, incoming_rx) = mpsc::channel();
-    let reader_name = config.display_name;
+    let reader_name = config.display_name.clone();
     let reader = thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
         loop {
@@ -3126,6 +3229,24 @@ mod tests {
             assert_eq!(lang.language_id(), expected_id);
             assert_eq!(lang.name(), expected_name);
         }
+    }
+
+    #[test]
+    fn extension_languages_keep_their_id_name_and_language_id() {
+        let servers = vec!["test-lua-ls".to_string()];
+        let language = extension_language("Test Lua", "lua", &servers);
+        assert_eq!(language.name(), "Test Lua");
+        assert_eq!(language.language_id(), "lua");
+        // Registering again (a new listing) gives the same language.
+        assert_eq!(extension_language("Test Lua", "lua", &[]), language);
+        assert_ne!(extension_language("Test Zig", "zig", &servers), language);
+        assert_eq!(
+            language.document_language_id(&file_uri(Path::new("init.lua"))),
+            "lua"
+        );
+        let config = server_config(language, None);
+        assert!(config.command.is_empty());
+        assert!(config.display_name.contains("Test Lua"));
     }
 
     #[test]

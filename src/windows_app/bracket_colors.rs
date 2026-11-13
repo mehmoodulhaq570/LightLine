@@ -59,10 +59,38 @@ fn in_string_or_comment(spans: &[lightline::syntax::Span], byte: usize) -> bool 
     })
 }
 
+/// Which of `()`, `[]` and `{}` are brackets in a file, one bit each.
+pub(super) const ALL_BRACKETS: u8 = 0b111;
+
+/// The bit of the pair `ch` opens or closes, if it's one of the three.
+pub(super) fn bracket_bit(ch: u8) -> Option<u8> {
+    match ch {
+        b'(' | b')' => Some(1),
+        b'[' | b']' => Some(2),
+        b'{' | b'}' => Some(4),
+        _ => None,
+    }
+}
+
+/// The brackets of tab `tab`'s file: all three, or those its extension
+/// language lists.
+pub(super) fn tab_brackets(tab: &Tab) -> u8 {
+    match tab
+        .editing_rules()
+        .and_then(|rules| rules.brackets.as_ref())
+    {
+        Some(brackets) => brackets.matched.iter().fold(0, |mask, (open, _)| {
+            mask | u8::try_from(*open).ok().and_then(bracket_bit).unwrap_or(0)
+        }),
+        None => ALL_BRACKETS,
+    }
+}
+
 // The brackets of `text` that count, with whether each opens.
 fn brackets<'a>(
     text: &'a str,
     spans: &'a [lightline::syntax::Span],
+    set: u8,
 ) -> impl Iterator<Item = (usize, bool)> + 'a {
     text.bytes().enumerate().filter_map(move |(byte, ch)| {
         let opens = match ch {
@@ -70,6 +98,9 @@ fn brackets<'a>(
             b')' | b']' | b'}' => false,
             _ => return None,
         };
+        if bracket_bit(ch).is_none_or(|bit| set & bit == 0) {
+            return None;
+        }
         (!in_string_or_comment(spans, byte)).then_some((byte, opens))
     })
 }
@@ -113,6 +144,7 @@ impl App {
         }
         let doc = &tab.document;
         let syntax = tab.syntax.as_ref()?;
+        let set = tab_brackets(tab);
         let mut cache = tab.bracket_depths.borrow_mut();
         // Since it was last used: one edit is redone from its line; anything
         // else (another file, several edits) from the top.
@@ -148,7 +180,7 @@ impl App {
             } else {
                 Vec::new()
             };
-            let depth = brackets(text, &spans).fold(cache.depths[at], |depth, (_, opens)| {
+            let depth = brackets(text, &spans, set).fold(cache.depths[at], |depth, (_, opens)| {
                 if opens {
                     depth + 1
                 } else {
@@ -172,7 +204,7 @@ impl App {
         };
         let palette = self.bracket_palette();
         let text = self.tabs[index].document.line(line);
-        brackets(text, spans)
+        brackets(text, spans, tab_brackets(&self.tabs[index]))
             .map(|(byte, opens)| {
                 let level = if opens {
                     depth += 1;
@@ -209,7 +241,7 @@ impl App {
             return None;
         }
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
-        let tab_size = self.settings.tab_size.max(1);
+        let tab_size = self.guide_unit(pane);
         let line = doc.clamp(self.view_for_pane(pane).cursor).line;
         let level = indent_columns(doc.line(line), tab_size) / tab_size;
         if level == 0 || doc.line(line).trim().is_empty() {
@@ -238,10 +270,26 @@ impl App {
         Some(ActiveGuide { level, start, end })
     }
 
-    /// Indentation levels with a guide on `line`: its own, or for a blank
-    /// line, the lesser of the lines around it (looking at most 100 away).
-    pub(super) fn guide_levels(&self, doc: &Document, line: usize) -> usize {
-        let tab_size = self.settings.tab_size.max(1);
+    /// The columns one indent guide level spans in `pane`: an extension
+    /// language's own `tab_size` when it indents with spaces, else the tab
+    /// size setting (tabs are drawn that wide).
+    pub(super) fn guide_unit(&self, pane: usize) -> usize {
+        let rules = self.tabs[self.tab_for_pane(pane)].editing_rules();
+        let spaces = rules
+            .and_then(|rules| rules.hard_tabs)
+            .map_or(self.settings.insert_spaces, |hard_tabs| !hard_tabs);
+        rules
+            .and_then(|rules| rules.tab_size)
+            .filter(|_| spaces)
+            .unwrap_or(self.settings.tab_size)
+            .max(1)
+    }
+
+    /// Indentation levels with a guide on `line`, `unit` columns a level
+    /// (`guide_unit`): its own, or for a blank line, the lesser of the lines
+    /// around it (looking at most 100 away).
+    pub(super) fn guide_levels(&self, doc: &Document, line: usize, unit: usize) -> usize {
+        let tab_size = unit.max(1);
         let text = doc.line(line);
         if !text.trim().is_empty() {
             return indent_columns(text, tab_size) / tab_size;
@@ -261,7 +309,7 @@ impl App {
     pub(super) fn guide_x(&self, hwnd: HWND, pane: usize, level: usize, space_width: i32) -> i32 {
         self.pane_left(hwnd, pane)
             + self.scale(GUTTER + PAD)
-            + (level * self.settings.tab_size.max(1)) as i32 * space_width
+            + (level * self.guide_unit(pane)) as i32 * space_width
             - self.scale(4)
             - self.scroll_x(pane)
     }
@@ -362,7 +410,7 @@ mod tests {
                 color: Color::Comment,
             },
         ];
-        let found: Vec<(usize, bool)> = brackets(text, &spans).collect();
+        let found: Vec<(usize, bool)> = brackets(text, &spans, ALL_BRACKETS).collect();
         assert_eq!(found, vec![(1, true), (8, false)]);
     }
 

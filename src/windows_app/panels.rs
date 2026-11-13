@@ -83,6 +83,7 @@ impl App {
             ("Preferences: Open Settings (Ctrl+,)", 47),
             ("Open Settings (JSON)", 16),
             ("Find in File", 17),
+            ("Toggle Line Comment (Ctrl+/)", 70),
             ("Find and Replace", 18),
             ("Run C/C++ File", 19),
             ("Find All References", 20),
@@ -229,6 +230,7 @@ impl App {
                 Some(16) => self.open_settings(hwnd),
                 Some(47) => self.open_settings_panel(hwnd),
                 Some(17) => self.open_find(hwnd, false),
+                Some(70) => self.toggle_comment(hwnd),
                 Some(18) => self.open_find(hwnd, true),
                 Some(19) => self.run_c_file(hwnd),
                 Some(21) => self.close_workspace(hwnd),
@@ -340,6 +342,15 @@ impl App {
                     || settings.font_family != self.settings.font_family;
                 lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
                 lightline::local_history::set_enabled(settings.local_history);
+                if settings.language_servers != self.settings.language_servers {
+                    lightline::extensions::language_servers::set_overrides(
+                        settings.language_servers.clone(),
+                    );
+                    // A server that wasn't found is looked for again with the
+                    // new commands the next time its file is shown.
+                    self.lsp_failed_at
+                        .retain(|(language, _), _| !matches!(language, LspLanguage::Extension(_)));
+                }
                 self.settings = settings;
                 if font_changed {
                     self.set_metrics(self.dpi, self.zoom);
@@ -879,18 +890,11 @@ impl App {
                             self.set_color_theme(hwnd, Some(name));
                         }
                         // Open files of these languages are colored now.
-                        Ok(ExtensionInstallKind::Languages {
-                            names,
-                            servers_unused,
-                        }) => {
+                        Ok(ExtensionInstallKind::Languages { names, servers }) => {
                             self.status = format!(
-                                "Syntax colors installed for {}{}",
+                                "{} installed: colors, comments, brackets and indentation{}",
                                 names.join(", "),
-                                if servers_unused {
-                                    " (its language server isn't supported yet)"
-                                } else {
-                                    ""
-                                }
+                                language_server_note(&servers)
                             );
                             self.reload_extension_languages();
                             self.refresh(hwnd);
@@ -1009,5 +1013,29 @@ impl App {
         if let Some((cancel, targets)) = replace {
             self.finish_replace_all(hwnd, cancel, targets);
         }
+    }
+}
+
+// What the status bar adds after a language extension is installed about
+// the language servers it declares.
+fn language_server_note(servers: &[String]) -> String {
+    if servers.is_empty() {
+        return String::new();
+    }
+    let commands: Vec<String> = servers
+        .iter()
+        .filter_map(|server| lightline::extensions::language_servers::known_command(server))
+        .map(|command| format!("`{}`", command.command))
+        .collect();
+    if commands.is_empty() {
+        format!(
+            ". To use its language server ({}), set its command under \"languageServers\" in settings",
+            servers.join(", ")
+        )
+    } else {
+        format!(
+            ". Its language server starts when {} is on PATH",
+            commands.join(" or ")
+        )
     }
 }

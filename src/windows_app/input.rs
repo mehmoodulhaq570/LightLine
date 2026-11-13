@@ -652,6 +652,11 @@ impl App {
                     self.request_code_actions(hwnd);
                     return true;
                 }
+                // Ctrl+/ (the key with `/` on US layouts).
+                x if x == VK_OEM_2 as u32 && !shift && !self.panel_focus => {
+                    self.toggle_comment(hwnd);
+                    return true;
+                }
                 x if x == VK_OEM_3 as u32 && shift => {
                     self.new_terminal(hwnd, false);
                     return true;
@@ -1227,7 +1232,14 @@ impl App {
             }
             // Auto-closing pairs: when typing an opening bracket or quote,
             // insert the closing counterpart and leave the cursor between them.
-            let closing = if self.settings.auto_close_pairs {
+            // An extension language that lists its brackets decides itself.
+            let own_brackets = self
+                .tab()
+                .editing_rules()
+                .is_some_and(|rules| rules.brackets.is_some());
+            let closing = if own_brackets {
+                self.extension_auto_close(ch)
+            } else if self.settings.auto_close_pairs {
                 match ch {
                     '(' => Some(')'),
                     '[' => Some(']'),
@@ -1243,7 +1255,9 @@ impl App {
             // For quotes, only auto-close when the character after the cursor
             // is whitespace, end-of-line, or a closing bracket — not mid-word.
             let should_auto_close = closing.is_some_and(|close| {
-                if matches!(ch, '"' | '\'' | '`') {
+                if own_brackets {
+                    true
+                } else if matches!(ch, '"' | '\'' | '`') {
                     let line = self.doc().line(self.view().cursor.line);
                     let after = &line[self.view().cursor.byte..];
                     after.is_empty()
@@ -1254,7 +1268,14 @@ impl App {
                 }
             });
             // Skip over a closing quote/bracket if the cursor is already on it.
-            if matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`') {
+            let steps_over = if own_brackets {
+                self.tab()
+                    .editing_rules()
+                    .is_some_and(|rules| rules.closes(ch))
+            } else {
+                matches!(ch, ')' | ']' | '}' | '"' | '\'' | '`')
+            };
+            if steps_over {
                 let line = self.doc().line(self.view().cursor.line);
                 if line[self.view().cursor.byte..].starts_with(ch) {
                     let next = self.doc().next(self.view().cursor);
@@ -1271,12 +1292,12 @@ impl App {
                     .selection_range()
                     .map_or(self.view().cursor, |(start, _)| start);
                 let line = self.doc().line(start.line);
-                let unit = if self.settings.insert_spaces {
-                    " ".repeat(self.settings.tab_size)
-                } else {
-                    "\t".to_string()
-                };
-                newline_text(&line[..start.byte], self.settings.auto_indent, &unit)
+                newline_text(
+                    &line[..start.byte],
+                    self.settings.auto_indent,
+                    &self.indent_unit(),
+                    self.tab().editing_rules(),
+                )
             } else if should_auto_close {
                 format!("{}{}", ch, closing.unwrap())
             } else {
@@ -1286,11 +1307,15 @@ impl App {
             let stays_in_editor = self.keystroke_stays_in_editor();
             let before = self.caret_frame(hwnd);
             self.cancel_transition(hwnd);
+            let outdents_before = self.caret_line_outdents();
             self.replace_selection(&text);
             // For auto-close pairs, move the cursor back before the closing char.
             if should_auto_close && ch != '\r' {
                 let pos = self.doc().previous(self.view().cursor);
                 self.view_mut().cursor = pos;
+            }
+            if ch != '\r' {
+                self.outdent_after_typing(outdents_before);
             }
             self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
             self.follow_signature(hwnd, Some(ch));
@@ -2332,7 +2357,7 @@ impl App {
             .ai_diagnostic_at_cursor()
             .map(|diagnostic| EditorContextDiagnostic::from_lsp(&diagnostic));
         let has_hunk = self.active_hunk_at_cursor().is_some();
-        let can_rename = Tab::lsp_language(self.doc()).is_some();
+        let can_rename = self.tab().lsp_language().is_some();
         self.editor_context =
             Some(EditorContextMenu::new(x, y, problem, selected, has_hunk).with_rename(can_rename));
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -2555,13 +2580,22 @@ impl App {
 // What Enter inserts, given the text left before the caret on its line: a
 // newline with that text's indentation, one `unit` deeper after a `{` or `:`
 // when auto-indent is on. Only the text before the caret counts: Enter at
-// the start of `def f():` moves the line down as it is.
-pub(super) fn newline_text(before: &str, auto_indent: bool, unit: &str) -> String {
+// the start of `def f():` moves the line down as it is. An extension
+// language's `rules` decide when to go deeper instead, when it has its own.
+pub(super) fn newline_text(
+    before: &str,
+    auto_indent: bool,
+    unit: &str,
+    rules: Option<&lightline::extensions::editing::EditingRules>,
+) -> String {
     let indent: String = before
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .collect();
-    let opens_block = before.trim_end().ends_with(['{', ':']);
+    let opens_block = match rules.and_then(|rules| rules.indents_after(before)) {
+        Some(deeper) => deeper,
+        None => before.trim_end().ends_with(['{', ':']),
+    };
     if auto_indent && opens_block {
         format!("\n{indent}{unit}")
     } else {
@@ -2576,15 +2610,49 @@ mod shortcut_tests {
     #[test]
     fn enter_indents_from_the_text_before_the_caret() {
         // After a block opener: one level deeper.
-        assert_eq!(newline_text("    def f():", true, "    "), "\n        ");
-        assert_eq!(newline_text("fn main() {", true, "    "), "\n    ");
+        assert_eq!(
+            newline_text("    def f():", true, "    ", None),
+            "\n        "
+        );
+        assert_eq!(newline_text("fn main() {", true, "    ", None), "\n    ");
         // At the start of such a line: the line just moves down.
-        assert_eq!(newline_text("", true, "    "), "\n");
+        assert_eq!(newline_text("", true, "    ", None), "\n");
         // Inside its indentation: only the indentation before the caret.
-        assert_eq!(newline_text("  ", true, "    "), "\n  ");
+        assert_eq!(newline_text("  ", true, "    ", None), "\n  ");
         // Mid-line, or with auto-indent off: the same indentation.
-        assert_eq!(newline_text("    let x = {a", true, "    "), "\n    ");
-        assert_eq!(newline_text("\tif x:", false, "\t"), "\n\t");
+        assert_eq!(newline_text("    let x = {a", true, "    ", None), "\n    ");
+        assert_eq!(newline_text("\tif x:", false, "\t", None), "\n\t");
+    }
+
+    #[test]
+    fn an_extension_language_indents_by_its_own_rules() {
+        use lightline::extensions::editing::{BracketEntry, EditingRules};
+        let brackets = [BracketEntry {
+            start: "{".into(),
+            end: "}".into(),
+            close: true,
+            newline: true,
+            not_in: Vec::new(),
+        }];
+        let lua = EditingRules::from_config(
+            &[],
+            None,
+            Some(&brackets),
+            "",
+            Some(r"^\s*(if|do|function)\b"),
+            None,
+            None,
+            None,
+        );
+        let enter = |before: &str| newline_text(before, true, "  ", Some(&lua));
+        assert_eq!(enter("if x then"), "\n  ");
+        assert_eq!(enter("t = {"), "\n  ");
+        // Its own rules replace LightLine's `:` rule.
+        assert_eq!(enter("  x = a:"), "\n  ");
+        assert_eq!(newline_text("  x = a:", false, "  ", Some(&lua)), "\n  ");
+        // No rules of its own: LightLine's apply.
+        let plain = EditingRules::default();
+        assert_eq!(newline_text("x:", true, "  ", Some(&plain)), "\n  ");
     }
 
     #[test]

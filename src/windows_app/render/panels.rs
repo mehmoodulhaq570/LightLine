@@ -665,7 +665,7 @@ impl App {
             &format!(
                 "{}  ›  {}{}",
                 if self.language_pick {
-                    "Run this file as"
+                    "Language of this file"
                 } else if self.history_pick.is_some() {
                     history_title.as_str()
                 } else {

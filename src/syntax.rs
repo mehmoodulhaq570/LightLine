@@ -118,9 +118,15 @@ impl Syntax {
 
     /// The installed language this tab is colored as, if it's one.
     pub fn extension_language(&self) -> Option<&str> {
+        self.extension().map(|language| language.name.as_str())
+    }
+
+    /// The installed language this tab is colored as, with its editing
+    /// rules and servers.
+    pub fn extension(&self) -> Option<&Arc<crate::extensions::language::ExtensionLanguage>> {
         match self {
             Syntax::Extension(syntax) => match &syntax.grammar.source {
-                GrammarSource::Extension(language) => Some(&language.name),
+                GrammarSource::Extension(language) => Some(language),
                 GrammarSource::Builtin { .. } => None,
             },
             _ => None,

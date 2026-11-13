@@ -3,7 +3,9 @@
 //! LightLine's own internal types, instead of LightLine maintaining its own
 //! marketplace/catalog. See `docs/extension_implementation_plan.md`.
 
+pub mod editing;
 pub mod installer;
 pub mod language;
+pub mod language_servers;
 pub mod zed_manifest;
 pub mod zed_registry;

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::extensions::language_servers::ServerCommand;
 use crate::terminal::ShellKind;
 
 /// User-configurable settings loaded from `%APPDATA%\LightLine\settings.json`.
@@ -53,6 +54,10 @@ pub struct Settings {
     /// The model the AI Assistant chats with; None until one is chosen,
     /// which is what leaves the assistant off.
     pub ai_model: Option<String>,
+    /// Commands for language servers that language extensions name, by
+    /// server name (`lua-language-server`) or language name (`Lua`). Saved
+    /// as `languageServers`.
+    pub language_servers: Vec<(String, ServerCommand)>,
     // Colors can be overridden; values are 0xRRGGBB.
     pub colors: HashMap<String, u32>,
 }
@@ -86,6 +91,7 @@ impl Default for Settings {
             color_theme: None,
             ai_endpoint: crate::ai::DEFAULT_ENDPOINT.to_string(),
             ai_model: None,
+            language_servers: Vec::new(),
             colors: HashMap::new(),
         }
     }
@@ -267,6 +273,40 @@ impl Settings {
                 _ => ShellKind::PowerShell,
             };
         }
+        // {"lua-language-server": {"command": "...", "args": [...]}} or
+        // {"TOML": "taplo lsp stdio"}.
+        if let Some(obj) = value.get("languageServers").and_then(|v| v.as_object()) {
+            for (name, entry) in obj {
+                let command = match entry {
+                    serde_json::Value::String(line) => ServerCommand::parse_line(line),
+                    serde_json::Value::Object(fields) => fields
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|command| !command.is_empty())
+                        .map(|command| ServerCommand {
+                            command: command.to_owned(),
+                            args: fields
+                                .get("args")
+                                .and_then(|v| v.as_array())
+                                .map(|args| {
+                                    args.iter()
+                                        .filter_map(|arg| arg.as_str().map(str::to_owned))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        }),
+                    _ => None,
+                };
+                if let Some(command) = command
+                    && !name.trim().is_empty()
+                {
+                    settings
+                        .language_servers
+                        .push((name.trim().to_owned(), command));
+                }
+            }
+        }
         if let Some(obj) = value.get("colors").and_then(|v| v.as_object()) {
             for (key, val) in obj {
                 if let Some(hex) = val.as_str()
@@ -379,6 +419,19 @@ impl Settings {
             "terminalDefaultProfile".into(),
             serde_json::Value::String(self.default_terminal_profile.name().to_string()),
         );
+        if !self.language_servers.is_empty() {
+            let servers: serde_json::Map<String, serde_json::Value> = self
+                .language_servers
+                .iter()
+                .map(|(name, command)| {
+                    (
+                        name.clone(),
+                        serde_json::json!({"command": command.command, "args": command.args}),
+                    )
+                })
+                .collect();
+            obj.insert("languageServers".into(), serde_json::Value::Object(servers));
+        }
         obj
     }
 }
@@ -411,6 +464,7 @@ const OWN_KEYS: &[&str] = &[
     "aiModel",
     "markdownLoadRemoteImages",
     "terminalDefaultProfile",
+    "languageServers",
 ];
 
 /// Parse a CSS-style hex color string like "#1c2b3f" or "1c2b3f" into a Win32
@@ -613,6 +667,43 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert_eq!(loaded.default_terminal_profile, ShellKind::GitBash);
+    }
+
+    #[test]
+    fn language_servers_parse_both_forms_and_round_trip() {
+        let json = r#"{
+            "languageServers": {
+                "lua-language-server": {"command": "C:\\tools\\lua-ls.exe", "args": ["--stdio"]},
+                "TOML": "taplo lsp stdio",
+                "broken": {"args": ["x"]},
+                "empty": "   ",
+                "number": 4
+            }
+        }"#;
+        let s = Settings::parse(json).unwrap();
+        assert_eq!(
+            s.language_servers,
+            [
+                (
+                    "TOML".to_string(),
+                    ServerCommand {
+                        command: "taplo".into(),
+                        args: vec!["lsp".into(), "stdio".into()],
+                    }
+                ),
+                (
+                    "lua-language-server".to_string(),
+                    ServerCommand {
+                        command: r"C:\tools\lua-ls.exe".into(),
+                        args: vec!["--stdio".into()],
+                    }
+                ),
+            ]
+        );
+        let loaded = Settings::parse(&s.to_json()).unwrap();
+        assert_eq!(loaded.language_servers, s.language_servers);
+        // None set: nothing written.
+        assert!(!Settings::default().to_json().contains("languageServers"));
     }
 
     #[test]

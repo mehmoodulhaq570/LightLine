@@ -416,11 +416,7 @@ impl App {
         match ch {
             '\r' | '\n' => self.edit_at_carets(hwnd, Op::Newline),
             '\t' => {
-                let unit = if self.settings.insert_spaces {
-                    " ".repeat(self.settings.tab_size)
-                } else {
-                    "\t".into()
-                };
+                let unit = self.indent_unit();
                 self.edit_at_carets(hwnd, Op::Insert(&unit));
             }
             ch if ch.is_control() => return true,
@@ -457,11 +453,8 @@ impl App {
         let mut order: Vec<usize> = (0..carets.len()).collect();
         order.sort_by_key(|&index| range_of(carets[index]).0);
         // Where each caret's edit is, worked out on the text before any.
-        let unit = if self.settings.insert_spaces {
-            " ".repeat(self.settings.tab_size)
-        } else {
-            "\t".to_string()
-        };
+        let unit = self.indent_unit();
+        let rules = self.tab().editing_rules();
         let doc = self.doc();
         let edits: Vec<(Pos, Pos, String)> = order
             .iter()
@@ -480,6 +473,7 @@ impl App {
                             &doc.line(start.line)[..start.byte],
                             self.settings.auto_indent,
                             &unit,
+                            rules,
                         ),
                     ),
                     Op::Backspace { .. } | Op::Delete { .. } if selected => {

@@ -90,6 +90,7 @@ Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patte
 | `Ctrl+D` | Select the word at the cursor; again, add the next match of the selection |
 | `Shift+Alt+F` | Format the document |
 | `Alt+Z` | Toggle word wrap for this file (on by default for Markdown) |
+| `Ctrl+/` | Comment out the caret's line or the selected lines, or uncomment them (also **Toggle Line Comment** in the Command Palette), with the marker the file's language uses: `// `, `# `, `-- `, or `<!-- -->` around the lines |
 | `Shift+Wheel` | Scroll sideways when a line is wider than the editor and word wrap is off; a tilt wheel or a sideways touchpad swipe does the same. The view also follows the cursor as you type or move it |
 | `Ctrl+Shift+V` | Preview a Markdown file (`>Markdown: Open Preview to the Side` shows it beside the file) |
 | Gutter chevron | Fold or unfold a block (`⌄` / `›`) |
@@ -145,7 +146,7 @@ No runner extension is required. Install the language's runtime or compiler:
 
 For JavaScript/TypeScript projects, a `start` script in the nearest `package.json` takes precedence; otherwise a `dev` script is used when present. These run from the package directory with `npm run`. Without a script, files run directly. Runtime configuration and project dependencies still apply; `tsx` runs TypeScript without type-checking it.
 
-**A file Run doesn't recognize**, such as a script without an extension: click the language name in the status bar (or use **Run: Choose the File's Language** in the Command Palette) and pick Python, C, C++, JavaScript, TypeScript, Go or Rust. Run then treats the file as that language, and the choice is remembered for that file, also after you close it or restart LightLine (in `%APPDATA%\LightLine\run-languages.json`). **Auto Detect** goes back to what the file's name says.
+**A file Run doesn't recognize**, such as a script without an extension: click the language name in the status bar (or use **Run: Choose the File's Language** in the Command Palette) and pick Python, C, C++, JavaScript, TypeScript, Go or Rust. Run then treats the file as that language, and the choice is remembered for that file, also after you close it or restart LightLine (in `%APPDATA%\LightLine\run-languages.json`). **Auto Detect** goes back to what the file's name says. The same list has the languages of installed [language extensions](#extensions): choosing one colors and edits the file as that language instead.
 
 Rust **Run** executes the program; **Ctrl+Shift+B** and **Run Rust tests** run tests separately. Standalone Rust executables are built into a `lightline-run` folder in your temp directory, not beside the source file. Go packages must be executable `main` packages. JSON and other data files have no Run action.
 
@@ -231,6 +232,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `markdownLoadRemoteImages` | Load web images in Markdown previews without asking |
 | `colorTheme` | An installed color theme, such as `"Catppuccin Mocha"`; leave it out for LightLine's own. **Preferences: Color Theme** sets it for you |
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |
+| `languageServers` | Commands for the language servers of [language extensions](#extensions), by the server's name or the language's, such as `{"lua-language-server": {"command": "C:\\tools\\lua-ls\\bin\\lua-language-server.exe", "args": []}, "Gleam": "gleam lsp"}`. A string is split at spaces; use `command` and `args` when a path has spaces. Used the next time a file of that language is opened |
 | `colors` | Override individual theme colors, on top of the color theme |
 
 `smoothScrolling` is accepted but doesn't do anything yet.
@@ -300,7 +302,13 @@ Updates download and validate a staged copy before replacing an installed extens
 
 - **Color themes** recolor all of LightLine, dark or light, including the terminal. Installing one, such as **Dracula**, switches to it at once and it's remembered. Themes with several variants (Catppuccin Latte, Frappé, Macchiato, Mocha) offer each in **Preferences: Color Theme**.
 - **Icon themes** change file and folder icons; **Material Icon Theme** is the popular one. Without one, LightLine uses its built-in icons.
-- **Languages** add syntax colors for files LightLine doesn't color itself. Installing one downloads the language's Tree-sitter grammar and builds it with the C compiler on your PC: the Visual Studio C++ Build Tools (found automatically, as Rust uses them), or `gcc` or `clang` on PATH. Without one, the install stops and says so. Building takes a few seconds; files of that language that are open change color as soon as it finishes. Only the colors come from the extension: a language server it declares isn't started (the status bar says so), and comment toggling, indentation and brackets follow LightLine's defaults. The grammar is native code loaded into LightLine, like a grammar in Helix or Neovim, so install language extensions you trust. After removing one, restart LightLine to free its grammar file if a file of that language was open.
+- **Languages** add languages LightLine doesn't know itself, such as Lua, Zig, TOML or Elixir. Installing one downloads the language's Tree-sitter grammar and builds it with the C compiler on your PC: the Visual Studio C++ Build Tools (found automatically, as Rust uses them), or `gcc` or `clang` on PATH. Without one, the install stops and says so. Building takes a few seconds; files of that language that are open change as soon as it finishes. The grammar is native code loaded into LightLine, like a grammar in Helix or Neovim, so install language extensions you trust. After removing one, restart LightLine to free its grammar file if a file of that language was open. From the extension, files of that language get:
+  - **Colors** from its highlight rules.
+  - **Comments**: `Ctrl+/` comments lines out with its comment marker (`-- ` for Lua, `# ` for TOML).
+  - **Brackets and quotes**: the pairs it lists are closed as you type (before a space, the end of the line or one of the characters it lists, and not inside a string or comment when it says so), and are the ones matched and colored.
+  - **Indentation**: Enter indents after its block openers (`{`, or `function` and `if ... then` in Lua), and typing `end` or `else` moves that line back out. Its own indent width, such as two spaces for Elixir, is used for what you type and for the indent guides.
+  - **A place in the language picker**: click the language name in the status bar (or **Run: Choose the File's Language**) to color and edit a file with another name, such as `notes.txt` or a script without an extension, as one of these languages. The choice is remembered for that file; **Auto Detect** goes back to what its name says.
+  - **Its language server, when you have it.** Zed extensions download their servers with code LightLine doesn't run, so LightLine starts a server only when its command is already on your PATH. It knows the commands of about 40 servers by the name the extension gives them, including `lua-language-server`, `zls`, `taplo`, `elixir-ls`, `bash-language-server` and `yaml-language-server`. If the command isn't found, the status bar says which one it looked for; nothing is downloaded. The `languageServers` setting names the command for any other server, or for a language whose extension names none. The server then works like the built-in ones: errors as you type, completions, hover, go to definition, rename and the rest, as far as it supports them.
 
 Other kinds of extensions, such as debuggers or extensions that only add a language server, say they aren't supported yet rather than half-installing.
 

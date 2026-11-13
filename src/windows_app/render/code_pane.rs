@@ -182,6 +182,7 @@ impl App {
                 .map_or(text_right, |(track, _)| track.left.min(text_right));
             // The caret's block's guide is drawn brighter (bracket_colors.rs).
             let active_guide = self.active_guide(pane);
+            let guide_unit = self.guide_unit(pane);
             let active_guide_brush =
                 CreateSolidBrush(blend(self.theme.editor_bg, self.theme.muted, 0.85));
             // Sticky scroll's pinned lines, drawn over the top rows after
@@ -489,7 +490,7 @@ impl App {
                         }
                         // Blank lines carry the guides of the lines around them.
                         let levels = if self.settings.indent_guides {
-                            self.guide_levels(doc, index).min(16)
+                            self.guide_levels(doc, index, guide_unit).min(16)
                         } else {
                             0
                         };
@@ -1055,7 +1056,9 @@ impl App {
         if !self.settings.bracket_matching || pane != self.focused_pane || self.terminal_focus {
             return None;
         }
-        let doc = &self.tabs[self.tab_for_pane(pane)].document;
+        let tab = &self.tabs[self.tab_for_pane(pane)];
+        let doc = &tab.document;
+        let set = super::super::bracket_colors::tab_brackets(tab);
         let view = self.view_for_pane(pane);
         let bracket_at = |byte: usize, line_idx: usize| -> Option<(char, usize)> {
             let text = doc.line(line_idx);
@@ -1063,11 +1066,11 @@ impl App {
                 return None;
             }
             let ch = text[byte..].chars().next()?;
-            if matches!(ch, '(' | ')' | '[' | ']' | '{' | '}') {
-                Some((ch, byte))
-            } else {
-                None
-            }
+            let counted = u8::try_from(ch)
+                .ok()
+                .and_then(super::super::bracket_colors::bracket_bit)
+                .is_some_and(|bit| set & bit != 0);
+            if counted { Some((ch, byte)) } else { None }
         };
         let cursor_line = view.cursor.line;
         let cursor_byte = view.cursor.byte;

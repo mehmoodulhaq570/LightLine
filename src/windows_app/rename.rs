@@ -41,7 +41,7 @@ impl App {
         if self.welcome || self.tab().read_only() || self.tab().is_placeholder() {
             return;
         }
-        if Tab::lsp_language(self.doc()).is_none() {
+        if self.tab().lsp_language().is_none() {
             self.status = "Rename needs a language server, and this file type has none".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;

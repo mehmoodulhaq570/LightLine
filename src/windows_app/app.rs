@@ -41,11 +41,11 @@ pub(super) enum ExtensionInstallKind {
     IconTheme,
     // The installed variant to switch to, by name.
     ColorTheme(String),
-    // Languages now colored, and whether the extension also declared a
-    // language server LightLine can't start.
+    // Languages now colored, and the language servers the extension
+    // declares.
     Languages {
         names: Vec<String>,
-        servers_unused: bool,
+        servers: Vec<String>,
     },
 }
 
@@ -351,6 +351,9 @@ pub(super) struct Tab {
     // None follows the file's name, or a choice remembered for the file
     // (run_language.rs).
     pub(super) run_language: Option<super::run_language::RunLanguage>,
+    // An installed extension language chosen for this file in the language
+    // picker: it colors and edits the file whatever its name says.
+    pub(super) extension_choice: Option<Arc<lightline::extensions::language::ExtensionLanguage>>,
     // True for a tab restored from the last session whose file hasn't been
     // read yet: it's read the first time the tab is shown (show_active_tab).
     // `document` is then an empty placeholder with the file's path and must
@@ -459,6 +462,7 @@ impl Tab {
             markdown: None,
             word_wrap: None,
             run_language: None,
+            extension_choice: None,
             unloaded: false,
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
@@ -553,6 +557,7 @@ impl Tab {
             markdown: None,
             word_wrap: None,
             run_language: None,
+            extension_choice: None,
             unloaded: false,
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
@@ -662,7 +667,26 @@ impl Tab {
             .is_some_and(|ext| ext.eq_ignore_ascii_case("go"))
     }
 
-    pub(super) fn lsp_language(document: &Document) -> Option<LspLanguage> {
+    /// The language server this tab's file is for: an extension language's
+    /// (when it is colored as one and has a server to try), else the one its
+    /// name says.
+    pub(super) fn lsp_language(&self) -> Option<LspLanguage> {
+        match self.syntax.as_ref().and_then(Syntax::extension) {
+            Some(language) => language.lsp_language(),
+            None => Self::builtin_lsp_language(&self.document),
+        }
+    }
+
+    /// The comment, bracket and indentation rules of the extension language
+    /// this tab is colored as; None for LightLine's own languages.
+    pub(super) fn editing_rules(&self) -> Option<&lightline::extensions::editing::EditingRules> {
+        self.syntax
+            .as_ref()
+            .and_then(Syntax::extension)
+            .map(|language| &language.editing)
+    }
+
+    pub(super) fn builtin_lsp_language(document: &Document) -> Option<LspLanguage> {
         if Self::is_rust(document) {
             Some(LspLanguage::Rust)
         } else if Self::is_python(document) {
@@ -679,7 +703,9 @@ impl Tab {
     }
 
     pub(super) fn update_syntax_language(&mut self) {
-        if Self::is_rust(&self.document) {
+        if let Some(language) = self.extension_choice.clone() {
+            self.use_extension_syntax(language);
+        } else if Self::is_rust(&self.document) {
             if !matches!(self.syntax, Some(Syntax::Rust(_))) {
                 self.syntax = Some(Syntax::new_rust());
             }
@@ -712,12 +738,24 @@ impl Tab {
                 self.syntax = Some(Syntax::new_json());
             }
         } else if let Some(language) = Self::extension_language(&self.document) {
-            let current = self.syntax.as_ref().and_then(Syntax::extension_language);
-            if current != Some(language.name.as_str()) {
-                self.syntax = Some(Syntax::new_extension(language));
-            }
+            self.use_extension_syntax(language);
         } else {
             self.syntax = None;
+        }
+    }
+
+    fn use_extension_syntax(
+        &mut self,
+        language: Arc<lightline::extensions::language::ExtensionLanguage>,
+    ) {
+        // The same listing's language: nothing to do. A new listing (after
+        // an install or removal) may have changed its rules.
+        let current = self.syntax.as_ref().and_then(Syntax::extension);
+        if !current.is_some_and(|current| Arc::ptr_eq(current, &language)) {
+            self.syntax = Some(Syntax::new_extension(language));
+            // Brackets in its strings and comments, and maybe which
+            // characters are brackets, changed.
+            *self.bracket_depths.borrow_mut() = Default::default();
         }
     }
 }
@@ -1000,6 +1038,11 @@ pub(super) struct App {
     // True while an edit is made at every caret (multiple cursors); any
     // other edit drops the extra carets, whose places it doesn't track.
     pub(super) multi_editing: bool,
+    // The line typing just outdented because it became `end`, `else`...
+    // (an extension language's decrease_indent_pattern): document id, line
+    // and the indentation taken off, put back if more typing makes it
+    // something else (`endpoint`). See comment.rs.
+    pub(super) auto_outdent: Option<(u64, usize, String)>,
     // The button under the mouse (see hot.rs).
     pub(super) hot: Option<Hot>,
     // Suppresses session snapshots while restore_session replays the last
@@ -1366,6 +1409,7 @@ impl App {
         let settings = lightline::settings::Settings::load();
         lightline::syntax::set_parse_limit_kb(settings.parse_limit_kb);
         lightline::local_history::set_enabled(settings.local_history);
+        lightline::extensions::language_servers::set_overrides(settings.language_servers.clone());
         let font = Self::font_for_dpi(dpi, zoom, &settings);
         let line_height = Self::measured_line_height(font, dpi, zoom);
         let char_width = Self::measured_char_width(font, dpi, zoom);
@@ -1571,6 +1615,7 @@ impl App {
             signature: None,
             signature_request: None,
             multi_editing: false,
+            auto_outdent: None,
             hot: None,
             restoring: true,
             watcher: Some({
@@ -1781,8 +1826,7 @@ impl App {
                                 .collect();
                             return Ok(ExtensionInstallKind::Languages {
                                 names,
-                                servers_unused:
-                                    lightline::extensions::language::has_language_servers(&dir),
+                                servers: lightline::extensions::language::language_servers(&dir),
                             });
                         }
                         if lightline::extensions::zed_manifest::is_icon_theme(&dir) {
@@ -2841,6 +2885,11 @@ impl App {
     pub(super) fn reload_extension_languages(&mut self) {
         lightline::extensions::language::reload();
         for tab in &mut self.tabs {
+            // A language chosen for a file follows its reinstall, and goes
+            // with its removal.
+            if let Some(chosen) = &tab.extension_choice {
+                tab.extension_choice = lightline::extensions::language::by_name(&chosen.name);
+            }
             tab.update_syntax_language();
         }
     }
@@ -3956,6 +4005,7 @@ impl App {
                 });
                 loaded.views = views;
                 self.tabs[index] = loaded;
+                self.apply_chosen_language(index);
                 if let Some(watcher) = &self.watcher {
                     watcher.watch_file(path);
                 }
@@ -4019,6 +4069,7 @@ impl App {
                     self.tabs.push(tab);
                     self.set_active_index(self.tabs.len() - 1);
                 }
+                self.apply_chosen_language(self.active);
                 self.reveal_file_in_explorer(&path);
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.status = if preview {
@@ -4314,7 +4365,7 @@ mod split_tests {
                 "Syntax check failed for {filename}"
             );
             assert_eq!(
-                Tab::lsp_language(&tab.document),
+                tab.lsp_language(),
                 expected_lsp,
                 "LSP check failed for {filename}"
             );

@@ -303,7 +303,7 @@ grammar:
 
 ```text
 extension.toml                    [grammars.<name>] repository = "...", rev = "<sha>" (or commit), path = "<subdir>"?
-                                  [language_servers.<id>] ...           (needs the extension's WASM)
+                                  [language_servers.<id>] languages = [...]   (started from PATH, see Step 2)
 languages/<lang>/config.toml      name, grammar, path_suffixes, line_comments, brackets, ...
 languages/<lang>/highlights.scm   Tree-sitter query with Zed's capture names
 languages/<lang>/{injections,indents,outline,brackets}.scm
@@ -380,23 +380,62 @@ install language extensions you trust.
   an extension whose grammar is in use can't delete the DLL until a restart;
   the removal reports that files remain.
 
+### Step 2: editing rules, the picker and language servers (2026-11)
+
+- **Editing rules** (`extensions/editing.rs`): the language's `config.toml`
+  is parsed once, when the installed languages are listed, into
+  `EditingRules`: `line_comments` (the first is what `Ctrl+/` types),
+  `block_comment` (both the old `["/* ", " */"]` form and the newer table),
+  `brackets` (one-character pairs with `close = true` are auto-closed, honouring
+  `autoclose_before` and `not_in = ["string", "comment"]` through the syntax
+  spans of the caret's line; which of `()`, `[]`, `{}` it lists are matched
+  and colored; those with `newline = true` indent the next line),
+  `increase_indent_pattern` / `decrease_indent_pattern` (regexes: Enter
+  indents after a match, typing a matching `end`/`else` outdents the line
+  once, and typing past it, as in `endpoint`, puts the indent back), and
+  `tab_size` / `hard_tabs` (what Tab, Enter and snippets insert, the status
+  bar's "Spaces: N" and the indent guides). The rules hang off the
+  `ExtensionLanguage` the tab's `Syntax` already holds, so typing reads them
+  through a pointer, with no lookup. A language without `brackets` keeps
+  LightLine's own pairs and Enter rule. Built-in languages are unchanged;
+  `Ctrl+/` is new for them too, with their usual markers.
+- **The language picker** (`run_language.rs`) lists the installed languages
+  by name after the Run languages. Listing reads only the config files the
+  installed-language list already reads; a grammar is loaded only when a tab
+  is colored with it. Choosing one sets the tab's `extension_choice`, which
+  wins over what the file's name says, and is remembered in
+  `run-languages.json` as `{"path", "extension": "<name>"}` (a key older
+  versions skip). It is re-applied when the file is read again.
+- **Language servers** (`extensions/language_servers.rs`, `lsp.rs`):
+  `[language_servers.<name>]` entries are read with their `languages` (or
+  the older single `language`), `opt_in_languages` (tried last) and
+  `language_ids`, in the file's order. An extension language with a server
+  gets an `lsp::Language::Extension(id)`, interned by name, so the existing
+  per-(language, root) clients, events and `lsp_failed_at` work unchanged.
+  The server thread picks the command: the `languageServers` setting for the
+  language, then for each declared server its setting or its entry in a
+  table of about 40 well-known servers (`lua-language-server`, `zls`,
+  `taplo lsp stdio`, `elixir-ls`, `nextls --stdio`, ...), the first found on
+  PATH. Nothing is downloaded. When none is found, `Event::Stopped` puts
+  "Lua: `lua-language-server` not found on PATH, so its language server
+  isn't running..." in the status bar, command first so a narrow status bar
+  still shows it. The root is the nearest folder with `.git`,
+  else the workspace. Servers run in the kill-on-close job, like the others.
+- **Checked live** against the real `lua` extension from the registry
+  (`tests/language_extension_live.rs`, built with MSVC), and in the app: see
+  the CHANGELOG entry.
+
 ### Not supported yet, in rough order of value
 
-1. `config.toml` beyond `name`, `grammar` and `path_suffixes`: line and block
-   comments (LightLine has no comment toggle yet), brackets and autoclose
-   pairs, `tab_size`.
-2. `injections.scm` (languages embedded in others), `indents.scm`, and
-   `outline.scm` (which could feed `@` file symbols without a language
-   server).
-3. Language servers the extension declares. Zed finds and starts them through
-   the extension's compiled WASM (`language_server_command`), so they need the
-   WASM runtime of §6. A middle step is a LightLine-side table mapping a
-   language name to a server command the user has installed.
-4. File icons for the new languages, and listing them in the status bar's
-   language picker.
+1. `indents.scm` (Tree-sitter indentation): the regex patterns and
+   `newline` brackets cover the common cases; `indents.scm` would need the
+   tree on the UI thread.
+2. `injections.scm` (languages embedded in others) and `outline.scm` (which
+   could feed `@` file symbols without a language server).
+3. Servers that only the extension's WASM can find or download (most Zed
+   extensions download theirs), and server settings or initialization
+   options the extension computes. Those need the WASM runtime of §6.
+4. File icons for the new languages.
 5. Registry entries with a `path` (inside another repository) are still
    refused before download (`zed_registry::check_installable`).
-6. Checked end to end only against a local fixture (tree-sitter-json's
-   sources from the Cargo cache, served from local git repositories) built
-   with MSVC. A real registry language extension, gcc/clang builds and
-   Windows ARM64 still need a live check.
+6. gcc/clang builds and Windows ARM64 still need a live check.
