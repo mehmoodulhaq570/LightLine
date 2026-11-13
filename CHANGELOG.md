@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Changed
+
+- **Faster Typing on Very Long Lines**: Typing on a very long line, such as a minified JSON or JavaScript file, no longer gets slower the further along the line you are. Each keystroke used to measure the line from its start several times, and it recolored and repositioned every bracket on the line even though only a screenful shows. Now LightLine reuses what it measured on the last keystroke, and colors only the part of the line in view. On a 510 KB one-line JSON file, a keystroke costs about 10–12 million CPU cycles of work on the window's thread, wherever the caret is on the line. With v0.10.0 it was 26–29 million near the line's start and 33–52 million halfway along. The screen looks exactly the same as before. Typing in ordinary files costs the same as before, about 8 million cycles per key in a 3,148-line Rust file with rust-analyzer running.
+
 ## [v0.10.0] - 2026-11-13
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.10.0-windows-x86_64.zip`, `lightline-v0.10.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
