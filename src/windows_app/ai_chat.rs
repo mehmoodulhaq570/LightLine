@@ -981,7 +981,7 @@ impl App {
         self.ai.model_query.clear();
         self.ai.model_menu_first = 0;
         if self.ai.model_menu_open {
-            unsafe { SetFocus(hwnd) };
+            take_keyboard(hwnd);
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -1006,7 +1006,7 @@ impl App {
         if self.ai.model_menu_open {
             if hits.model_search.as_ref().is_some_and(inside) {
                 self.ai.focused = false;
-                unsafe { SetFocus(hwnd) };
+                take_keyboard(hwnd);
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return;
             }

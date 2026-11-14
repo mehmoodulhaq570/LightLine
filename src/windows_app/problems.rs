@@ -56,7 +56,7 @@ impl App {
         self.problem_selected = 0;
         self.problem_first = 0;
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             InvalidateRect(hwnd, null(), 0);
         }
     }
@@ -230,7 +230,7 @@ impl App {
         }
         // The list keeps the keyboard, so Up and Down go on from here.
         self.problem_focus = true;
-        unsafe { SetFocus(hwnd) };
+        take_keyboard(hwnd);
         true
     }
 

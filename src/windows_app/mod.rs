@@ -67,7 +67,7 @@ use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
     ExtensionInstallKind, ExtensionsFilter, FileAction, GhostText, GitAction, SideView, Tab,
     TerminalPane, TerminalTab, WATCHER_EVENT_MESSAGE, WORKER_EVENT_MESSAGE, WorkerMessage,
-    is_c_family_path, is_cpp_path,
+    is_c_family_path, is_cpp_path, take_keyboard,
 };
 use debug_panel::{DebugButton, DebugHot};
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
@@ -75,6 +75,7 @@ use extensions_panel::{ExtensionsButton, ExtensionsHot};
 use git::{GitButton, GitHot};
 use menu_bar::MenuBar;
 use more_menu::{DebugMenu, GitMenu, MoreMenu};
+use terminal::TerminalHot;
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
 mod input;

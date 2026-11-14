@@ -7,7 +7,15 @@ pub(super) const TERMINAL_EVENT_MESSAGE: u32 = WM_APP + 8;
 // panel's height is user-resizable (App::terminal_height); this is only its
 // fixed header row.
 pub(super) const TERMINAL_HEADER: i32 = 34;
-pub(super) const TERMINAL_PAD: i32 = 8;
+/// The terminal's text starts this far in, as in VS Code.
+pub(super) const TERMINAL_PAD: i32 = 20;
+/// And stops this far before the right edge (or the shell list).
+pub(super) const TERMINAL_PAD_RIGHT: i32 = 12;
+/// The list of shells at the side, from two shells on.
+pub(super) const SHELL_LIST_WIDTH: i32 = 168;
+pub(super) const SHELL_ROW: i32 = 22;
+/// The toolbar's square buttons.
+const TOOL_BUTTON: i32 = 24;
 
 fn brighten(color: u32) -> u32 {
     let lift = |channel: u32| (channel + (255 - channel) / 2).min(255) as u8;
@@ -165,12 +173,28 @@ pub(super) enum TerminalHeaderHit {
     Problems,
     OutputTab,
     DebugTab,
-    TerminalTab(usize),
+    TerminalTab,
+    New,
+    ShellPicker,
+    /// Kill the active shell, or stop the running program in Output.
+    Kill,
+    Maximize,
+    Hide,
+    Body,
+}
+
+/// What the mouse is over in the bottom panel, for hover: a tab or a
+/// toolbar button in its header, or a row of the shell list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TerminalHot {
+    /// 0 Problems, 1 Output, 2 Debug Console, 3 Terminal.
+    Tab(usize),
     New,
     ShellPicker,
     Kill,
+    Maximize,
     Hide,
-    Body,
+    Shell(usize),
 }
 
 const MAX_TERMINAL_NAME_CHARS: usize = 48;
@@ -219,11 +243,16 @@ pub(super) struct TerminalHeaderLayout {
     pub(super) problems: RECT,
     pub(super) output: RECT,
     pub(super) debug: RECT,
-    pub(super) terminals: Vec<RECT>,
+    pub(super) terminal: RECT,
+    /// The toolbar, right to left: close, maximize, then (Terminal) kill,
+    /// the profile ▾ and + or (Output) Stop. Empty when not shown.
     pub(super) plus: RECT,
     pub(super) chevron: RECT,
     pub(super) kill: RECT,
+    pub(super) maximize: RECT,
     pub(super) hide: RECT,
+    /// The line between the tab-specific buttons and maximize/close.
+    pub(super) separator: i32,
 }
 
 pub(super) struct TerminalProfileMenuLayout {
@@ -273,7 +302,7 @@ impl App {
         no_profile: bool,
     ) -> Option<usize> {
         let request = self.terminal_launch_request(shell_kind, no_profile);
-        let size = self.terminal_size_for(hwnd);
+        let size = self.terminal_size_with(hwnd, self.terminals.len() + 1 >= 2);
         let hwnd_value = hwnd as isize;
         let mut service = TerminalService::new(move || unsafe {
             PostMessageW(hwnd_value as HWND, TERMINAL_EVENT_MESSAGE, 0, 0);
@@ -292,6 +321,8 @@ impl App {
                     shell_kind,
                 });
                 self.terminal_active = self.terminals.len() - 1;
+                // A second shell brings the list, which narrows the others.
+                self.resize_terminal_to_fit(hwnd);
                 Some(self.terminal_active)
             }
             Err(error) => {
@@ -299,6 +330,13 @@ impl App {
                 None
             }
         }
+    }
+
+    /// How the open shell ended, when it has: its exit code (None while it
+    /// runs).
+    pub(super) fn active_shell_exit(&self) -> Option<String> {
+        let pane = self.terminals.get(self.terminal_active)?;
+        shell_exit_text(pane)
     }
 
     // Snapshot backing the currently shown area (active shell or run output).
@@ -357,7 +395,7 @@ impl App {
             // focus lands in the terminal rather than after half a cycle.
             self.caret_on = true;
         }
-        unsafe { SetFocus(hwnd) };
+        take_keyboard(hwnd);
     }
 
     // Reveal the Terminal area: start the first shell if none exist yet,
@@ -388,7 +426,16 @@ impl App {
             self.hide_terminal(hwnd);
             return;
         }
-        let index = self.terminal_active.min(self.terminals.len() - 1);
+        self.close_terminal_at(hwnd, self.terminal_active);
+    }
+
+    /// Closes shell `index` (its 🗑 in the list, or the toolbar's for the
+    /// open one). Hides the panel once the last one is gone.
+    pub(super) fn close_terminal_at(&mut self, hwnd: HWND, index: usize) {
+        if index >= self.terminals.len() {
+            return;
+        }
+        let active = self.terminal_active;
         let removed = self.terminals.remove(index);
         clear_terminal_rename_for_session(&mut self.terminal_rename_input, removed.id);
         if self.terminals.is_empty() {
@@ -397,9 +444,18 @@ impl App {
             self.terminal_active = 0;
             self.keep_cursor_visible(hwnd);
         } else {
-            self.terminal_active = index.min(self.terminals.len() - 1);
+            // The open shell stays open when another one closes.
+            self.terminal_active = if index < active {
+                active - 1
+            } else if index == active {
+                index.min(self.terminals.len() - 1)
+            } else {
+                active
+            };
             self.focus_active_shell(hwnd);
         }
+        // Down to one shell, the list goes and the shell gets its width back.
+        self.resize_terminal_to_fit(hwnd);
         self.update_title(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -482,7 +538,7 @@ impl App {
                     self.caret_on = true;
                 }
 
-                unsafe { SetFocus(hwnd) };
+                take_keyboard(hwnd);
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
             TerminalTab::Problems => self.show_problems(hwnd),
@@ -503,7 +559,7 @@ impl App {
             if self.terminal_focus {
                 self.caret_on = true;
             }
-            unsafe { SetFocus(hwnd) };
+            take_keyboard(hwnd);
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -531,7 +587,7 @@ impl App {
             return Some(id);
         }
         let request = self.terminal_launch_request(ShellKind::PowerShell, true);
-        let size = self.terminal_size_for(hwnd);
+        let size = self.run_size_for(hwnd);
         let started = self
             .terminal
             .start(SessionKind::ManagedRun, request, size)
@@ -555,7 +611,7 @@ impl App {
     fn focus_run_session(&mut self, hwnd: HWND) {
         self.terminal_focus = true;
         self.caret_on = true;
-        unsafe { SetFocus(hwnd) };
+        take_keyboard(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
@@ -588,6 +644,7 @@ impl App {
                 };
                 let _ = self.terminal.remove(event.session_id);
                 self.run_session = None;
+                self.run_label = None;
                 self.run_applied_size = None;
                 if self.terminal_tab == TerminalTab::Output {
                     self.terminal_focus = false;
@@ -599,87 +656,233 @@ impl App {
         }
     }
 
-    // Header tab-strip geometry, shared by painting and hit testing so they
-    // can never disagree about where a tab, `+`, kill, or hide button sits.
+    // Header geometry, shared by painting and hit testing so they can never
+    // disagree about where a tab or a button sits.
     pub(super) fn terminal_header_layout(
         &self,
         left: i32,
         right: i32,
         top: i32,
     ) -> TerminalHeaderLayout {
-        let header_bottom = top + self.scale(TERMINAL_HEADER);
-        let mut x = left + self.scale(16);
-        // Room for "PROBLEMS" and a count of up to three digits.
-        let problems = RECT {
-            left: x,
-            top,
-            right: x + self.scale(112),
-            bottom: header_bottom,
-        };
-        x += self.scale(112);
-        let output = RECT {
-            left: x,
-            top,
-            right: x + self.scale(78),
-            bottom: header_bottom,
-        };
-        x += self.scale(78);
-        let debug = RECT {
-            left: x,
-            top,
-            right: x + self.scale(124),
-            bottom: header_bottom,
-        };
-        x += self.scale(124);
-        let tab_width = self.scale(92);
-        let gap = self.scale(6);
-        let mut terminals = Vec::with_capacity(self.terminals.len());
-        for _ in 0..self.terminals.len() {
-            terminals.push(RECT {
-                left: x + gap,
+        let s = |value: i32| self.scale(value);
+        let header_bottom = top + s(TERMINAL_HEADER);
+        // Tabs in the small font, 10 px of padding each side; PROBLEMS has
+        // room for its count badge.
+        let (errors, warnings) = self.problem_counts();
+        let badge = s(16).max(s(8) + s(7) * (errors + warnings).to_string().len() as i32);
+        let widths = self.with_font_dc(self.small_font, |hdc| {
+            ["PROBLEMS", "OUTPUT", "DEBUG CONSOLE", "TERMINAL"]
+                .map(|label| self.text_width(hdc, label))
+        });
+        let mut x = left + s(8);
+        let mut tab = |width: i32| {
+            let rect = RECT {
+                left: x,
                 top,
-                right: x + gap + tab_width,
+                right: x + width + s(20),
                 bottom: header_bottom,
-            });
-            x += gap + tab_width;
-        }
-        let plus = RECT {
-            left: x + gap,
-            top,
-            right: x + gap + self.scale(22),
-            bottom: header_bottom,
+            };
+            x = rect.right;
+            rect
         };
-        x += gap + self.scale(22);
-        let chevron = RECT {
-            left: x,
-            top,
-            right: x + self.scale(18),
-            bottom: header_bottom,
+        let problems = tab(widths[0] + s(6) + badge);
+        let output = tab(widths[1]);
+        let debug = tab(widths[2]);
+        let terminal = tab(widths[3]);
+
+        let middle = (top + header_bottom) / 2;
+        let button = |right: i32, width: i32| RECT {
+            left: right - width,
+            top: middle - s(11),
+            right,
+            bottom: middle + s(11),
         };
-        x += self.scale(22);
-        let kill = RECT {
-            left: x,
+        let none = RECT {
+            left: right,
             top,
-            right: x + self.scale(28),
-            bottom: header_bottom,
+            right,
+            bottom: top,
         };
-        let hide = RECT {
-            left: right - self.scale(34),
-            top,
-            right: right - self.scale(6),
-            bottom: header_bottom,
+        let hide = button(right - s(6), s(TOOL_BUTTON));
+        let maximize = button(hide.left - s(2), s(TOOL_BUTTON));
+        let separator = maximize.left - s(5);
+        let (plus, chevron, kill) = match self.terminal_tab {
+            TerminalTab::Terminal => {
+                let kill = button(separator - s(4), s(TOOL_BUTTON));
+                let chevron = button(kill.left - s(2), s(18));
+                let plus = button(chevron.left, s(TOOL_BUTTON));
+                (plus, chevron, kill)
+            }
+            TerminalTab::Output => (none, none, button(separator - s(4), s(TOOL_BUTTON))),
+            TerminalTab::Problems | TerminalTab::DebugConsole => (none, none, none),
         };
         TerminalHeaderLayout {
             header_bottom,
             problems,
             output,
             debug,
-            terminals,
+            terminal,
             plus,
             chevron,
             kill,
+            maximize,
             hide,
+            separator,
         }
+    }
+
+    /// Runs `f` with a screen DC holding `font`, to measure text outside a
+    /// paint.
+    pub(super) fn with_font_dc<T>(&self, font: HFONT, f: impl FnOnce(HDC) -> T) -> T {
+        unsafe {
+            let hdc = GetDC(null_mut());
+            let old = SelectObject(hdc, font);
+            let result = f(hdc);
+            SelectObject(hdc, old);
+            ReleaseDC(null_mut(), hdc);
+            result
+        }
+    }
+
+    /// Whether the shells get a list at the side: from two shells on, as in
+    /// VS Code. It takes its width from them whichever tab is open, so the
+    /// shells' size doesn't change when you switch to Output and back.
+    pub(super) fn shell_list_shown(&self) -> bool {
+        self.terminals.len() >= 2
+    }
+
+    /// The shell list's area, when it's showing.
+    pub(super) fn shell_list_rect(&self, right: i32, top: i32, bottom: i32) -> Option<RECT> {
+        (self.shell_list_shown() && self.terminal_tab == TerminalTab::Terminal).then(|| RECT {
+            left: right - self.scale(SHELL_LIST_WIDTH),
+            top: top + self.scale(TERMINAL_HEADER),
+            right,
+            bottom,
+        })
+    }
+
+    /// Shell `index`'s row in the list.
+    pub(super) fn shell_row_rect(&self, list: RECT, index: usize) -> RECT {
+        let top = list.top + self.scale(2) + self.scale(SHELL_ROW) * index as i32;
+        RECT {
+            left: list.left + 1,
+            top,
+            right: list.right,
+            bottom: top + self.scale(SHELL_ROW),
+        }
+    }
+
+    /// The 🗑 at the right of a shell's row.
+    pub(super) fn shell_row_kill(&self, row: RECT) -> RECT {
+        RECT {
+            left: row.right - self.scale(6) - self.scale(22),
+            top: row.top,
+            right: row.right - self.scale(6),
+            bottom: row.bottom,
+        }
+    }
+
+    /// Which shell row, and whether its 🗑, is at (x, y), in the window.
+    pub(super) fn shell_list_hit(&self, hwnd: HWND, x: i32, y: i32) -> Option<(usize, bool)> {
+        let mut client = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let list = self.shell_list_rect(
+            self.editor_right(hwnd),
+            self.terminal_top(hwnd),
+            client.bottom - self.scale(STATUS),
+        )?;
+        if x < list.left || x >= list.right || y < list.top || y >= list.bottom {
+            return None;
+        }
+        (0..self.terminals.len()).find_map(|index| {
+            let row = self.shell_row_rect(list, index);
+            (y >= row.top && y < row.bottom).then(|| {
+                let kill = self.shell_row_kill(row);
+                (index, x >= kill.left && x < kill.right)
+            })
+        })
+    }
+
+    /// The header tab, toolbar button or shell row under (x, y).
+    pub(super) fn terminal_hot_at(&self, hwnd: HWND, x: i32, y: i32) -> Option<TerminalHot> {
+        let left = self.editor_left();
+        let right = self.editor_right(hwnd);
+        let top = self.terminal_top(hwnd);
+        let layout = self.terminal_header_layout(left, right, top);
+        if y >= top && y < layout.header_bottom && x >= left && x < right {
+            let inside =
+                |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+            let tabs = [
+                layout.problems,
+                layout.output,
+                layout.debug,
+                layout.terminal,
+            ];
+            if let Some(index) = tabs
+                .iter()
+                .position(|rect| x >= rect.left && x < rect.right)
+            {
+                return Some(TerminalHot::Tab(index));
+            }
+            return [
+                (layout.plus, TerminalHot::New),
+                (layout.chevron, TerminalHot::ShellPicker),
+                (layout.kill, TerminalHot::Kill),
+                (layout.maximize, TerminalHot::Maximize),
+                (layout.hide, TerminalHot::Hide),
+            ]
+            .into_iter()
+            .find(|(rect, _)| inside(rect))
+            .map(|(_, hot)| hot);
+        }
+        self.shell_list_hit(hwnd, x, y)
+            .map(|(index, _)| TerminalHot::Shell(index))
+    }
+
+    /// Where `hot` is, in the window.
+    pub(super) fn terminal_hot_rect(&self, hwnd: HWND, hot: TerminalHot) -> Option<RECT> {
+        let left = self.editor_left();
+        let right = self.editor_right(hwnd);
+        let top = self.terminal_top(hwnd);
+        let layout = self.terminal_header_layout(left, right, top);
+        Some(match hot {
+            TerminalHot::Tab(index) => [
+                layout.problems,
+                layout.output,
+                layout.debug,
+                layout.terminal,
+            ]
+            .get(index)
+            .copied()?,
+            TerminalHot::New => layout.plus,
+            TerminalHot::ShellPicker => layout.chevron,
+            TerminalHot::Kill => layout.kill,
+            TerminalHot::Maximize => layout.maximize,
+            TerminalHot::Hide => layout.hide,
+            TerminalHot::Shell(index) => {
+                let mut client = RECT::default();
+                unsafe { GetClientRect(hwnd, &mut client) };
+                let list = self.shell_list_rect(right, top, client.bottom - self.scale(STATUS))?;
+                self.shell_row_rect(list, index)
+            }
+        })
+    }
+
+    /// The bottom panel's maximize button: the panel takes the editor's
+    /// height; again, it goes back to the height it had.
+    pub(super) fn toggle_terminal_maximized(&mut self, hwnd: HWND) {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        match self.terminal_restore_height.take() {
+            Some(height) => self.terminal_height = height,
+            None => {
+                self.terminal_restore_height = Some(self.terminal_height);
+                let max_height = self.unscale((rect.bottom - self.editor_top()).max(0));
+                self.terminal_height = max_height.saturating_sub(80).max(80);
+            }
+        }
+        self.resize_terminal_to_fit(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn terminal_header_hit(
@@ -693,31 +896,33 @@ impl App {
         let layout = self.terminal_header_layout(left, right, top);
         let inside =
             |rect: &RECT| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+        let within = |rect: &RECT| x >= rect.left && x < rect.right;
         if inside(&layout.hide) {
             return TerminalHeaderHit::Hide;
         }
-        if inside(&layout.problems) {
-            return TerminalHeaderHit::Problems;
+        if inside(&layout.maximize) {
+            return TerminalHeaderHit::Maximize;
         }
-        if inside(&layout.output) {
-            return TerminalHeaderHit::OutputTab;
-        }
-        if inside(&layout.debug) {
-            return TerminalHeaderHit::DebugTab;
-        }
-        for (index, rect) in layout.terminals.iter().enumerate() {
-            if inside(rect) {
-                return TerminalHeaderHit::TerminalTab(index);
-            }
-        }
-        if inside(&layout.plus) {
-            return TerminalHeaderHit::New;
+        if inside(&layout.kill) {
+            return TerminalHeaderHit::Kill;
         }
         if inside(&layout.chevron) {
             return TerminalHeaderHit::ShellPicker;
         }
-        if inside(&layout.kill) {
-            return TerminalHeaderHit::Kill;
+        if inside(&layout.plus) {
+            return TerminalHeaderHit::New;
+        }
+        if within(&layout.problems) {
+            return TerminalHeaderHit::Problems;
+        }
+        if within(&layout.output) {
+            return TerminalHeaderHit::OutputTab;
+        }
+        if within(&layout.debug) {
+            return TerminalHeaderHit::DebugTab;
+        }
+        if within(&layout.terminal) {
+            return TerminalHeaderHit::TerminalTab;
         }
         TerminalHeaderHit::Body
     }
@@ -752,8 +957,19 @@ impl App {
         let left = self.editor_left();
         let right = self.editor_right(hwnd);
         let top = self.terminal_top(hwnd);
+        let mut client = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client) };
+        if let Some(list) = self.shell_list_rect(right, top, client.bottom - self.scale(STATUS)) {
+            let row = self.shell_row_rect(list, index);
+            return Some(RECT {
+                left: (row.right - self.scale(230)).max(left + self.scale(8)),
+                top: row.top - self.scale(4),
+                right: row.right - self.scale(4),
+                bottom: row.bottom + self.scale(4),
+            });
+        }
         let layout = self.terminal_header_layout(left, right, top);
-        let tab = layout.terminals.get(index)?;
+        let tab = layout.terminal;
         Some(RECT {
             left: tab.left,
             top: layout.header_bottom + self.scale(3),
@@ -779,7 +995,7 @@ impl App {
         self.terminal_rename_input = Some(rename_state);
         self.caret_on = true;
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             InvalidateRect(hwnd, null(), 0);
         }
     }
@@ -813,9 +1029,7 @@ impl App {
         let s = |v: i32| self.scale(v);
         let header = self.terminal_header_layout(left, right, top);
         let width = s(252);
-        let menu_left = header
-            .chevron
-            .left
+        let menu_left = (header.chevron.right - width)
             .min(right - width - s(8))
             .max(left + s(8));
         let title_height = s(22);
@@ -1106,7 +1320,7 @@ impl App {
         let cell_width = self.cell_width.max(1);
         let cell_height = self.line_height.max(1);
         let content_left = self.editor_left() + self.scale(TERMINAL_PAD);
-        let header_bottom = self.terminal_top(hwnd) + self.scale(TERMINAL_HEADER);
+        let header_bottom = self.terminal_top(hwnd) + self.scale(TERMINAL_HEADER) + self.scale(2);
         let column = ((x - content_left).max(0) / cell_width) as u16;
         let row = ((y - header_bottom).max(0) / cell_height) as u16;
         (column, row)
@@ -1198,15 +1412,31 @@ impl App {
         }
     }
 
+    /// The shells' size in cells: the text area, less the shell list when
+    /// there are two shells or more.
     pub(super) fn terminal_size_for(&self, hwnd: HWND) -> TerminalSize {
+        self.terminal_size_with(hwnd, self.shell_list_shown())
+    }
+
+    /// The run session's size in cells: Output has no shell list.
+    fn run_size_for(&self, hwnd: HWND) -> TerminalSize {
+        self.terminal_size_with(hwnd, false)
+    }
+
+    fn terminal_size_with(&self, hwnd: HWND, list: bool) -> TerminalSize {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
         let cell_width = self.measure_cell_width(hwnd).max(1);
         let cell_height = self.line_height.max(1);
         let left = self.editor_left() + self.scale(TERMINAL_PAD);
-        let right = rect.right - self.scale(TERMINAL_PAD);
-        let top = self.terminal_top(hwnd) + self.scale(TERMINAL_HEADER);
-        let bottom = rect.bottom - self.scale(STATUS) - self.scale(TERMINAL_PAD);
+        let edge = if list {
+            self.editor_right(hwnd) - self.scale(SHELL_LIST_WIDTH)
+        } else {
+            self.editor_right(hwnd)
+        };
+        let right = edge - self.scale(TERMINAL_PAD_RIGHT);
+        let top = self.terminal_top(hwnd) + self.scale(TERMINAL_HEADER) + self.scale(2);
+        let bottom = rect.bottom - self.scale(STATUS) - self.scale(4);
         let columns = ((right - left).max(1) / cell_width).clamp(1, 400) as u16;
         let rows = ((bottom - top).max(1) / cell_height).clamp(1, 200) as u16;
         TerminalSize::new(rows, columns).unwrap_or_default()
@@ -1222,11 +1452,12 @@ impl App {
                 pane.applied_size = Some(size);
             }
         }
-        if self.run_applied_size != Some(size)
+        let run_size = self.run_size_for(hwnd);
+        if self.run_applied_size != Some(run_size)
             && let Some(id) = self.run_session
-            && self.terminal.resize(id, size).is_ok()
+            && self.terminal.resize(id, run_size).is_ok()
         {
-            self.run_applied_size = Some(size);
+            self.run_applied_size = Some(run_size);
         }
     }
 
@@ -1249,6 +1480,13 @@ impl App {
             alt,
         };
         self.reset_terminal_scrollback();
+        if self.terminal_tab == TerminalTab::Terminal
+            && key == TermKey::Enter
+            && self.active_shell_exit().is_some()
+        {
+            self.close_active_terminal(hwnd);
+            return true;
+        }
         let delivered = match self.terminal_tab {
             TerminalTab::Terminal => match self.terminals.get_mut(self.terminal_active) {
                 Some(pane) => pane.service.key(pane.id, key, modifiers).is_ok(),
@@ -1374,6 +1612,9 @@ impl App {
 
     // Runs `command` in the dedicated Output session, never the user's shell.
     pub(super) fn run_in_terminal(&mut self, hwnd: HWND, command: &str) {
+        // What Output says is running: the command, shortened.
+        let label: String = command.chars().take(40).collect();
+        self.run_label = Some(label);
         if let Some(id) = self.ensure_run_session(hwnd) {
             let mut line = command.to_string();
             line.push('\r');
@@ -1399,7 +1640,14 @@ impl App {
             self.refresh(hwnd);
             return;
         }
-        let size = self.terminal_size_for(hwnd);
+        let size = self.run_size_for(hwnd);
+        // What Output says is running: the file being run.
+        self.run_label = self
+            .doc()
+            .path
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned());
         match self.terminal.start(
             SessionKind::ManagedRun,
             LaunchRequest::Run { cwd, command },
@@ -1636,5 +1884,131 @@ mod input_tests {
         // Anchor near/beyond left edge clamps left
         let rect = clamp(10, 100);
         assert_eq!(rect.left, left_bound + 6);
+    }
+}
+
+/// How a shell ended, for its row and the note under it: "code 1",
+/// "an error: ...", or None while it runs.
+pub(super) fn shell_exit_text(pane: &TerminalPane) -> Option<String> {
+    match &pane.snapshot.as_ref()?.status {
+        SessionStatus::Exited { code } => Some(format!("code {code}")),
+        SessionStatus::Failed(message) => Some(format!("an error: {message}")),
+        SessionStatus::Stopped => Some("stopped".into()),
+        _ => None,
+    }
+}
+
+impl App {
+    /// The font for the terminal's private-use symbols (a Nerd Font), made at
+    /// the terminal font's height the first time a row needs one: the
+    /// `terminalSymbolFont` setting, else the first installed font whose name
+    /// has "Nerd Font" (a "Mono" one preferred, as it fits one cell). None
+    /// when there's none; the symbols then draw as the font has them.
+    pub(super) fn terminal_symbol_font(&mut self) -> Option<HFONT> {
+        if self.terminal_symbol_font.is_some() || self.terminal_symbol_font_tried {
+            return self.terminal_symbol_font;
+        }
+        self.terminal_symbol_font_tried = true;
+        let family = self
+            .settings
+            .terminal_symbol_font
+            .clone()
+            .or_else(installed_nerd_font)?;
+        let mut logfont: LOGFONTW = unsafe { std::mem::zeroed() };
+        let read = unsafe {
+            GetObjectW(
+                self.font,
+                size_of::<LOGFONTW>() as i32,
+                (&mut logfont as *mut LOGFONTW).cast(),
+            )
+        };
+        if read == 0 {
+            return None;
+        }
+        let name: Vec<u16> = family.encode_utf16().take(31).collect();
+        logfont.lfFaceName = [0; 32];
+        logfont.lfFaceName[..name.len()].copy_from_slice(&name);
+        let font = unsafe { CreateFontIndirectW(&logfont) };
+        (!font.is_null()).then(|| {
+            self.terminal_symbol_font = Some(font);
+            font
+        })
+    }
+
+    /// Drops the symbol font, to be made again (the terminal font or the
+    /// setting changed).
+    pub(super) fn reset_terminal_symbol_font(&mut self) {
+        if let Some(font) = self.terminal_symbol_font.take() {
+            unsafe { DeleteObject(font) };
+        }
+        self.terminal_symbol_font_tried = false;
+    }
+}
+
+/// The first installed font family with "Nerd Font" in its name, a "Mono"
+/// one first.
+fn installed_nerd_font() -> Option<String> {
+    unsafe extern "system" fn collect(
+        logfont: *const LOGFONTW,
+        _: *const TEXTMETRICW,
+        _: u32,
+        names: LPARAM,
+    ) -> i32 {
+        let names = unsafe { &mut *(names as *mut Vec<String>) };
+        let face = unsafe { &(*logfont).lfFaceName };
+        let len = face.iter().position(|&c| c == 0).unwrap_or(face.len());
+        let name = String::from_utf16_lossy(&face[..len]);
+        if name.contains("Nerd Font") && !name.starts_with('@') && !names.contains(&name) {
+            names.push(name);
+        }
+        1
+    }
+    let mut names: Vec<String> = Vec::new();
+    unsafe {
+        let hdc = GetDC(null_mut());
+        let mut wanted: LOGFONTW = std::mem::zeroed();
+        wanted.lfCharSet = DEFAULT_CHARSET;
+        EnumFontFamiliesExW(
+            hdc,
+            &wanted,
+            Some(collect),
+            &mut names as *mut Vec<String> as LPARAM,
+            0,
+        );
+        ReleaseDC(null_mut(), hdc);
+    }
+    names.sort();
+    names
+        .iter()
+        .find(|name| name.contains("Mono"))
+        .or_else(|| names.first())
+        .cloned()
+}
+
+/// Whether `ch` is a Powerline separator LightLine draws as a shape:
+/// U+E0B0–E0B7 (solid and thin arrows, and half circles).
+pub(super) fn is_powerline_separator(ch: char) -> bool {
+    ('\u{E0B0}'..='\u{E0B7}').contains(&ch)
+}
+
+/// Whether `ch` is in a private-use area, where Nerd Fonts put their icons.
+pub(super) fn is_private_use(ch: char) -> bool {
+    ('\u{E000}'..='\u{F8FF}').contains(&ch) || ch >= '\u{F0000}'
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::{is_powerline_separator, is_private_use};
+
+    #[test]
+    fn powerline_separators_and_private_use() {
+        assert!(is_powerline_separator('\u{E0B0}'));
+        assert!(is_powerline_separator('\u{E0B6}'));
+        assert!(!is_powerline_separator('\u{E0A0}'));
+        assert!(is_private_use('\u{E0A0}'));
+        assert!(is_private_use('\u{F07B}'));
+        assert!(is_private_use('\u{F0001}'));
+        assert!(!is_private_use('A'));
+        assert!(!is_private_use('\u{2502}'));
     }
 }

@@ -127,7 +127,7 @@ impl App {
         self.panel_focus = false;
         self.debug_console.focus = self.debug.is_some();
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             InvalidateRect(hwnd, null(), 0);
         }
     }
@@ -298,7 +298,7 @@ impl App {
         self.terminal_focus = false;
         self.panel_focus = false;
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             InvalidateRect(hwnd, &body, 0);
         }
         // The editor's caret hides while the prompt has the keyboard.

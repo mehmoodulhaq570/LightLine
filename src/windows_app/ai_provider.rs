@@ -247,7 +247,7 @@ impl App {
         self.pending_high_surrogate = None;
         self.provider_check_if_ready(hwnd);
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             InvalidateRect(hwnd, null(), 0);
         }
     }
