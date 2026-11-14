@@ -38,6 +38,16 @@ Recovery is a periodic checkpoint: edits made after the latest completed checkpo
 
 Arrow movement, Backspace and Delete treat combining characters and joined emoji as complete characters. This does not add bidirectional layout or change the renderer's font shaping.
 
+### Source Control
+
+`Ctrl+Shift+G` opens Source Control for the open folder's Git repository.
+
+- **Commit**: type a message in the box at the top and press `Enter`, or click **Commit**. If nothing is staged, LightLine offers to stage everything first. With no message and nothing to commit, the same button pushes your commits (**Push 2 commits**) or pulls new ones (**Pull 3 commits**). Its **▾** lists Commit, Push, Pull and Fetch.
+- **Branch row**: the branch and how far it is ahead or behind, with **Pull**, **Push** and **Fetch** buttons at the right. They run Git in the terminal, where you see its output and can answer a password prompt. The panel updates when Git finishes.
+- **··· in the header**: Commit, Refresh, Pull, Push, Fetch, Stage All Changes, Unstage All Changes and Discard All Changes, which asks first.
+- **Files**: each changed file shows its name, its folder, and a letter for the change: **M** modified, **A** added, **U** untracked, **D** deleted, **R** renamed, **!** in conflict. Click a file to see its diff. Point at it (or select it with the keyboard) for **Open File**, **Discard Changes** and **Stage** or **Unstage**. Pointing at a section's title shows **Stage All**, **Unstage All** or **Discard All**.
+- **History**: the latest commits, newest first, with their age; point at one to see its hash.
+
 ### Merge conflicts
 
 When a merge, pull or rebase stops with conflicts, Git writes both versions into the file between markers:

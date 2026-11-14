@@ -801,21 +801,6 @@ impl App {
                             source.len()
                         }
                         .max(start_byte);
-                        if row == 0 {
-                            // Diagnostics have their own lane and use the
-                            // anti-aliased dot also used for breakpoints.
-                            let center_x = left + self.scale(GUTTER_DIAGNOSTIC_CENTER);
-                            let center_y = y + self.line_height / 2;
-                            let size = self.scale(14);
-                            self.icons.draw_glyph(
-                                hdc,
-                                DebugGlyph::GutterDot,
-                                color,
-                                center_x - size / 2,
-                                center_y - size / 2,
-                                size,
-                            );
-                        }
                         // Underlined on each row the problem reaches; an
                         // empty range gets a short mark on its own row.
                         let on_row = if end_byte > start_byte {

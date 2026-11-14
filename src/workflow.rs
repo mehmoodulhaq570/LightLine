@@ -1353,19 +1353,19 @@ pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitEntry>, String> {
         &[
             "log",
             &format!("--max-count={limit}"),
-            "--date=format:%b %d",
-            "--pretty=format:%h\u{1f}%an\u{1f}%ad\u{1f}%s",
+            "--pretty=format:%h\u{1f}%an\u{1f}%ct\u{1f}%s",
         ],
     )?;
     Ok(parse_log(&text))
 }
 
-/// Parse `%h<US>%an<US>%ad<US>%s` records, one per line.
+/// Parse `%h<US>%an<US>%ct<US>%s` records, one per line. A time that isn't
+/// a number reads as 0, which `short_age` shows as no age at all.
 pub fn parse_log(text: &str) -> Vec<CommitEntry> {
     text.lines()
         .filter_map(|line| {
             let mut fields = line.split('\u{1f}');
-            let (oid, author, date, subject) = (
+            let (oid, author, time, subject) = (
                 fields.next()?,
                 fields.next()?,
                 fields.next()?,
@@ -1374,18 +1374,38 @@ pub fn parse_log(text: &str) -> Vec<CommitEntry> {
             (!oid.is_empty()).then(|| CommitEntry {
                 oid: oid.to_owned(),
                 author: author.to_owned(),
-                date: date.to_owned(),
+                time: time.trim().parse().unwrap_or(0),
                 subject: subject.to_owned(),
             })
         })
         .collect()
 }
 
+/// How long ago `time` was, in one short unit: "now", "5m", "9h", "3d",
+/// "2w", "4mo", "1y". Empty when the time is unknown (0).
+pub fn short_age(time: i64, now: i64) -> String {
+    if time <= 0 {
+        return String::new();
+    }
+    let seconds = (now - time).max(0);
+    let (minute, hour, day) = (60, 3_600, 86_400);
+    match seconds {
+        s if s < minute => "now".into(),
+        s if s < hour => format!("{}m", s / minute),
+        s if s < day => format!("{}h", s / hour),
+        s if s < 14 * day => format!("{}d", s / day),
+        s if s < 60 * day => format!("{}w", s / (7 * day)),
+        s if s < 365 * day => format!("{}mo", s / (30 * day)),
+        s => format!("{}y", s / (365 * day)),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommitEntry {
     pub oid: String,
     pub author: String,
-    pub date: String,
+    /// Committer time, seconds since the Unix epoch (0 when unknown).
+    pub time: i64,
     pub subject: String,
 }
 
@@ -2691,14 +2711,30 @@ mod tests {
     #[test]
     fn parses_commit_log_records() {
         let rows = parse_log(
-            "aaaa\u{1f}Ada\u{1f}Sep 12\u{1f}Add terminal\n\
+            "aaaa\u{1f}Ada\u{1f}1757660000\u{1f}Add terminal\n\
                               bbbb\u{1f}Ada\u{1f}Sep 13\u{1f}Fix: a bug, then another",
         );
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].oid, "aaaa");
         assert_eq!(rows[0].author, "Ada");
+        assert_eq!(rows[0].time, 1_757_660_000);
+        assert_eq!(rows[1].time, 0);
         assert_eq!(rows[1].subject, "Fix: a bug, then another");
         assert!(parse_log("").is_empty());
+    }
+
+    #[test]
+    fn short_age_uses_one_unit() {
+        let now = 1_000_000_000;
+        assert_eq!(short_age(0, now), "");
+        assert_eq!(short_age(now - 20, now), "now");
+        assert_eq!(short_age(now + 90, now), "now");
+        assert_eq!(short_age(now - 5 * 60, now), "5m");
+        assert_eq!(short_age(now - 9 * 3_600 - 59, now), "9h");
+        assert_eq!(short_age(now - 3 * 86_400, now), "3d");
+        assert_eq!(short_age(now - 20 * 86_400, now), "2w");
+        assert_eq!(short_age(now - 100 * 86_400, now), "3mo");
+        assert_eq!(short_age(now - 800 * 86_400, now), "2y");
     }
 
     fn buffer(text: &str) -> Vec<String> {

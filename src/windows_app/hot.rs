@@ -34,6 +34,8 @@ pub(super) enum Hot {
     MenuButton,
     // A Welcome screen target, by its index in `WelcomeLayout::targets`.
     Welcome(usize),
+    // A Source Control button or row (git.rs).
+    Git(GitHot),
 }
 
 impl App {
@@ -83,6 +85,15 @@ impl App {
         }
         if x < self.scale(RAIL) && y < client.bottom - self.scale(STATUS) {
             return self.rail_item_at(y - chrome_top, client.bottom - chrome_top);
+        }
+        if self.side_view == SideView::Review
+            && self.explorer_visible
+            && self.sidebar_width > 0
+            && x < self.sidebar_right()
+            && y >= chrome_top
+            && y < client.bottom - self.scale(STATUS)
+        {
+            return self.git_hot_at(x, y - self.side_origin()).map(Hot::Git);
         }
         None
     }
@@ -150,6 +161,14 @@ impl App {
                 .targets
                 .get(index)
                 .map(|(rect, _)| *rect),
+            Hot::Git(git) => {
+                let origin = self.side_origin();
+                self.git_hot_rect(git).map(|rect| RECT {
+                    top: rect.top + origin,
+                    bottom: rect.bottom + origin,
+                    ..rect
+                })
+            }
             rail => {
                 let editor_bottom = client.bottom - self.scale(STATUS) - chrome_top;
                 self.rail_item_rect(rail, editor_bottom).map(|rect| RECT {
@@ -182,6 +201,16 @@ impl App {
                 return welcome_rail_tip(&self.welcome_layout(client).targets, index);
             }
             Hot::MenuButton => "Menu (Alt)",
+            Hot::Git(GitHot::Button(button)) => match button {
+                GitButton::Commit => "Commit",
+                GitButton::Refresh => "Refresh",
+                GitButton::More => "More actions",
+                GitButton::Drop => "Commit, push, pull or fetch",
+                GitButton::Pull => "Pull",
+                GitButton::Push => "Push",
+                GitButton::Fetch => "Fetch",
+                GitButton::Primary => return None,
+            },
             _ => return None,
         })
     }
@@ -202,7 +231,7 @@ impl App {
         let height = s(28);
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let card = if let Hot::TitleButton(_) = hot {
+        let card = if let Hot::TitleButton(_) | Hot::Git(_) = hot {
             let right = item.right.min(client.right - s(6));
             RECT {
                 left: right - width,

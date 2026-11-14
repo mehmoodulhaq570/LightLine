@@ -701,7 +701,7 @@ impl App {
         if repaint_all {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         } else if diagnostics_changed {
-            // Underlines and gutter dots on the lines whose problems changed,
+            // Underlines on the lines whose problems changed,
             // and the counts in the status bar.
             let panes = if self.split_visible { 0..2 } else { 0..1 };
             let mut areas = vec![self.status_area(hwnd)];

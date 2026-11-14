@@ -68,8 +68,9 @@ use app::{
     WorkerMessage, is_c_family_path, is_cpp_path,
 };
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
+use git::{GitButton, GitHot};
 use menu_bar::MenuBar;
-use more_menu::MoreMenu;
+use more_menu::{GitMenu, MoreMenu};
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
 mod input;
@@ -151,7 +152,6 @@ const GUTTER: i32 = 62;
 const GUTTER_FOLD_LANE: i32 = 18;
 const GUTTER_FOLD_CENTER: i32 = 9;
 const GUTTER_BREAKPOINT_CENTER: i32 = 25;
-const GUTTER_DIAGNOSTIC_CENTER: i32 = 40;
 const GUTTER_NUMBER_RIGHT_INSET: i32 = 6;
 const TOP: i32 = 5;
 const STATUS: i32 = 22;

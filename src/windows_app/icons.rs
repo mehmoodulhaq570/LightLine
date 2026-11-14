@@ -108,6 +108,12 @@ pub(super) enum DebugGlyph {
     Plus,
     Minus,
     Discard,
+    // Source Control: commit, push, pull, fetch, open the changed file.
+    Check,
+    ArrowUp,
+    ArrowDown,
+    Fetch,
+    OpenFile,
 }
 
 impl DebugGlyph {
@@ -193,6 +199,20 @@ impl DebugGlyph {
             // Back to how it was: an arrow turning back.
             DebugGlyph::Discard => format!(
                 r#"<path {ui} d="M9 6.5 4.5 11 9 15.5"/><path {ui} d="M4.5 11h9.5a5 5 0 0 1 0 10h-2.5"/>"#
+            ),
+            DebugGlyph::Check => format!(r#"<path {ui} d="M5 12.5l4.5 4.5L19 7.5"/>"#),
+            DebugGlyph::ArrowUp => {
+                format!(r#"<path {ui} d="M12 19V5.5"/><path {ui} d="M6.5 11 12 5.5l5.5 5.5"/>"#)
+            }
+            DebugGlyph::ArrowDown => {
+                format!(r#"<path {ui} d="M12 5v13.5"/><path {ui} d="M6.5 13 12 18.5l5.5-5.5"/>"#)
+            }
+            // Down onto a shelf: bring the remote's commits in, nothing merged.
+            DebugGlyph::Fetch => format!(
+                r#"<path {ui} d="M12 4v11"/><path {ui} d="M7.5 10.5 12 15l4.5-4.5"/><path {ui} d="M5 19.5h14"/>"#
+            ),
+            DebugGlyph::OpenFile => format!(
+                r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5"/>"#
             ),
             DebugGlyph::Warning => format!(
                 r#"<path {ui} d="M10.4 4.6a1.85 1.85 0 0 1 3.2 0l6.9 12.2a1.85 1.85 0 0 1-1.6 2.7H5.1a1.85 1.85 0 0 1-1.6-2.7z"/><path {ui} d="M12 9.5v4"/><circle fill="{color}" cx="12" cy="16.6" r="1.05"/>"#
@@ -704,6 +724,11 @@ mod icon_tests {
             DebugGlyph::Stop,
             DebugGlyph::GutterDot,
             DebugGlyph::ExecutionArrow,
+            DebugGlyph::Check,
+            DebugGlyph::ArrowUp,
+            DebugGlyph::ArrowDown,
+            DebugGlyph::Fetch,
+            DebugGlyph::OpenFile,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");

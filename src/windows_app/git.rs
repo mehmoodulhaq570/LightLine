@@ -1,20 +1,27 @@
 use super::*;
 
-// Source control sidebar geometry, in logical pixels below the panel header.
-// The commit message box and button stay pinned while the change list scrolls,
-// so their rectangles come from the same layout as the rows.
-const COMMIT_TOP: i32 = 50;
-const COMMIT_HEIGHT: i32 = 54;
-const COMMIT_BUTTON_HEIGHT: i32 = 34;
-// Push, pull and fetch sit in a row of their own below the commit button.
-const SYNC_HEIGHT: i32 = 34;
-const BRANCH_HEIGHT: i32 = 38;
-pub(super) const ROW_HEADER: i32 = 34;
+// Source control sidebar geometry, in logical pixels from the top of the
+// panel's 40 px header (design/source-control-design.html). The message box,
+// the button and the branch row stay pinned while the list below scrolls, so
+// their rectangles come from the same layout as the rows.
+const COMMIT_TOP: i32 = 48;
+const COMMIT_HEIGHT: i32 = 30;
+const COMMIT_BUTTON_HEIGHT: i32 = 28;
+// The ▾ at the commit button's right end.
+const DROP_WIDTH: i32 = 28;
+// The branch, with Pull, Push and Fetch as icon buttons at its right.
+const BRANCH_HEIGHT: i32 = 26;
+const SYNC_BUTTON: i32 = 24;
+// Every list row is one 22 px line, like the Explorer's.
+pub(super) const ROW_HEADER: i32 = EXPLORER_ROW;
 pub(super) const ROW_CHANGE: i32 = EXPLORER_ROW;
-pub(super) const ROW_COMMIT: i32 = 48;
-pub(super) const ROW_CLEAN: i32 = 82;
+pub(super) const ROW_COMMIT: i32 = EXPLORER_ROW;
+pub(super) const ROW_CLEAN: i32 = EXPLORER_ROW;
 // Row action buttons are square and right aligned, like the rest of the panel.
 pub(super) const ROW_BUTTON: i32 = 22;
+// Where a change row's text starts, and the status letter's column.
+pub(super) const ROW_INDENT: i32 = 20;
+pub(super) const LETTER_WIDTH: i32 = 14;
 
 // One line in the source-control list: a section title, a changed file, a
 // commit, or a plain message such as "No changes".
@@ -56,30 +63,122 @@ impl GitRow {
     }
 }
 
+/// The panel's buttons outside the list: three in the header, the commit
+/// button and its ▾, and three on the branch row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GitButton {
+    Commit,
+    Refresh,
+    More,
+    Primary,
+    Drop,
+    Pull,
+    Push,
+    Fetch,
+}
+
+/// What the mouse is over in the panel, for hover: a button, or a row of
+/// the list by its index into `git_rows`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GitHot {
+    Button(GitButton),
+    Row(usize),
+}
+
+/// What the commit button does now: the next thing there is to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GitPrimary {
+    Busy,
+    /// Commit; `ready` once there's a message.
+    Commit {
+        ready: bool,
+    },
+    /// Nothing to commit and the branch is ahead / behind its upstream.
+    Push(usize),
+    Pull(usize),
+}
+
 // Where a click landed. Rows are addressed by index into `git_rows`.
 pub(super) enum GitHit {
     CommitBox,
-    CommitButton,
+    Button(GitButton),
     StageAll,
     UnstageAll,
-    Refresh,
-    Push,
-    Pull,
-    Fetch,
+    DiscardAll,
     ToggleSection(GitSection),
     Row(usize),
     Toggle(usize),
     Discard(usize),
+    Open(usize),
     Nothing,
 }
 
 pub(super) struct GitLayout {
     pub commit_box: RECT,
-    pub commit_button: RECT,
-    pub sync: [RECT; 3],
+    /// The commit button without its ▾, and the ▾.
+    pub primary: RECT,
+    pub drop: RECT,
+    /// The branch row; Pull, Push and Fetch sit at its right.
     pub branch: RECT,
-    pub refresh: RECT,
+    /// Commit, Refresh and More in the header.
+    pub header: [RECT; 3],
+    /// Pull, Push and Fetch.
+    pub sync: [RECT; 3],
+    /// The line between the branch row and the list.
+    pub divider: i32,
     pub list_top: i32,
+}
+
+/// A change row's buttons, right to left: the status letter's column, then
+/// Stage or Unstage, Discard (unstaged rows only) and Open File (not for a
+/// deleted file).
+pub(super) struct RowActions {
+    pub letter: RECT,
+    pub toggle: RECT,
+    pub discard: Option<RECT>,
+    pub open: Option<RECT>,
+}
+
+impl GitLayout {
+    pub(super) fn button(&self, button: GitButton) -> RECT {
+        match button {
+            GitButton::Commit => self.header[0],
+            GitButton::Refresh => self.header[1],
+            GitButton::More => self.header[2],
+            GitButton::Primary => self.primary,
+            GitButton::Drop => self.drop,
+            GitButton::Pull => self.sync[0],
+            GitButton::Push => self.sync[1],
+            GitButton::Fetch => self.sync[2],
+        }
+    }
+
+    const BUTTONS: [GitButton; 8] = [
+        GitButton::Commit,
+        GitButton::Refresh,
+        GitButton::More,
+        GitButton::Primary,
+        GitButton::Drop,
+        GitButton::Pull,
+        GitButton::Push,
+        GitButton::Fetch,
+    ];
+
+    fn button_at(&self, x: i32, y: i32) -> Option<GitButton> {
+        Self::BUTTONS
+            .into_iter()
+            .find(|button| contains(&self.button(*button), x, y))
+    }
+}
+
+/// How many digits a count adds to a sync button's width.
+fn count_digits(count: usize) -> i32 {
+    match count {
+        0 => 0,
+        1..=9 => 1,
+        10..=99 => 2,
+        _ => 3,
+    }
 }
 
 impl App {
@@ -130,11 +229,23 @@ impl App {
             self.gutter_done = None;
             self.forget_blame();
         }
-        let watch: Vec<PathBuf> = state
+        // index and HEAD move with staging, commits and checkouts. Push,
+        // Pull and Fetch run in the terminal and finish there, so the panel
+        // hears of them from FETCH_HEAD (fetch, pull) and the upstream's
+        // remote-tracking ref (push), and its ahead/behind counts and the
+        // commit button follow without a manual refresh.
+        let mut watch: Vec<PathBuf> = state
             .git_dir
             .iter()
-            .flat_map(|dir| [dir.join("index"), dir.join("HEAD")])
+            .flat_map(|dir| [dir.join("index"), dir.join("HEAD"), dir.join("FETCH_HEAD")])
             .collect();
+        if let (Some(dir), Some(upstream)) = (&state.git_dir, &state.upstream) {
+            // "origin/main" -> refs\remotes\origin\main, in the separators
+            // the watcher reports paths in.
+            let mut path = dir.join("refs").join("remotes");
+            path.extend(upstream.split('/'));
+            watch.push(path);
+        }
         if watch != self.git_watch_files
             && let Some(watcher) = &self.watcher
         {
@@ -153,6 +264,7 @@ impl App {
         self.git_conflicted = state.conflicted;
         self.history = state.history;
         self.changes = state.changes;
+        self.forget_git_hot_row(hwnd);
         // Keep the selection inside the list after a refresh shrinks it, and
         // keep it on screen: the row count changes under the pointer whenever
         // a file is saved or a write lands.
@@ -171,7 +283,10 @@ impl App {
     /// The list model, built fresh so paint and hit-testing always agree.
     pub(super) fn git_rows(&self) -> Vec<GitRow> {
         let mut rows = Vec::new();
-        if self.review_loading && self.changes.is_empty() {
+        // Only before the first answer: a refresh (one runs whenever the
+        // window gets focus back) keeps showing the last list until the new
+        // one arrives, instead of blanking a clean repository's history.
+        if self.review_loading && self.changes.is_empty() && self.history.is_empty() {
             rows.push(GitRow::Note("Reading Git status..."));
             return rows;
         }
@@ -184,7 +299,7 @@ impl App {
         let has_staged = !staged.is_empty();
         if has_staged {
             rows.push(GitRow::Header {
-                title: "STAGED",
+                title: "STAGED CHANGES",
                 count: staged.len(),
                 section: GitSection::Staged,
             });
@@ -226,81 +341,153 @@ impl App {
     }
 
     pub(super) fn git_layout(&self, left: i32, right: i32) -> GitLayout {
-        let box_left = left + self.scale(12);
-        let box_right = right - self.scale(12);
-        let top = self.scale(COMMIT_TOP);
-        let height = self.scale(COMMIT_HEIGHT);
-        let button_top = top + height + self.scale(8);
-        let button_bottom = button_top + self.scale(COMMIT_BUTTON_HEIGHT);
-        let sync_top = button_bottom + self.scale(8);
-        let sync_bottom = sync_top + self.scale(SYNC_HEIGHT);
-        let branch_top = sync_bottom + self.scale(10);
-        let branch_bottom = branch_top + self.scale(BRANCH_HEIGHT);
-        let gap = self.scale(6);
-        let third = ((box_right - box_left - gap * 2) / 3).max(1);
+        let s = |value: i32| self.scale(value);
+        let box_left = left + s(12);
+        let box_right = right - s(12);
+        let top = s(COMMIT_TOP);
+        let button_top = top + s(COMMIT_HEIGHT) + s(8);
+        let button_bottom = button_top + s(COMMIT_BUTTON_HEIGHT);
+        let branch_top = button_bottom + s(6);
+        let branch_bottom = branch_top + s(BRANCH_HEIGHT);
+        // Header buttons, centred on the header's visible part (its top
+        // SIDE_SHIFT is hidden), at the Run & Debug panel's spacing.
+        let header = [94, 65, 36].map(|offset| RECT {
+            left: right - s(offset),
+            top: s(SIDE_SHIFT),
+            right: right - s(offset) + s(22),
+            bottom: s(40),
+        });
+        // Fetch, Push, Pull from the right; a count widens its button.
+        let mut edge = right - s(8);
+        let mut sync = [RECT::default(); 3];
+        for (index, count) in [(2, 0), (1, self.git_ahead), (0, self.git_behind)] {
+            let width = s(SYNC_BUTTON) + s(7) * count_digits(count);
+            sync[index] = RECT {
+                left: edge - width,
+                top: branch_top + s(2),
+                right: edge,
+                bottom: branch_bottom - s(2),
+            };
+            edge -= width + s(2);
+        }
         GitLayout {
             commit_box: RECT {
                 left: box_left,
                 top,
                 right: box_right,
-                bottom: top + height,
+                bottom: top + s(COMMIT_HEIGHT),
             },
-            commit_button: RECT {
+            primary: RECT {
                 left: box_left,
+                top: button_top,
+                right: box_right - s(DROP_WIDTH),
+                bottom: button_bottom,
+            },
+            drop: RECT {
+                left: box_right - s(DROP_WIDTH),
                 top: button_top,
                 right: box_right,
                 bottom: button_bottom,
             },
-            // Push, pull, fetch - left to right, each labelled with its own name
-            // so the three download arrows do not have to be told apart.
-            sync: [0, 1, 2].map(|index| {
-                let left = box_left + (third + gap) * index;
-                RECT {
-                    left,
-                    top: sync_top,
-                    right: left + third,
-                    bottom: sync_bottom,
-                }
-            }),
             branch: RECT {
                 left: box_left,
                 top: branch_top,
-                right: box_right,
+                right: right - s(8),
                 bottom: branch_bottom,
             },
-            refresh: RECT {
-                left: right - self.scale(34),
-                top: self.scale(12),
-                right: right - self.scale(10),
-                bottom: self.scale(34),
-            },
-            list_top: branch_bottom + self.scale(8),
+            header,
+            sync,
+            divider: branch_bottom + s(4),
+            list_top: branch_bottom + s(7),
         }
     }
 
-    /// The two square buttons at the right edge of a change row.
-    pub(super) fn git_row_buttons(
+    /// The buttons of a change row: see `RowActions`.
+    pub(super) fn git_row_actions(
         &self,
         right: i32,
         rect: RECT,
+        change: &Change,
         staged: bool,
-    ) -> (RECT, Option<RECT>) {
+    ) -> RowActions {
         let size = self.scale(ROW_BUTTON);
-        let middle = (rect.top + rect.bottom) / 2;
-        let edge = right - self.scale(8);
-        let toggle = RECT {
-            left: edge - size,
-            top: middle - size / 2,
-            right: edge,
-            bottom: middle + size / 2,
+        let letter_right = right - self.scale(8);
+        let letter = RECT {
+            left: letter_right - self.scale(LETTER_WIDTH),
+            top: rect.top,
+            right: letter_right,
+            bottom: rect.bottom,
         };
-        let discard = (!staged).then(|| RECT {
-            left: toggle.left - size - self.scale(2),
-            top: toggle.top,
-            right: toggle.right - size - self.scale(2),
-            bottom: toggle.bottom,
-        });
-        (toggle, discard)
+        let at = |right: i32| RECT {
+            left: right - size,
+            top: rect.top,
+            right,
+            bottom: rect.top + size,
+        };
+        let toggle = at(letter.left - self.scale(4));
+        let discard = (!staged).then(|| at(toggle.left));
+        let open_right = discard.map_or(toggle.left, |rect| rect.left);
+        let deleted = change.label() == "Deleted";
+        let open = (!deleted).then(|| at(open_right));
+        RowActions {
+            letter,
+            toggle,
+            discard,
+            open,
+        }
+    }
+
+    /// A section header's buttons, right to left: Unstage All on Staged
+    /// Changes; Stage All, then Discard All on Changes.
+    pub(super) fn git_header_actions(
+        &self,
+        right: i32,
+        rect: RECT,
+        section: GitSection,
+    ) -> Vec<(GitHit, DebugGlyph, RECT)> {
+        let size = self.scale(ROW_BUTTON);
+        let at = |index: i32| {
+            let right = right - self.scale(8) - size * index;
+            RECT {
+                left: right - size,
+                top: rect.top,
+                right,
+                bottom: rect.top + size,
+            }
+        };
+        match section {
+            GitSection::Staged => vec![(GitHit::UnstageAll, DebugGlyph::Minus, at(0))],
+            GitSection::Changes if self.changes.iter().any(|change| change.unstaged) => vec![
+                (GitHit::StageAll, DebugGlyph::Plus, at(0)),
+                (GitHit::DiscardAll, DebugGlyph::Discard, at(1)),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Each row on screen with its rectangle, in the panel's coordinates.
+    fn git_rows_on_screen(
+        &self,
+        rows: &[GitRow],
+        left: i32,
+        right: i32,
+        list_top: i32,
+    ) -> Vec<(usize, RECT)> {
+        let mut top = list_top;
+        rows.iter()
+            .enumerate()
+            .skip(self.panel_first)
+            .map(|(index, row)| {
+                let rect = RECT {
+                    left,
+                    top,
+                    right,
+                    bottom: top + self.scale(row.height()),
+                };
+                top = rect.bottom;
+                (index, rect)
+            })
+            .collect()
     }
 
     pub(super) fn git_hit(&self, x: i32, y: i32, left: i32, right: i32) -> GitHit {
@@ -308,74 +495,195 @@ impl App {
         if contains(&layout.commit_box, x, y) {
             return GitHit::CommitBox;
         }
-        if contains(&layout.commit_button, x, y) {
-            return GitHit::CommitButton;
+        if let Some(button) = layout.button_at(x, y) {
+            return GitHit::Button(button);
         }
-        match layout.sync.iter().position(|rect| contains(rect, x, y)) {
-            Some(0) => return GitHit::Push,
-            Some(1) => return GitHit::Pull,
-            Some(2) => return GitHit::Fetch,
-            _ => {}
-        }
-        if contains(&layout.refresh, x, y) {
-            return GitHit::Refresh;
-        }
-        // The section headers carry their own all-rows buttons.
         if y < layout.list_top {
             return GitHit::Nothing;
         }
         let rows = self.git_rows();
-        let mut top = layout.list_top;
-        for (index, row) in rows.iter().enumerate().skip(self.panel_first) {
-            let height = self.scale(row.height());
-            let rect = RECT {
-                left,
-                top,
-                right,
-                bottom: top + height,
-            };
-            if y >= rect.bottom {
-                top = rect.bottom;
-                continue;
-            }
-            match row {
-                GitRow::Change { staged, .. } => {
-                    let (toggle, discard) = self.git_row_buttons(right, rect, *staged);
-                    if contains(&toggle, x, y) {
-                        return GitHit::Toggle(index);
-                    }
-                    if discard.is_some_and(|rect| contains(&rect, x, y)) {
-                        return GitHit::Discard(index);
-                    }
-                    return GitHit::Row(index);
-                }
-                GitRow::Header { section, .. } => {
-                    let action = match section {
-                        GitSection::Changes => Some(GitHit::StageAll),
-                        GitSection::Staged => Some(GitHit::UnstageAll),
-                        GitSection::History => None,
-                    };
-                    if let Some(action) = action {
-                        let size = self.scale(ROW_BUTTON);
-                        let edge = right - self.scale(8);
-                        let rect = RECT {
-                            left: edge - size,
-                            top: rect.top,
-                            right: edge,
-                            bottom: rect.bottom,
-                        };
-                        if contains(&rect, x, y) {
-                            return action;
-                        }
-                    }
-                    return GitHit::ToggleSection(*section);
-                }
-                GitRow::Commit(_) => return GitHit::Row(index),
-                GitRow::Clean | GitRow::Note(_) => {}
-            }
+        let Some((index, rect)) = self
+            .git_rows_on_screen(&rows, left, right, layout.list_top)
+            .into_iter()
+            .find(|(_, rect)| y >= rect.top && y < rect.bottom)
+        else {
             return GitHit::Nothing;
+        };
+        match &rows[index] {
+            GitRow::Change { change, staged } => {
+                let actions = self.git_row_actions(right, rect, change, *staged);
+                if contains(&actions.toggle, x, y) {
+                    return GitHit::Toggle(index);
+                }
+                if actions.discard.is_some_and(|rect| contains(&rect, x, y)) {
+                    return GitHit::Discard(index);
+                }
+                if actions.open.is_some_and(|rect| contains(&rect, x, y)) {
+                    return GitHit::Open(index);
+                }
+                GitHit::Row(index)
+            }
+            GitRow::Header { section, .. } => self
+                .git_header_actions(right, rect, *section)
+                .into_iter()
+                .find(|(_, _, button)| contains(button, x, y))
+                .map_or(GitHit::ToggleSection(*section), |(hit, _, _)| hit),
+            GitRow::Commit(_) => GitHit::Row(index),
+            GitRow::Clean | GitRow::Note(_) => GitHit::Nothing,
         }
-        GitHit::Nothing
+    }
+
+    /// What's under the mouse at (x, y) in the panel's coordinates.
+    pub(super) fn git_hot_at(&self, x: i32, y: i32) -> Option<GitHot> {
+        let (left, right) = (self.scale(RAIL), self.sidebar_right());
+        let layout = self.git_layout(left, right);
+        if let Some(button) = layout.button_at(x, y) {
+            return Some(GitHot::Button(button));
+        }
+        if y < layout.list_top {
+            return None;
+        }
+        let rows = self.git_rows();
+        self.git_rows_on_screen(&rows, left, right, layout.list_top)
+            .into_iter()
+            .find(|(_, rect)| y >= rect.top && y < rect.bottom)
+            .filter(|(index, _)| !matches!(rows[*index], GitRow::Clean | GitRow::Note(_)))
+            .map(|(index, _)| GitHot::Row(index))
+    }
+
+    /// Where `hot` is, in the panel's coordinates.
+    pub(super) fn git_hot_rect(&self, hot: GitHot) -> Option<RECT> {
+        let (left, right) = (self.scale(RAIL), self.sidebar_right());
+        let layout = self.git_layout(left, right);
+        match hot {
+            GitHot::Button(button) => Some(layout.button(button)),
+            GitHot::Row(index) => {
+                let rows = self.git_rows();
+                self.git_rows_on_screen(&rows, left, right, layout.list_top)
+                    .into_iter()
+                    .find(|(row, _)| *row == index)
+                    .map(|(_, rect)| rect)
+            }
+        }
+    }
+
+    /// The row under the mouse, if any.
+    pub(super) fn git_hot_row(&self) -> Option<usize> {
+        match self.hot {
+            Some(Hot::Git(GitHot::Row(index))) => Some(index),
+            _ => None,
+        }
+    }
+
+    /// The list scrolled or changed under a still mouse: the row it lit is
+    /// no longer the one under it.
+    pub(super) fn forget_git_hot_row(&mut self, hwnd: HWND) {
+        if self.git_hot_row().is_some() {
+            self.clear_hot(hwnd);
+        }
+    }
+
+    pub(super) fn git_primary(&self) -> GitPrimary {
+        if self.git_busy {
+            GitPrimary::Busy
+        } else if !self.commit_message.trim().is_empty() || !self.changes.is_empty() {
+            GitPrimary::Commit {
+                ready: !self.commit_message.trim().is_empty(),
+            }
+        } else if self.git_behind > 0 {
+            GitPrimary::Pull(self.git_behind)
+        } else if self.git_ahead > 0 {
+            GitPrimary::Push(self.git_ahead)
+        } else {
+            GitPrimary::Commit { ready: false }
+        }
+    }
+
+    /// A click on one of the panel's buttons outside the list.
+    pub(super) fn git_button_pressed(&mut self, hwnd: HWND, button: GitButton, layout: &GitLayout) {
+        match button {
+            GitButton::Commit => self.git_commit_pressed(hwnd),
+            GitButton::Refresh => self.refresh_git(),
+            GitButton::Primary => match self.git_primary() {
+                GitPrimary::Busy => {}
+                GitPrimary::Commit { .. } => self.git_commit_pressed(hwnd),
+                GitPrimary::Push(_) => self.git_remote(hwnd, workflow::RemoteAction::Push),
+                GitPrimary::Pull(_) => self.git_remote(hwnd, workflow::RemoteAction::Pull),
+            },
+            GitButton::Pull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
+            GitButton::Push => self.git_remote(hwnd, workflow::RemoteAction::Push),
+            GitButton::Fetch => self.git_remote(hwnd, workflow::RemoteAction::Fetch),
+            GitButton::More | GitButton::Drop => {
+                let menu = if button == GitButton::More {
+                    GitMenu::Header
+                } else {
+                    GitMenu::Commit
+                };
+                // The menu is placed in the window's coordinates.
+                let rect = layout.button(button);
+                let origin = self.side_origin();
+                self.toggle_git_menu(
+                    hwnd,
+                    menu,
+                    RECT {
+                        top: rect.top + origin,
+                        bottom: rect.bottom + origin,
+                        ..rect
+                    },
+                );
+            }
+        }
+    }
+
+    /// Open a changed file in the editor.
+    pub(super) fn git_open_row(&mut self, hwnd: HWND, index: usize) {
+        let Some(GitRow::Change { change, .. }) = self.git_rows().into_iter().nth(index) else {
+            return;
+        };
+        let path = match self.git_root.clone().or(self.workspace_root.clone()) {
+            Some(root) if !change.path.is_absolute() => root.join(&change.path),
+            _ => change.path,
+        };
+        self.panel_focus = false;
+        self.open(hwnd, Some(path));
+    }
+
+    /// Discard every unstaged change, after asking.
+    pub(super) fn git_discard_all(&mut self, hwnd: HWND) {
+        let unstaged: Vec<Change> = self
+            .changes
+            .iter()
+            .filter(|change| change.unstaged)
+            .cloned()
+            .collect();
+        if unstaged.is_empty() {
+            self.status = "No changes to discard".into();
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
+        let new_files = unstaged.iter().filter(|change| change.untracked).count();
+        let mut message = match unstaged.len() {
+            1 => "Discard the changes in 1 file?".to_owned(),
+            count => format!("Discard the changes in {count} files?"),
+        };
+        match new_files {
+            0 => {}
+            1 => message.push_str(" 1 new file will be deleted."),
+            count => message.push_str(&format!(" {count} new files will be deleted.")),
+        }
+        message.push_str(" Git cannot recover them once discarded.");
+        if !self.confirm_git(hwnd, "Discard all changes", &message) {
+            return;
+        }
+        let (untracked, tracked): (Vec<Change>, Vec<Change>) =
+            unstaged.into_iter().partition(|change| change.untracked);
+        self.git_write(
+            hwnd,
+            GitAction::Discard {
+                paths: tracked.into_iter().map(|change| change.path).collect(),
+                untracked: untracked.into_iter().map(|change| change.path).collect(),
+            },
+        );
     }
 
     pub(super) fn git_section_collapsed(&self, section: GitSection) -> bool {
@@ -448,8 +756,11 @@ impl App {
     pub(super) fn git_visible_rows(&self, hwnd: HWND) -> usize {
         let mut rect = RECT::default();
         unsafe { GetClientRect(hwnd, &mut rect) };
-        let layout = self.git_layout(self.scale(RAIL), self.editor_left());
-        let available = (rect.bottom - self.scale(STATUS) - layout.list_top).max(0);
+        let layout = self.git_layout(self.scale(RAIL), self.sidebar_right());
+        // The layout is in the panel's coordinates, which start at
+        // side_origin in the window.
+        let available =
+            (rect.bottom - self.scale(STATUS) - self.side_origin() - layout.list_top).max(0);
         (available / self.scale(ROW_CHANGE).max(1)).max(3) as usize
     }
 
