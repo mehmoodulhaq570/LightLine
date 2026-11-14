@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-08 evening (Asia/Karachi). The sections are in date order; the newest work is in "Follow-up: live checks of merged main finished; the PC's black screens (2026-11-08)" at the end. **Start there: it lists what is still open.**
+Updated: 2026-11-13 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-13)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -307,34 +307,121 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 - Tools for this session are in the scratchpad `...\28cfc03d-a2fb-49a8-bad2-0933812c4f58\scratchpad`: the copied `measure_driver.py`, `capture.py` and probes, plus new `geticon_compare.py`, `langext_check.py` (open a file with or without an extension and capture), and `ui.py` (step-by-step hidden-window driver: `launch`, `chord cs X`, `chars`, `key`, `click x y`, `shot`, `kill`; refuses input unless the window is still hidden).
 - PowerShell's safety check rejects `Remove-Item` with quoted `C:\...` paths ("system path is blocked"); deleting from Bash with exact paths works.
 
-## Follow-up: the long-line freeze fixed (2026-11-09, uncommitted, on `main`)
+## Follow-up: the long-line freeze fixed (2026-11-09; merged as #74)
 
-- **Clean-up done:** the three worktrees are removed (plain `git worktree remove`; all were clean) and so is the empty `agent-a4e54ea0d0429fe6b` folder. **Branches not deleted:** `git branch -D` was blocked by the auto-mode check; `-d` refuses because the PRs were squash-merged. Each tip equals its merged PR head (#70 `c47e32e`, #71 `81246ab`, #72 `786690a`), so `git branch -D perf/idle-wakeups perf/text-model-benchmark feat/language-extensions` is safe. `cargo clean --profile dev` freed 2.3 GB.
+- **Clean-up done:** the three worktrees are removed (plain `git worktree remove`; all were clean) and so is the empty `agent-a4e54ea0d0429fe6b` folder. The old branches `perf/idle-wakeups`, `perf/text-model-benchmark` and `feat/language-extensions` were deleted later the same day, once the maintainer allowed it. `cargo clean --profile dev` freed 2.3 GB.
 - **Cause of the multi-second freeze on a 512 KiB line:** `paint_code_pane` drew the whole row with one `ExtTextOut`, and drew every colored bracket (36,004 in `big.min.json`) at `x_after(byte)`, which measured the line from its start each time: about 9 billion characters measured per paint. With wrap off there's no horizontal scroll, so none of it past ~200 columns can show.
 - **Fix:** `wrap.rs::visible_end` (two characters per pixel of row width, so it never cuts visible text); the row painter stops text, spans, brackets, hints, occurrences, selections and diagnostics there, and the caret, extra carets and bracket-match highlight skip the measurement when they're past it. Test `only_what_fits_of_a_long_row_is_drawn`. CHANGELOG `#### Fixed` entry added.
 - **Measured** (release builds, `longline_probe.py` in this session's scratchpad `...\56ff248a-...\scratchpad`, `big.min.json`, caret 0,100): fixed: first frame done 0.83 s, full repaint 22.6 M UI cycles, 24 M cycles/key. Merged `main` without the fix: the UI thread never went quiet within 120 s. Capture `fixed-longline.png` there looks right (brackets colored).
 - fmt, Clippy `-D warnings` and `cargo test --locked` pass (255 lib, 110 bin, 9 integration).
-- **Found, not fixed:** no horizontal scrolling. With wrap off, typing past ~the pane width puts the caret and text off screen (Ln 1, Col 106 in the capture, nothing visible there). Worth an issue or a feature.
-- **Next:** commit on a branch + PR when the maintainer asks; then release v0.9.0 (#70–#72 + this).
-- D: has ~2.1 GB free after the debug test build.
+- Horizontal scrolling, missing at the time, was added in #76 (below).
 
 ## Follow-up: #74 merged, v0.9.0 released, horizontal scrolling (2026-11-09)
 
 - **#74** (long-line paint) squash-merged as `6ebf4a7`; local `main` reset onto it (`cc15ffd` had the identical tree). **#75** (v0.9.0 notes) merged as `5efff2d`.
 - **v0.9.0 released** 2026-11-09 15:22 UTC (run 42642700543, all jobs green): x64/ARM64 exes, zips, SHA256SUMS; notes from the CHANGELOG section. Scoop commit `e7e21bf` pulled into local `main`.
   - Speed check in the notes (published v0.8.0 exe vs local release build of the merged code, main.rs, two alternating runs): 6.4–6.9 M UI cycles/key vs 7.2–9.9 M; start 0.104–0.105 s vs 0.105–0.128 s; idle 0 vs 0–0.15 wakeups/s.
-- **Branch `feat/horizontal-scroll`** (uncommitted when this was written): `EditorView::scroll_x` (pixels; ignored when the tab wraps), new `windows_app/hscroll.rs` (`scroll_x`, `text_view_width`, `row_anchor`, `reveal_caret_x` called from `keep_cursor_visible`, `wheel_sideways`, `scroll_pane_x`, `max_scroll_x` counted in columns). Painter, caret_rect, guide_x, position_at_pane, rename box and sticky lines subtract the offset; `CaretScene` includes it so a sideways scroll redraws the pane. Shift+wheel in `WM_MOUSEWHEEL`, new `WM_MOUSEHWHEEL` arm. Reveal jumps a quarter of the width past an edge (one full-pane redraw every few dozen typed characters, not every key).
+- **Horizontal scrolling, #76:** `EditorView::scroll_x` (pixels; ignored when the tab wraps), new `windows_app/hscroll.rs` (`scroll_x`, `text_view_width`, `row_anchor`, `reveal_caret_x` called from `keep_cursor_visible`, `wheel_sideways`, `scroll_pane_x`, `max_scroll_x` counted in columns). Painter, caret_rect, guide_x, position_at_pane, rename box and sticky lines subtract the offset; `CaretScene` includes it so a sideways scroll redraws the pane. Shift+wheel in `WM_MOUSEWHEEL`, new `WM_MOUSEHWHEEL` arm. Reveal jumps a quarter of the width past an edge (one full-pane redraw every few dozen typed characters, not every key).
   - Live (release, big.min.json): TYPED visible at col 106, End reaches col 510,799 and typing there shows, Home + 5 tilt notches scrolls 30 chars. 50 keys at 0,100: 30–32 M cycles/key vs 21 M before hscroll (text was invisible before; this PC's numbers are noisy).
-- Scratchpad for this session: `...\56ff248a-...\scratchpad` (`longline_probe.py`, `hscroll_check.py`, `hscroll_repaint.py`, exes in `fixed\`, `hscroll\`). Test file added: `D:\Projects\lightline-tmp\live\ws\src\wide.json` (300 lines up to 363 chars).
+- Test file added: `D:\Projects\lightline-tmp\live\ws\src\wide.json` (300 lines up to 363 chars).
 - **#76 merged** (`ecf54d3`). Ordinary typing unchanged (main.rs, 200 keys: 13.6 M / 7.75 M vs 13.3 M / 7.86 M cycles). Debug SCROLL_CHECK: 0 stale pixels after End, typing past the edge, tilt left/right, vertical wheel while scrolled, Down, Home, on `wide.json` and `big.min.json`.
 
-## Follow-up: Find count in slices, PR #77 (2026-11-09)
+## Follow-up: Find count in slices, merged as #77 (2026-11-09)
 
 - `perf/find-count`: files over 50,000 lines count find-box matches 50,000 lines per `FIND_COUNT_TIMER` (24) tick; `Document::find_next_within` bounds the first-match search to 50,000 lines from the caret, and the count selects a farther first match when it reaches it (unless the caret moved). Box shows "Counting..." / "N+ results" / "i of N+".
-- 1M-line file (`ws\src\big1m.txt`), `self.lsp` typed at 0.12 s/key: each char held the window 145–413 M cycles before, 7–34 M after. `far1m.txt` (marker at line 900,000) selects it, "1 of 1"; `self.` shows "1 of 6345" (= grep -o).
+- 1M-line file (the main.rs fixture repeated; deleted afterwards), `self.lsp` typed at 0.12 s/key: each char held the window 145–413 M cycles before, 7–34 M after. `far1m.txt` (marker at line 900,000) selects it, "1 of 1"; `self.` shows "1 of 6345" (= grep -o).
 
-## Not done: saving off the UI thread (next)
+## Saving off the UI thread: measured and designed, not started
 
 - Measured on this D: drive, 36 MB: write 34–45 ms, fsync 64–131 ms, rename 1–9 ms (benchmark: 272 ms for the whole save at 1M lines; 4.2 ms at 3k lines).
 - Proposed design: UI thread serializes the lines (with endings/BOM) into one buffer, about `text()`'s cost (22 ms at 1M lines); a worker writes the temp file, fsyncs, renames, runs `local_history::after_save` and reads the metadata, then posts a `WorkerMessage`; the UI sets `last_saved` and `saved_revision` to the snapshot's revision and runs the after-save steps (LSP didSave, syntax language, Explorer, Git, settings reload, format-on-save). Every caller that needs "saved" (close tab/window, Run, save-all, workspace edits) must wait for an in-flight save of that tab first; the recovery snapshot keeps the text until then. Possibly only for files over a few MB, keeping small files synchronous.
 - Held back on purpose: it's the data-safety path with ~30 callers that rely on `save()` returning the result.
+
+## Background save and language extensions step 2 built in parallel (2026-11-12/13)
+
+- The maintainer asked for items 1–3 of the 2026-11-09 plan in parallel worktrees. The Agent tool's `isolation: "worktree"` refused (`d:\` vs `D:/` casing in its path check), so the worktrees were made by hand with `git worktree add` under `D:\Projects\lightline-wt\`; each agent built into its own `CARGO_TARGET_DIR` on C:.
+- Both agents died once mid-task from a network outage (API unreachable, GitHub TLS timeouts) and were resumed; no work was lost.
+- **Background save, `perf/background-save` @ `c2585e7`** (reviewed in the coordinating session):
+  - Ctrl+S (`save_command`) on a file ≥ 4 MiB (`BACKGROUND_SAVE_BYTES`, new `windows_app/background_save.rs`) on the same path, with no external formatter due, copies the bytes on the UI thread (`Document::snapshot_for_save`) and a worker runs the shared `document::write_file` (temp file, flush, atomic move, Local History), then posts `WorkerMessage::Saved(id)`. One save at a time in `App::background_save`.
+  - `finish_background_save` (blocks on the worker) marks the tab saved at the snapshot's revision and runs `App::after_save` (factored out of `save_with`); a closed/retargeted tab just gets "Saved". Errors go through `self.error`, tab stays dirty.
+  - Callers that wait first: `save_in`, `can_discard` (if that tab), `can_close_window`, Run/run file/run test/Python debug (new `save_if_dirty`), run configs, `start_rust_debug`, `run_project`, `apply_edits`, `git_write`, Explorer delete/rename; the file watcher skips the file while it saves.
+  - 36 MB file: Ctrl+S holds the window 44–80 ms (79–147 M cycles) vs 100–357 ms (145–259 M) for v0.9.0. Unit tests: identical bytes in 9 ending/BOM cases, typing during a save, locked file. Live: typing mid-save, closing mid-save, locked and read-only files. Not tested: a real full disk.
+  - Known differences: Ctrl+S on another tab waits for a running big save; the finish doesn't scroll the view to the cursor. Twice in the error runs one Ctrl+S did nothing (once on a small file, unchanged code); believed to be the test driver's Ctrl state.
+  - CHANGELOG bullet under Unreleased → Changed is in the commit. A PR description was drafted in the 2026-11-13 conversation (design, callers, errors, measurements, tests).
+- **Language extensions step 2, `feat/language-extensions-2` @ `7d483fd`** (~2,400 lines, 30 files):
+  - `src/extensions/editing.rs`: `config.toml` → line/block comments, brackets (auto-close with `autoclose_before`/`not_in`, step over closers; which of `()[]{}` match/colorize), `increase/decrease_indent_pattern`, `newline` brackets, `tab_size`/`hard_tabs`. Parsed once when languages are listed; built-in languages unchanged.
+  - New `windows_app/comment.rs`: **Ctrl+/ toggle line comment** for every language (LightLine had none), Command Palette id **70**, one undo step.
+  - Language picker (`run_language.rs`, retitled "Language of this file") lists installed extension languages ("Lua  (extension)") from config only; choice saved in `run-languages.json` as `{"path", "extension"}`.
+  - `src/extensions/language_servers.rs`: `[language_servers.*]` parsed (`languages`/`language`, `opt_in_languages`, `language_ids`); `lsp::Language::Extension(..)`; 42-entry server-name → command table; new setting **`languageServers`** (by server or language name, object or string form; all five `settings.rs` places, User Guide). First command found on PATH starts lazily in the job; otherwise the status bar names the command.
+  - Live-checked with the real Lua extension (installed by pinned commit, MSVC grammar build): colors, Ctrl+/, auto-close, indent/outdent, picker remembered after relaunch; LSP start checked with a fake stdio server (PATH and setting). No real server binary was tried. Typing on main.rs 17.7–21.3 M cycles/key vs 19.2–25.8 M baseline.
+  - Not done: `indents.scm`, `injections.scm`, `outline.scm`, WASM-computed server options, Enter between `{}`, display tab width per language, gcc/clang and ARM64 grammar builds.
+  - Docs: CHANGELOG (4 bullets, Added), User Guide, README, `TECHNICAL_DIRECTION.md` row 3, `extension_implementation_plan.md` §7. Ignored live test `tests/language_extension_live.rs` (`LIGHTLINE_LIVE_APPDATA`, optional `LIGHTLINE_LIVE_LUA=<url>@<commit>`).
+- Both branches pass fmt and Clippy. In the last full test runs the two `debug::tests::debugpy_*` tests timed out ("no debug event within 30 seconds"), also on untouched `ebfea40`; they passed earlier the same day, so it's the machine's state. `git merge-tree` shows the two branches merge without conflicts.
+- **`git push` / `gh pr create` were blocked by the auto-mode permission check.** Nothing from 2026-11-12/13 is on GitHub.
+
+## Where things stand (2026-11-13)
+
+### State
+
+- **2026-11-13: #78 squash-merged (`fb84aa0`), then #79 (branch updated onto it, CI green x64+ARM64) squash-merged (`598c750`).** `main` = `origin/main` = `598c750`. Cleanup done the same day (maintainer approved): both worktrees removed (`D:\Projects\lightline-wt` gone), `perf/background-save` and `feat/language-extensions-2` deleted locally and on origin (squash trees checked equal first), `C:\Users\mehmo\lightline-build\bgsave` and `...\langext` deleted. Kept for the release: `...\merged`, `...\v090`, `...\luals`.
+- **Merged `main` tested (release build in `C:\Users\mehmo\lightline-build\merged`):** fmt, Clippy `-D warnings`, `cargo test --locked` all pass (271 lib, 118 bin, 9 integration; debugpy tests passed this time). Live: real LuaLS (diagnostics, Problems, F12, rename, completion; server dies with LightLine), Lua `edit` (saved text exact) and `picker` (choice restored after relaunch), background save `typing` and `close` on a 36 MB file all pass.
+- **Measured vs published v0.9.0** (`C:\Users\mehmo\lightline-build\v090\lightline.exe`, hash checked): Ctrl+S on 36 MB held the window 52–98 ms (96–181 M cycles) vs 86–354 ms (127–185 M). Four alternating runs of `measure_driver.py`: typing 9.4–17.3 M UI cycles/key vs 9.6–18.2 M (noisy PC, same within noise); start medians 0.089–0.106 s (one 0.355 outlier) vs 0.106–0.22 s; idle 0 wakeups/s in all four merged runs (v0.9.0: 0, 0, 14.25, 0.15).
+- **Released: v0.10.0** (2026-11-13 12:53 UTC, run 43427979677, all jobs green) from `e935da6` (#80 notes): #76, #77, #78, #79. Scoop commit `8a68d1e` pulled; `main` = `origin/main` = `8a68d1e`. Published `lightline.exe` matched `SHA256SUMS.txt`; Scoop zip hashes match. Smoke test of the published exe: start 0.075–0.086 s, 9.0 M UI cycles/key, 0 idle wakeups. `C:\Users\mehmo\lightline-build\` deleted entirely afterwards. `[Unreleased]` is empty.
+- **Open issues:** #66 and #67 waiting on the reporters (close around 2026-11-21 if no reply); #13 waiting on SignPath; #35 `wontfix`, left open.
+
+### Waiting on the maintainer
+
+1. **Done 2026-11-13:** both branches pushed; PRs **#78** (`perf/background-save`) and **#79** (`feat/language-extensions-2`) opened, CI green on #79. The maintainer deferred the release ("release later on"). Next: review → squash-merge (#78 first).
+   - **#79 tried with a real server (2026-11-13):** LuaLS 3.19.2 win32-x64 (zip SHA-256 matched GitHub's digest), in `C:\Users\mehmo\lightline-build\luals\server\bin` (27 MB; delete when done). Release build of `7d483fd`, hidden window, fresh profile, Lua extension copied from `D:\Projects\lightline-tmp\e2e-live\profile-ui\LightLine\extensions\lua`. Both ways of finding the server (on PATH, and only via `languageServers` with the full path) passed: server started as LightLine's child; ``Undefined global `mesage` `` squiggle + Problems panel; F12 to the definition; F2 rename `msg`→`message` (2 places, saved); Ctrl+Space lists `greet(name)`; F1 hover (`function greet(name: any) -> unknown`); server gone after LightLine was killed. Driver: `lua_real.py` in this session's scratchpad (`LUA_MODE=path|setting|hover`).
+   - Driver lesson: `SetKeyboardState` on an attached thread sometimes doesn't take on the first call; `lua_real.py` now re-sets and reads it back with `GetKeyState` before every key. That explains the earlier "one Ctrl+S did nothing" flake. `character()` drops WM_CHAR while Ctrl reads as down, so a stuck Ctrl silently swallows typing.
+   - `HOVER_TEST_MESSAGE` (WM_APP+98) only drives chrome hover (`set_hot`), not code hover; use F1 (hover at caret) instead.
+   - Stale-build trap: `cargo build` in the langext worktree reused an old `lightline` rlib (22 "cannot find" errors with old line numbers) until `cargo clean -p lightline --release`.
+2. **v0.10.0 scope.** Recommended: #76, #77 and the background save; language extensions step 2 in v0.11.0, after the maintainer has used it (large change; only a fake LSP was tried). Alternative: everything in v0.10.0.
+
+### Next
+
+1. ~~PRs merged~~ (done, see State).
+2. ~~Release v0.10.0~~ (done, see State). Next proposed work: the 500 KB single-line typing cost (see "Smaller items").
+3. Remaining cleanup (ask first): delete the stale remote branches `feat/horizontal-scroll`, `fix/long-line-paint`, `perf/find-count`, `release/v0.9.0` (check `fix/problems-tab` first).
+
+### Smaller items for later
+
+- Background save: copy the bytes from the recovery cache instead of re-serializing (60–90 ms at 36 MB on the UI thread); let a Ctrl+S on another tab not wait for a running big save.
+- Language extensions: `indents.scm`, Enter between `{}`, per-language display tab width, a real language server binary tried live, gcc/clang and ARM64 grammar builds.
+- Gutter diff: cache HEAD's lines per file instead of re-splitting on every recompute (up to about 8 ms each typing pause).
+- Recovery snapshot of huge files: write it less often (89 ms every 5 s at 121 MiB).
+- ~~A 500 KB single line costs about 30 M UI cycles per key~~ **Fixed and merged as #81 (`5c8494f`, 2026-11-13; CI green x64+ARM64; changelog under Unreleased → Changed; not released):** 510 KB line 10–12 M/key anywhere on the line vs v0.10.0 26–29 M (start) / 33–52 M (mid); `main.rs` typing unchanged (7.8–8.0 M). Found with a temporary per-scope cycle profiler (`prof.rs.keep` in this session's scratchpad; `prof_probe.py` posts WM_CHAR so message-loop hooks run, then WM_APP+95 dumps). Causes and fixes: fold pill `x_after(row_end)` measured the whole line every paint (now only when folded); `remap_spans` rebuilt the edited line's span list (now in place, `remap_line_in_place`, randomized equivalence test); bracket colors listed every bracket of the line (now `BracketWalker`, visible part only); `reveal_caret_x`, `row_anchor`, the main caret and the bracket-pair highlight measured from the line start (now `App::prefix_widths` cache: width/column/bracket depth at a byte, valid while the only change since is at or after it, `PrefixWidth::still_holds` + test; pair highlight uses the row's own geometry; backward pair search no longer collects the prefix). Verified: fmt, Clippy, `cargo test` (272 lib, 119 bin, 9 integration); 13 screenshots pixel-identical to v0.10.0 (`pixcmp.py`); debug repaint check 0 px on 24 steps. Tried and reverted: byte-table skip in `bracket_fold_end` (no measurable gain on JSON). Left: fold scan ~2 M and in-place span shift ~1.7 M per key on such a line. Build folders deleted after the merge (`C:\Users\mehmo\lightline-build\` is gone).
+- No horizontal scrollbar yet (#76 has wheel, touchpad and caret only). The sideways offset isn't saved in `session.json`.
+- The `debugpy_*` tests are timing-sensitive on a busy PC (30 s limit).
+
+### Environment and tools
+
+- D: has about 3.4 GB free; C: about 22 GB. Build into `CARGO_TARGET_DIR` on C: (`C:\Users\mehmo\lightline-build\<name>`) with `CARGO_INCREMENTAL=0`; a debug test build takes about 2.5 GB.
+- **Network was unstable on 2026-11-12/13** (connection resets, TLS timeouts, the local IP switching between 192.168.x and 172.16.x).
+- **GPU resets continue** (about 36 a day as of 2026-11-09). Next suspect: the USB display adapter driver (`oem114.inf`).
+- **Live-test scripts:**
+  - `C:\Users\mehmo\AppData\Local\Temp\claude\0e6237c820aba7d4\56ff248a-cae9-456a-981b-1e54191321c7\scratchpad`: `measure_driver.py` (startup, typing, idle), `capture.py` (hidden-window screenshot), `longline_probe.py`, `hscroll_check.py`, `hscroll_repaint.py`, `find_probe.py`.
+  - `C:\Users\mehmo\AppData\Local\Temp\claude\0e6237c820aba7d4\32e22021-283e-40c2-a4a2-5376519cb149\scratchpad`: `save_probe.py` (Ctrl+S cost, mid-save typing/closing, locked/read-only files); `langext\` has `lua_check.py`, `fake_lsp.py` (fake stdio language server) and `ui.py` (step-by-step hidden-window driver).
+- **Test workspace:** `D:\Projects\lightline-tmp\live\ws`.
+  - `src\main.rs`: 3,148 lines of Rust; starts rust-analyzer.
+  - `src\big.min.json`: 510 KB on one line.
+  - `src\wide.json`: 300 lines up to 363 characters.
+  - Make a 1M-line file from `main.rs` when needed, and delete it afterwards (36 MB).
+  - (`profile-merged-r1-start0`, an old 2 KB test profile, was deleted on 2026-11-14.)
+
+## Menu bar, merged as #82 (2026-11-13)
+
+- `116205a`: File/Edit/Selection/View/Go/Run/Terminal/Help in the title bar (`windows_app/menu_bar.rs`), from the approved `design/menu-bar-design.html`. Items replay their shortcut through `key` with `App::replayed_modifiers` (read via `modifier_down`; never SetKeyboardState, which a dialog would inherit) or run a palette id (`panels::QUICK_COMMANDS` / `run_command`, both new). Alt tap focuses the titles (WM_SYSKEYUP VK_MENU, skipping SC_KEYMENU); Alt+letter opens menus except from the terminal and Alt+R in the find box/Search. Narrow window: one ☰ button. Maintainer approved branch, PR and merge without asking. Not released (Unreleased → Added).
+- Verified: fmt, Clippy, `cargo test` (272 lib, 124 bin, 9 integration); live `menu_live.py` 15/15 + `menu_welcome.py` (this session's scratchpad), 0 stale px; speed vs v0.10.0 same within noise (start 0.080–0.083 s, typing 8.8–9.5 M vs 8.5–8.9 M, idle 0).
+- Driver lesson: set modifier state AND send the key while still attached (`AttachThreadInput`); detached, LightLine no longer sees Ctrl/Alt. Earlier scripts that detached first silently sent plain keys.
+- `.lightline/run.json` is staged in the index by the maintainer (not ours); left alone. Build folders deleted.
+
+## Flat layout, merged as #83 (2026-11-14)
+
+- `794bf93`: VS Code proportions from the approved `design/layout-smooth-design.html` (35 px title bar/tabs/panel headers via `side_origin()` + `SIDE_SHIFT`; 22 px rows, breadcrumbs, status bar; 48 px rail with a bar), every icon an SVG `DebugGlyph` at its exact size, and `motion.rs` (side panel and bottom panel ease 120 ms, hover fade 90 ms, `smoothScrolling` glide). New setting `animations` (default on) plus Windows' Show animations gate all motion; `smoothScrolling` stays **off** by default (a glide notch costs 26.6 M vs 10.9 M cycles). Not released (Unreleased → Added/Changed).
+- Icons now go through an atlas (`AtlasPage` in `icons.rs`: 256 px 32bpp DIB pages, AlphaBlend). One HICON per icon had put +53 M UI cycles on startup; with the atlas, startup is 355 M vs main's 368 M (median of 12, TOML file). Typing 15.2 M vs 17.0 M per key; idle 0.
+- Verified: fmt, Clippy, `cargo test` (272 lib, 125 bin, 9 integration); CI x64+ARM64 green; live on merged main (this session's scratchpad): `motion_live.py` 21/21 (end pixels = motion off, 0 stale mid-glide/mid-ease, hover fade, quiet after), `clicks_live.py` 9/9, `menu_live.py` 13/13, `menu_welcome.py` 2/2, `views_shot.py` screenshots, `startup_cycles.py` and `wheel_cost.py` for speed.
+- Test-driver notes: Pillow is only in user site-packages, so run scripts that need it without `-I`. A hidden-window grab right after SendMessage can come before the paint; wait ~35 ms. `settle()` never goes quiet while the caret blinks; send WM_KILLFOCUS first.
+- Left as is: the Search preview's stale fragments and Run & Debug text clipping (both also in v0.10.0); the Welcome screen keeps its own rail style.
+- Build folder kept: `C:\Users\mehmo\lightline-build\flat` (debug + release of current main). `v0100` and `base` deleted.
+
