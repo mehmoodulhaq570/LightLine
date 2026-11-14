@@ -1,4 +1,5 @@
-use super::super::app::ExtensionCategory;
+use super::super::app::{Extension, ExtensionCategory, ExtensionIcon};
+use super::super::extensions_panel::monogram;
 use super::super::extensions_panel::{
     EXTENSION_INDENT, ExtensionRow, ExtensionsButton, ExtensionsHot, ExtensionsLayout,
 };
@@ -345,7 +346,7 @@ impl App {
             right: rect.left + s(EXTENSION_INDENT + 36),
             bottom: rect.top + s(46),
         };
-        self.paint_extension_icon(hdc, icon, &ext.id);
+        self.paint_extension_icon(hdc, icon, ext);
 
         let text_left = icon.right + s(10);
         let (action, label) = self.extension_action(hdc, rect, index, hot);
@@ -354,6 +355,7 @@ impl App {
             ExtensionCategory::Formatter => ui(86, 182, 240),
             ExtensionCategory::IconTheme => self.theme.green,
             ExtensionCategory::ColorTheme => ui(174, 109, 242),
+            ExtensionCategory::Language => self.theme.sky,
             ExtensionCategory::Unknown => self.theme.muted,
         };
 
@@ -483,65 +485,164 @@ impl App {
         unsafe { SelectObject(hdc, self.ui_font) };
     }
 
-    /// The curated extensions' own marks; anything else a package glyph.
-    fn paint_extension_icon(&self, hdc: HDC, icon: RECT, id: &str) {
+    /// The extension's icon, by the same rules for every extension: a color
+    /// theme shows a swatch of its colors, an icon theme its own folder, a
+    /// language its file icon, anything else a monogram. Prettier shows its
+    /// own logo (offset bars in its colors) in the same style, and Dracula and
+    /// Material, known before they're installed, look as they will after.
+    fn paint_extension_icon(&self, hdc: HDC, icon: RECT, ext: &Extension) {
         let s = |value: i32| self.scale(value);
-        match id {
+        match ext.id.as_str() {
             "prettier" => {
-                self.panel_card(hdc, icon, s(6), ui(47, 63, 96), ui(22, 32, 58));
-                unsafe { SelectObject(hdc, self.brand_font) };
-                let braces = "{ }";
-                let width = self.text_width(hdc, braces);
-                self.label_mid(
+                self.paint_prettier_tile(hdc, icon);
+                return;
+            }
+            // Dracula's colors (its own file once installed).
+            "dracula" if !matches!(ext.icon, Some(ExtensionIcon::Swatch { .. })) => {
+                let background = ui(40, 42, 54);
+                self.paint_swatch(
                     hdc,
-                    braces,
-                    (icon.left + icon.right - width) / 2,
-                    icon.top + s(15),
-                    ui(244, 247, 255),
                     icon,
+                    background,
+                    blend(background, ui(255, 255, 255), 0.14),
+                    &[ui(255, 121, 198), ui(241, 250, 140), ui(80, 250, 123)],
                 );
-                unsafe { SelectObject(hdc, self.ui_font) };
-                let colors = [
-                    ui(86, 182, 240),
-                    ui(236, 72, 153),
-                    ui(245, 197, 24),
-                    ui(168, 85, 247),
-                ];
-                let bars_left = (icon.left + icon.right) / 2 - s(13);
-                for (index, color) in colors.iter().enumerate() {
-                    let left = bars_left + s(7) * index as i32;
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left,
-                            top: icon.bottom - s(9),
-                            right: left + s(5),
-                            bottom: icon.bottom - s(7),
-                        },
-                        *color,
-                    );
-                }
+                return;
             }
-            "dracula" => {
-                self.panel_card(hdc, icon, s(6), ui(70, 55, 112), ui(30, 24, 55));
-                self.glyph_in(hdc, DebugGlyph::GutterDot, ui(167, 109, 242), icon, s(22));
-            }
-            "material-icons" => {
-                self.panel_card(hdc, icon, s(6), ui(39, 83, 72), ui(18, 43, 39));
+            // Its own folder once installed; a plain folder before.
+            "material-icons" if !matches!(ext.icon, Some(ExtensionIcon::Svg(_))) => {
+                self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
                 let size = s(22);
                 let x = (icon.left + icon.right - size) / 2;
                 let y = (icon.top + icon.bottom - size) / 2;
                 if !self
                     .icons
-                    .draw_generic(hdc, GenericIcon::FolderSrc, x, y, size)
+                    .draw_generic(hdc, GenericIcon::Folder, x, y, size)
                 {
                     self.draw_vector_folder(hdc, x, y, size, false);
                 }
+                return;
             }
-            _ => {
-                self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
-                self.glyph_in(hdc, DebugGlyph::Extensions, self.theme.muted, icon, s(18));
-            }
+            _ => {}
         }
+        let size = s(22);
+        let x = (icon.left + icon.right - size) / 2;
+        let y = (icon.top + icon.bottom - size) / 2;
+        match &ext.icon {
+            Some(ExtensionIcon::Swatch {
+                background,
+                edge,
+                lines,
+            }) => self.paint_swatch(hdc, icon, *background, *edge, lines),
+            Some(ExtensionIcon::Svg(path)) => {
+                self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
+                if !self.icons.draw_svg_file(hdc, path, x, y, size) {
+                    self.paint_monogram(hdc, icon, &ext.id);
+                }
+            }
+            Some(ExtensionIcon::Language(suffix)) => {
+                self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
+                let sample = std::path::PathBuf::from(format!("file.{suffix}"));
+                let use_theme = self.has_extension("material-icons");
+                if !self
+                    .icons
+                    .draw_for_path(hdc, &sample, false, false, use_theme, x, y, size)
+                {
+                    self.paint_monogram(hdc, icon, &ext.id);
+                }
+            }
+            None => self.paint_monogram(hdc, icon, &ext.id),
+        }
+    }
+
+    /// A color theme's tile: its background with three short lines of "code"
+    /// in its colors.
+    fn paint_swatch(&self, hdc: HDC, icon: RECT, background: u32, edge: u32, lines: &[u32; 3]) {
+        let s = |value: i32| self.scale(value);
+        self.panel_card(hdc, icon, s(6), edge, background);
+        let middle = (icon.top + icon.bottom) / 2;
+        for (index, (color, width)) in lines.iter().zip([15, 22, 11]).enumerate() {
+            let top = middle - s(7) + s(5) * index as i32;
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: icon.left + s(7),
+                    top,
+                    right: icon.left + s(7 + width),
+                    bottom: top + s(3),
+                },
+                s(3),
+                *color,
+            );
+        }
+    }
+
+    /// Prettier's logo in the tiles' style: its offset bars in its colors.
+    fn paint_prettier_tile(&self, hdc: HDC, icon: RECT) {
+        let s = |value: i32| self.scale(value);
+        let background = ui(26, 43, 52);
+        self.panel_card(
+            hdc,
+            icon,
+            s(6),
+            blend(background, ui(255, 255, 255), 0.14),
+            background,
+        );
+        // (left, width, color) from the top: teal, yellow, red, purple.
+        let bars = [
+            (7, 14, ui(86, 179, 180)),
+            (13, 15, ui(247, 186, 62)),
+            (7, 10, ui(234, 94, 94)),
+            (11, 17, ui(191, 133, 191)),
+        ];
+        let top = (icon.top + icon.bottom) / 2 - s(9);
+        for (index, (left, width, color)) in bars.into_iter().enumerate() {
+            let y = top + s(5) * index as i32;
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: icon.left + s(left),
+                    top: y,
+                    right: icon.left + s(left + width),
+                    bottom: y + s(3),
+                },
+                s(3),
+                color,
+            );
+        }
+    }
+
+    /// Initials on one of eight hues picked from the id: a tile that's the
+    /// same every time for the same extension.
+    fn paint_monogram(&self, hdc: HDC, icon: RECT, id: &str) {
+        let (letters, hue) = monogram(id);
+        let hue = [
+            self.theme.blue,
+            self.theme.violet,
+            self.theme.green,
+            self.theme.warning,
+            self.theme.error,
+            self.theme.teal,
+            self.theme.pink,
+            self.theme.orange,
+        ][hue];
+        self.panel_card(
+            hdc,
+            icon,
+            self.scale(6),
+            blend(self.theme.edge, hue, 0.35),
+            blend(self.theme.sidebar_bg, hue, 0.22),
+        );
+        unsafe { SelectObject(hdc, self.brand_font) };
+        let width = self.text_width(hdc, &letters);
+        self.label_mid(
+            hdc,
+            &letters,
+            (icon.left + icon.right - width) / 2,
+            (icon.top + icon.bottom) / 2,
+            blend(hue, self.theme.text, 0.35),
+            icon,
+        );
+        unsafe { SelectObject(hdc, self.small_font) };
     }
 }
