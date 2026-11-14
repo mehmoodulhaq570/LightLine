@@ -831,6 +831,9 @@ impl App {
                         };
                     }
                 }
+                WorkerMessage::ExtensionsScanned(scanned) => {
+                    self.apply_extension_scan(hwnd, scanned);
+                }
                 WorkerMessage::ZedRegistryList(result) => {
                     self.zed_registry_loading = false;
                     match result {
@@ -854,6 +857,8 @@ impl App {
                                             .into(),
                                     installed: false,
                                     installing: false,
+                                    kind: None,
+                                    icon: None,
                                 });
                             }
                         }
@@ -906,6 +911,7 @@ impl App {
                         }
                         Err(_) => {}
                     }
+                    self.scan_installed_extensions();
                 }
                 WorkerMessage::DebugBuild(result) => {
                     self.debug_build_finished(hwnd, result);

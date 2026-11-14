@@ -2,7 +2,8 @@
 // (design/extensions-design.html). Painting is in render/extensions.rs; both
 // use `extensions_layout` and `extension_rows`, so what's drawn is clicked.
 
-use super::app::{Extension, ExtensionCategory};
+use super::app::{Extension, ExtensionCategory, ExtensionIcon, ScannedExtension};
+use super::render::blend;
 use super::*;
 
 // In logical pixels from the top of the panel's 40 px header.
@@ -651,5 +652,230 @@ impl App {
         std::thread::spawn(move || {
             let _ = std::process::Command::new("explorer").arg(path).spawn();
         });
+    }
+
+    /// Lists the installed extensions from disk, with their icons, on a
+    /// worker: the first time the panel opens, and after an install or
+    /// uninstall. Theme files are parsed there, never while painting.
+    pub(super) fn scan_installed_extensions(&mut self) {
+        self.extensions_scanned = true;
+        let Some(dir) = workflow::extensions_dir() else {
+            return;
+        };
+        let tx = self.worker_tx.clone();
+        std::thread::spawn(move || {
+            tx.send(WorkerMessage::ExtensionsScanned(scan_installed(&dir)));
+        });
+    }
+
+    /// Takes in a scan: installed extensions get their kind and icon, ones
+    /// not listed yet are added, and ones no longer on disk are uninstalled.
+    pub(super) fn apply_extension_scan(&mut self, hwnd: HWND, scanned: Vec<ScannedExtension>) {
+        // The curated entries keep LightLine's ids for their folders.
+        let internal = |folder: &str| match folder {
+            "material-icon-theme" => "material-icons".to_owned(),
+            other => other.to_owned(),
+        };
+        let found: Vec<String> = scanned.iter().map(|ext| internal(&ext.id)).collect();
+        for ext in &mut self.extensions {
+            // Prettier isn't a folder; it's found on PATH instead.
+            if ext.id != "prettier" && ext.installed && !ext.installing && !found.contains(&ext.id)
+            {
+                ext.installed = false;
+                ext.icon = None;
+            }
+        }
+        for item in scanned {
+            let id = internal(&item.id);
+            if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
+                ext.installed = true;
+                ext.kind = Some(item.kind);
+                ext.icon = item.icon;
+                // A registry entry's placeholder text gives way to its own.
+                if !matches!(id.as_str(), "material-icons" | "dracula") {
+                    ext.name = item.name;
+                    ext.version = item.version;
+                    if let Some(description) = item.description {
+                        ext.description = description;
+                    }
+                }
+                continue;
+            }
+            self.extensions.push(Extension {
+                id,
+                name: item.name,
+                publisher: "Zed registry".into(),
+                version: item.version,
+                description: item.description.unwrap_or_default(),
+                installed: true,
+                installing: false,
+                kind: Some(item.kind),
+                icon: item.icon,
+            });
+        }
+        self.forget_extensions_hot_row(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+}
+
+/// The installed extensions under `dir`: what each is and the icon its files
+/// make. Folders starting with "." are staging and rollback copies.
+pub(super) fn scan_installed(dir: &Path) -> Vec<ScannedExtension> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut folders: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| {
+            !path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        })
+        .collect();
+    folders.sort();
+    folders
+        .into_iter()
+        .filter_map(|folder| {
+            let manifest = lightline::extensions::zed_manifest::Manifest::load(&folder)?;
+            let id = folder.file_name()?.to_string_lossy().into_owned();
+            let (kind, icon) = extension_kind_and_icon(&folder);
+            Some(ScannedExtension {
+                id,
+                name: manifest.name,
+                version: manifest.version,
+                description: manifest.description,
+                kind,
+                icon,
+            })
+        })
+        .collect()
+}
+
+/// What an installed extension is, and its icon: a color theme's colors, an
+/// icon theme's folder icon, or a language's file suffix.
+fn extension_kind_and_icon(folder: &Path) -> (ExtensionCategory, Option<ExtensionIcon>) {
+    use lightline::extensions::{language, zed_manifest};
+    if language::is_language_extension(folder) {
+        let suffix = language::language_configs(folder)
+            .into_iter()
+            .find_map(|(_, config)| config.path_suffixes.into_iter().next());
+        return (
+            ExtensionCategory::Language,
+            suffix.map(ExtensionIcon::Language),
+        );
+    }
+    if zed_manifest::is_icon_theme(folder) {
+        let svg = lightline::icon_theme::IconTheme::load(folder)
+            .and_then(|theme| theme.generic_folder_icon(false))
+            .filter(|path| path.is_file());
+        return (ExtensionCategory::IconTheme, svg.map(ExtensionIcon::Svg));
+    }
+    if zed_manifest::is_color_theme(folder) {
+        let swatch = lightline::color_theme::ZedColorTheme::load(folder).and_then(|theme| {
+            let color = |rgba: lightline::color_theme::Rgba| ui(rgba.r, rgba.g, rgba.b);
+            let background = theme
+                .style_color("editor.background")
+                .or_else(|| theme.style_color("background"))
+                .map(color)?;
+            let syntax = |names: &[&str]| {
+                names
+                    .iter()
+                    .find_map(|name| theme.syntax_color(name))
+                    .map(color)
+            };
+            let text = theme
+                .style_color("editor.foreground")
+                .or_else(|| theme.style_color("text"))
+                .map(color)
+                .unwrap_or_else(|| blend(background, ui(255, 255, 255), 0.7));
+            let lines = [
+                syntax(&["keyword", "keyword.control"]).unwrap_or(text),
+                syntax(&["string"]).unwrap_or(text),
+                syntax(&["function", "function.method", "type"]).unwrap_or(text),
+            ];
+            Some(ExtensionIcon::Swatch {
+                background,
+                edge: blend(background, ui(255, 255, 255), 0.14),
+                lines,
+            })
+        });
+        return (ExtensionCategory::ColorTheme, swatch);
+    }
+    (ExtensionCategory::Unknown, None)
+}
+
+/// A monogram for an extension without an icon: the first letters of its
+/// id's words ("tokyo-night" -> "TN"; one word gives one letter), leaving
+/// out "theme", "themes" and "zed", and which of eight hues it gets (the
+/// same every time for the same id).
+pub(super) fn monogram(id: &str) -> (String, usize) {
+    let words: Vec<&str> = id
+        .split(['-', '_', ' ', '.'])
+        .filter(|word| !word.is_empty())
+        .collect();
+    let meaningful: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| !matches!(word.to_lowercase().as_str(), "theme" | "themes" | "zed"))
+        .collect();
+    let parts = if meaningful.is_empty() {
+        &words
+    } else {
+        &meaningful
+    };
+    let letters: String = parts
+        .iter()
+        .take(2)
+        .filter_map(|word| word.chars().next())
+        .flat_map(char::to_uppercase)
+        .collect();
+    // FNV-1a: the same id always lands on the same hue.
+    let hash = id.bytes().fold(2_166_136_261u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
+    });
+    let letters = if letters.is_empty() {
+        "?".to_owned()
+    } else {
+        letters
+    };
+    (letters, hash as usize % 8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::monogram;
+
+    #[test]
+    fn monograms_use_the_words_initials() {
+        assert_eq!(monogram("tokyo-night").0, "TN");
+        assert_eq!(monogram("nord").0, "N");
+        assert_eq!(monogram("github-theme").0, "G");
+        assert_eq!(monogram("kanagawa-themes").0, "K");
+        assert_eq!(monogram("rose-pine-theme").0, "RP");
+        assert_eq!(monogram("theme").0, "T");
+        assert_eq!(monogram("").0, "?");
+    }
+
+    #[test]
+    fn a_monogram_keeps_its_hue() {
+        assert_eq!(monogram("tokyo-night").1, monogram("tokyo-night").1);
+        assert!(monogram("tokyo-night").1 < 8);
+        // Different ids spread over the hues.
+        let hues: std::collections::HashSet<usize> = [
+            "tokyo-night",
+            "github-theme",
+            "one-dark-pro",
+            "gruvbox-material",
+            "rose-pine-theme",
+            "nord",
+            "kanagawa-themes",
+            "everforest",
+        ]
+        .iter()
+        .map(|id| monogram(id).1)
+        .collect();
+        assert!(hues.len() >= 4, "{hues:?}");
     }
 }

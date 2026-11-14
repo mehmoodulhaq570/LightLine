@@ -78,6 +78,8 @@ pub(super) enum WorkerMessage {
     ExtensionInstalled(String, bool),
     // The full Zed registry id/version list, for the Extensions panel search.
     ZedRegistryList(Result<Vec<(String, String)>, String>),
+    // The installed extensions found on disk, with their icons.
+    ExtensionsScanned(Vec<ScannedExtension>),
     // id, and the outcome. An extension that's neither an icon theme nor a
     // color theme (needs WASM execution LightLine doesn't have) is
     // uninstalled again before this fires and reported as Err(reason)
@@ -271,6 +273,7 @@ pub(super) enum ExtensionCategory {
     Formatter,
     IconTheme,
     ColorTheme,
+    Language,
     Unknown,
 }
 
@@ -280,6 +283,7 @@ impl ExtensionCategory {
             ExtensionCategory::Formatter => "Formatter",
             ExtensionCategory::IconTheme => "Icon theme",
             ExtensionCategory::ColorTheme => "Color theme",
+            ExtensionCategory::Language => "Language",
             ExtensionCategory::Unknown => "Zed extension",
         }
     }
@@ -297,6 +301,39 @@ pub(super) struct Extension {
     pub(super) description: String,
     pub(super) installed: bool,
     pub(super) installing: bool,
+    // What an installed registry extension turned out to be, and the icon
+    // made from its files (extensions_panel.rs scans them); None until then.
+    pub(super) kind: Option<ExtensionCategory>,
+    pub(super) icon: Option<ExtensionIcon>,
+}
+
+/// An installed extension's icon, made from its own files: Zed extensions
+/// have no icon of their own. Anything without one gets a monogram.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum ExtensionIcon {
+    /// A color theme: its editor background, its edge, and three syntax
+    /// colors drawn as short lines of "code".
+    Swatch {
+        background: u32,
+        edge: u32,
+        lines: [u32; 3],
+    },
+    /// An icon theme: its own folder icon (an SVG file).
+    Svg(PathBuf),
+    /// A language: the file icon for this suffix, e.g. "lua".
+    Language(String),
+}
+
+/// An installed extension as the scan found it (extensions_panel.rs).
+#[derive(Clone, Debug)]
+pub(super) struct ScannedExtension {
+    /// Its folder under the extensions directory, e.g. "catppuccin".
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) version: String,
+    pub(super) description: Option<String>,
+    pub(super) kind: ExtensionCategory,
+    pub(super) icon: Option<ExtensionIcon>,
 }
 
 impl Extension {
@@ -305,7 +342,7 @@ impl Extension {
             "prettier" => ExtensionCategory::Formatter,
             "material-icons" => ExtensionCategory::IconTheme,
             "dracula" => ExtensionCategory::ColorTheme,
-            _ => ExtensionCategory::Unknown,
+            _ => self.kind.unwrap_or(ExtensionCategory::Unknown),
         }
     }
 }
@@ -1102,6 +1139,9 @@ pub(super) struct App {
     pub(super) extensions_search_active: bool,
     pub(super) zed_registry_loaded: bool,
     pub(super) zed_registry_loading: bool,
+    // Whether the installed extensions have been scanned since startup (the
+    // first time the Extensions panel opens).
+    pub(super) extensions_scanned: bool,
     pub(super) debug: Option<DebugClient>,
     pub(super) debug_event_tx: Sender<DebugEvent>,
     pub(super) debug_events: Receiver<DebugEvent>,
@@ -1686,6 +1726,8 @@ impl App {
                     description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
                     installed: false,
                     installing: false,
+                    kind: None,
+                    icon: None,
                 },
                 Extension {
                     id: "material-icons".into(),
@@ -1695,6 +1737,8 @@ impl App {
                     description: "Material Design file & folder icons, consumed from the real Zed extension registry".into(),
                     installed: lightline::extensions::installer::is_installed("material-icon-theme"),
                     installing: false,
+                    kind: None,
+                    icon: None,
                 },
                 Extension {
                     id: "dracula".into(),
@@ -1704,6 +1748,8 @@ impl App {
                     description: "A dark color theme with vivid, accessible syntax colors".into(),
                     installed: lightline::extensions::installer::is_installed("dracula"),
                     installing: false,
+                    kind: None,
+                    icon: None,
                 },
             ],
             extensions_first: 0,
@@ -1712,6 +1758,7 @@ impl App {
             extensions_query: String::new(),
             zed_registry_loaded: false,
             zed_registry_loading: false,
+            extensions_scanned: false,
             debug: None,
             debug_event_tx: debug_tx,
             debug_events: debug_rx,
@@ -1791,6 +1838,7 @@ impl App {
                     return;
                 }
                 self.extensions[idx].installed = false;
+                self.extensions[idx].icon = None;
                 if registry_id == "material-icon-theme" {
                     self.icons = IconSet::new(self.dpi, self.zoom);
                 }
@@ -2238,6 +2286,9 @@ impl App {
             self.set_sidebar_visible(hwnd, true);
             if view == SideView::Extensions {
                 self.ensure_zed_registry_loaded();
+                if !self.extensions_scanned {
+                    self.scan_installed_extensions();
+                }
             }
         }
         self.show_active_tab(hwnd);
@@ -4220,6 +4271,8 @@ mod split_tests {
                 description: "Code formatter using prettier for JS, TS, HTML, CSS".into(),
                 installed: false,
                 installing: false,
+                kind: None,
+                icon: None,
             },
             Extension {
                 id: "material-icons".into(),
@@ -4229,6 +4282,8 @@ mod split_tests {
                 description: "Material Design file & folder icons for LightLine".into(),
                 installed: true,
                 installing: false,
+                kind: None,
+                icon: None,
             },
         ];
         assert_eq!(extensions.len(), 2);

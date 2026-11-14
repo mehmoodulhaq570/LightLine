@@ -56,7 +56,6 @@ pub(super) enum GenericIcon {
     File,
     Folder,
     FolderOpen,
-    FolderSrc,
 }
 
 // The Run & Debug toolbar's controls and the workbench's own icons (rail,
@@ -590,7 +589,6 @@ impl IconSet {
                 GenericIcon::File => theme.generic_file_icon(),
                 GenericIcon::Folder => theme.generic_folder_icon(false),
                 GenericIcon::FolderOpen => theme.generic_folder_icon(true),
-                GenericIcon::FolderSrc => theme.resolve_directory("src", false),
             };
             if let Some(svg_path) = svg_path
                 && self.draw_themed(hdc, svg_path, x, y, size)
@@ -602,7 +600,6 @@ impl IconSet {
             GenericIcon::File => BuiltinIcon::File,
             GenericIcon::Folder => BuiltinIcon::Folder,
             GenericIcon::FolderOpen => BuiltinIcon::FolderOpen,
-            GenericIcon::FolderSrc => BuiltinIcon::FolderSrc,
         };
         self.draw_builtin(hdc, builtin, x, y, size)
     }
@@ -618,6 +615,19 @@ impl IconSet {
         self.draw_atlas(hdc, AtlasKey::Builtin(kind), (x, y), size, || {
             Some(kind.svg_str().as_bytes().to_vec())
         })
+    }
+
+    /// Draws an SVG file (an icon theme's own folder icon, say) from the
+    /// atlas, `size` pixels square at (x, y).
+    pub(super) fn draw_svg_file(
+        &self,
+        hdc: HDC,
+        svg_path: &Path,
+        x: i32,
+        y: i32,
+        size: i32,
+    ) -> bool {
+        self.draw_themed(hdc, svg_path.to_path_buf(), x, y, size)
     }
 
     fn draw_themed(&self, hdc: HDC, svg_path: PathBuf, x: i32, y: i32, size: i32) -> bool {

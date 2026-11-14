@@ -122,7 +122,7 @@
         <li><b>Icon themes, once installed:</b> the theme's own folder icon from its SVGs, which is what Material's tile does today.</li>
         <li><b>Languages, once installed:</b> the language's file icon from the active icon theme (Lua's moon, Zig's bolt), else LightLine's built-in icon for it.</li>
         <li><b>Anything not installed yet:</b> a monogram. Before installing, LightLine only knows the extension's id. The first letters of its words become the letters (<code>tokyo-night</code> → TN; one word gives one letter, <code>nord</code> → N), on one of eight colours picked from the id. The same extension always gets the same tile, and neighbours rarely match.</li>
-        <li><b>Prettier, Material and Dracula</b> keep the marks LightLine draws for them.</li>
+        <li><b>Prettier, Material and Dracula follow the same rules.</b> Dracula is a swatch of its colours, Material its own folder icon, and Prettier its logo (offset bars in its colours) drawn in the same style. They look the same before and after installing.</li>
       </ol>
     </div>
   </div>
@@ -179,10 +179,10 @@ function swatch(bg, a, b, c, edge) {
   return `<span class="icon swatch" style="background:${bg};border:1px solid ${edge || mix(bg, '#ffffff', 0.12)}">` +
     `<i style="width:15px;background:${a}"></i><i style="width:22px;background:${b}"></i><i style="width:11px;background:${c}"></i></span>`;
 }
-const materialFolder = `<span class="icon" style="background:#122b27;border:1px solid #27534a">${svg('<path class="f" style="color:#3acf80" d="M1.5 4.2A1.2 1.2 0 0 1 2.7 3h3.6l1.4 1.5h5.6a1.2 1.2 0 0 1 1.2 1.2v6.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2z"/>').replace('width: 16px', '')}</span>`;
+const dracula = swatch('#282a36', '#ff79c6', '#f1fa8c', '#50fa7b');
+const materialFolder = `<span class="icon" style="background:#081020;border:1px solid #182f52"><svg viewBox="0 0 16 16" style="width:22px;height:22px"><path fill="#90a4ae" d="M1.5 4.2A1.2 1.2 0 0 1 2.7 3h3.6l1.4 1.5h5.6a1.2 1.2 0 0 1 1.2 1.2v6.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2z"/></svg></span>`;
 const luaIcon = `<span class="icon" style="background:#101a2e;border:1px solid var(--edge)"><svg viewBox="0 0 16 16" style="width:22px;height:22px"><circle cx="8" cy="8" r="6.2" fill="#2c5bd8"/><circle cx="11.2" cy="4.8" r="1.6" fill="#ffffff"/><circle cx="7" cy="9" r="2.4" fill="#ffffff"/><circle cx="7.9" cy="8.2" r="2" fill="#2c5bd8"/></svg></span>`;
-const prettier = `<span class="icon" style="background:#16203a;border:1px solid #2f3f60;flex-direction:column;gap:2px;display:flex;align-items:center;justify-content:center"><b style="font:700 13px/1 Consolas,monospace;color:#f4f7ff">{ }</b><span style="display:flex;gap:2px">${['#56b6f0', '#ec4899', '#f5c518', '#a855f7'].map((c) => `<i style="width:5px;height:2px;background:${c}"></i>`).join('')}</span></span>`;
-const dracula = `<span class="icon" style="background:#1e1837;border:1px solid #463770"><i style="width:18px;height:18px;border-radius:50%;background:#a76df2;display:block"></i></span>`;
+const prettier = `<span class="icon" style="background:#1a2b34;border:1px solid #3a4a52;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px">${[[7, 14, '#56b3b4'], [13, 15, '#f7ba3e'], [7, 10, '#ea5e5e'], [11, 17, '#bf85bf']].map(([l, w, c]) => `<i style="display:block;margin-left:${l}px;width:${w}px;height:3px;border-radius:2px;background:${c}"></i>`).join('')}</span>`;
 
 const KIND = { 'Color theme': '#ae6df2', 'Icon theme': 'var(--green)', Language: '#56b6f0', Formatter: '#56b6f0', 'Zed extension': 'var(--muted)' };
 function row(icon, name, ver, desc, pub, kind, action) {

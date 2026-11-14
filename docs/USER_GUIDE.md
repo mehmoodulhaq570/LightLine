@@ -332,6 +332,8 @@ The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extensio
 
 The panel lists **Installed** extensions, then **Featured** ones (Prettier, Material Icon Theme, Dracula), then what's **In Use**: the formatter, the file icons and the color theme (click it to change the theme). The **All**, **Themes** and **Formatters** chips filter the lists. Typing in the search box searches the whole Zed registry instead. Each extension has one button: **Install**; a green ✓ once installed, which becomes **Uninstall** when you point at it (**Turn Off** for Prettier). Click a section's title to fold it. The **···** menu has Show Installed, Show Featured, Check for Updates and Open Extensions Folder.
 
+Zed extensions have no icons of their own, so LightLine makes one: an installed color theme shows a swatch of its colors, an icon theme its own folder icon, and a language its file icon. An extension that isn't installed shows the first letters of its name on a color that's always the same for it.
+
 Updates download and validate a staged copy before replacing an installed extension. A failed download, invalid manifest, malformed theme, missing icon asset or a grammar that doesn't build leaves the existing installation intact. If replacement fails, LightLine attempts to restore the previous copy; any backup it cannot restore is retained and its location is reported.
 
 - **Color themes** recolor all of LightLine, dark or light, including the terminal. Installing one, such as **Dracula**, switches to it at once and it's remembered. Themes with several variants (Catppuccin Latte, Frappé, Macchiato, Mocha) offer each in **Preferences: Color Theme**.
