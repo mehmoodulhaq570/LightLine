@@ -114,6 +114,8 @@ pub(super) enum DebugGlyph {
     ArrowDown,
     Fetch,
     OpenFile,
+    // The Extensions search box's filter.
+    Filter,
 }
 
 impl DebugGlyph {
@@ -211,6 +213,9 @@ impl DebugGlyph {
             DebugGlyph::Fetch => format!(
                 r#"<path {ui} d="M12 4v11"/><path {ui} d="M7.5 10.5 12 15l4.5-4.5"/><path {ui} d="M5 19.5h14"/>"#
             ),
+            DebugGlyph::Filter => {
+                format!(r#"<path {ui} d="M4 5h16l-6.2 7.3v5.2l-3.6 1.8v-7z"/>"#)
+            }
             DebugGlyph::OpenFile => format!(
                 r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5"/>"#
             ),
@@ -729,6 +734,7 @@ mod icon_tests {
             DebugGlyph::ArrowDown,
             DebugGlyph::Fetch,
             DebugGlyph::OpenFile,
+            DebugGlyph::Filter,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");

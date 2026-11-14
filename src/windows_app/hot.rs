@@ -38,6 +38,8 @@ pub(super) enum Hot {
     Git(GitHot),
     // A Run & Debug button or row (debug_panel.rs).
     Debug(DebugHot),
+    // An Extensions button or row (extensions_panel.rs).
+    Extensions(ExtensionsHot),
 }
 
 impl App {
@@ -104,6 +106,17 @@ impl App {
             && y < client.bottom - self.scale(STATUS)
         {
             return self.debug_hot_at(x, y - self.side_origin()).map(Hot::Debug);
+        }
+        if self.side_view == SideView::Extensions
+            && self.explorer_visible
+            && self.sidebar_width > 0
+            && x < self.sidebar_right()
+            && y >= chrome_top
+            && y < client.bottom - self.scale(STATUS)
+        {
+            return self
+                .extensions_hot_at(x, y - self.side_origin())
+                .map(Hot::Extensions);
         }
         None
     }
@@ -187,6 +200,14 @@ impl App {
                     ..rect
                 })
             }
+            Hot::Extensions(extensions) => {
+                let origin = self.side_origin();
+                self.extensions_hot_rect(extensions).map(|rect| RECT {
+                    top: rect.top + origin,
+                    bottom: rect.bottom + origin,
+                    ..rect
+                })
+            }
             rail => {
                 let editor_bottom = client.bottom - self.scale(STATUS) - chrome_top;
                 self.rail_item_rect(rail, editor_bottom).map(|rect| RECT {
@@ -241,6 +262,15 @@ impl App {
                 DebugButton::Tool(_) => "Stop (Shift+F5)",
                 DebugButton::Pick | DebugButton::Link => return None,
             },
+            Hot::Extensions(ExtensionsHot::Button(button)) => match button {
+                ExtensionsButton::Refresh => "Check for updates",
+                ExtensionsButton::More => "More actions",
+                ExtensionsButton::SearchAction if !self.extensions_query.is_empty() => {
+                    "Clear search"
+                }
+                ExtensionsButton::SearchAction => "Filter: All, Themes, Formatters",
+                ExtensionsButton::Chip(_) => return None,
+            },
             _ => return None,
         })
     }
@@ -261,24 +291,25 @@ impl App {
         let height = s(28);
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let card = if let Hot::TitleButton(_) | Hot::Git(_) | Hot::Debug(_) = hot {
-            let right = item.right.min(client.right - s(6));
-            RECT {
-                left: right - width,
-                top: item.bottom + s(4),
-                right,
-                bottom: item.bottom + s(4) + height,
-            }
-        } else {
-            let middle = (item.top + item.bottom) / 2;
-            let top = (middle - height / 2).min(client.bottom - s(STATUS) - height);
-            RECT {
-                left: s(RAIL) + s(6),
-                top,
-                right: s(RAIL) + s(6) + width,
-                bottom: top + height,
-            }
-        };
+        let card =
+            if let Hot::TitleButton(_) | Hot::Git(_) | Hot::Debug(_) | Hot::Extensions(_) = hot {
+                let right = item.right.min(client.right - s(6));
+                RECT {
+                    left: right - width,
+                    top: item.bottom + s(4),
+                    right,
+                    bottom: item.bottom + s(4) + height,
+                }
+            } else {
+                let middle = (item.top + item.bottom) / 2;
+                let top = (middle - height / 2).min(client.bottom - s(STATUS) - height);
+                RECT {
+                    left: s(RAIL) + s(6),
+                    top,
+                    right: s(RAIL) + s(6) + width,
+                    bottom: top + height,
+                }
+            };
         Some((card, text))
     }
 

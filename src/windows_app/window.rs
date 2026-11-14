@@ -672,6 +672,21 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                     app.scroll_settings_panel(hwnd, delta as i32);
                     return 0;
                 }
+                if app.side_view == SideView::Extensions {
+                    // Installed, featured and in use are one list.
+                    let max = app
+                        .extension_rows()
+                        .len()
+                        .saturating_sub(app.extensions_visible_rows(hwnd));
+                    app.extensions_first = if delta > 0 {
+                        app.extensions_first.saturating_sub(1)
+                    } else {
+                        (app.extensions_first + 1).min(max)
+                    };
+                    app.forget_extensions_hot_row(hwnd);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return 0;
+                }
                 if app.side_view == SideView::Debug {
                     // Variables, call stack and breakpoints are one list.
                     let max = app

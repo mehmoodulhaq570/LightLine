@@ -6,6 +6,7 @@
 // and Run & Debug's ··· and configuration picker, open the same menu with
 // their own items.
 
+use super::extensions_panel::ExtensionsSection;
 use super::*;
 
 const WIDTH: i32 = 250;
@@ -41,6 +42,11 @@ enum MoreAction {
     DebugAutomatic,
     DebugRust,
     DebugPython,
+    // Extensions.
+    ExtensionsShowInstalled,
+    ExtensionsShowFeatured,
+    ExtensionsCheckUpdates,
+    ExtensionsOpenFolder,
 }
 
 /// Which Run & Debug control opened the menu.
@@ -68,6 +74,7 @@ enum MenuAnchor {
     Pane(usize),
     Git(GitMenu, RECT),
     Debug(DebugMenu, RECT),
+    Extensions(RECT),
 }
 
 pub(super) struct MoreMenu {
@@ -93,6 +100,14 @@ impl App {
                     MoreAction::GitStageAll,
                     MoreAction::GitUnstageAll,
                     MoreAction::GitDiscardAll,
+                ];
+            }
+            Some(MenuAnchor::Extensions(_)) => {
+                return vec![
+                    MoreAction::ExtensionsShowInstalled,
+                    MoreAction::ExtensionsShowFeatured,
+                    MoreAction::ExtensionsCheckUpdates,
+                    MoreAction::ExtensionsOpenFolder,
                 ];
             }
             Some(MenuAnchor::Debug(DebugMenu::Header, _)) => {
@@ -157,6 +172,10 @@ impl App {
             MoreAction::GitStageAll => ("Stage All Changes", ""),
             MoreAction::GitUnstageAll => ("Unstage All Changes", ""),
             MoreAction::GitDiscardAll => ("Discard All Changes", ""),
+            MoreAction::ExtensionsShowInstalled => ("Show Installed", ""),
+            MoreAction::ExtensionsShowFeatured => ("Show Featured", ""),
+            MoreAction::ExtensionsCheckUpdates => ("Check for Updates", ""),
+            MoreAction::ExtensionsOpenFolder => ("Open Extensions Folder", ""),
             MoreAction::DebugStart => ("Start Debugging", "F5"),
             MoreAction::DebugSelect => ("Select Configuration...", ""),
             MoreAction::DebugConsole => ("Debug Console", "Ctrl+Shift+Y"),
@@ -182,6 +201,20 @@ impl App {
         } else {
             Some(MoreMenu {
                 anchor: MenuAnchor::Pane(pane),
+                highlighted: None,
+            })
+        };
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Opens the Extensions ··· menu under `button` (in the window's
+    /// coordinates), or closes it if it's open.
+    pub(super) fn toggle_extensions_menu(&mut self, hwnd: HWND, button: RECT) {
+        self.more_menu = if self.more_menu.is_some() {
+            None
+        } else {
+            Some(MoreMenu {
+                anchor: MenuAnchor::Extensions(button),
                 highlighted: None,
             })
         };
@@ -220,7 +253,9 @@ impl App {
     fn anchor_button(&self, hwnd: HWND, anchor: MenuAnchor) -> RECT {
         match anchor {
             MenuAnchor::Pane(pane) => self.pane_actions(self.pane_right(hwnd, pane)).1,
-            MenuAnchor::Git(_, button) | MenuAnchor::Debug(_, button) => button,
+            MenuAnchor::Git(_, button)
+            | MenuAnchor::Debug(_, button)
+            | MenuAnchor::Extensions(button) => button,
         }
     }
 
@@ -367,6 +402,14 @@ impl App {
             MoreAction::GitStageAll => self.git_stage_all(hwnd),
             MoreAction::GitUnstageAll => self.git_unstage_all(hwnd),
             MoreAction::GitDiscardAll => self.git_discard_all(hwnd),
+            MoreAction::ExtensionsShowInstalled => {
+                self.show_extensions_section(hwnd, ExtensionsSection::Installed)
+            }
+            MoreAction::ExtensionsShowFeatured => {
+                self.show_extensions_section(hwnd, ExtensionsSection::Featured)
+            }
+            MoreAction::ExtensionsCheckUpdates => self.check_extension_updates(),
+            MoreAction::ExtensionsOpenFolder => self.open_extensions_folder(),
             MoreAction::DebugStart => self.start_debug_session(hwnd),
             MoreAction::DebugSelect => self.show_debug_config_menu(hwnd),
             MoreAction::DebugConsole => self.show_debug_console(hwnd),

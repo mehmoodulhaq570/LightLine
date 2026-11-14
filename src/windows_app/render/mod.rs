@@ -3,6 +3,7 @@ mod code_pane;
 mod completion;
 mod debug;
 mod editor;
+mod extensions;
 mod git;
 mod hover;
 mod panels;
