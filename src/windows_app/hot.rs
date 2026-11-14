@@ -40,6 +40,8 @@ pub(super) enum Hot {
     Debug(DebugHot),
     // An Extensions button or row (extensions_panel.rs).
     Extensions(ExtensionsHot),
+    // A bottom panel tab, toolbar button or shell (terminal.rs).
+    Terminal(TerminalHot),
 }
 
 impl App {
@@ -88,6 +90,15 @@ impl App {
         }
         if x < self.scale(RAIL) && y < client.bottom - self.scale(STATUS) {
             return self.rail_item_at(y - chrome_top, client.bottom - chrome_top);
+        }
+        if self.terminal_visible
+            && y >= self.terminal_top(hwnd)
+            && y < client.bottom - self.scale(STATUS)
+            && x >= self.editor_left()
+            && !self.terminal_profile_menu_open
+            && self.terminal_context_menu.is_none()
+        {
+            return self.terminal_hot_at(hwnd, x, y).map(Hot::Terminal);
         }
         if self.side_view == SideView::Review
             && self.explorer_visible
@@ -200,6 +211,7 @@ impl App {
                     ..rect
                 })
             }
+            Hot::Terminal(terminal) => self.terminal_hot_rect(hwnd, terminal),
             Hot::Extensions(extensions) => {
                 let origin = self.side_origin();
                 self.extensions_hot_rect(extensions).map(|rect| RECT {
@@ -271,6 +283,18 @@ impl App {
                 ExtensionsButton::SearchAction => "Filter: All, Themes, Formatters",
                 ExtensionsButton::Chip(_) => return None,
             },
+            Hot::Terminal(hot) => match hot {
+                TerminalHot::New => "New Terminal (Ctrl+Shift+`)",
+                TerminalHot::ShellPicker => "Launch Profile…",
+                TerminalHot::Kill if self.terminal_tab == TerminalTab::Output => "Stop",
+                TerminalHot::Kill => "Kill Terminal",
+                TerminalHot::Maximize if self.terminal_restore_height.is_some() => {
+                    "Restore Panel Size"
+                }
+                TerminalHot::Maximize => "Maximize Panel Size",
+                TerminalHot::Hide => "Close Panel",
+                TerminalHot::Tab(_) | TerminalHot::Shell(_) => return None,
+            },
             _ => return None,
         })
     }
@@ -291,25 +315,29 @@ impl App {
         let height = s(28);
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let card =
-            if let Hot::TitleButton(_) | Hot::Git(_) | Hot::Debug(_) | Hot::Extensions(_) = hot {
-                let right = item.right.min(client.right - s(6));
-                RECT {
-                    left: right - width,
-                    top: item.bottom + s(4),
-                    right,
-                    bottom: item.bottom + s(4) + height,
-                }
-            } else {
-                let middle = (item.top + item.bottom) / 2;
-                let top = (middle - height / 2).min(client.bottom - s(STATUS) - height);
-                RECT {
-                    left: s(RAIL) + s(6),
-                    top,
-                    right: s(RAIL) + s(6) + width,
-                    bottom: top + height,
-                }
-            };
+        let card = if let Hot::TitleButton(_)
+        | Hot::Git(_)
+        | Hot::Debug(_)
+        | Hot::Extensions(_)
+        | Hot::Terminal(_) = hot
+        {
+            let right = item.right.min(client.right - s(6));
+            RECT {
+                left: right - width,
+                top: item.bottom + s(4),
+                right,
+                bottom: item.bottom + s(4) + height,
+            }
+        } else {
+            let middle = (item.top + item.bottom) / 2;
+            let top = (middle - height / 2).min(client.bottom - s(STATUS) - height);
+            RECT {
+                left: s(RAIL) + s(6),
+                top,
+                right: s(RAIL) + s(6) + width,
+                bottom: top + height,
+            }
+        };
         Some((card, text))
     }
 

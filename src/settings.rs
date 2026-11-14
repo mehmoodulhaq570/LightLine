@@ -59,6 +59,11 @@ pub struct Settings {
     /// The model the AI Assistant chats with; None until one is chosen,
     /// which is what leaves the assistant off.
     pub ai_model: Option<String>,
+    /// The font the terminal draws private-use symbols with (prompt icons
+    /// from oh-my-posh or Starship: git branch, folder, OS logo), e.g.
+    /// "CaskaydiaCove Nerd Font Mono". None looks for an installed Nerd Font.
+    /// Saved as `terminalSymbolFont`.
+    pub terminal_symbol_font: Option<String>,
     /// Commands for language servers that language extensions name, by
     /// server name (`lua-language-server`) or language name (`Lua`). Saved
     /// as `languageServers`.
@@ -97,6 +102,7 @@ impl Default for Settings {
             color_theme: None,
             ai_endpoint: crate::ai::DEFAULT_ENDPOINT.to_string(),
             ai_model: None,
+            terminal_symbol_font: None,
             language_servers: Vec::new(),
             colors: HashMap::new(),
         }
@@ -263,6 +269,12 @@ impl Settings {
                 settings.ai_model = Some(model.to_owned());
             }
         }
+        if let Some(font) = value.get("terminalSymbolFont").and_then(|v| v.as_str()) {
+            let font = font.trim();
+            if !font.is_empty() {
+                settings.terminal_symbol_font = Some(font.to_owned());
+            }
+        }
         if let Some(b) = value
             .get("markdownLoadRemoteImages")
             .and_then(|v| v.as_bool())
@@ -424,6 +436,12 @@ impl Settings {
         if let Some(model) = &self.ai_model {
             obj.insert("aiModel".into(), serde_json::Value::String(model.clone()));
         }
+        if let Some(font) = &self.terminal_symbol_font {
+            obj.insert(
+                "terminalSymbolFont".into(),
+                serde_json::Value::String(font.clone()),
+            );
+        }
         obj.insert(
             "markdownLoadRemoteImages".into(),
             serde_json::Value::Bool(self.markdown_load_remote_images),
@@ -478,6 +496,7 @@ const OWN_KEYS: &[&str] = &[
     "aiModel",
     "markdownLoadRemoteImages",
     "terminalDefaultProfile",
+    "terminalSymbolFont",
     "languageServers",
 ];
 

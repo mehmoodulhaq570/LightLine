@@ -130,13 +130,17 @@ Add cursors with `Alt+Click`, `Ctrl+Alt+Up` / `Ctrl+Alt+Down` or `Ctrl+D`. Typin
 | `Ctrl+B` | Show or hide the side panel (also the ☰ at the top of the left rail) |
 | `Ctrl+\` | Split the editor / close the split |
 | `Ctrl+1` / `Ctrl+2` | Focus the left / right pane |
-| `` Ctrl+` `` / `` Ctrl+Shift+` `` | Show or hide the terminal / open a new terminal tab |
+| `` Ctrl+` `` / `` Ctrl+Shift+` `` | Show or hide the terminal / open a new terminal |
 | `Ctrl+Shift+G` | Source Control |
 | `Ctrl+Shift+D` | Run & Debug |
 | `Ctrl+Shift+Y` | Show or hide the **Debug Console**: the debugger's messages, and a prompt to evaluate expressions while paused |
 | `Ctrl+Shift+X` | Extensions |
 | `Ctrl+,` | Settings |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / reset |
+
+The bottom panel has four tabs: **Problems** (with its count), **Output**, **Debug Console** and **Terminal**. With two shells or more, a list at the side of the terminal shows them all, each with its shell's icon: click one to open it, point at it for 🗑 to close it, right-click it to rename it. The toolbar at the right has **+** (a new terminal with the default profile), **▾** (pick PowerShell, Command Prompt, Git Bash or WSL, or the default), 🗑 (close the open shell, or **Stop** a running program in Output), **^** (make the panel as tall as it goes; again to go back) and ✕ (hide the panel; the shells keep running). When a shell exits, the terminal says so; press `Enter` to close it.
+
+Prompts made with oh-my-posh, Starship or Powerlevel draw properly: LightLine draws their arrows itself, and their icons (git branch, folder, language logos) come from a [Nerd Font](https://www.nerdfonts.com/) if one is installed. Set `terminalSymbolFont` to choose which.
 
 ### Run and debug
 
@@ -267,6 +271,7 @@ To edit the file directly, click **Open settings.json** at the bottom of the pan
 | `colorTheme` | An installed color theme, such as `"Catppuccin Mocha"`; leave it out for LightLine's own. **Preferences: Color Theme** sets it for you |
 | `aiEndpoint`, `aiModel` | Where the AI Assistant connects, and which model it uses |
 | `languageServers` | Commands for the language servers of [language extensions](#extensions), by the server's name or the language's, such as `{"lua-language-server": {"command": "C:\\tools\\lua-ls\\bin\\lua-language-server.exe", "args": []}, "Gleam": "gleam lsp"}`. A string is split at spaces; use `command` and `args` when a path has spaces. Used the next time a file of that language is opened |
+| `terminalSymbolFont` | The font for the symbols in terminal prompts (a Nerd Font, such as `"CaskaydiaCove Nerd Font Mono"`); leave it out to use the first Nerd Font installed. The terminal's text keeps the editor's font |
 | `colors` | Override individual theme colors, on top of the color theme |
 
 ---

@@ -1,4 +1,7 @@
-use super::super::terminal::cell_colors;
+use super::super::terminal::{
+    TERMINAL_PAD, TERMINAL_PAD_RIGHT, TerminalHeaderLayout, TerminalHot, cell_colors,
+    is_powerline_separator, is_private_use, shell_exit_text,
+};
 use super::super::*;
 use super::code_pane::blend;
 
@@ -36,6 +39,8 @@ impl App {
         top: i32,
         bottom: i32,
     ) {
+        let (dpi, zoom) = (self.dpi, self.zoom);
+        let s = move |v: i32| scaled(v, dpi, zoom);
         Self::fill(
             hdc,
             RECT {
@@ -52,188 +57,23 @@ impl App {
                 left,
                 top,
                 right,
-                bottom: top + self.scale(1),
+                bottom: top + s(1),
             },
             self.theme.edge,
         );
         self.refresh_terminal_cell_width(hdc);
-        // The tab strip (OUTPUT, one tab per shell, add/kill buttons, panel
-        // close) is laid out by the same helper input.rs hit-tests, so painted
-        // rectangles and click targets can never drift apart.
+        // The header is laid out by the same helper input.rs hit-tests, so
+        // painted rectangles and click targets can never drift apart.
         let layout = self.terminal_header_layout(left, right, top);
         let header_bottom = layout.header_bottom;
+        self.paint_terminal_header(hdc, &layout);
 
-        let (errors, warnings) = self.problem_counts();
         let problems_active = self.terminal_tab == TerminalTab::Problems;
-        Self::label(
-            hdc,
-            &format!("PROBLEMS  {}", errors + warnings),
-            layout.problems.left,
-            top + self.scale(9),
-            if problems_active {
-                self.theme.text
-            } else {
-                self.theme.muted
-            },
-            layout.problems,
-        );
-        if problems_active {
-            Self::fill(
-                hdc,
-                RECT {
-                    left: layout.problems.left,
-                    top: header_bottom - self.scale(2),
-                    right: layout.problems.right - self.scale(14),
-                    bottom: header_bottom,
-                },
-                self.theme.violet,
-            );
-        }
-
-        let output_active = self.terminal_tab == TerminalTab::Output;
-        Self::label(
-            hdc,
-            "OUTPUT",
-            layout.output.left,
-            top + self.scale(9),
-            if output_active {
-                self.theme.text
-            } else {
-                self.theme.muted
-            },
-            layout.output,
-        );
-        if output_active {
-            Self::fill(
-                hdc,
-                RECT {
-                    left: layout.output.left,
-                    top: header_bottom - self.scale(2),
-                    right: layout.output.right - self.scale(14),
-                    bottom: header_bottom,
-                },
-                self.theme.violet,
-            );
-        }
-
         let debug_active = self.terminal_tab == TerminalTab::DebugConsole;
-        Self::label(
-            hdc,
-            "DEBUG CONSOLE",
-            layout.debug.left,
-            top + self.scale(9),
-            if debug_active {
-                self.theme.text
-            } else {
-                self.theme.muted
-            },
-            layout.debug,
-        );
-        if debug_active {
-            Self::fill(
-                hdc,
-                RECT {
-                    left: layout.debug.left,
-                    top: header_bottom - self.scale(2),
-                    right: layout.debug.right - self.scale(14),
-                    bottom: header_bottom,
-                },
-                self.theme.violet,
-            );
-        }
-
-        // One tab per interactive shell session, marked with a leading bullet.
-        for (index, rect) in layout.terminals.iter().enumerate() {
-            let pane = self.terminals.get(index);
-            let shell_tag = pane
-                .map(|p| p.shell_kind.tag().to_uppercase())
-                .unwrap_or_else(|| "TERMINAL".into());
-            let title = pane.map(|p| p.title.as_str()).unwrap_or("?");
-            let label = if pane.is_some_and(|pane| pane.custom_title) {
-                title.to_string()
-            } else if self.terminals.len() == 1 {
-                shell_tag
-            } else {
-                format!("{shell_tag} {title}")
-            };
-            let active =
-                self.terminal_tab == TerminalTab::Terminal && index == self.terminal_active;
-            let clip = RECT {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right - self.scale(4),
-                bottom: rect.bottom,
-            };
-            self.label_ellipsis(
-                hdc,
-                &label,
-                rect.left + self.scale(6),
-                top + self.scale(9),
-                if active {
-                    self.theme.text
-                } else {
-                    self.theme.muted
-                },
-                clip,
-            );
-            if active {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: rect.left,
-                        top: header_bottom - self.scale(2),
-                        right: rect.right,
-                        bottom: header_bottom,
-                    },
-                    self.theme.violet,
-                );
-            }
-        }
-
-        let shell_open = self.terminal_tab == TerminalTab::Terminal
-            && self.terminal_active < self.terminals.len();
-        self.panel_card(
-            hdc,
-            RECT {
-                left: layout.plus.left,
-                top: top + self.scale(5),
-                right: layout.chevron.right,
-                bottom: header_bottom - self.scale(5),
-            },
-            self.scale(4),
-            self.theme.card_edge,
-            ui(15, 28, 49),
-        );
-        let icon = self.scale(16);
-        self.glyph_in(hdc, DebugGlyph::Plus, self.theme.muted, layout.plus, icon);
-        self.glyph_in(
-            hdc,
-            DebugGlyph::ChevronDown,
-            self.theme.muted,
-            layout.chevron,
-            self.scale(14),
-        );
-        self.glyph_in(
-            hdc,
-            DebugGlyph::Close,
-            if match self.terminal_tab {
-                TerminalTab::Output => self.run_session.is_some(),
-                TerminalTab::Terminal => shell_open,
-                TerminalTab::Problems | TerminalTab::DebugConsole => false,
-            } {
-                self.theme.muted
-            } else {
-                ui(74, 80, 94)
-            },
-            layout.kill,
-            icon,
-        );
-
         if problems_active {
-            self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
             self.paint_problems(hdc, hwnd);
             if let Some((track, slider)) = self.problems_scrollbar(hwnd) {
-                let edge = self.scale(1).max(1);
+                let edge = s(1).max(1);
                 Self::fill(hdc, track, self.theme.editor_bg);
                 Self::fill(
                     hdc,
@@ -265,13 +105,19 @@ impl App {
             return;
         }
         if debug_active {
-            self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
             self.paint_debug_console(hdc, hwnd);
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
             }
             return;
         }
+
+        // The shells' list at the side, from two shells on.
+        let list = self.shell_list_rect(right, top, bottom);
+        if let Some(list) = list {
+            self.paint_shell_list(hdc, list);
+        }
+
         let active_snapshot: Option<Arc<Snapshot>> = match self.terminal_tab {
             TerminalTab::Output => self.run_snapshot.clone(),
             TerminalTab::Terminal => self
@@ -280,37 +126,6 @@ impl App {
                 .and_then(|pane| pane.snapshot.clone()),
             TerminalTab::Problems | TerminalTab::DebugConsole => None,
         };
-        let status = match &active_snapshot {
-            Some(snapshot) => match &snapshot.status {
-                SessionStatus::Exited { code } => format!("process exited ({code})"),
-                SessionStatus::Failed(message) => format!("error: {message}"),
-                SessionStatus::Stopped => "stopped".to_string(),
-                SessionStatus::Starting => "starting\u{2026}".to_string(),
-                SessionStatus::Stopping => "stopping\u{2026}".to_string(),
-                SessionStatus::Running => String::new(),
-            },
-            None => String::new(),
-        };
-        if !status.is_empty() {
-            let width = self.text_width(hdc, &status);
-            let x = (layout.kill.right + self.scale(18))
-                .min(right - self.scale(48) - width)
-                .max(layout.kill.right);
-            Self::label(
-                hdc,
-                &status,
-                x,
-                top + self.scale(10),
-                self.theme.muted,
-                RECT {
-                    left,
-                    top,
-                    right: layout.hide.left,
-                    bottom: header_bottom,
-                },
-            );
-        }
-        self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, layout.hide, icon);
         let Some(snapshot) = active_snapshot else {
             if self.terminal_profile_menu_open {
                 self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
@@ -319,13 +134,19 @@ impl App {
         };
         let cell_width = self.cell_width.max(1);
         let cell_height = self.line_height.max(1);
-        let content_left = left + self.scale(8);
-        let content_right = right - self.scale(8);
+        let content_left = left + s(TERMINAL_PAD);
+        let content_right = list.map_or(right, |list| list.left) - s(TERMINAL_PAD_RIGHT);
+        let text_top = header_bottom + s(2);
+        let symbol_font = if snapshot_has_private_use(&snapshot) {
+            self.terminal_symbol_font()
+        } else {
+            None
+        };
         let old_font = unsafe { SelectObject(hdc, self.font) };
         let clip = RECT {
             left,
             top: header_bottom,
-            right,
+            right: content_right + s(TERMINAL_PAD_RIGHT) / 2,
             bottom,
         };
         let selection = self.terminal_selection_range();
@@ -338,10 +159,14 @@ impl App {
             let point = (row_index as u16, column as u16);
             point >= (start.1, start.0) && point <= (finish.1, finish.0)
         };
+        let mut last_text_row = 0usize;
         for (row_index, row) in snapshot.rows.iter().enumerate() {
-            let y = header_bottom + row_index as i32 * cell_height;
+            let y = text_top + row_index as i32 * cell_height;
             if y >= bottom {
                 break;
+            }
+            if row.cells.iter().any(|cell| !cell.text.trim().is_empty()) {
+                last_text_row = row_index;
             }
             let colors: Vec<(u32, u32)> = row
                 .cells
@@ -381,26 +206,76 @@ impl App {
                         background,
                     );
                 }
+                // Text in runs; Powerline separators drawn as shapes and
+                // other private-use symbols in the symbol font, one cell each.
                 let mut run = String::new();
-                for cell in &row.cells[column..end] {
+                let mut run_start = column;
+                for (offset, cell) in row.cells[column..end].iter().enumerate() {
+                    let at = column + offset;
                     if cell.wide_continuation {
                         continue;
                     }
-                    if cell.text.is_empty() {
-                        run.push(' ');
-                    } else {
-                        run.push_str(&cell.text);
+                    let ch = cell.text.chars().next().unwrap_or(' ');
+                    let special =
+                        is_powerline_separator(ch) || (symbol_font.is_some() && is_private_use(ch));
+                    if !special {
+                        if run.is_empty() {
+                            run_start = at;
+                        }
+                        if cell.text.is_empty() {
+                            run.push(' ');
+                        } else {
+                            run.push_str(&cell.text);
+                        }
+                        continue;
+                    }
+                    if run.chars().any(|ch| ch != ' ') {
+                        let run_x = content_left + run_start as i32 * cell_width;
+                        Self::label(hdc, &run, run_x, y, foreground, clip);
+                    }
+                    run.clear();
+                    let cell_rect = RECT {
+                        left: content_left + at as i32 * cell_width,
+                        top: y,
+                        right: content_left + (at as i32 + 1) * cell_width,
+                        bottom: y + cell_height,
+                    };
+                    if is_powerline_separator(ch) {
+                        Self::paint_powerline(hdc, ch, cell_rect, foreground);
+                    } else if let Some(font) = symbol_font {
+                        unsafe { SelectObject(hdc, font) };
+                        Self::label(hdc, &cell.text, cell_rect.left, y, foreground, clip);
+                        unsafe { SelectObject(hdc, self.font) };
                     }
                 }
                 if run.chars().any(|ch| ch != ' ') {
-                    Self::label(hdc, &run, x, y, foreground, clip);
+                    let run_x = content_left + run_start as i32 * cell_width;
+                    Self::label(hdc, &run, run_x, y, foreground, clip);
                 }
                 column = end;
             }
         }
-        if self.terminal_focus && self.caret_on && snapshot.cursor.visible {
+        // An exited shell says so under its last line, as in VS Code.
+        if self.terminal_tab == TerminalTab::Terminal
+            && let Some(exit) = self.active_shell_exit()
+            && let Some(pane) = self.terminals.get(self.terminal_active)
+        {
+            let y = text_top + (last_text_row as i32 + 2) * cell_height;
+            if y + cell_height <= bottom {
+                let note = format!(
+                    "{} exited with {exit}. Press Enter to close this terminal.",
+                    pane.shell_kind.tag()
+                );
+                Self::label(hdc, &note, content_left, y, self.theme.muted, clip);
+            }
+        }
+        if self.terminal_focus
+            && self.caret_on
+            && snapshot.cursor.visible
+            && !snapshot.status.is_final()
+        {
             let x = content_left + i32::from(snapshot.cursor.column) * cell_width;
-            let y = header_bottom + i32::from(snapshot.cursor.row) * cell_height;
+            let y = text_top + i32::from(snapshot.cursor.row) * cell_height;
             if y + cell_height <= bottom && x + cell_width <= content_right {
                 Self::fill(
                     hdc,
@@ -418,57 +293,370 @@ impl App {
             SelectObject(hdc, old_font);
         }
         if let Some((_, menu)) = self.terminal_context_menu {
-            Self::rounded_fill(hdc, menu, self.scale(4), self.theme.card_edge);
+            Self::rounded_fill(hdc, menu, s(4), self.theme.card_edge);
             Self::fill(
                 hdc,
                 RECT {
-                    left: menu.left + self.scale(1),
-                    top: menu.top + self.scale(1),
-                    right: menu.right - self.scale(1),
-                    bottom: menu.bottom - self.scale(1),
+                    left: menu.left + s(1),
+                    top: menu.top + s(1),
+                    right: menu.right - s(1),
+                    bottom: menu.bottom - s(1),
                 },
                 self.theme.sidebar_bg,
             );
             Self::label(
                 hdc,
                 "Rename Terminal",
-                menu.left + self.scale(10),
-                menu.top + self.scale(7),
+                menu.left + s(10),
+                menu.top + s(7),
                 self.theme.text,
                 menu,
             );
         }
-        if let Some((session_id, name)) = &self.terminal_rename_input
-            && let Some(index) = self
-                .terminals
-                .iter()
-                .position(|pane| pane.id == *session_id)
-            && let Some(tab) = layout.terminals.get(index)
+        if let Some((_, name)) = &self.terminal_rename_input
+            && let Some(field) = self.terminal_rename_field_rect(hwnd)
         {
-            let field = RECT {
-                left: tab.left,
-                top: header_bottom + self.scale(3),
-                right: (tab.left + self.scale(230)).min(right - self.scale(8)),
-                bottom: header_bottom + self.scale(33),
-            };
-            self.panel_card(
-                hdc,
-                field,
-                self.scale(4),
-                self.theme.card_edge,
-                self.theme.sidebar_bg,
-            );
-            Self::label(
+            self.panel_card(hdc, field, s(4), self.theme.blue, self.theme.sidebar_bg);
+            self.label_mid(
                 hdc,
                 name,
-                field.left + self.scale(8),
-                field.top + self.scale(7),
+                field.left + s(8),
+                (field.top + field.bottom) / 2,
                 self.theme.text,
                 field,
             );
         }
         if self.terminal_profile_menu_open {
             self.paint_terminal_profile_menu(hdc, left, right, top, bottom);
+        }
+    }
+
+    /// The header: four tabs in the small font (PROBLEMS with its count
+    /// badge), a line under the open one, and the toolbar at the right.
+    fn paint_terminal_header(&self, hdc: HDC, layout: &TerminalHeaderLayout) {
+        let s = |v: i32| self.scale(v);
+        let header_bottom = layout.header_bottom;
+        let middle = (layout.problems.top + header_bottom) / 2;
+        let old = unsafe { SelectObject(hdc, self.small_font) };
+        let (errors, warnings) = self.problem_counts();
+        let tabs = [
+            (layout.problems, "PROBLEMS", TerminalTab::Problems),
+            (layout.output, "OUTPUT", TerminalTab::Output),
+            (layout.debug, "DEBUG CONSOLE", TerminalTab::DebugConsole),
+            (layout.terminal, "TERMINAL", TerminalTab::Terminal),
+        ];
+        for (index, (rect, label, tab)) in tabs.into_iter().enumerate() {
+            let active = self.terminal_tab == tab;
+            let hot = self.hot == Some(Hot::Terminal(TerminalHot::Tab(index)));
+            let color = if active || hot {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
+            self.label_mid(hdc, label, rect.left + s(10), middle, color, rect);
+            if tab == TerminalTab::Problems {
+                let count = (errors + warnings).to_string();
+                let width = self.text_width(hdc, &count);
+                let badge_left = rect.left + s(10) + self.text_width(hdc, label) + s(6);
+                let badge = RECT {
+                    left: badge_left,
+                    top: middle - s(8),
+                    right: badge_left + (width + s(8)).max(s(16)),
+                    bottom: middle + s(8),
+                };
+                Self::rounded_fill(hdc, badge, s(16), self.theme.edge);
+                self.label_mid(
+                    hdc,
+                    &count,
+                    (badge.left + badge.right - width) / 2,
+                    middle,
+                    self.theme.text,
+                    badge,
+                );
+            }
+            if active {
+                Self::fill(
+                    hdc,
+                    RECT {
+                        left: rect.left + s(10),
+                        top: header_bottom - s(6),
+                        right: rect.right - s(10),
+                        bottom: header_bottom - s(5),
+                    },
+                    self.theme.violet,
+                );
+            }
+        }
+        unsafe { SelectObject(hdc, old) };
+
+        // Output: what's running, beside Stop.
+        if self.terminal_tab == TerminalTab::Output && self.run_session.is_some() {
+            let label = match &self.run_label {
+                Some(name) => format!("Running {name}"),
+                None => "Running".to_owned(),
+            };
+            let width = self.text_width(hdc, &label);
+            let x = layout.kill.left - s(8) - width;
+            if x > layout.terminal.right + s(16) {
+                let dot = s(7);
+                self.icons.draw_glyph(
+                    hdc,
+                    DebugGlyph::GutterDot,
+                    self.theme.green,
+                    x - s(13),
+                    middle - dot / 2,
+                    dot,
+                );
+                self.label_mid(
+                    hdc,
+                    &label,
+                    x,
+                    middle,
+                    self.theme.muted,
+                    RECT {
+                        left: x,
+                        right: layout.kill.left,
+                        ..layout.kill
+                    },
+                );
+            }
+        }
+
+        let running = self.terminal_tab == TerminalTab::Output && self.run_session.is_some();
+        let shell_open = self.terminal_tab == TerminalTab::Terminal
+            && self.terminal_active < self.terminals.len();
+        let buttons = [
+            (layout.plus, TerminalHot::New, DebugGlyph::Plus, true),
+            (
+                layout.chevron,
+                TerminalHot::ShellPicker,
+                DebugGlyph::ChevronDown,
+                true,
+            ),
+            (
+                layout.kill,
+                TerminalHot::Kill,
+                if self.terminal_tab == TerminalTab::Output {
+                    DebugGlyph::Stop
+                } else {
+                    DebugGlyph::Trash
+                },
+                running || shell_open,
+            ),
+            (
+                layout.maximize,
+                TerminalHot::Maximize,
+                if self.terminal_restore_height.is_some() {
+                    DebugGlyph::ChevronDown
+                } else {
+                    DebugGlyph::ChevronUp
+                },
+                true,
+            ),
+            (layout.hide, TerminalHot::Hide, DebugGlyph::Close, true),
+        ];
+        for (rect, hot, glyph, enabled) in buttons {
+            if rect.right <= rect.left {
+                continue;
+            }
+            let lit = enabled && self.hot == Some(Hot::Terminal(hot));
+            if lit {
+                Self::rounded_fill(
+                    hdc,
+                    rect,
+                    s(4),
+                    self.hot_color(self.theme.sidebar_bg, self.theme.active_bg),
+                );
+            }
+            let color = if !enabled {
+                blend(self.theme.edge, self.theme.muted, 0.3)
+            } else if glyph == DebugGlyph::Stop {
+                self.theme.error
+            } else if lit {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
+            let size = if glyph == DebugGlyph::Stop {
+                s(13)
+            } else {
+                s(16)
+            };
+            self.glyph_in(hdc, glyph, color, rect, size);
+        }
+        // The line between the tab's own buttons and maximize/close.
+        if layout.kill.right > layout.kill.left {
+            Self::fill(
+                hdc,
+                RECT {
+                    left: layout.separator,
+                    top: middle - s(8),
+                    right: layout.separator + 1,
+                    bottom: middle + s(8),
+                },
+                self.theme.edge,
+            );
+        }
+    }
+
+    /// The shells, one 22 px row each: its shell's icon, its name, how it
+    /// ended if it has, and a 🗑 under the mouse.
+    fn paint_shell_list(&self, hdc: HDC, list: RECT) {
+        let s = |v: i32| self.scale(v);
+        Self::fill(
+            hdc,
+            RECT {
+                right: list.left + 1,
+                ..list
+            },
+            self.theme.edge,
+        );
+        for (index, pane) in self.terminals.iter().enumerate() {
+            let row = self.shell_row_rect(list, index);
+            if row.bottom > list.bottom {
+                break;
+            }
+            let active = index == self.terminal_active;
+            let hot = self.hot == Some(Hot::Terminal(TerminalHot::Shell(index)));
+            if active {
+                Self::fill(hdc, row, self.theme.select_bg);
+                Self::fill(
+                    hdc,
+                    RECT {
+                        right: row.left + s(2),
+                        ..row
+                    },
+                    self.theme.violet,
+                );
+            } else if hot {
+                Self::fill(
+                    hdc,
+                    row,
+                    self.hot_color(self.theme.sidebar_bg, self.theme.active_bg),
+                );
+            }
+            let middle = (row.top + row.bottom) / 2;
+            let icon = RECT {
+                left: row.left + s(10),
+                top: middle - s(8),
+                right: row.left + s(26),
+                bottom: middle + s(8),
+            };
+            self.paint_terminal_profile_shell_icon(hdc, pane.shell_kind, icon, true);
+            let exit = shell_exit_text(pane);
+            let name = if pane.custom_title {
+                pane.title.clone()
+            } else {
+                // "pwsh", then "pwsh 2" for a second of the same kind.
+                let same_before = self.terminals[..index]
+                    .iter()
+                    .filter(|other| other.shell_kind == pane.shell_kind && !other.custom_title)
+                    .count();
+                if same_before == 0 {
+                    pane.shell_kind.tag().to_owned()
+                } else {
+                    format!("{} {}", pane.shell_kind.tag(), same_before + 1)
+                }
+            };
+            let mut text_right = row.right - s(8);
+            if hot {
+                let kill = self.shell_row_kill(row);
+                self.glyph_in(hdc, DebugGlyph::Trash, self.theme.muted, kill, s(16));
+                text_right = kill.left - s(4);
+            } else if let Some(exit) = &exit {
+                let short = match exit.strip_prefix("code ") {
+                    Some(code) => format!("exited ({code})"),
+                    None => "exited".to_owned(),
+                };
+                let width = self.text_width(hdc, &short);
+                self.label_mid(
+                    hdc,
+                    &short,
+                    text_right - width,
+                    middle,
+                    self.theme.error,
+                    row,
+                );
+                text_right -= width + s(6);
+            }
+            let color = if exit.is_some() {
+                self.theme.muted
+            } else if active || hot {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
+            self.label_ellipsis(
+                hdc,
+                &name,
+                icon.right + s(7),
+                middle - self.text_height(hdc) / 2,
+                color,
+                RECT {
+                    right: text_right,
+                    ..row
+                },
+            );
+        }
+    }
+
+    /// A Powerline separator drawn as a shape filling its cell, so the
+    /// prompt's segments join without a Nerd Font: solid and thin arrows
+    /// (U+E0B0–E0B3) and half circles (U+E0B4–E0B7).
+    fn paint_powerline(hdc: HDC, ch: char, cell: RECT, color: u32) {
+        let (l, t, r, b) = (cell.left, cell.top, cell.right, cell.bottom);
+        let mid = (t + b) / 2;
+        unsafe {
+            let brush = CreateSolidBrush(color);
+            let pen = CreatePen(PS_SOLID, 1, color);
+            let old_brush = SelectObject(hdc, brush);
+            let old_pen = SelectObject(hdc, pen);
+            match ch {
+                '\u{E0B0}' => {
+                    let points = [
+                        POINT { x: l, y: t },
+                        POINT { x: r, y: mid },
+                        POINT { x: l, y: b },
+                    ];
+                    Polygon(hdc, points.as_ptr(), 3);
+                }
+                '\u{E0B2}' => {
+                    let points = [
+                        POINT { x: r, y: t },
+                        POINT { x: l, y: mid },
+                        POINT { x: r, y: b },
+                    ];
+                    Polygon(hdc, points.as_ptr(), 3);
+                }
+                '\u{E0B1}' => {
+                    MoveToEx(hdc, l, t, null_mut());
+                    LineTo(hdc, r - 1, mid);
+                    LineTo(hdc, l - 1, b);
+                }
+                '\u{E0B3}' => {
+                    MoveToEx(hdc, r - 1, t, null_mut());
+                    LineTo(hdc, l, mid);
+                    LineTo(hdc, r, b);
+                }
+                // Half circles: the right half of an ellipse twice the cell's
+                // width, and the left half.
+                '\u{E0B4}' => {
+                    Pie(hdc, l - (r - l), t, r, b, l, b, l, t);
+                }
+                '\u{E0B6}' => {
+                    Pie(hdc, l, t, r + (r - l), b, r, t, r, b);
+                }
+                '\u{E0B5}' => {
+                    Arc(hdc, l - (r - l), t, r, b, l, b, l, t);
+                }
+                _ => {
+                    Arc(hdc, l, t, r + (r - l), b, r, t, r, b);
+                }
+            }
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(brush);
+            DeleteObject(pen);
         }
     }
 
@@ -487,37 +675,29 @@ impl App {
             s(7),
             ui(4, 9, 18),
         );
-        self.panel_card(hdc, menu, s(7), ui(47, 73, 112), ui(13, 25, 45));
+        self.panel_card(hdc, menu, s(6), self.theme.edge, self.theme.sidebar_bg);
         let title = if self.terminal_profile_defaults_open {
             "SELECT DEFAULT PROFILE"
         } else {
             "NEW TERMINAL"
         };
+        let old_font = unsafe { SelectObject(hdc, self.small_font) };
         Self::label(
             hdc,
             title,
             menu.left + s(12),
-            menu.top + s(3),
-            ui(129, 154, 194),
+            menu.top + s(5),
+            self.theme.muted,
             menu,
         );
+        unsafe { SelectObject(hdc, old_font) };
 
         let default_shell = self.settings.default_terminal_profile;
         for (shell, row) in &layout.shell_rows {
             let available = self.terminal_profile_shell_available(*shell);
             let is_default = *shell == default_shell;
             if is_default {
-                Self::rounded_fill(hdc, *row, s(4), ui(24, 53, 94));
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: row.left,
-                        top: row.top + s(2),
-                        right: row.left + s(3),
-                        bottom: row.bottom - s(2),
-                    },
-                    ui(40, 205, 225),
-                );
+                Self::rounded_fill(hdc, *row, s(4), self.theme.select_bg);
             }
             let icon = RECT {
                 left: row.left + s(9),
@@ -526,9 +706,9 @@ impl App {
                 bottom: row.bottom - s(3),
             };
             let text_color = if available {
-                ui(226, 235, 249)
+                self.theme.text
             } else {
-                ui(91, 107, 132)
+                self.theme.muted
             };
             self.paint_terminal_profile_shell_icon(hdc, *shell, icon, available);
             Self::label(
@@ -551,28 +731,14 @@ impl App {
                     *row,
                 );
             } else if is_default {
-                let check = RECT {
-                    left: row.right - s(76),
-                    top: row.top + s(5),
-                    right: row.right - s(62),
-                    bottom: row.top + s(19),
-                };
-                Self::rounded_fill(hdc, check, s(4), ui(24, 104, 105));
-                unsafe {
-                    let pen = CreatePen(PS_SOLID, s(1).max(1), ui(172, 246, 229));
-                    let old_pen = SelectObject(hdc, pen);
-                    MoveToEx(hdc, check.left + s(3), check.top + s(7), null_mut());
-                    LineTo(hdc, check.left + s(6), check.top + s(10));
-                    LineTo(hdc, check.left + s(11), check.top + s(4));
-                    SelectObject(hdc, old_pen);
-                    DeleteObject(pen);
-                }
+                let label = "Default";
+                let width = self.text_width(hdc, label);
                 Self::label(
                     hdc,
-                    "Default",
-                    check.right + s(6),
+                    label,
+                    row.right - width - s(10),
                     row.top + s(3),
-                    ui(158, 179, 213),
+                    self.theme.muted,
                     *row,
                 );
             }
@@ -591,10 +757,9 @@ impl App {
                 right: menu.right - s(10),
                 bottom: after_shells + s(2),
             },
-            ui(40, 57, 84),
+            self.theme.edge,
         );
         if let Some(settings) = layout.settings {
-            Self::rounded_fill(hdc, settings, s(4), ui(17, 34, 59));
             Self::label(
                 hdc,
                 "\u{2699}",
@@ -605,10 +770,10 @@ impl App {
             );
             Self::label(
                 hdc,
-                "Select Default Profile",
+                "Select Default Profile…",
                 settings.left + s(38),
                 settings.top + s(4),
-                ui(226, 235, 249),
+                self.theme.text,
                 settings,
             );
             Self::label(
@@ -711,4 +876,14 @@ impl App {
             DeleteObject(pen);
         }
     }
+}
+
+/// Whether any cell shows a private-use character, so the symbol font is
+/// looked up only for a terminal that needs it.
+fn snapshot_has_private_use(snapshot: &Snapshot) -> bool {
+    snapshot.rows.iter().any(|row| {
+        row.cells
+            .iter()
+            .any(|cell| cell.text.chars().next().is_some_and(is_private_use))
+    })
 }

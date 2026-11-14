@@ -429,6 +429,18 @@ pub(super) fn is_c_family_path(path: &Path) -> bool {
 // checks, keybinding hints, ...); the real Zed registry entry is named
 // "material-icon-theme". Every other id (found via registry search) is
 // already the real registry id, so this is the identity function for them.
+/// Gives LightLine's window the keyboard, but only while it's the active
+/// window. SetFocus on an inactive window activates it, so a program starting
+/// in Output or a panel opening would otherwise pull the user away from the
+/// app they're in (and a hidden test window would take their typing).
+pub(super) fn take_keyboard(hwnd: HWND) {
+    unsafe {
+        if GetForegroundWindow() == hwnd {
+            SetFocus(hwnd);
+        }
+    }
+}
+
 fn zed_registry_id(internal_id: &str) -> &str {
     if internal_id == "material-icons" {
         "material-icon-theme"
@@ -971,6 +983,15 @@ pub(super) struct App {
     pub(super) terminal_active: usize,
     pub(super) terminal_counter: usize,
     pub(super) run_session: Option<SessionId>,
+    // What Output says is running ("main.rs", "git push"), while it runs.
+    pub(super) run_label: Option<String>,
+    // The bottom panel's height before Maximize, to go back to.
+    pub(super) terminal_restore_height: Option<i32>,
+    // The font for private-use symbols in the terminal (a Nerd Font), made
+    // the first time a row needs one; `tried` stops a fruitless search
+    // repeating on every paint.
+    pub(super) terminal_symbol_font: Option<HFONT>,
+    pub(super) terminal_symbol_font_tried: bool,
     pub(super) run_snapshot: Option<Arc<Snapshot>>,
     pub(super) run_applied_size: Option<TerminalSize>,
     pub(super) terminal_visible: bool,
@@ -1609,6 +1630,10 @@ impl App {
             terminal_active: 0,
             terminal_counter: 0,
             run_session: None,
+            run_label: None,
+            terminal_restore_height: None,
+            terminal_symbol_font: None,
+            terminal_symbol_font_tried: false,
             run_snapshot: None,
             run_applied_size: None,
             terminal_visible: false,
@@ -2672,6 +2697,8 @@ impl App {
         self.line_height = Self::measured_line_height(font, dpi, zoom);
         self.char_width = Self::measured_char_width(font, dpi, zoom);
         self.font = font;
+        // The symbol font is made at the terminal font's height.
+        self.reset_terminal_symbol_font();
         self.ui_font = ui_font;
         self.small_font = small_font;
         self.brand_font = brand_font;

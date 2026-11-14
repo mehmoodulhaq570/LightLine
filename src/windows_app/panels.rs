@@ -355,7 +355,12 @@ impl App {
                     self.lsp_failed_at
                         .retain(|(language, _), _| !matches!(language, LspLanguage::Extension(_)));
                 }
+                let symbol_font_changed =
+                    settings.terminal_symbol_font != self.settings.terminal_symbol_font;
                 self.settings = settings;
+                if symbol_font_changed {
+                    self.reset_terminal_symbol_font();
+                }
                 if font_changed {
                     self.set_metrics(self.dpi, self.zoom);
                 }

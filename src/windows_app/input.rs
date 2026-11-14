@@ -1897,10 +1897,12 @@ impl App {
         }
         if self.terminal_visible && y >= self.terminal_top(hwnd) {
             let top = self.terminal_top(hwnd);
-            let layout = self.terminal_header_layout(editor_left, rect.right, top);
+            // The same edges the panel is painted with.
+            let panel_right = self.editor_right(hwnd);
+            let layout = self.terminal_header_layout(editor_left, panel_right, top);
             let header_bottom = layout.header_bottom;
             if y < header_bottom {
-                match self.terminal_header_hit(editor_left, rect.right, top, x, y) {
+                match self.terminal_header_hit(editor_left, panel_right, top, x, y) {
                     // The far-right close hides the panel but keeps every
                     // shell session running, exactly like dismissing a dock.
                     TerminalHeaderHit::Hide => self.close_terminal(hwnd),
@@ -1909,10 +1911,11 @@ impl App {
                         self.switch_terminal_tab(hwnd, TerminalTab::Output);
                     }
                     TerminalHeaderHit::DebugTab => self.show_debug_console(hwnd),
-                    TerminalHeaderHit::TerminalTab(index) => self.select_terminal(hwnd, index),
+                    TerminalHeaderHit::TerminalTab => self.open_terminal(hwnd),
                     TerminalHeaderHit::New => self.new_terminal(hwnd, false),
                     TerminalHeaderHit::ShellPicker => self.toggle_terminal_profile_menu(hwnd),
                     TerminalHeaderHit::Kill => self.close_active_terminal(hwnd),
+                    TerminalHeaderHit::Maximize => self.toggle_terminal_maximized(hwnd),
                     TerminalHeaderHit::Body => {
                         self.focus_terminal(hwnd);
                         self.start_terminal_selection(hwnd, x, y);
@@ -1924,6 +1927,22 @@ impl App {
                 return;
             }
             if self.debug_console_click(hwnd, x, y) {
+                return;
+            }
+            // A shell's row opens it; its 🗑 closes it.
+            if let Some((index, kill)) = self.shell_list_hit(hwnd, x, y) {
+                self.clear_hot(hwnd);
+                if kill {
+                    self.close_terminal_at(hwnd, index);
+                } else {
+                    self.select_terminal(hwnd, index);
+                }
+                return;
+            }
+            if self
+                .shell_list_rect(panel_right, top, rect.bottom - self.scale(STATUS))
+                .is_some_and(|list| x >= list.left)
+            {
                 return;
             }
             self.focus_terminal(hwnd);
@@ -2057,7 +2076,7 @@ impl App {
             self.search_input = false;
             self.find_mode = false;
             self.toggle_caret_at(hwnd, pos);
-            unsafe { SetFocus(hwnd) };
+            take_keyboard(hwnd);
             return;
         }
         // Only the editor and the status bar change, unless this click takes
@@ -2079,7 +2098,7 @@ impl App {
         self.move_cursor(pos, extend);
         self.dragging = true;
         unsafe {
-            SetFocus(hwnd);
+            take_keyboard(hwnd);
             SetCapture(hwnd);
         }
         self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
@@ -2199,11 +2218,22 @@ impl App {
             let left = self.editor_left();
             let top = self.terminal_top(hwnd);
             let right = self.editor_right(hwnd);
+            // Right-click a shell's row (or the TERMINAL tab, for the open
+            // one) to rename it.
+            if let Some((index, _)) = self.shell_list_hit(hwnd, x, y) {
+                if let Some(pane) = self.terminals.get(index) {
+                    let bottom = (rect.bottom - self.scale(STATUS)).max(0) - self.chrome_gap();
+                    let menu_rect = self.terminal_context_menu_rect(x, y, left, right, bottom);
+                    self.terminal_context_menu = Some((pane.id, menu_rect));
+                }
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            }
             if x >= left && x < right && y >= top && y < top + self.scale(TERMINAL_HEADER) {
                 let hit = self.terminal_header_hit(left, right, top, x, y);
                 match hit {
-                    TerminalHeaderHit::TerminalTab(index) => {
-                        if let Some(pane) = self.terminals.get(index) {
+                    TerminalHeaderHit::TerminalTab => {
+                        if let Some(pane) = self.terminals.get(self.terminal_active) {
                             let bottom =
                                 (rect.bottom - self.scale(STATUS)).max(0) - self.chrome_gap();
                             let menu_rect =
