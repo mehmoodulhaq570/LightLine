@@ -1719,6 +1719,17 @@ impl App {
                     }
                     return;
                 }
+                if self.side_view == SideView::Review {
+                    let layout = self.git_layout(self.scale(RAIL), self.sidebar_right());
+                    if let GitHit::Button(button) =
+                        self.git_hit(x, y, self.scale(RAIL), self.sidebar_right())
+                    {
+                        self.commit_focus = false;
+                        self.git_button_pressed(hwnd, button, &layout);
+                        unsafe { InvalidateRect(hwnd, null(), 0) };
+                        return;
+                    }
+                }
                 if self.side_view == SideView::Debug {
                     if x >= editor_left - self.scale(38) {
                         self.show_quick_open(hwnd);
@@ -1791,8 +1802,9 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Review {
-                let panel_left = self.scale(RAIL);
-                match self.git_hit(x, y, panel_left, editor_left) {
+                // The same edges the panel is painted with.
+                let (panel_left, panel_right) = (self.scale(RAIL), self.sidebar_right());
+                match self.git_hit(x, y, panel_left, panel_right) {
                     GitHit::CommitBox => {
                         self.commit_focus = true;
                         self.panel_focus = true;
@@ -1802,18 +1814,19 @@ impl App {
                         // Anywhere else takes the keyboard away from the box.
                         self.commit_focus = false;
                         match hit {
-                            GitHit::CommitButton => self.git_commit_pressed(hwnd),
-                            GitHit::Refresh => self.refresh_git(),
-                            GitHit::Push => self.git_remote(hwnd, workflow::RemoteAction::Push),
-                            GitHit::Pull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
-                            GitHit::Fetch => self.git_remote(hwnd, workflow::RemoteAction::Fetch),
+                            GitHit::Button(button) => {
+                                let layout = self.git_layout(panel_left, panel_right);
+                                self.git_button_pressed(hwnd, button, &layout);
+                            }
                             GitHit::ToggleSection(section) => {
                                 self.git_toggle_section(hwnd, section)
                             }
                             GitHit::StageAll => self.git_stage_all(hwnd),
                             GitHit::UnstageAll => self.git_unstage_all(hwnd),
+                            GitHit::DiscardAll => self.git_discard_all(hwnd),
                             GitHit::Toggle(index) => self.git_toggle_row(hwnd, index),
                             GitHit::Discard(index) => self.git_discard_row(hwnd, index),
+                            GitHit::Open(index) => self.git_open_row(hwnd, index),
                             GitHit::Row(index) => {
                                 self.panel_selected = index;
                                 self.panel_focus = false;

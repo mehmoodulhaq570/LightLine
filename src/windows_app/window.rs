@@ -699,6 +699,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                     } else {
                         (app.panel_first + 3).min(max)
                     };
+                    app.forget_git_hot_row(hwnd);
                     unsafe { InvalidateRect(hwnd, null(), 0) };
                     return 0;
                 }

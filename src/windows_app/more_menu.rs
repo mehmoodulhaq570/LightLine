@@ -2,7 +2,8 @@
 // breadcrumb row. The button used to be drawn with nothing behind it, so a
 // click did nothing (#57). Like the editor's right-click menu it is painted
 // in the backbuffer, so it follows the color theme, and painting and clicks
-// share `more_menu_layout`.
+// share `more_menu_layout`. Source Control's ··· and its commit button's ▾
+// open the same menu with their own items.
 
 use super::*;
 
@@ -21,10 +22,36 @@ enum MoreAction {
     RunConfigurations,
     Close,
     Palette,
+    // Source Control.
+    GitCommit,
+    GitRefresh,
+    GitPull,
+    GitPush,
+    GitFetch,
+    GitStageAll,
+    GitUnstageAll,
+    GitDiscardAll,
+}
+
+/// Which Source Control button opened the menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GitMenu {
+    /// The ··· in the panel's header.
+    Header,
+    /// The ▾ beside the commit button.
+    Commit,
+}
+
+/// What the menu hangs from: a pane's "..." button, or a Source Control
+/// button at this rectangle in the window.
+#[derive(Clone, Copy)]
+enum MenuAnchor {
+    Pane(usize),
+    Git(GitMenu, RECT),
 }
 
 pub(super) struct MoreMenu {
-    pane: usize,
+    anchor: MenuAnchor,
     highlighted: Option<usize>,
 }
 
@@ -35,6 +62,29 @@ struct MoreLayout {
 
 impl App {
     fn more_actions(&self) -> Vec<MoreAction> {
+        match self.more_menu.as_ref().map(|menu| menu.anchor) {
+            Some(MenuAnchor::Git(GitMenu::Header, _)) => {
+                return vec![
+                    MoreAction::GitCommit,
+                    MoreAction::GitRefresh,
+                    MoreAction::GitPull,
+                    MoreAction::GitPush,
+                    MoreAction::GitFetch,
+                    MoreAction::GitStageAll,
+                    MoreAction::GitUnstageAll,
+                    MoreAction::GitDiscardAll,
+                ];
+            }
+            Some(MenuAnchor::Git(GitMenu::Commit, _)) => {
+                return vec![
+                    MoreAction::GitCommit,
+                    MoreAction::GitPush,
+                    MoreAction::GitPull,
+                    MoreAction::GitFetch,
+                ];
+            }
+            _ => {}
+        }
         let mut actions = vec![MoreAction::Split];
         // Image, binary and Markdown preview tabs have no text to edit.
         if !self.tab().read_only() {
@@ -63,6 +113,14 @@ impl App {
             MoreAction::RunConfigurations => ("Run Configurations...", ""),
             MoreAction::Close => ("Close Editor", "Ctrl+W"),
             MoreAction::Palette => ("Command Palette", "Ctrl+Shift+P"),
+            MoreAction::GitCommit => ("Commit", ""),
+            MoreAction::GitRefresh => ("Refresh", ""),
+            MoreAction::GitPull => ("Pull", ""),
+            MoreAction::GitPush => ("Push", ""),
+            MoreAction::GitFetch => ("Fetch", ""),
+            MoreAction::GitStageAll => ("Stage All Changes", ""),
+            MoreAction::GitUnstageAll => ("Unstage All Changes", ""),
+            MoreAction::GitDiscardAll => ("Discard All Changes", ""),
         }
     }
 
@@ -72,11 +130,33 @@ impl App {
             None
         } else {
             Some(MoreMenu {
-                pane,
+                anchor: MenuAnchor::Pane(pane),
                 highlighted: None,
             })
         };
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Opens a Source Control menu under `button` (in the window's
+    /// coordinates), or closes it if it's open.
+    pub(super) fn toggle_git_menu(&mut self, hwnd: HWND, menu: GitMenu, button: RECT) {
+        self.more_menu = if self.more_menu.is_some() {
+            None
+        } else {
+            Some(MoreMenu {
+                anchor: MenuAnchor::Git(menu, button),
+                highlighted: None,
+            })
+        };
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    // The button the menu hangs from, in the window.
+    fn anchor_button(&self, hwnd: HWND, anchor: MenuAnchor) -> RECT {
+        match anchor {
+            MenuAnchor::Pane(pane) => self.pane_actions(self.pane_right(hwnd, pane)).1,
+            MenuAnchor::Git(_, button) => button,
+        }
     }
 
     pub(super) fn dismiss_more_menu(&mut self, hwnd: HWND) {
@@ -88,7 +168,7 @@ impl App {
     fn more_menu_layout(&self, hwnd: HWND) -> Option<MoreLayout> {
         let menu = self.more_menu.as_ref()?;
         let s = |value: i32| self.scale(value);
-        let (_, button) = self.pane_actions(self.pane_right(hwnd, menu.pane));
+        let button = self.anchor_button(hwnd, menu.anchor);
         let actions = self.more_actions();
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
@@ -130,15 +210,16 @@ impl App {
         let Some(layout) = self.more_menu_layout(hwnd) else {
             return false;
         };
-        let pane = self.more_menu.as_ref().map_or(0, |menu| menu.pane);
+        let Some(anchor) = self.more_menu.as_ref().map(|menu| menu.anchor) else {
+            return false;
+        };
         self.dismiss_more_menu(hwnd);
         if !contains(layout.menu, x, y) {
             // A click on the same button only closes the menu.
-            let (_, button) = self.pane_actions(self.pane_right(hwnd, pane));
-            return contains(button, x, y);
+            return contains(self.anchor_button(hwnd, anchor), x, y);
         }
         if let Some(&(action, _)) = layout.rows.iter().find(|(_, row)| contains(*row, x, y)) {
-            self.run_more_action(hwnd, pane, action);
+            self.run_more_action(hwnd, anchor, action);
         }
         true
     }
@@ -163,7 +244,7 @@ impl App {
         let Some(menu) = &self.more_menu else {
             return false;
         };
-        let pane = menu.pane;
+        let anchor = menu.anchor;
         let highlighted = menu.highlighted;
         let actions = self.more_actions();
         let count = actions.len();
@@ -175,7 +256,7 @@ impl App {
             x if x == VK_RETURN as u32 => {
                 self.dismiss_more_menu(hwnd);
                 if let Some(action) = highlighted.and_then(|index| actions.get(index)) {
-                    self.run_more_action(hwnd, pane, *action);
+                    self.run_more_action(hwnd, anchor, *action);
                 }
                 return true;
             }
@@ -195,8 +276,10 @@ impl App {
         true
     }
 
-    fn run_more_action(&mut self, hwnd: HWND, pane: usize, action: MoreAction) {
-        self.focus_pane(hwnd, pane);
+    fn run_more_action(&mut self, hwnd: HWND, anchor: MenuAnchor, action: MoreAction) {
+        if let MenuAnchor::Pane(pane) = anchor {
+            self.focus_pane(hwnd, pane);
+        }
         match action {
             MoreAction::Split => self.toggle_split(hwnd),
             MoreAction::Find => self.open_find(hwnd, false),
@@ -211,7 +294,16 @@ impl App {
                 self.quick_query = ">".into();
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
+            MoreAction::GitCommit => self.git_commit_pressed(hwnd),
+            MoreAction::GitRefresh => self.refresh_git(),
+            MoreAction::GitPull => self.git_remote(hwnd, workflow::RemoteAction::Pull),
+            MoreAction::GitPush => self.git_remote(hwnd, workflow::RemoteAction::Push),
+            MoreAction::GitFetch => self.git_remote(hwnd, workflow::RemoteAction::Fetch),
+            MoreAction::GitStageAll => self.git_stage_all(hwnd),
+            MoreAction::GitUnstageAll => self.git_unstage_all(hwnd),
+            MoreAction::GitDiscardAll => self.git_discard_all(hwnd),
         }
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn paint_more_menu(&self, hdc: HDC, hwnd: HWND) {

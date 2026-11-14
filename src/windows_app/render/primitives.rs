@@ -759,13 +759,7 @@ impl App {
         }
         let ellipsis = "\u{2026}";
         let budget = (max_width - self.text_width(hdc, ellipsis)).max(0);
-        let mut end = text.len();
-        while end > 0 && self.text_width(hdc, &text[..end]) > budget {
-            end -= 1;
-            while end > 0 && !text.is_char_boundary(end) {
-                end -= 1;
-            }
-        }
+        let end = Self::fitting_prefix(hdc, text, budget);
         Self::label(
             hdc,
             &format!("{}{ellipsis}", &text[..end]),
@@ -774,6 +768,41 @@ impl App {
             color,
             clip,
         );
+    }
+
+    /// The byte length of the longest start of `text` that is at most
+    /// `budget` pixels wide. One GDI call measures every prefix at once; the
+    /// loop it replaces measured the text again for each character it cut,
+    /// which added up on a list of long commit subjects.
+    pub(in crate::windows_app) fn fitting_prefix(hdc: HDC, text: &str, budget: i32) -> usize {
+        let utf16: Vec<u16> = text.encode_utf16().collect();
+        let mut fit = 0i32;
+        let mut size = SIZE::default();
+        let measured = unsafe {
+            GetTextExtentExPointW(
+                hdc,
+                utf16.as_ptr(),
+                utf16.len() as i32,
+                budget.max(0),
+                &mut fit,
+                null_mut(),
+                &mut size,
+            )
+        };
+        if measured == 0 {
+            return 0;
+        }
+        // `fit` counts UTF-16 units; end on the last whole character inside.
+        let mut units = 0usize;
+        let mut end = 0usize;
+        for (byte, ch) in text.char_indices() {
+            units += ch.len_utf16();
+            if units > fit.max(0) as usize {
+                break;
+            }
+            end = byte + ch.len_utf8();
+        }
+        end
     }
 
     /// Draws `glyph` in `color`, `size` pixels square, centred in `rect`.

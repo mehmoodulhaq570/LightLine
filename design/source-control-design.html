@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Source Control</title>
+<style>
+  :root {
+    --page: #02060f;
+    --edge-page: #182f52;
+    --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs default_dark) */
+    --rail: #070d1b;
+    --side: #081020;
+    --editor: #070e1d;
+    --active: #111f3b;
+    --select: #1a3065;
+    --edge: #182f52;
+    --text: #e2e8f0;
+    --muted: #7e92b2;
+    --blue: #5297ff;
+    --violet: #8b5cf6;
+    --green: #34d399;
+    --amber: #f5b85f;
+    --red: #f66e78;
+    --orange: #f59150;
+    --ready: #4f46d2;
+    --ready-edge: #6c5cf6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 10px; }
+  p.lead { color: var(--label); max-width: 900px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+
+  .pair { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .pair figure { margin: 0; }
+  .pair figcaption { margin: 0 0 8px; font-weight: 600; }
+  .pair figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  .frame { width: 466px; height: 975px; max-width: 100%; overflow: hidden; border: 1px solid var(--edge-page); border-radius: 8px; position: relative; background: #000; }
+  .frame > img { display: block; width: 466px; height: 975px; }
+  .notes { flex: 1 1 260px; min-width: 260px; }
+  .notes ol { padding-left: 20px; margin: 0; }
+  .notes li { margin: 0 0 12px; }
+  .notes li b { color: #fff; }
+  .notes .dim { color: var(--muted); }
+
+  table { border-collapse: collapse; width: 100%; max-width: 900px; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .better { color: var(--green); }
+  ul.plain { max-width: 900px; padding-left: 20px; }
+  ul.plain li { margin: 0 0 8px; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- The mock: LightLine logical pixels, shown at 125% like the screenshot ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 373px; height: 780px; transform: scale(1.25); transform-origin: 0 0;
+          display: grid; grid-template-columns: 48px 285px 40px; grid-template-rows: 1fr 22px;
+          font-size: 13px; line-height: 22px; color: var(--text); background: var(--editor); cursor: default; user-select: none; }
+  .mock svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  .rail { background: var(--rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 6px; color: var(--muted); }
+  .rail .ri { width: 48px; height: 40px; display: grid; place-items: center; position: relative; }
+  .rail .ri svg { width: 22px; height: 22px; stroke-width: 1.4; }
+  .rail .ri.on { color: var(--text); }
+  .rail .ri.on::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--violet); }
+  .rail .grow { flex: 1; }
+  .side { background: var(--side); border-right: 1px solid var(--edge); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .ed { background: var(--editor); }
+  .status { grid-column: 1 / -1; background: var(--editor); border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; color: var(--text); }
+  .status span { display: flex; align-items: center; gap: 4px; }
+  .status svg { width: 14px; height: 14px; }
+
+  .head { height: 35px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; }
+  .head .t { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); flex: 1; }
+  .ib { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
+  .ib:hover { background: var(--active); color: var(--text); }
+
+  .box { margin: 0 12px; height: 30px; flex: none; border: 1px solid var(--edge); background: var(--active); border-radius: 4px; padding: 0 8px; display: flex; align-items: center; color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .box.focus { border-color: var(--blue); color: var(--text); }
+  .box .caret { display: inline-block; width: 1px; height: 16px; background: var(--text); margin-left: 1px; vertical-align: -3px; }
+  .btnrow { margin: 8px 12px 0; height: 28px; flex: none; display: flex; border-radius: 4px; overflow: hidden; border: 1px solid var(--edge); background: var(--active); color: var(--muted); }
+  .btnrow.ready { background: var(--ready); border-color: var(--ready-edge); color: #fff; }
+  .btnrow .main { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .btnrow .drop { width: 28px; display: grid; place-items: center; border-left: 1px solid var(--edge); }
+  .btnrow.ready .drop { border-left-color: var(--ready-edge); }
+  .btnrow:hover .main, .btnrow .drop:hover { filter: brightness(1.15); }
+
+  .branch { margin: 6px 8px 4px 12px; height: 26px; flex: none; display: flex; align-items: center; gap: 6px; }
+  .branch .name { color: var(--text); }
+  .branch .state { color: var(--muted); font-size: 12px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .branch .state.ahead { color: var(--blue); }
+  .branch .ib { width: auto; min-width: 26px; padding: 0 4px; gap: 2px; display: flex; align-items: center; font-size: 12px; }
+  .branch .ib b { font-weight: 600; color: var(--blue); }
+
+  .list { flex: 1; min-height: 0; overflow: hidden; position: relative; border-top: 1px solid var(--edge); padding-top: 2px; }
+  .sec { height: 22px; display: flex; align-items: center; padding: 0 8px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); }
+  .sec .chev { color: var(--muted); }
+  .sec .t { margin-left: 2px; }
+  .pill { margin-left: 6px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--edge); color: var(--text); font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; letter-spacing: 0; }
+  .sec .sp { flex: 1; }
+  .acts { display: none; gap: 0; }
+  .sec:hover .acts, .row:hover .acts, .row.hov .acts, .row.sel .acts, .sec.hov .acts { display: flex; }
+  .acts .ib { width: 22px; }
+
+  .row { height: 22px; display: flex; align-items: center; padding: 0 8px 0 20px; gap: 6px; white-space: nowrap; }
+  .row:hover, .row.hov { background: var(--active); }
+  .row.sel { background: var(--select); }
+  .fi { width: 16px; height: 16px; flex: none; border-radius: 3px; display: grid; place-items: center; font-size: 8px; font-weight: 700; line-height: 1; color: #0a0f1c; background: var(--c); letter-spacing: -.02em; }
+  .row .n { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .row .d { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+  .row .n.del { text-decoration: line-through; color: var(--muted); }
+  .row .k { width: 14px; text-align: center; font-weight: 600; font-size: 12px; flex: none; }
+
+  .note { height: 22px; display: flex; align-items: center; gap: 6px; padding-left: 20px; color: var(--muted); }
+  .note svg { color: var(--green); }
+
+  .crow { height: 22px; display: flex; align-items: center; padding: 0 8px 0 0; white-space: nowrap; }
+  .crow:hover, .crow.hov { background: var(--active); }
+  .crow.sel { background: var(--select); }
+  .lane { width: 34px; height: 22px; position: relative; flex: none; }
+  .lane::before { content: ""; position: absolute; left: 20px; top: 0; bottom: 0; width: 1px; background: #2a4570; }
+  .crow.first .lane::before { top: 11px; }
+  .lane i { position: absolute; left: 17px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+  .crow.head .lane i { left: 16px; top: 7px; width: 9px; height: 9px; background: var(--side); border: 2px solid var(--violet); }
+  .ref { flex: none; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: #2a1f5c; color: #c4b5fd; margin-right: 6px; }
+  .crow .s { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .crow .s em { font-style: normal; color: var(--muted); }
+  .crow .w { flex: none; color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .crow .h { display: none; flex: none; color: var(--muted); font-size: 12px; margin-left: 8px; font-family: "Cascadia Code", Consolas, monospace; }
+  .crow:hover .h, .crow.hov .h { display: block; }
+  .crow:hover .w, .crow.hov .w { display: none; }
+
+  .sb { position: absolute; right: 1px; top: 4px; width: 4px; height: 210px; border-radius: 2px; background: #2a4570; }
+
+  @media (max-width: 520px) {
+    .frame { height: calc(975px * var(--fit, 1)); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>LightLine Source Control: current and proposed</h1>
+  <p class="lead">On the left is a screenshot of the panel today. On the right is the proposed panel, drawn at the same 125% scale in LightLine's own colours. Everything it shows already exists in LightLine: the commit box, staging, discarding, Push, Pull, Fetch, the branch and its ahead/behind counts, and History. The change is how it's laid out: less chrome above the files, file names you can read, and three times as many commits on screen.</p>
+
+  <div class="toolbar" role="group" aria-label="Panel state">
+    <button data-state="changes" aria-pressed="true">With changes</button>
+    <button data-state="typing" aria-pressed="false">Typing a message</button>
+    <button data-state="clean" aria-pressed="false">Clean, 2 to push</button>
+    <button data-state="behind" aria-pressed="false">3 to pull</button>
+    <span class="hint">Hover rows in the mock to see their buttons.</span>
+  </div>
+
+  <div class="pair">
+    <figure>
+      <figcaption>Today<span>Screenshot, 125% display</span></figcaption>
+      <div class="frame"><img src="screens/source-control-current.png" alt="LightLine's Source Control panel today"></div>
+    </figure>
+    <figure>
+      <figcaption>Proposed<span>Same scale and data</span></figcaption>
+      <div class="frame"><div class="mock" id="mock"></div></div>
+    </figure>
+    <div class="notes">
+      <h2 style="margin-top:0">What changes</h2>
+      <ol>
+        <li><b>Commit and Refresh move into the header</b>, next to a <b>···</b> menu with Push, Pull, Fetch and Stage All / Unstage All. That's where VS Code keeps them. <span class="dim">The header already draws Refresh; this adds two icons.</span></li>
+        <li><b>The message box is one line tall</b> (30 px, was 54), and the placeholder tells you that <code>Enter</code> commits on the current branch.</li>
+        <li><b>One button that does the next thing.</b> It shows <b>Commit</b> when there's a message, <b>Push 2 commits</b> when the branch is ahead and there's nothing to commit, and <b>Pull 3 commits</b> when it's behind. The ▾ beside it lists Commit, Push, Pull and Fetch. It's 28 px tall, down from 34.</li>
+        <li><b>The branch, Pull, Push and Fetch share one row</b> (26 px), replacing the three big buttons and the branch row (34 + 38 px). The icon buttons show their counts (<b>↓3</b>, <b>↑2</b>) only when there is something to pull or push.</li>
+        <li><b>File rows lead with the name.</b> The row shows the file icon (from the icon theme, as in the Explorer), the name, then the folder dimmed. Today the path is cut off before the name: <code>src/windows_app/lan…</code>.</li>
+        <li><b>Status is one coloured letter</b> instead of a word: <b style="color:var(--amber)">M</b> modified, <b style="color:var(--green)">A</b> added, <b style="color:var(--green)">U</b> untracked, <b style="color:var(--red)">D</b> deleted (the name is struck through), <b style="color:var(--blue)">R</b> renamed, <b style="color:var(--orange)">!</b> conflicted. The colour shows the kind of change. Whether a file is staged is shown by its section, so the colour no longer has to say it (today staged files are violet and unstaged ones green).</li>
+        <li><b>Row buttons appear on hover</b>, and stay on the selected row so the keyboard can reach them: Open File, Discard and Stage/Unstage. Section headers get Stage All, Unstage All and Discard All the same way. Today every row shows them all the time.</li>
+        <li><b>History is one line per commit</b> (22 px, was 48). Each commit shows a graph dot, its subject and its age; the hash appears on hover. The newest commit gets a hollow violet dot and a <span class="ref" style="display:inline-block;margin:0">main</span> label instead of a highlighted card. Clicking a commit still puts its hash and subject in the status bar.</li>
+        <li><b>Square corners, 1 px lines, 22 px rows</b>, matching the Explorer and the flat layout from #83. Section counts are small filled pills instead of bordered boxes.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h2>In sizes</h2>
+  <table>
+    <tr><th>Measure (logical pixels)</th><th>Today</th><th>Proposed</th></tr>
+    <tr><td>Message box</td><td class="num">54</td><td class="num better">30</td></tr>
+    <tr><td>Commit button</td><td class="num">34</td><td class="num better">28</td></tr>
+    <tr><td>Push / Pull / Fetch plus the branch</td><td class="num">34 + 38</td><td class="num better">26, one row</td></tr>
+    <tr><td>First file row starts at (from the top of the window)</td><td class="num">about 276</td><td class="num better">about 162</td></tr>
+    <tr><td>Commit row height</td><td class="num">48, two lines</td><td class="num better">22, one line</td></tr>
+    <tr><td>Commits visible in this window (5 changes shown)</td><td class="num">6</td><td class="num better">about 20</td></tr>
+    <tr><td>Room for the file name in a 285 px panel</td><td class="num">path cut off after ~22 characters, name hidden</td><td class="num better">name in full up to 150 px, then the folder</td></tr>
+  </table>
+
+  <h2>Speed</h2>
+  <ul class="plain">
+    <li><b>It's drawn with what LightLine already has.</b> Rectangles, labels, the shared icon atlas, and the file icons the Explorer already rasterizes. Nothing new is loaded when the panel opens.</li>
+    <li><b>Painting gets cheaper.</b> A commit row draws one line of text where it drew two. Each drawn line costs real time in GDI (about 0.6 M cycles a row), so a commit costs half what it did. The panel shows more commits, so a full redraw of it draws more rows in total, but that only happens when the panel opens or its list changes.</li>
+    <li><b>Hover redraws two rows</b>: the one the mouse left and the one it entered, 2 × 22 px. It's a new <code>Hot</code> target, like the rail's, with no timer; the 90 ms fade follows the <code>animations</code> setting. Idle stays at 0 wakeups.</li>
+    <li><b>Ages like "9h" are worked out when History loads</b>, on the worker that already runs <code>git log</code> (it asks for <code>%ct</code> as well). They aren't kept up to date by a timer; they refresh with the panel, as the list does today.</li>
+  </ul>
+
+  <h2>Open questions</h2>
+  <ul class="plain">
+    <li><b>Pull, Push and Fetch:</b> icon buttons on the branch row (as drawn), or only in the ··· menu and the button's ▾, like VS Code? The row costs 26 px.</li>
+    <li><b>History:</b> one line with the hash on hover (as drawn), or keep the author visible? The author could go in the dimmed text after the subject, at the cost of subject width.</li>
+    <li><b>Later, not in this change:</b> a message box that wraps and grows up to 5 lines for longer messages, like VS Code. Today it's a single line of text; this design keeps that.</li>
+  </ul>
+</div>
+
+<script>
+const I = {
+  check: '<path d="M3 8.5l3.2 3L13 4.5"/>',
+  refresh: '<path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 2.5v3h-3"/>',
+  more: '<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',
+  down: '<path d="M4 6l4 4 4-4"/>',
+  right: '<path d="M6 4l4 4-4 4"/>',
+  caret: '<path d="M5 6.5l3 3 3-3"/>',
+  branch: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="5" r="1.5"/><path d="M5 5v6M11 6.5c0 3-6 2.3-6 4.5"/>',
+  pull: '<path d="M8 3v9M4.5 8.5L8 12l3.5-3.5"/>',
+  push: '<path d="M8 13V4M4.5 7.5L8 4l3.5 3.5"/>',
+  fetch: '<path d="M8 2.5v7M5 6.8l3 3 3-3M3 13h10"/>',
+  plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  minus: '<path d="M3.5 8h9"/>',
+  discard: '<path d="M5.5 4L3 6.5 5.5 9"/><path d="M3 6.5h6.5a3.25 3.25 0 0 1 0 6.5H7"/>',
+  open: '<path d="M9 2.5H4.5v11h7V5z"/><path d="M9 2.5V5h2.5"/>',
+  error: '<circle cx="8" cy="8" r="5.5"/><path d="M6 6l4 4M10 6l-4 4"/>',
+  warn: '<path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/>',
+  menu: '<path d="M3 4.5h10M3 8h10M3 11.5h10"/>',
+  files: '<path d="M6 2.5h5l2.5 2.5v7H6z"/><path d="M4 5v8.5h7"/>',
+  search: '<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',
+  git: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M5 5v6M11.5 7.5c0 2.8-6.5 2-6.5 4"/>',
+  run: '<path d="M4 3l6.5 4.2L4 11.4z"/><circle cx="11.5" cy="11.5" r="2.2"/>',
+  ext: '<rect x="2.5" y="8.5" width="5" height="5"/><rect x="8.5" y="8.5" width="5" height="5"/><rect x="2.5" y="2.5" width="5" height="5"/><rect x="9.5" y="1.5" width="4.5" height="4.5" transform="rotate(12 11.7 3.7)"/>',
+  ai: '<path d="M7 2l1.3 3.7L12 7l-3.7 1.3L7 12l-1.3-3.7L2 7l3.7-1.3z"/><path d="M12.5 10.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z"/>',
+  gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
+};
+const svg = (name) => `<svg viewBox="0 0 16 16" aria-hidden="true">${I[name]}</svg>`;
+const ib = (name, title, extra = '') => `<span class="ib" title="${title}">${svg(name)}${extra}</span>`;
+
+const ICON = { rs: ['#f59150', 'RS'], md: ['#5297ff', 'M↓'], json: ['#f5b85f', '{ }'], py: ['#38bdf8', 'PY'] };
+const KIND = { M: 'var(--amber)', A: 'var(--green)', U: 'var(--green)', D: 'var(--red)', R: 'var(--blue)', '!': 'var(--orange)' };
+
+const staged = [
+  ['session.md', '.claude', 'M', 'md'],
+  ['run.json', '.lightline', 'A', 'json'],
+];
+const changes = [
+  ['language.rs', 'src/windows_app', 'M', 'rs'],
+  ['mod.rs', 'src/windows_app', 'M', 'rs'],
+  ['code_pane.rs', 'src/windows_app/render', 'M', 'rs'],
+];
+const history = [
+  ['794bf93', 'feat(ui): flat layout, sharp icons and short motion, as in VS Code (#83)', '9h'],
+  ['116205a', 'feat(ui): menu bar in the title bar (#82)', '12h'],
+  ['5c8494f', 'perf(editor): type on very long lines without re-measuring them (#81)', '14h'],
+  ['8a68d1e', 'chore(scoop): update LightLine to 0.10.0', '18h'],
+  ['e935da6', 'release: v0.10.0 notes (#80)', '18h'],
+  ['598c750', 'feat(extensions): comments, brackets, indentation, picker and language servers…', '19h'],
+  ['fb84aa0', 'perf(save): write big files off the UI thread (#78)', '19h'],
+  ['ebfea40', 'perf(find): count a big file\'s matches between keystrokes (#77)', '5d'],
+  ['ecf54d3', 'feat(editor): horizontal scrolling when word wrap is off (#76)', '5d'],
+  ['e7e21bf', 'chore(scoop): update LightLine to 0.9.0', '5d'],
+  ['5efff2d', 'release: v0.9.0 notes (#75)', '5d'],
+  ['6ebf4a7', 'fix: prevent freezing on very long lines by optimizing drawing logic (#74)', '5d'],
+  ['6b15356', 'docs: record the idle, text-model and language-extension results', '7d'],
+  ['d95bee5', 'docs: refresh technical direction for v0.8.0 and propose next stages', '7d'],
+  ['d64eb7d', 'Syntax colors from Zed language extensions (#72)', '7d'],
+  ['115e3a9', 'perf(document): edit within a line in place; add a text model benchmark (#71)', '7d'],
+  ['1f36c6e', 'perf: answer WM_GETICON so window-listing programs wake LightLine once (#70)', '7d'],
+  ['1e15fc6', 'chore(scoop): update LightLine to 0.8.0', '7d'],
+  ['7b6f658', 'docs: release notes for v0.8.0 and its speed check', '7d'],
+  ['0dbfaa5', 'test: add unit tests for workflow, terminal model and registry parsing (#69)', '7d'],
+];
+
+function fileRow([name, dir, kind, ext], isStaged, cls = '') {
+  const [c, label] = ICON[ext];
+  const acts = [ib('open', 'Open File')];
+  if (!isStaged) acts.push(ib('discard', 'Discard Changes'));
+  acts.push(isStaged ? ib('minus', 'Unstage') : ib('plus', 'Stage'));
+  return `<div class="row ${cls}"><span class="fi" style="--c:${c}">${label}</span>` +
+    `<span class="n${kind === 'D' ? ' del' : ''}">${name}</span><span class="d">${dir}</span>` +
+    `<span class="acts">${acts.join('')}</span><span class="k" style="color:${KIND[kind]}">${kind}</span></div>`;
+}
+
+function section(title, count, acts, cls = '') {
+  return `<div class="sec ${cls}"><span class="chev">${svg('down')}</span><span class="t">${title}</span>` +
+    `<span class="pill">${count}</span><span class="sp"></span><span class="acts">${acts}</span></div>`;
+}
+
+function render(state) {
+  const clean = state === 'clean';
+  const typing = state === 'typing';
+  const ahead = clean ? 2 : 0;
+  const behind = state === 'behind' ? 3 : 0;
+
+  let box = `<div class="box">Message (Enter to commit on "main")</div>`;
+  if (typing) box = `<div class="box focus">fix(editor): drop the error dot beside line numbers<span class="caret"></span></div>`;
+
+  let button = `<div class="btnrow"><span class="main">${svg('check')}Commit</span><span class="drop">${svg('caret')}</span></div>`;
+  if (typing) button = `<div class="btnrow ready"><span class="main">${svg('check')}Commit</span><span class="drop">${svg('caret')}</span></div>`;
+  if (clean) button = `<div class="btnrow ready"><span class="main">${svg('push')}Push 2 commits</span><span class="drop">${svg('caret')}</span></div>`;
+  if (behind) button = `<div class="btnrow ready"><span class="main">${svg('pull')}Pull 3 commits</span><span class="drop">${svg('caret')}</span></div>`;
+
+  let stateText = '<span class="state">up to date</span>';
+  if (ahead) stateText = '<span class="state ahead">2 commits to push</span>';
+  if (behind) stateText = '<span class="state ahead">3 commits to pull</span>';
+  const branch = `<div class="branch"><span style="color:var(--blue)">${svg('branch')}</span><span class="name">main</span>${stateText}` +
+    ib('pull', 'Pull', behind ? '<b>3</b>' : '') + ib('push', 'Push', ahead ? '<b>2</b>' : '') + ib('fetch', 'Fetch') + `</div>`;
+
+  let list = '';
+  if (clean) {
+    list += section('CHANGES', 0, '');
+    list += `<div class="note">${svg('check')}No changes</div>`;
+  } else {
+    list += section('STAGED CHANGES', staged.length, ib('minus', 'Unstage All'));
+    list += staged.map((f) => fileRow(f, true)).join('');
+    list += section('CHANGES', changes.length, ib('discard', 'Discard All') + ib('plus', 'Stage All'), state === 'changes' ? 'hov' : '');
+    list += changes.map((f, i) => fileRow(f, false, i === 0 && state === 'changes' ? 'hov' : '')).join('');
+  }
+  list += section('HISTORY', 30, '');
+  list += history.map(([hash, subject, when], i) => {
+    const cls = [i === 0 ? 'first head' : '', i === 2 && state === 'changes' ? 'hov' : ''].join(' ');
+    const ref = i === 0 ? '<span class="ref">main</span>' : '';
+    return `<div class="crow ${cls}"><span class="lane"><i></i></span>${ref}<span class="s">${subject}</span>` +
+      `<span class="w">${when}</span><span class="h">${hash}</span></div>`;
+  }).join('');
+  list += '<span class="sb"></span>';
+
+  const rail = ['menu', 'files', 'search', 'git', 'run', 'ext', 'ai'].map((n) =>
+    `<span class="ri${n === 'git' ? ' on' : ''}">${svg(n)}</span>`).join('') +
+    `<span class="grow"></span><span class="ri">${svg('gear')}</span>`;
+
+  document.getElementById('mock').innerHTML =
+    `<div class="rail">${rail}</div>` +
+    `<div class="side"><div class="head"><span class="t">SOURCE CONTROL</span>` +
+    ib('check', 'Commit') + ib('refresh', 'Refresh') + ib('more', 'More Actions…') + `</div>` +
+    box + button + branch + `<div class="list">${list}</div></div>` +
+    `<div class="ed"></div>` +
+    `<div class="status"><span>${svg('branch')}main${ahead ? ' ↑2' : ''}${behind ? ' ↓3' : ''}</span>` +
+    `<span style="color:var(--red)">${svg('error')}<span style="color:var(--text)">3</span></span>` +
+    `<span style="color:var(--amber)">${svg('warn')}<span style="color:var(--text)">0</span></span></div>`;
+}
+
+document.querySelectorAll('[data-state]').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+    render(button.dataset.state);
+  });
+});
+render('changes');
+</script>
+</body>
+</html>
