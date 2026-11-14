@@ -1682,14 +1682,9 @@ impl App {
             }
             if y < self.scale(39) {
                 if self.side_view == SideView::Extensions
-                    && x >= editor_left - self.scale(44)
-                    && x < editor_left - self.scale(18)
+                    && x >= self.sidebar_right() - self.scale(70)
                 {
-                    if !self.zed_registry_loading {
-                        self.zed_registry_loaded = false;
-                        self.status = "Refreshing extension registry...".into();
-                        self.ensure_zed_registry_loaded();
-                    }
+                    self.extensions_panel_click(hwnd, x, y);
                     return;
                 }
                 if self.side_view == SideView::Review {
@@ -1813,120 +1808,7 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Extensions {
-                // The "Color Theme" row under Active Capabilities, where it
-                // was last drawn (in window coordinates, as painted).
-                let window_y = y + self.side_origin();
-                if let Some(row) = self.color_theme_row.get()
-                    && x >= row.left
-                    && x < row.right
-                    && window_y >= row.top
-                    && window_y < row.bottom
-                {
-                    self.show_color_theme_menu(hwnd, row.left, row.bottom);
-                    return;
-                }
-                let (dpi, zoom) = (self.dpi, self.zoom);
-                let s = |v: i32| scaled(v, dpi, zoom);
-                let rail = s(RAIL);
-                let left = rail;
-
-                // 1. Search bar click
-                if y >= s(48) && y <= s(84) {
-                    let right = self.sidebar_right();
-                    let search_left = left + s(8);
-                    let search_right = right - s(8);
-                    if x >= search_left && x <= search_right {
-                        // Clear button click
-                        if !self.extensions_query.is_empty()
-                            && x >= search_right - s(30)
-                            && x <= search_right
-                        {
-                            self.extensions_query.clear();
-                            self.refresh(hwnd);
-                            return;
-                        }
-                        self.extensions_search_active = true;
-                        self.search_input = false;
-                        self.commit_focus = false;
-                        self.panel_focus = true;
-                        self.terminal_focus = false;
-                        self.ensure_zed_registry_loaded();
-                        self.refresh(hwnd);
-                        return;
-                    }
-                }
-
-                // 2. Subtabs click (Segmented Pill Capsule)
-                if y >= s(92) && y <= s(122) {
-                    self.extensions_search_active = false;
-                    self.terminal_focus = false;
-                    let tabs_left = left + s(8);
-                    let tabs_right = editor_left - s(8);
-                    let half_w = (tabs_right - tabs_left) / 2;
-                    if x >= tabs_left && x < tabs_left + half_w {
-                        self.extensions_tab = ExtensionsTab::Marketplace;
-                        self.refresh(hwnd);
-                        return;
-                    }
-                    if x >= tabs_left + half_w && x <= tabs_right {
-                        self.extensions_tab = ExtensionsTab::Installed;
-                        self.refresh(hwnd);
-                        return;
-                    }
-                }
-
-                // 3. Marketplace sorting/filter pills.
-                if self.extensions_tab == ExtensionsTab::Marketplace && y >= s(132) && y <= s(160) {
-                    let mut filter_x = left + s(8);
-                    for (filter, _, width) in ExtensionsFilter::PILLS {
-                        if x >= filter_x && x < filter_x + s(width) {
-                            self.extensions_filter = filter;
-                            self.refresh(hwnd);
-                            return;
-                        }
-                        filter_x += s(width + 4);
-                    }
-                }
-
-                // 4. Card action button click
-                let card_h = s(132);
-                let card_step = card_h + s(8);
-                let start_y = s(186);
-                let visible = self.filtered_extensions();
-                let bottom = (panel_bottom - self.scale(STATUS)).max(0);
-                if y >= start_y {
-                    let row = ((y - start_y) / card_step.max(1)) as usize;
-                    let ey = start_y + row as i32 * card_step;
-                    // Only cards that were painted, i.e. that fit (see
-                    // paint_extensions_panel).
-                    if row < visible.len() && ey + card_h <= bottom {
-                        let card_right = editor_left - s(8);
-                        let btn_w = s(if visible[row].installing {
-                            86
-                        } else if visible[row].installed {
-                            82
-                        } else {
-                            72
-                        });
-                        let btn_h = s(34);
-                        let btn_left = card_right - btn_w - s(10);
-                        let btn_right = card_right - s(10);
-                        let btn_top = ey + s(82);
-                        let btn_bottom = btn_top + btn_h;
-
-                        // Generous hit box around the button
-                        if y < ey + card_h
-                            && x >= btn_left - s(8)
-                            && x <= btn_right + s(8)
-                            && y >= btn_top - s(6)
-                            && y <= btn_bottom + s(8)
-                        {
-                            let id = visible[row].id.to_string();
-                            self.toggle_extension(hwnd, &id);
-                            return;
-                        }
-                    }
-                }
+                self.extensions_panel_click(hwnd, x, y);
                 return;
             }
             if self.explorer_input.is_some() {

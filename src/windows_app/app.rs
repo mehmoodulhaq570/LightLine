@@ -248,12 +248,6 @@ impl FileAction {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum ExtensionsTab {
-    Marketplace,
-    Installed,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum ExtensionsFilter {
     Featured,
     Themes,
@@ -264,7 +258,7 @@ impl ExtensionsFilter {
     // The Marketplace filter pills: label and unscaled width, shared by the
     // painter and the click handler so the two can't drift apart.
     pub(super) const PILLS: [(ExtensionsFilter, &'static str, i32); 3] = [
-        (ExtensionsFilter::Featured, "Featured", 69),
+        (ExtensionsFilter::Featured, "All", 69),
         (ExtensionsFilter::Themes, "Themes", 60),
         (ExtensionsFilter::Formatters, "Formatters", 82),
     ];
@@ -794,7 +788,6 @@ pub(super) struct App {
     // extension is installed/removed.
     pub(super) active_color_theme: Option<String>,
     // Where the Extensions panel drew its "Color Theme" row, for clicks.
-    pub(super) color_theme_row: std::cell::Cell<Option<RECT>>,
     pub(super) dpi: u32,
     pub(super) zoom: i32,
     pub(super) line_height: i32,
@@ -1100,7 +1093,10 @@ pub(super) struct App {
     // or checkout run in a terminal refreshes the Git panel and gutter.
     pub(super) git_watch_files: Vec<PathBuf>,
     pub(super) extensions: Vec<Extension>,
-    pub(super) extensions_tab: ExtensionsTab,
+    // The first Extensions list row on screen, and which of its sections
+    // (installed, featured or marketplace, in use) are folded.
+    pub(super) extensions_first: usize,
+    pub(super) extension_sections_collapsed: [bool; 3],
     pub(super) extensions_filter: ExtensionsFilter,
     pub(super) extensions_query: String,
     pub(super) extensions_search_active: bool,
@@ -1472,7 +1468,6 @@ impl App {
             icons: IconSet::new(dpi, zoom),
             theme,
             active_color_theme,
-            color_theme_row: std::cell::Cell::new(None),
             dpi,
             zoom,
             line_height,
@@ -1711,7 +1706,8 @@ impl App {
                     installing: false,
                 },
             ],
-            extensions_tab: ExtensionsTab::Marketplace,
+            extensions_first: 0,
+            extension_sections_collapsed: [false; 3],
             extensions_filter: ExtensionsFilter::Featured,
             extensions_query: String::new(),
             zed_registry_loaded: false,
@@ -1749,49 +1745,6 @@ impl App {
         self.extensions
             .iter()
             .any(|ext| ext.id == id && ext.installed)
-    }
-
-    pub(super) fn filtered_extensions(&self) -> Vec<&Extension> {
-        let q = self.extensions_query.trim().to_lowercase();
-        let mut visible: Vec<&Extension> = self
-            .extensions
-            .iter()
-            .filter(|ext| {
-                if self.extensions_tab == ExtensionsTab::Installed {
-                    return ext.installed;
-                }
-                if q.is_empty() {
-                    // Marketplace with no search yet: only the two curated
-                    // entries LightLine ships knowledge of, not every id in
-                    // the Zed registry the moment it's loaded -- the search
-                    // box is what reveals the rest.
-                    return matches!(ext.id.as_str(), "prettier" | "material-icons" | "dracula");
-                }
-                // Registry entries share one placeholder description and
-                // publisher, which would make "theme" or "zed" match all of
-                // them; only curated entries have real ones to search.
-                let described = ext.category() != ExtensionCategory::Unknown;
-                ext.id.to_lowercase().contains(&q)
-                    || ext.name.to_lowercase().contains(&q)
-                    || (described && ext.description.to_lowercase().contains(&q))
-                    || (described && ext.publisher.to_lowercase().contains(&q))
-            })
-            .collect();
-        if q.is_empty() && self.extensions_tab == ExtensionsTab::Marketplace {
-            match self.extensions_filter {
-                ExtensionsFilter::Featured => {}
-                ExtensionsFilter::Themes => visible.retain(|ext| {
-                    matches!(
-                        ext.category(),
-                        ExtensionCategory::IconTheme | ExtensionCategory::ColorTheme
-                    )
-                }),
-                ExtensionsFilter::Formatters => {
-                    visible.retain(|ext| ext.category() == ExtensionCategory::Formatter)
-                }
-            }
-        }
-        visible
     }
 
     // Kicks off a one-time fetch of every id/version in the Zed registry, so

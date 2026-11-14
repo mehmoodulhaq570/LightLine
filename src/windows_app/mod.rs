@@ -13,6 +13,7 @@ mod crash;
 mod debug_panel;
 mod dialog;
 mod editor_context;
+mod extensions_panel;
 mod file_dialog;
 mod find_widget;
 mod git;
@@ -64,12 +65,13 @@ mod terminal;
 mod workspace;
 use app::{
     App, EditorView, ExplorerEntry, ExplorerInputState, ExplorerRow, Extension,
-    ExtensionInstallKind, ExtensionsFilter, ExtensionsTab, FileAction, GhostText, GitAction,
-    SideView, Tab, TerminalPane, TerminalTab, WATCHER_EVENT_MESSAGE, WORKER_EVENT_MESSAGE,
-    WorkerMessage, is_c_family_path, is_cpp_path,
+    ExtensionInstallKind, ExtensionsFilter, FileAction, GhostText, GitAction, SideView, Tab,
+    TerminalPane, TerminalTab, WATCHER_EVENT_MESSAGE, WORKER_EVENT_MESSAGE, WorkerMessage,
+    is_c_family_path, is_cpp_path,
 };
 use debug_panel::{DebugButton, DebugHot};
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
+use extensions_panel::{ExtensionsButton, ExtensionsHot};
 use git::{GitButton, GitHot};
 use menu_bar::MenuBar;
 use more_menu::{DebugMenu, GitMenu, MoreMenu};
@@ -89,7 +91,7 @@ mod color_theme_adapter;
 mod icons;
 mod theme;
 mod theme_picker;
-use theme::{Theme, ink, label_on, themed, ui};
+use theme::{Theme, label_on, themed, ui};
 
 use icons::{AppIcons, DebugGlyph, GenericIcon, IconSet};
 use lightline::clipboard;
