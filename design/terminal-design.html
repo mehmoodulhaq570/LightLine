@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Terminal Panel</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    --side: #081020; --editor: #070e1d; --active: #111f3b; --select: #1a3065; --edge: #182f52;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --violet: #8b5cf6; --green: #34d399;
+    --amber: #f5b85f; --red: #f66e78; --cursor: #a9b8d6;
+    --seg1: #f5b13d; --seg2: #f07a2d; --seg3: #3d8ee8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 10px; }
+  p.lead { color: var(--label); max-width: 940px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+  figure { margin: 0 0 22px; }
+  figcaption { margin: 0 0 8px; font-weight: 600; }
+  figcaption span { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .frame { width: 982px; height: 280px; max-width: 100%; overflow: hidden; border: 1px solid var(--edge-page); border-radius: 8px; position: relative; background: #000; }
+  .frame > img { display: block; width: 982px; height: 280px; }
+  .cols { display: flex; flex-wrap: wrap; gap: 28px; }
+  .cols > div { flex: 1 1 420px; }
+  ol, ul { padding-left: 20px; margin: 0; }
+  li { margin: 0 0 10px; }
+  li b { color: #fff; }
+  .dim { color: var(--muted); }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+
+  /* ---------- The mock: logical pixels at 125%, the same 982×280 crop ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 786px; height: 224px; transform: scale(1.25); transform-origin: 0 0;
+          background: var(--side); border-top: 1px solid var(--edge); display: flex; flex-direction: column; font-size: 13px; user-select: none; color: var(--text); }
+  .mock svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  .mock svg .f { fill: currentColor; stroke: none; }
+  .strip { height: 35px; flex: none; display: flex; align-items: stretch; padding: 0 6px 0 8px; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 11px; letter-spacing: .04em; color: var(--muted); position: relative; }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--text); }
+  .tab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 5px; height: 1px; background: var(--violet); }
+  .badge { min-width: 16px; height: 16px; border-radius: 8px; background: var(--edge); color: var(--text); font-size: 10.5px; line-height: 16px; text-align: center; padding: 0 4px; letter-spacing: 0; }
+  .grow { flex: 1; }
+  .actions { display: flex; align-items: center; gap: 2px; }
+  .ib { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); position: relative; }
+  .ib:hover, .ib.hov { background: var(--active); color: var(--text); }
+  .ib.joined { width: 18px; margin-left: -2px; }
+  .sep { width: 1px; height: 16px; background: var(--edge); margin: 0 4px; }
+  .run { color: var(--muted); font-size: 12px; margin-right: 8px; display: flex; align-items: center; gap: 6px; }
+  .run i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .term { flex: 1; min-width: 0; padding: 2px 12px 0 20px; font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace; font-size: 13px; line-height: 20px; overflow: hidden; }
+  .ln { height: 20px; position: relative; white-space: pre; }
+  .cursor { display: inline-block; width: 8px; height: 17px; background: var(--cursor); vertical-align: -4px; }
+  .note { color: var(--muted); }
+  /* The prompt's powerline segments, drawn as the vector shapes the proposal
+     gives LightLine (no Nerd Font needed for the arrows). */
+  .pl { display: inline-flex; align-items: center; height: 20px; vertical-align: top; }
+  .pl .seg { height: 18px; line-height: 18px; padding: 0 6px; color: #10131c; }
+  .pl .arrow { width: 0; height: 0; border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-left: 9px solid; }
+  .pl .cap { width: 0; height: 0; border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-right: 9px solid; }
+  .ln .right { position: absolute; right: 0; top: 0; }
+  .k { color: var(--blue); } .s { color: var(--green); } .y { color: #e5c07b; } .m { color: var(--muted); }
+  /* Terminal list, from two shells on. */
+  .shells { width: 168px; flex: none; border-left: 1px solid var(--edge); padding-top: 2px; }
+  .shell { height: 22px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 10px; position: relative; color: var(--muted); }
+  .shell:hover, .shell.hov { background: var(--active); color: var(--text); }
+  .shell.on { background: var(--select); color: var(--text); }
+  .shell.on::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--violet); }
+  .shell .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shell .acts { display: none; }
+  .shell:hover .acts, .shell.hov .acts { display: flex; }
+  .shell .exit { font-size: 11px; color: var(--red); }
+  .glyph { width: 16px; height: 16px; border-radius: 3px; display: grid; place-items: center; font: 700 9px/1 Consolas, monospace; color: #fff; flex: none; }
+  .menu { position: absolute; top: 31px; right: 74px; width: 232px; background: var(--side); border: 1px solid var(--edge); border-radius: 6px; box-shadow: 4px 6px 0 #03081280; padding: 5px; z-index: 2; }
+  .menu .h { font-size: 10.5px; letter-spacing: .05em; color: var(--muted); padding: 4px 8px 2px; }
+  .menu .it { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 4px; }
+  .menu .it.on { background: var(--select); }
+  .menu .it em { margin-left: auto; font-style: normal; color: var(--muted); font-size: 12px; }
+  .menu .rule { height: 1px; background: var(--edge); margin: 4px 2px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>LightLine terminal panel: current and proposed</h1>
+  <p class="lead">Above is a screenshot of the bottom panel today (your user name in the prompt is covered). Below is the proposed panel, drawn at the same 125% scale and size in LightLine's colours, laid out like VS Code's: one TERMINAL tab, a list of shells at the side once there are two, a compact toolbar, and a prompt whose powerline arrows and icons draw properly instead of as boxes.</p>
+
+  <figure>
+    <figcaption>Today<span>One shell, then two (each shell is another tab in the strip)</span></figcaption>
+    <div class="frame"><img src="screens/terminal-current.png" alt="LightLine's terminal panel today, one shell"></div>
+    <div class="frame" style="margin-top:10px"><img src="screens/terminal-current-two.png" alt="LightLine's terminal panel today, two shells"></div>
+  </figure>
+
+  <div class="toolbar" role="group" aria-label="Panel state">
+    <button data-state="one" aria-pressed="true">One shell</button>
+    <button data-state="two" aria-pressed="false">Two shells</button>
+    <button data-state="menu" aria-pressed="false">New terminal ▾</button>
+    <button data-state="exited" aria-pressed="false">A shell exited</button>
+    <button data-state="output" aria-pressed="false">Output (a running program)</button>
+    <span class="hint">Hover the tabs, buttons and shells.</span>
+  </div>
+  <figure>
+    <figcaption>Proposed<span>Same scale and size</span></figcaption>
+    <div class="frame"><div class="mock" id="mock"></div></div>
+  </figure>
+
+  <div class="cols">
+    <div>
+      <h2 style="margin-top:8px">What changes</h2>
+      <ol>
+        <li><b>One TERMINAL tab.</b> Shells no longer each add a tab to the strip beside PROBLEMS, OUTPUT and DEBUG CONSOLE ("PWSH 1", "PWSH 2"…), which ran out of room after a few. The strip always has four tabs, in VS Code's 11 px capitals, with a thin accent line under the open one. PROBLEMS shows its count as a small badge.</li>
+        <li><b>A list of shells at the side once there are two or more</b>, as in VS Code: each with its shell's icon (PowerShell, Command Prompt, Git Bash, WSL) and name. The open one is highlighted; pointing at one shows a 🗑 to close it; a double-click renames it (the right-click Rename still works). With one shell the list is hidden and the terminal gets the whole width.</li>
+        <li><b>A compact toolbar on the right:</b> <b>+</b> new terminal, joined to <b>▾</b> for the profile menu, 🗑 kill, <b>^</b> maximize the panel (new; again to restore), ✕ close. Today the + ▾ sit in a bordered box, and the kill and close buttons are two identical ✕ symbols.</li>
+        <li><b>The profile menu</b> lists PowerShell, Command Prompt, Git Bash and WSL with their icons, marks the default, and ends with <b>Select Default Profile…</b>, all in the same themed menu as the rest of LightLine.</li>
+        <li><b>Powerline prompts draw properly.</b> The arrows between prompt segments (<code>U+E0B0</code>–<code>E0B7</code>) are drawn by LightLine as shapes sized to the cell, the way Windows Terminal does, so they join seamlessly with no special font. Other prompt icons (git branch, folder, OS logo) come from a Nerd Font when one is installed (this PC has <i>Adwaita Mono Nerd Font</i>). A new <code>terminalFontFamily</code> setting picks one, like VS Code's.</li>
+        <li><b>When a shell exits,</b> a muted line in the terminal says so (<i>pwsh exited with code 1. Press Enter to close.</i>) and its row in the list turns muted with the code. Today the status sits in the tab strip.</li>
+        <li><b>OUTPUT shows what's running</b> at the right of the strip (<i>● Running main.rs</i>) with ■ Stop beside it.</li>
+        <li><b>More room for text:</b> 20 px on the left like VS Code, and the block caret is a quieter grey-blue.</li>
+      </ol>
+    </div>
+    <div>
+      <h2 style="margin-top:8px">Speed</h2>
+      <ul>
+        <li><b>Nothing new runs.</b> ConPTY, the shells and the vt100 model are unchanged; this is layout and drawing.</li>
+        <li><b>Powerline shapes come from the icon atlas</b>, rasterized once per cell size, so a prompt full of arrows costs about the same as text.</li>
+        <li><b>The Nerd Font is looked up once</b>, the first time a terminal shows a private-use glyph, never at startup. Text without those glyphs draws exactly as today.</li>
+        <li><b>The shell list redraws only itself</b> when shells are added, closed or renamed. Typing in the terminal still repaints only the rows that changed. Idle stays at 0 wakeups.</li>
+      </ul>
+      <h2>Open questions</h2>
+      <ul>
+        <li><b>Split terminals</b> (two shells side by side) would be new work, so they're left for later. OK?</li>
+        <li><b>Maximize</b> takes the panel to the editor's full height. Keep the panel's last height to come back to (as drawn)?</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const svg = (body, cls = '') => `<svg viewBox="0 0 16 16" aria-hidden="true" class="${cls}">${body}</svg>`;
+const I = {
+  plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  down: '<path d="M5 6.5l3 3 3-3"/>',
+  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/><path d="M7 7v4M9 7v4"/>',
+  up: '<path d="M4 10l4-4 4 4"/>',
+  close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  stop: '<rect class="f" x="4" y="4" width="8" height="8" rx="1.2"/>',
+  more: '<circle class="f" cx="3.5" cy="8" r="1"/><circle class="f" cx="8" cy="8" r="1"/><circle class="f" cx="12.5" cy="8" r="1"/>',
+};
+const ib = (name, title, cls = '') => `<span class="ib ${cls}" title="${title}">${svg(I[name])}</span>`;
+const SHELL = {
+  pwsh: ['#2671be', '&gt;_'],
+  cmd: ['#3b4252', 'C:'],
+  bash: ['#f05133', '$'],
+  wsl: ['#e95420', '◉'],
+};
+const glyph = (kind) => `<span class="glyph" style="background:${SHELL[kind][0]}">${SHELL[kind][1]}</span>`;
+
+// The prompt: user, folder, git, then what was typed; the right side the
+// shell and time.
+function prompt(folder = 'term-ws', time = '16:12:29', typed = '') {
+  const seg = (bg, text) => `<span class="seg" style="background:${bg}">${text}</span>`;
+  const arrow = (from, to) => `<span class="arrow" style="border-left-color:${from};background:${to || 'transparent'}"></span>`;
+  return `<span class="pl"><span class="cap" style="border-right-color:var(--seg1)"></span>${seg('var(--seg1)', '\u{1F464}\u{FE0E} user')}${arrow('var(--seg1)', 'var(--seg2)')}` +
+    `${seg('var(--seg2)', '\u{1F5C0}\u{FE0E} ' + folder)}${arrow('var(--seg2)', 'var(--seg3)')}${seg('var(--seg3)', '\u{2387} main')}${arrow('var(--seg3)')}</span> ${typed}` +
+    `<span class="right">in <span class="k">pwsh</span> at <span class="k">${time}</span></span>`;
+}
+const lines = (...rows) => rows.map((row) => `<div class="ln">${row}</div>`).join('');
+
+function render(state) {
+  const two = state === 'two' || state === 'exited' || state === 'menu';
+  const tab = (label, on, badge) => `<span class="tab ${on ? 'on' : ''}">${label}${badge !== undefined ? `<span class="badge">${badge}</span>` : ''}</span>`;
+  const output = state === 'output';
+  let actions;
+  if (output) {
+    actions = `<span class="run"><i></i>Running main.rs</span>${ib('stop', 'Stop')}<span class="sep"></span>${ib('up', 'Maximize Panel')}${ib('close', 'Close Panel')}`;
+  } else {
+    actions = `${ib('plus', 'New Terminal (Ctrl+Shift+`)')}${ib('down', 'Launch Profile…', 'joined' + (state === 'menu' ? ' hov' : ''))}` +
+      `${ib('trash', 'Kill Terminal')}<span class="sep"></span>${ib('up', 'Maximize Panel')}${ib('close', 'Close Panel')}`;
+  }
+  let text;
+  if (output) {
+    text = lines(
+      '<span class="m">&gt; cargo run</span>',
+      '<span class="s">   Compiling</span> demo v0.1.0 (D:\\Projects\\demo)',
+      '<span class="s">    Finished</span> `dev` profile [unoptimized + debuginfo] target(s) in 0.84s',
+      '<span class="s">     Running</span> `target\\debug\\demo.exe`',
+      'Hello, LightLine!',
+      'Enter your name: <span class="cursor"></span>');
+  } else if (state === 'exited') {
+    text = lines(prompt('term-ws', '16:14:02', 'exit 1'), '', '<span class="note">pwsh exited with code 1. Press Enter to close this terminal.</span>');
+  } else {
+    text = lines(prompt('term-ws', '16:12:29', '<span class="y">Get-ChildItem</span> <span class="m">-Name</span>'), 'src', 'Cargo.toml', 'README.md', prompt('term-ws', '16:12:36', '<span class="cursor"></span>'));
+  }
+  let shells = '';
+  if (two) {
+    const rows = [
+      ['pwsh', 'pwsh', state !== 'exited', state === 'two'],
+      [state === 'exited' ? 'pwsh' : 'bash', state === 'exited' ? 'pwsh' : 'Git Bash', false, false, state === 'exited'],
+    ];
+    if (state === 'exited') rows.reverse();
+    shells = `<div class="shells">${rows.map(([kind, name, on, hov, exited]) =>
+      `<div class="shell ${on || exited ? 'on' : ''} ${hov ? '' : ''}" ${exited ? 'style="color:var(--muted)"' : ''}>${glyph(kind)}<span class="nm">${name}</span>` +
+      `${exited ? '<span class="exit">exited (1)</span>' : ''}<span class="acts">${ib('trash', 'Kill')}</span></div>`).join('')}</div>`;
+  }
+  const menu = state === 'menu' ? `<div class="menu"><div class="h">NEW TERMINAL</div>` +
+    `<div class="it on">${glyph('pwsh')}PowerShell<em>Default</em></div><div class="it">${glyph('cmd')}Command Prompt</div>` +
+    `<div class="it">${glyph('bash')}Git Bash</div><div class="it">${glyph('wsl')}Ubuntu (WSL)</div><div class="rule"></div>` +
+    `<div class="it">Select Default Profile…</div></div>` : '';
+  document.getElementById('mock').innerHTML =
+    `<div class="strip">${tab('PROBLEMS', false, 0)}${tab('OUTPUT', output)}${tab('DEBUG CONSOLE', false)}${tab('TERMINAL', !output)}` +
+    `<span class="grow"></span><span class="actions">${actions}</span></div>${menu}` +
+    `<div class="body"><div class="term">${text}</div>${output ? '' : shells}</div>`;
+}
+
+document.querySelectorAll('[data-state]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+  render(button.dataset.state);
+}));
+const initial = new URLSearchParams(location.search).get('state') || 'one';
+document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.state === initial)));
+render(initial);
+</script>
+</body>
+</html>

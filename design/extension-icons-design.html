@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Extension Icons</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    --title: #081122; --rail: #070d1b; --side: #081020; --editor: #070e1d;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52; --text: #e2e8f0; --muted: #7e92b2;
+    --blue: #5297ff; --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78; --install: #1272c4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 10px; }
+  h3 { font-size: 15px; margin: 18px 0 6px; }
+  p.lead { color: var(--label); max-width: 920px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .pair { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .pair figure { margin: 0; }
+  .pair figcaption { margin: 0 0 8px; font-weight: 600; }
+  .pair figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  .frame { width: 482px; height: 900px; max-width: 100%; overflow: hidden; border: 1px solid var(--edge-page); border-radius: 8px; position: relative; background: #000; }
+  .frame > img { display: block; width: 482px; height: 900px; }
+  .notes { flex: 1 1 260px; min-width: 260px; }
+  .notes ol { padding-left: 20px; margin: 0; }
+  .notes li { margin: 0 0 12px; }
+  .notes li b { color: #fff; }
+  .notes .dim { color: var(--muted); }
+  ul.plain { max-width: 900px; padding-left: 20px; }
+  ul.plain li { margin: 0 0 8px; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+
+  /* The rules, drawn large. */
+  .gallery { display: flex; flex-wrap: wrap; gap: 18px; margin: 10px 0 4px; }
+  .gallery figure { margin: 0; width: 118px; text-align: center; font-size: 12px; color: var(--muted); }
+  .gallery figure b { display: block; color: var(--text); font-weight: 600; font-size: 13px; }
+  .big { transform: scale(2); transform-origin: 50% 0; margin: 0 auto 44px; }
+
+  /* ---------- The mock (as the Extensions panel), at 125% ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 386px; height: 720px; transform: scale(1.25); transform-origin: 0 0;
+          display: grid; grid-template-columns: 48px 314px 24px; grid-template-rows: 35px 1fr 22px;
+          font-size: 13px; line-height: 22px; color: var(--text); background: var(--editor); user-select: none; }
+  .mock svg, .gallery svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  .mock svg .f, .gallery svg .f { fill: currentColor; stroke: none; }
+  .titlebar { grid-column: 1 / -1; background: var(--title); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 18px; padding: 0 12px; font-size: 13.5px; white-space: nowrap; overflow: hidden; }
+  .titlebar .logo { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+  .titlebar .logo i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #6c5cf6, #2f6bff); display: inline-block; }
+  .titlebar .ide { font-size: 11px; font-weight: 600; background: #2a1f5c; color: #c4b5fd; padding: 0 5px; border-radius: 3px; }
+  .rail { background: var(--rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 6px; color: var(--muted); }
+  .rail .ri { width: 48px; height: 40px; display: grid; place-items: center; position: relative; }
+  .rail .ri svg { width: 22px; height: 22px; stroke-width: 1.4; }
+  .rail .ri.on { color: var(--text); }
+  .rail .ri.on::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--violet); }
+  .rail .grow { flex: 1; }
+  .side { background: var(--side); border-right: 1px solid var(--edge); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .ed { background: var(--editor); }
+  .status { grid-column: 1 / -1; background: var(--editor); border-top: 1px solid var(--edge); }
+  .head { height: 35px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; }
+  .head .t { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); flex: 1; }
+  .ib { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
+  .search { margin: 8px 12px 0; height: 28px; flex: none; display: flex; align-items: center; gap: 6px; border: 1px solid var(--edge); background: var(--active); border-radius: 4px; padding: 0 3px 0 8px; color: var(--muted); }
+  .search.focus { border-color: var(--blue); color: var(--text); }
+  .search span { flex: 1; white-space: nowrap; overflow: hidden; }
+  .chips { margin: 6px 12px 4px; display: flex; gap: 4px; flex: none; }
+  .chip { height: 22px; line-height: 20px; padding: 0 8px; border-radius: 11px; border: 1px solid var(--edge); color: var(--muted); font-size: 12px; }
+  .chip.on { background: var(--select); border-color: var(--blue); color: var(--text); }
+  .list { flex: 1; min-height: 0; overflow: hidden; border-top: 1px solid var(--edge); padding-top: 2px; margin-top: 4px; }
+  .sec { height: 22px; display: flex; align-items: center; padding: 0 8px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); }
+  .sec .t { margin-left: 2px; }
+  .pill { margin-left: 6px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--edge); color: var(--text); font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; letter-spacing: 0; }
+  .sec .sp { flex: 1; } .sec .note { font-weight: 400; letter-spacing: 0; color: var(--muted); font-size: 12px; }
+  .ext { height: 62px; display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px 0 20px; }
+  .ext .body { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 16px; gap: 1px; }
+  .ext .l1 { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .ext .name { overflow: hidden; text-overflow: ellipsis; }
+  .ext .ver { color: var(--muted); font-size: 11.5px; flex: none; }
+  .ext .desc { color: #b4c2d8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3 { display: flex; align-items: center; gap: 6px; font-size: 11.5px; white-space: nowrap; }
+  .ext .pub { color: var(--muted); }
+  .ext .act { margin-left: auto; flex: none; }
+  .btn { height: 18px; line-height: 16px; padding: 0 9px; border-radius: 3px; font-size: 12px; background: var(--install); color: #fff; display: inline-block; }
+  .ok { color: var(--green); }
+
+  /* The icons. */
+  .icon { width: 36px; height: 36px; flex: none; border-radius: 6px; display: grid; place-items: center; margin-top: 3px; position: relative; overflow: hidden; }
+  .mono { font-weight: 600; font-size: 15px; letter-spacing: -.02em; }
+  .mono.one { font-size: 18px; }
+  /* A color theme: its background with three lines of "code" in its colors. */
+  .swatch { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding-left: 7px; place-items: initial; }
+  .swatch i { display: block; height: 3px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Extension icons: current and proposed</h1>
+  <p class="lead">Zed's registry and its extension manifests have no icon field, so every extension except the three LightLine draws by hand (Prettier, Material Icon Theme, Dracula) gets the same grey package glyph. The proposal gives every extension an icon from what LightLine does know, without any downloads. An installed extension's icon comes from its own files. One that isn't installed yet gets a monogram that's always the same for the same extension.</p>
+
+  <div class="toolbar" role="group" aria-label="Panel state">
+    <button data-state="search" aria-pressed="true">Searching "theme"</button>
+    <button data-state="installed" aria-pressed="false">With installed extensions</button>
+  </div>
+
+  <div class="pair">
+    <figure>
+      <figcaption>Today<span>Screenshot, 125% display: search results for "drac"</span></figcaption>
+      <div class="frame"><img src="screens/extension-icons-current.png" alt="Search results today, each with the same grey icon"></div>
+    </figure>
+    <figure>
+      <figcaption>Proposed<span>Same scale; the other state uses the buttons above</span></figcaption>
+      <div class="frame"><div class="mock" id="mock"></div></div>
+    </figure>
+    <div class="notes">
+      <h2 style="margin-top:0">Where each icon comes from</h2>
+      <ol>
+        <li><b>Color themes, once installed:</b> a tile in the theme's own editor background, with three short lines of "code" in its keyword, string and function colours. Catppuccin, Gruvbox and Tokyo Night look like themselves, light themes look light, and you can tell themes apart at a glance.</li>
+        <li><b>Icon themes, once installed:</b> the theme's own folder icon from its SVGs, which is what Material's tile does today.</li>
+        <li><b>Languages, once installed:</b> the language's file icon from the active icon theme (Lua's moon, Zig's bolt), else LightLine's built-in icon for it.</li>
+        <li><b>Anything not installed yet:</b> a monogram. Before installing, LightLine only knows the extension's id. The first letters of its words become the letters (<code>tokyo-night</code> → TN; one word gives one letter, <code>nord</code> → N), on one of eight colours picked from the id. The same extension always gets the same tile, and neighbours rarely match.</li>
+        <li><b>Prettier, Material and Dracula</b> keep the marks LightLine draws for them.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h2>The tiles, at 2×</h2>
+  <div class="gallery" id="gallery"></div>
+
+  <h2>Speed and privacy</h2>
+  <ul class="plain">
+    <li><b>No network.</b> No icon or avatar is fetched for each result. That would be one request per row, slow on a poor connection, limited to 60 an hour by GitHub without a login, and against LightLine's rule to use the network only when asked.</li>
+    <li><b>Worked out once.</b> A theme's colours, folder icon or language icon are read when the extension is installed, or when LightLine first lists its extensions, and kept with it. Painting never re-reads theme files.</li>
+    <li><b>Cheap to draw.</b> A monogram is one filled square and two letters. A swatch is a square and three short bars. Icons come from the shared atlas. Idle stays at 0 wakeups.</li>
+    <li><b>No guessing.</b> A result's kind isn't guessed from its name ("…-theme"). A monogram says only what's known.</li>
+  </ul>
+</div>
+
+<script>
+const svg = (body) => `<svg viewBox="0 0 16 16" aria-hidden="true">${body}</svg>`;
+const I = {
+  search: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.6 3.6"/>',
+  close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  filter: '<path d="M2.5 3.5h11l-4.3 5v4.2l-2.4 1.1V8.5z"/>',
+  refresh: '<path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 2.5v3h-3"/>',
+  more: '<circle class="f" cx="3.5" cy="8" r="1"/><circle class="f" cx="8" cy="8" r="1"/><circle class="f" cx="12.5" cy="8" r="1"/>',
+  down: '<path d="M4 6l4 4 4-4"/>', check: '<path d="M3.5 8.5l3 3L12.5 5"/>',
+  menu: '<path d="M3 4.5h10M3 8h10M3 11.5h10"/>', files: '<path d="M6 2.5h5l2.5 2.5v7H6z"/><path d="M4 5v8.5h7"/>',
+  git: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M5 5v6M11.5 7.5c0 2.8-6.5 2-6.5 4"/>',
+  run: '<path d="M4 3l6.5 4.2L4 11.4z"/><circle cx="11.5" cy="11.5" r="2.2"/>',
+  ext: '<rect x="2.5" y="8.5" width="5" height="5"/><rect x="8.5" y="8.5" width="5" height="5"/><rect x="2.5" y="2.5" width="5" height="5"/><rect x="9.5" y="1.5" width="4.5" height="4.5" transform="rotate(12 11.7 3.7)"/>',
+  ai: '<path d="M7 2l1.3 3.7L12 7l-3.7 1.3L7 12l-1.3-3.7L2 7l3.7-1.3z"/>',
+  gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7"/>',
+};
+
+// Eight hues that read on the dark (and light) themes; the tile is the hue
+// blended into the panel, the letters the hue lightened.
+const HUES = ['#5297ff', '#8b5cf6', '#34d399', '#f5b85f', '#f66e78', '#2dd4bf', '#ec4899', '#f59150'];
+function hash(id) { let h = 2166136261; for (const c of id) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h; }
+function mix(a, b, t) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+function initials(id) {
+  const words = id.split(/[-_ ]+/).filter((w) => w && !['theme', 'themes', 'zed'].includes(w));
+  const parts = words.length ? words : id.split(/[-_ ]+/);
+  return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : parts[0][0].toUpperCase();
+}
+function monogram(id) {
+  const hue = HUES[hash(id) % HUES.length];
+  const letters = initials(id);
+  return `<span class="icon mono ${letters.length === 1 ? 'one' : ''}" style="background:${mix('#081020', hue, 0.22)};border:1px solid ${mix('#182f52', hue, 0.35)};color:${mix(hue, '#ffffff', 0.35)}">${letters}</span>`;
+}
+function swatch(bg, a, b, c, edge) {
+  return `<span class="icon swatch" style="background:${bg};border:1px solid ${edge || mix(bg, '#ffffff', 0.12)}">` +
+    `<i style="width:15px;background:${a}"></i><i style="width:22px;background:${b}"></i><i style="width:11px;background:${c}"></i></span>`;
+}
+const materialFolder = `<span class="icon" style="background:#122b27;border:1px solid #27534a">${svg('<path class="f" style="color:#3acf80" d="M1.5 4.2A1.2 1.2 0 0 1 2.7 3h3.6l1.4 1.5h5.6a1.2 1.2 0 0 1 1.2 1.2v6.6a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2z"/>').replace('width: 16px', '')}</span>`;
+const luaIcon = `<span class="icon" style="background:#101a2e;border:1px solid var(--edge)"><svg viewBox="0 0 16 16" style="width:22px;height:22px"><circle cx="8" cy="8" r="6.2" fill="#2c5bd8"/><circle cx="11.2" cy="4.8" r="1.6" fill="#ffffff"/><circle cx="7" cy="9" r="2.4" fill="#ffffff"/><circle cx="7.9" cy="8.2" r="2" fill="#2c5bd8"/></svg></span>`;
+const prettier = `<span class="icon" style="background:#16203a;border:1px solid #2f3f60;flex-direction:column;gap:2px;display:flex;align-items:center;justify-content:center"><b style="font:700 13px/1 Consolas,monospace;color:#f4f7ff">{ }</b><span style="display:flex;gap:2px">${['#56b6f0', '#ec4899', '#f5c518', '#a855f7'].map((c) => `<i style="width:5px;height:2px;background:${c}"></i>`).join('')}</span></span>`;
+const dracula = `<span class="icon" style="background:#1e1837;border:1px solid #463770"><i style="width:18px;height:18px;border-radius:50%;background:#a76df2;display:block"></i></span>`;
+
+const KIND = { 'Color theme': '#ae6df2', 'Icon theme': 'var(--green)', Language: '#56b6f0', Formatter: '#56b6f0', 'Zed extension': 'var(--muted)' };
+function row(icon, name, ver, desc, pub, kind, action) {
+  return `<div class="ext">${icon}<div class="body"><div class="l1"><span class="name">${name}</span><span class="ver">${ver}</span></div>` +
+    `<div class="desc">${desc}</div><div class="l3"><span class="pub">${pub}</span><span style="color:var(--muted)">·</span>` +
+    `<span style="color:${KIND[kind]}">${kind}</span><span class="act">${action}</span></div></div></div>`;
+}
+const install = '<span class="btn">Install</span>';
+const done = `<span class="ok">${svg(I.check)}</span>`;
+const zed = 'Install to see whether LightLine supports it yet';
+const section = (t, n, note = '') => `<div class="sec"><span style="color:var(--muted)">${svg(I.down)}</span><span class="t">${t}</span><span class="pill">${n}</span><span class="sp"></span><span class="note">${note}</span></div>`;
+
+function render(state) {
+  let box, chips = '', list = '';
+  if (state === 'search') {
+    box = `<div class="search focus">${svg(I.search)}<span>theme</span><span class="ib">${svg(I.close)}</span></div>`;
+    const results = ['tokyo-night', 'github-theme', 'one-dark-pro', 'gruvbox-material', 'rose-pine-theme', 'nord', 'kanagawa-themes', 'everforest'];
+    list += section('MARKETPLACE', 8, '8 results');
+    list += results.map((id, i) => row(monogram(id), id, ['0.2.4', '1.0.3', '0.9.1', '2.1.0', '1.2.0', '0.3.0', '0.4.2', '1.1.1'][i], zed, 'Zed registry', 'Zed extension', install)).join('');
+  } else {
+    box = `<div class="search">${svg(I.search)}<span>Search the Zed registry</span><span class="ib">${svg(I.filter)}</span></div>`;
+    chips = `<div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Formatters</span></div>`;
+    list += section('INSTALLED', 5);
+    list += row(swatch('#1e1e2e', '#cba6f7', '#a6e3a1', '#89b4fa'), 'Catppuccin', '0.2.13', 'Soothing pastel theme: Latte, Frappé, Macchiato, Mocha', 'catppuccin', 'Color theme', done);
+    list += row(swatch('#282828', '#fb4934', '#b8bb26', '#fabd2f'), 'Gruvbox', '1.0.4', 'Retro groove color scheme', 'gruvbox-community', 'Color theme', done);
+    list += row(swatch('#fbf1c7', '#9d0006', '#79740e', '#076678', '#d5c4a1'), 'Gruvbox Light', '1.0.4', 'The same, light', 'gruvbox-community', 'Color theme', done);
+    list += row(materialFolder, 'Material Icon Theme', '1.3.1', 'Material Design file & folder icons', 'Zed Industries', 'Icon theme', done);
+    list += row(luaIcon, 'Lua', '0.1.4', 'Lua language support', 'Zed Industries', 'Language', done);
+    list += section('FEATURED', 2);
+    list += row(prettier, 'Prettier', 'v3.4.2', 'Code formatter using prettier for JS, TS, CSS…', 'esbenp', 'Formatter', install);
+    list += row(dracula, 'Dracula Theme', '1.1.2', 'A dark color theme with vivid, accessible colors', 'Dracula Team', 'Color theme', install);
+  }
+  const rail = ['menu', 'files', 'search', 'git', 'run', 'ext', 'ai'].map((n) => `<span class="ri${n === 'ext' ? ' on' : ''}">${svg(I[n])}</span>`).join('') + `<span class="grow"></span><span class="ri">${svg(I.gear)}</span>`;
+  document.getElementById('mock').innerHTML =
+    `<div class="titlebar"><span class="logo"><i></i>LightLine <span class="ide">IDE</span></span><span>File</span><span>Edit</span><span>Selection</span><span>View</span></div>` +
+    `<div class="rail">${rail}</div><div class="side"><div class="head"><span class="t">EXTENSIONS</span><span class="ib">${svg(I.refresh)}</span><span class="ib">${svg(I.more)}</span></div>${box}${chips}<div class="list">${list}</div></div><div class="ed"></div><div class="status"></div>`;
+}
+
+const gallery = [
+  [monogram('tokyo-night'), 'tokyo-night', 'Monogram TN'],
+  [monogram('github-theme'), 'github-theme', 'G: "theme" is skipped'],
+  [monogram('nord'), 'nord', 'One word, one letter'],
+  [monogram('rose-pine-theme'), 'rose-pine-theme', 'RP'],
+  [swatch('#1e1e2e', '#cba6f7', '#a6e3a1', '#89b4fa'), 'Catppuccin Mocha', 'Swatch from its colours'],
+  [swatch('#fbf1c7', '#9d0006', '#79740e', '#076678', '#d5c4a1'), 'Gruvbox Light', 'A light theme looks light'],
+  [materialFolder, 'Material Icon Theme', "The theme's folder"],
+  [luaIcon, 'Lua', "Its file icon"],
+];
+document.getElementById('gallery').innerHTML = gallery.map(([icon, name, note]) =>
+  `<figure><div class="big" style="width:36px;height:36px">${icon}</div><b>${name}</b>${note}</figure>`).join('');
+
+document.querySelectorAll('[data-state]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+  render(button.dataset.state);
+}));
+const initial = new URLSearchParams(location.search).get('state') || 'search';
+document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.state === initial)));
+render(initial);
+</script>
+</body>
+</html>

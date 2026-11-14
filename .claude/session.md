@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-13 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-13)" at the end: it has the current state and the planned next steps.**
+Updated: 2026-11-14 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-14)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -425,3 +425,37 @@ v0.4.0 was released (workflow_dispatch; Scoop bot commit on origin/main, so pull
 - Left as is: the Search preview's stale fragments and Run & Debug text clipping (both also in v0.10.0); the Welcome screen keeps its own rail style.
 - Build folder kept: `C:\Users\mehmo\lightline-build\flat` (debug + release of current main). `v0100` and `base` deleted.
 
+
+## Three panels redesigned, merged as #84, #85, #86 (2026-11-14)
+
+Each followed the same loop the maintainer asked for: an HTML mock-up in `design/` (today's screenshot beside the proposal, same 125% scale), approval, a branch, a live check against the mock-up, squash-merge, then the same checks on merged `main`.
+
+- **#84 `39ede64` Source Control** (`design/source-control-design.html`): `git.rs` model (`GitRow`, `GitLayout`, `GitButton`, `GitHot`, `GitPrimary`) + `render/git.rs`. One-line message box; the commit button does the next thing (Commit / Push N / Pull N) with a ▾; branch row with Pull/Push/Fetch icon buttons; 22 px rows with icon, name, dimmed folder, one coloured status letter; buttons on the hovered or keyboard row; one-line history with age (`git log %ct`, `workflow::short_age`). Fixes: watches `FETCH_HEAD` and the upstream ref so push/pull/fetch in the terminal refresh the panel; a refresh no longer blanks a clean repo's list ("Reading Git status..." only before the first answer); `git_visible_rows` now subtracts `side_origin`. `label_ellipsis` cuts with one `GetTextExtentExPointW` (`fitting_prefix`). Also carried `b2cacc9` (gutter error dot removed).
+- **#85 `8aa545b` Run and Debug** (`design/run-debug-design.html`): `debug_panel.rs` model + `render/debug.rs`. Launch bar (▶ joined to the picker) that becomes the 6-button toolbar during a session; one status line with a coloured dot and Show Details / Install links; one scrolling list (`debug_first`) of `name: value` variables in syntax colours, every frame (paused one with the gutter's arrow), breakpoints with the gutter's red dot. New: click a frame or breakpoint to open its line, ✕ removes one, header removes all / collapses variables. Picker and ··· use the shared `more_menu.rs` (`MenuAnchor::Debug`). Status bar turns amber and reads "Debugging" during a session. Fixed: Stop now cancels a running Rust debug build (`debug_pending_root` cleared); build errors go to the Debug Console. The old popup (`debug_config_menu_open`) and legacy painters are gone.
+- **#86 `e2b4886` Extensions** (`design/extensions-design.html`): `extensions_panel.rs` model + `render/extensions.rs`. 62 px rows instead of 132 px cards; Installed and Featured sections (no Marketplace/Installed switch), Marketplace for search; All/Themes/Formatters chips; one button per row (Install, ✓ → Uninstall on hover, Turn Off for Prettier); In Use section; ··· (Show Installed/Featured, Check for Updates, Open Extensions Folder). `ExtensionsTab`, `filtered_extensions`, `color_theme_row` and the old painter are gone; new `Filter` glyph.
+- Shared pattern for all three: a `*Hot` enum inside `Hot`, rows outside `GetClipBox` skipped, hover repaints only the row, header buttons drawn by each panel (`paint_side_panel` no longer draws any). The maintainer must **not** be listed as a co-author: squash-merge with explicit `--subject/--body` (see memory `no-self-coauthor`).
+- Verified on merged `main`: fmt, Clippy `-D warnings`, `cargo test` (273 lib, 125 bin, 9 integration), CI x64+ARM64; live checks (this session's scratchpad `ce68f4ec…`): `scc_live.py` 31 checks, `dbg_live.py` 19 (real debugpy), `ext_live.py` 14, idle 0 wakeups with each panel open (`*_idle*.py`).
+
+## Where things stand (2026-11-14)
+
+### State
+
+- `main` = `origin/main` = `e2b4886`. Unreleased has #81–#86 (long-line typing, menu bar, flat layout, the three panels); not released. v0.10.0 is the latest release.
+- Open issues unchanged: #66, #67 (close around 2026-11-21 if no reply), #13 (SignPath), #35 (wontfix).
+
+### Waiting on the maintainer
+
+1. **Two mock-ups, approved to be shown, not yet built** (uncommitted in `design/`):
+   - `design/extension-icons-design.html`: Zed extensions have no icon field (checked `extension.toml` and `extensions.toml`), so: installed color themes get a swatch (theme bg + three "code" bars in its colors), installed icon themes their own folder icon, languages their file icon; uninstalled ones a monogram from the id (initials, "theme"/"themes"/"zed" skipped, one of 8 hues by FNV hash of the id). No network. Compute swatches/icons once at install/startup and keep them on `Extension`.
+   - `design/terminal-design.html` (screenshots `design/screens/terminal-current*.png`, the prompt's user name masked): one TERMINAL tab instead of a tab per shell; a shell list at the side from two shells (icon per shell kind, 🗑 on hover, double-click rename); toolbar + ▾ 🗑 | ^ ✕ (maximize is new); profile menu in the themed menu; powerline arrows U+E0B0–E0B7 drawn as cell-sized shapes, other private-use glyphs from an installed Nerd Font (this PC has Adwaita Mono Nerd Font), new `terminalFontFamily` setting; exited shells say so in the terminal and the list; Output shows "● Running x" + Stop.
+   - Open questions asked: split terminals later?; maximize remembers the old height?; one change or two?
+2. **LLDB install, deferred** until the maintainer says the connection is good (memory `pending-lldb-install`): only `LLVM-23.1.5-win64.msi` contains lldb-dap (the tarballs don't); ~17 MB partial download kept in `C:\Users\mehmo\Tools\llvm-download\`; extract with `msiexec /a` (no admin); likely needs `python311.dll`. Then live-test Rust debugging.
+3. **Release v0.11.0** whenever the maintainer wants (the Unreleased section is ready).
+
+### Live-test harness (important)
+
+- **A hidden test window took the maintainer's typing once (2026-11-14).** `measure_driver.py` (session `56ff248a…` scratchpad) now adds `WS_EX_NOACTIVATE` in `hide()` and `still_hidden()` fails if LightLine is the foreground window; every driver's `guard()` checks it before each input and capture. Keep it that way.
+- debugpy is in the per-user site-packages under the real APPDATA; with an isolated APPDATA set `PYTHONPATH=%APPDATA%\Python\Python314\site-packages` and put `C:\Python314` first on PATH (`dbg_live.py` does).
+- The repaint check (WM_APP+97) can report ~700–1500 px in the status bar message area when it lands in the 50 ms between a status message expiring (5 s, decided at paint time) and `STATUS_TIMER`'s repaint (5.05 s). A check race, not a missed invalidation; `scc_live.py` steps take ~5 s and hit it about 1 run in 2.
+- Use `rmtree` with an `onexc` chmod handler for test folders (Git object files are read-only).
+- Build folder: `C:\Users\mehmo\lightline-build\flat` (debug build of current main). D: has about 3 GB free.
