@@ -2,8 +2,9 @@
 // breadcrumb row. The button used to be drawn with nothing behind it, so a
 // click did nothing (#57). Like the editor's right-click menu it is painted
 // in the backbuffer, so it follows the color theme, and painting and clicks
-// share `more_menu_layout`. Source Control's ··· and its commit button's ▾
-// open the same menu with their own items.
+// share `more_menu_layout`. Source Control's ··· and its commit button's ▾,
+// and Run & Debug's ··· and configuration picker, open the same menu with
+// their own items.
 
 use super::*;
 
@@ -31,6 +32,24 @@ enum MoreAction {
     GitStageAll,
     GitUnstageAll,
     GitDiscardAll,
+    // Run & Debug.
+    DebugStart,
+    DebugSelect,
+    DebugConsole,
+    DebugInstallPython,
+    DebugRemoveBreakpoints,
+    DebugAutomatic,
+    DebugRust,
+    DebugPython,
+}
+
+/// Which Run & Debug control opened the menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DebugMenu {
+    /// The ··· in the panel's header.
+    Header,
+    /// The launch bar's configuration picker.
+    Config,
 }
 
 /// Which Source Control button opened the menu.
@@ -48,6 +67,7 @@ pub(super) enum GitMenu {
 enum MenuAnchor {
     Pane(usize),
     Git(GitMenu, RECT),
+    Debug(DebugMenu, RECT),
 }
 
 pub(super) struct MoreMenu {
@@ -73,6 +93,22 @@ impl App {
                     MoreAction::GitStageAll,
                     MoreAction::GitUnstageAll,
                     MoreAction::GitDiscardAll,
+                ];
+            }
+            Some(MenuAnchor::Debug(DebugMenu::Header, _)) => {
+                return vec![
+                    MoreAction::DebugStart,
+                    MoreAction::DebugSelect,
+                    MoreAction::DebugConsole,
+                    MoreAction::DebugInstallPython,
+                    MoreAction::DebugRemoveBreakpoints,
+                ];
+            }
+            Some(MenuAnchor::Debug(DebugMenu::Config, _)) => {
+                return vec![
+                    MoreAction::DebugAutomatic,
+                    MoreAction::DebugRust,
+                    MoreAction::DebugPython,
                 ];
             }
             Some(MenuAnchor::Git(GitMenu::Commit, _)) => {
@@ -121,6 +157,21 @@ impl App {
             MoreAction::GitStageAll => ("Stage All Changes", ""),
             MoreAction::GitUnstageAll => ("Unstage All Changes", ""),
             MoreAction::GitDiscardAll => ("Discard All Changes", ""),
+            MoreAction::DebugStart => ("Start Debugging", "F5"),
+            MoreAction::DebugSelect => ("Select Configuration...", ""),
+            MoreAction::DebugConsole => ("Debug Console", "Ctrl+Shift+Y"),
+            MoreAction::DebugInstallPython => ("Python: Install debugpy", ""),
+            MoreAction::DebugRemoveBreakpoints => ("Remove All Breakpoints", ""),
+            // The picked configuration is ticked.
+            MoreAction::DebugAutomatic => ("Automatic", tick(self.debug_config.is_none())),
+            MoreAction::DebugRust => (
+                "Rust: Current Workspace",
+                tick(self.debug_config == Some(DebugConfig::RustWorkspace)),
+            ),
+            MoreAction::DebugPython => (
+                "Python: Current File",
+                tick(self.debug_config == Some(DebugConfig::PythonFile)),
+            ),
         }
     }
 
@@ -131,6 +182,20 @@ impl App {
         } else {
             Some(MoreMenu {
                 anchor: MenuAnchor::Pane(pane),
+                highlighted: None,
+            })
+        };
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Opens a Run & Debug menu under `button` (in the window's
+    /// coordinates), or closes it if it's open.
+    pub(super) fn toggle_debug_menu(&mut self, hwnd: HWND, menu: DebugMenu, button: RECT) {
+        self.more_menu = if self.more_menu.is_some() {
+            None
+        } else {
+            Some(MoreMenu {
+                anchor: MenuAnchor::Debug(menu, button),
                 highlighted: None,
             })
         };
@@ -155,7 +220,7 @@ impl App {
     fn anchor_button(&self, hwnd: HWND, anchor: MenuAnchor) -> RECT {
         match anchor {
             MenuAnchor::Pane(pane) => self.pane_actions(self.pane_right(hwnd, pane)).1,
-            MenuAnchor::Git(_, button) => button,
+            MenuAnchor::Git(_, button) | MenuAnchor::Debug(_, button) => button,
         }
     }
 
@@ -302,6 +367,18 @@ impl App {
             MoreAction::GitStageAll => self.git_stage_all(hwnd),
             MoreAction::GitUnstageAll => self.git_unstage_all(hwnd),
             MoreAction::GitDiscardAll => self.git_discard_all(hwnd),
+            MoreAction::DebugStart => self.start_debug_session(hwnd),
+            MoreAction::DebugSelect => self.show_debug_config_menu(hwnd),
+            MoreAction::DebugConsole => self.show_debug_console(hwnd),
+            MoreAction::DebugInstallPython => self.install_debugpy(hwnd),
+            MoreAction::DebugRemoveBreakpoints => self.remove_all_breakpoints(hwnd),
+            MoreAction::DebugAutomatic => self.select_debug_config(hwnd, None),
+            MoreAction::DebugRust => {
+                self.select_debug_config(hwnd, Some(DebugConfig::RustWorkspace))
+            }
+            MoreAction::DebugPython => {
+                self.select_debug_config(hwnd, Some(DebugConfig::PythonFile))
+            }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -343,6 +420,11 @@ impl App {
             self.label_mid(hdc, shortcut, shortcut_left, middle, self.theme.muted, *row);
         }
     }
+}
+
+// A tick for the picked item, in the shortcut column.
+fn tick(on: bool) -> &'static str {
+    if on { "\u{2713}" } else { "" }
 }
 
 fn contains(rect: RECT, x: i32, y: i32) -> bool {

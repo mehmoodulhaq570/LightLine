@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Run and Debug</title>
+<style>
+  :root {
+    --page: #02060f;
+    --edge-page: #182f52;
+    --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs default_dark) */
+    --title: #081122;
+    --rail: #070d1b;
+    --side: #081020;
+    --editor: #070e1d;
+    --active: #111f3b;
+    --select: #1a3065;
+    --edge: #182f52;
+    --text: #e2e8f0;
+    --muted: #7e92b2;
+    --blue: #5297ff;
+    --violet: #8b5cf6;
+    --green: #34d399;
+    --amber: #f5b85f;
+    --red: #f66e78;
+    --bp: #f55252;
+    --string: #34d399;
+    --number: #f8b482;
+    --keyword: #5297ff;
+    --go: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1320px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 10px; }
+  p.lead { color: var(--label); max-width: 920px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+
+  .pair { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .pair figure { margin: 0; }
+  .pair figcaption { margin: 0 0 8px; font-weight: 600; }
+  .pair figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+  .frame { width: 575px; height: 1012px; max-width: 100%; overflow: hidden; border: 1px solid var(--edge-page); border-radius: 8px; position: relative; background: #000; }
+  .frame > img { display: block; width: 575px; height: 1012px; }
+  .notes { flex: 1 1 260px; min-width: 260px; }
+  .notes ol { padding-left: 20px; margin: 0; }
+  .notes li { margin: 0 0 12px; }
+  .notes li b { color: #fff; }
+  .notes .dim { color: var(--muted); }
+
+  table { border-collapse: collapse; width: 100%; max-width: 900px; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .better { color: var(--green); }
+  ul.plain { max-width: 900px; padding-left: 20px; }
+  ul.plain li { margin: 0 0 8px; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+
+  /* ---------- The mock: LightLine logical pixels, shown at 125% like the screenshot ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 460px; height: 810px; transform: scale(1.25); transform-origin: 0 0;
+          display: grid; grid-template-columns: 48px 332px 80px; grid-template-rows: 35px 1fr 22px;
+          font-size: 13px; line-height: 22px; color: var(--text); background: var(--editor); cursor: default; user-select: none; }
+  .mock svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+  .mock svg .f { fill: currentColor; stroke: none; }
+  .titlebar { grid-column: 1 / -1; background: var(--title); border-bottom: 1px solid var(--edge); display: flex; align-items: center; gap: 18px; padding: 0 12px; font-size: 13.5px; }
+  .titlebar .logo { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+  .titlebar .logo i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #6c5cf6, #2f6bff); display: inline-block; }
+  .titlebar .ide { font-size: 11px; font-weight: 600; background: #2a1f5c; color: #c4b5fd; padding: 0 5px; border-radius: 3px; }
+  .rail { background: var(--rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 6px; color: var(--muted); }
+  .rail .ri { width: 48px; height: 40px; display: grid; place-items: center; position: relative; }
+  .rail .ri svg { width: 22px; height: 22px; stroke-width: 1.4; }
+  .rail .ri.on { color: var(--text); }
+  .rail .ri.on::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--violet); }
+  .rail .grow { flex: 1; }
+  .side { background: var(--side); border-right: 1px solid var(--edge); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .ed { background: var(--editor); }
+  .status { grid-column: 1 / -1; background: var(--editor); border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; }
+  .status span { display: flex; align-items: center; gap: 4px; }
+  .status svg { width: 14px; height: 14px; }
+  .status.debugging { background: #3b2a0c; }
+
+  .head { height: 35px; flex: none; display: flex; align-items: center; padding: 0 8px 0 20px; }
+  .head .t { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); flex: 1; }
+  .ib { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); position: relative; }
+  .ib:hover { background: var(--active); color: var(--text); }
+  .ib.off { color: #34425c; pointer-events: none; }
+
+  /* Launch bar: ▶ joined to the configuration picker. */
+  .launch { margin: 0 12px; height: 28px; flex: none; display: flex; border: 1px solid var(--edge); background: var(--active); border-radius: 4px; overflow: hidden; }
+  .launch .go { width: 30px; display: grid; place-items: center; color: var(--go); border-right: 1px solid var(--edge); }
+  .launch .go svg { width: 14px; height: 14px; }
+  .launch .go:hover, .launch .pick:hover { background: #172a4f; }
+  .launch .pick { flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; min-width: 0; }
+  .launch .pick span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .launch .pick em { font-style: normal; color: var(--muted); font-size: 12px; }
+  .launch.off .go { color: #34425c; }
+  /* The toolbar that takes the launch bar's place during a session. */
+  .tools { margin: 0 12px; height: 28px; flex: none; display: flex; align-items: center; gap: 2px; border: 1px solid var(--edge); background: var(--active); border-radius: 4px; padding: 0 3px; }
+  .tools .ib { width: 28px; height: 22px; }
+  .tools .sep { width: 1px; height: 16px; background: var(--edge); margin: 0 3px; }
+  .tools .cfg { flex: 1; text-align: right; color: var(--muted); font-size: 12px; padding-right: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib.cont { color: var(--go); }
+  .ib.stop { color: var(--red); }
+  .ib.step { color: #aac8fa; }
+
+  .state { margin: 6px 12px 4px; height: 22px; flex: none; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
+  .state i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+  .state b { font-weight: 400; }
+  .state span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .state a { margin-left: auto; color: var(--blue); text-decoration: none; flex: none; }
+
+  .list { flex: 1; min-height: 0; overflow: hidden; position: relative; border-top: 1px solid var(--edge); padding-top: 2px; }
+  .sec { height: 22px; display: flex; align-items: center; padding: 0 8px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--label); }
+  .sec .chev { color: var(--muted); }
+  .sec .t { margin-left: 2px; }
+  .pill { margin-left: 6px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--edge); color: var(--text); font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; letter-spacing: 0; }
+  .sec .sp { flex: 1; }
+  .acts { display: none; }
+  .sec:hover .acts, .row:hover .acts, .row.hov .acts, .sec.hov .acts { display: flex; }
+  .acts .ib { width: 22px; }
+
+  .row { height: 22px; display: flex; align-items: center; padding: 0 8px 0 20px; gap: 6px; white-space: nowrap; }
+  .row:hover, .row.hov { background: var(--active); }
+  .row .tw { width: 16px; flex: none; color: var(--muted); }
+  .row .nm { flex: none; max-width: 170px; overflow: hidden; text-overflow: ellipsis; color: #c4b5fd; }
+  .row .nm.scope { color: var(--text); }
+  .row .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .row .v.str { color: var(--string); } .row .v.num { color: var(--number); } .row .v.kw { color: var(--keyword); } .row .v.obj { color: var(--muted); }
+  .row .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .row .loc { flex: none; color: var(--muted); font-size: 12px; }
+  .row.cur { background: #2b2410; }
+  .row.cur .fn { color: #fde7b0; }
+  .row .arrow { width: 14px; flex: none; color: var(--amber); margin-left: -16px; }
+  .row .file { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .row .dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+  .row .ln { flex: none; min-width: 22px; text-align: right; color: var(--muted); font-size: 12px; }
+  .row .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bp); flex: none; margin: 0 3px; }
+  .note { min-height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 20px; color: var(--muted); }
+  .note.welcome { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px 6px 20px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>LightLine Run and Debug: current and proposed</h1>
+  <p class="lead">On the left is a screenshot of the panel today. On the right is the proposed panel, drawn at the same 125% scale in LightLine's own colours, in the same style as the new Source Control panel. It's the same debugger (LLDB for Rust, debugpy for Python), the same configurations, the same six controls and the same three sections. What changes is the layout: the controls sit where your eye already is, there's one line of status instead of a card, and the sections become plain lists you can click.</p>
+
+  <div class="toolbar" role="group" aria-label="Panel state">
+    <button data-state="ready" aria-pressed="true">Ready</button>
+    <button data-state="paused" aria-pressed="false">Paused at a breakpoint</button>
+    <button data-state="running" aria-pressed="false">Running</button>
+    <button data-state="none" aria-pressed="false">Nothing to debug</button>
+    <button data-state="failed" aria-pressed="false">Build failed</button>
+    <span class="hint">Hover rows and buttons in the mock.</span>
+  </div>
+
+  <div class="pair">
+    <figure>
+      <figcaption>Today<span>Screenshot, 125% display</span></figcaption>
+      <div class="frame"><img src="screens/run-debug-current.png" alt="LightLine's Run and Debug panel today"></div>
+    </figure>
+    <figure>
+      <figcaption>Proposed<span>Same scale, with three breakpoints set to show their rows; other states use the buttons above</span></figcaption>
+      <div class="frame"><div class="mock" id="mock"></div></div>
+    </figure>
+    <div class="notes">
+      <h2 style="margin-top:0">What changes</h2>
+      <ol>
+        <li><b>One launch bar.</b> The green ▶ is joined to the configuration picker as one 28 px control, like VS Code's, instead of a 36 px dropdown with a separate big button beside it. The picker still offers Automatic, Rust: Current Workspace and Python: Current File. In Automatic it says what it picked (<i>Rust · Auto</i>).</li>
+        <li><b>The toolbar takes its place while debugging.</b> Continue or Pause, Step Over, Step Into, Step Out, then Restart and Stop, as 28 px icon buttons in the same row, with the configuration named at the right. Today they appear as a second row of bordered tiles and push everything down. Each has a tip with its key (<kbd>F5</kbd>, <kbd>F10</kbd>, <kbd>F11</kbd>, <kbd>Shift+F11</kbd>, <kbd>Shift+F5</kbd>). Steps are dimmed while the program runs.</li>
+        <li><b>Status is one line</b> instead of a 58 px card: a coloured dot, what's happening, and where. Grey means ready, green running, amber paused (<i>Paused · main.rs:42</i>), red failed. A failed build gets a <b>Show Output</b> link.</li>
+        <li><b>Sections are flat, like Source Control:</b> 22 px rows, a chevron, the title and a count pill. There's no bordered card or blue bar on each header. They sit in one list that scrolls, so a long call stack no longer stops at 5 frames.</li>
+        <li><b>Variables read as <code>name: value</code></b>, with the value in the editor's own colours: strings green, numbers orange, <code>true</code>/<code>false</code>/<code>None</code> blue, structs dimmed. Today values start at a fixed column 126 px from the edge and get cut off. Expand arrows are drawn icons, not text triangles.</li>
+        <li><b>The call stack marks where you're paused</b> with the editor's execution arrow on an amber row, instead of a blue card. <b>Clicking a frame opens its file at that line</b> <span class="dim">(new; today frames do nothing)</span>.</li>
+        <li><b>Breakpoints look like the gutter's:</b> the same red dot, the file name, its folder dimmed, and the line number at the right. The fake ✓ box goes, because breakpoints can't be switched off without removing them. <b>Click one to go to it; ✕ on hover removes it</b>, and the header's hover button removes all of them <span class="dim">(new)</span>.</li>
+        <li><b>The header's ··· is a real menu:</b> Start Debugging, Select Configuration, Debug Console, Python: Install debugpy, Remove All Breakpoints. Today ··· opens the Command Palette and the ⚙ opens Settings, which don't belong to this panel.</li>
+        <li><b>The status bar turns amber while a session runs</b>, as in VS Code, so you can tell you're debugging even when the panel is closed.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h2>In sizes</h2>
+  <table>
+    <tr><th>Measure (logical pixels)</th><th>Today</th><th>Proposed</th></tr>
+    <tr><td>Configuration and start</td><td class="num">36, two controls</td><td class="num better">28, one control</td></tr>
+    <tr><td>Debug controls during a session</td><td class="num">a second 36 px row</td><td class="num better">replace the launch bar: 0 extra</td></tr>
+    <tr><td>Status</td><td class="num">58, card</td><td class="num better">22, one line</td></tr>
+    <tr><td>Section header</td><td class="num">28 with card and gaps</td><td class="num better">22</td></tr>
+    <tr><td>Variable, frame and breakpoint rows</td><td class="num">23–24</td><td class="num better">22</td></tr>
+    <tr><td>First section starts at (from the panel's top)</td><td class="num">about 174 when idle, 220 while debugging</td><td class="num better">about 106, idle or debugging</td></tr>
+    <tr><td>Call stack frames shown</td><td class="num">at most 5</td><td class="num better">all of them; the list scrolls</td></tr>
+  </table>
+
+  <h2>Speed</h2>
+  <ul class="plain">
+    <li><b>Nothing new runs.</b> The debugger, its messages and its threads are unchanged, and the panel draws only what <code>debug_state</code> already holds.</li>
+    <li><b>Fewer, cheaper shapes.</b> The status card, six bordered tiles and three header cards go, along with their GDI <code>Ellipse</code> brushes. Dots, arrows and controls come from the shared icon atlas, like Source Control's. Value colours are the theme's existing syntax colours.</li>
+    <li><b>Hover redraws one row or one button</b> (the same <code>Hot</code> targets as Source Control), with no timers. Idle stays at 0 wakeups.</li>
+    <li><b>Clicking a frame or breakpoint</b> opens or switches a tab, as Go to Definition does. Nothing is read in advance.</li>
+  </ul>
+
+  <h2>Open questions</h2>
+  <ul class="plain">
+    <li><b>The amber status bar while debugging:</b> keep it (as drawn), or leave the status bar alone?</li>
+    <li><b>Watch expressions</b> (a WATCH section that re-evaluates expressions on each pause) would fit here, but they're new debugger work. They'd come later, not in this change; the Debug Console already evaluates an expression on demand.</li>
+  </ul>
+</div>
+
+<script>
+const I = {
+  play: '<path class="f" d="M4.5 2.8v10.4L13 8z"/>',
+  cont: '<rect class="f" x="2.5" y="3" width="2" height="10" rx=".6"/><path class="f" d="M6.5 3.2v9.6L13.5 8z"/>',
+  pause: '<rect class="f" x="4" y="3" width="2.6" height="10" rx=".7"/><rect class="f" x="9.4" y="3" width="2.6" height="10" rx=".7"/>',
+  over: '<path d="M3 9.5a5 5 0 0 1 10 0"/><path d="M10.6 7.6 13 10l2.2-2.4"/><circle class="f" cx="8" cy="13" r="1.4"/>',
+  into: '<path d="M8 2v7"/><path d="M5.2 6.3 8 9.1l2.8-2.8"/><circle class="f" cx="8" cy="13" r="1.4"/>',
+  out: '<path d="M8 9V2.5"/><path d="M5.2 5.3 8 2.5l2.8 2.8"/><circle class="f" cx="8" cy="13" r="1.4"/>',
+  restart: '<path d="M13.5 3.5v3.4h-3.4"/><path d="M12.4 9.7a5.1 5.1 0 1 1-1.2-5.3l2.3 2.5"/>',
+  stop: '<rect class="f" x="3.5" y="3.5" width="9" height="9" rx="1.4"/>',
+  arrow: '<path class="f" d="M2 4.8A1.1 1.1 0 0 1 3.1 3.7h5.6a1.1 1.1 0 0 1 .8.36l3.4 3.5a.6.6 0 0 1 0 .8L9.5 11.9a1.1 1.1 0 0 1-.8.36H3.1A1.1 1.1 0 0 1 2 11.2z"/>',
+  down: '<path d="M4 6l4 4 4-4"/>',
+  right: '<path d="M6 4l4 4-4 4"/>',
+  more: '<circle class="f" cx="3.5" cy="8" r="1"/><circle class="f" cx="8" cy="8" r="1"/><circle class="f" cx="12.5" cy="8" r="1"/>',
+  close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  closeAll: '<path d="M6 6l6 6M12 6l-6 6"/><path d="M3 10V3.8A.8.8 0 0 1 3.8 3H10"/>',
+  collapse: '<rect x="5" y="5" width="8.5" height="8.5" rx="1.2"/><path d="M2.5 10.5V3.3a.8.8 0 0 1 .8-.8H10.5"/><path d="M7 9.25h4.5"/>',
+  branch: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="5" r="1.5"/><path d="M5 5v6M11 6.5c0 3-6 2.3-6 4.5"/>',
+  error: '<circle cx="8" cy="8" r="5.5"/><path d="M6 6l4 4M10 6l-4 4"/>',
+  warn: '<path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/>',
+  menu: '<path d="M3 4.5h10M3 8h10M3 11.5h10"/>',
+  files: '<path d="M6 2.5h5l2.5 2.5v7H6z"/><path d="M4 5v8.5h7"/>',
+  search: '<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',
+  git: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M5 5v6M11.5 7.5c0 2.8-6.5 2-6.5 4"/>',
+  run: '<path d="M4 3l6.5 4.2L4 11.4z"/><circle cx="11.5" cy="11.5" r="2.2"/>',
+  ext: '<rect x="2.5" y="8.5" width="5" height="5"/><rect x="8.5" y="8.5" width="5" height="5"/><rect x="2.5" y="2.5" width="5" height="5"/><rect x="9.5" y="1.5" width="4.5" height="4.5" transform="rotate(12 11.7 3.7)"/>',
+  ai: '<path d="M7 2l1.3 3.7L12 7l-3.7 1.3L7 12l-1.3-3.7L2 7l3.7-1.3z"/><path d="M12.5 10.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z"/>',
+  gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
+};
+const svg = (name) => `<svg viewBox="0 0 16 16" aria-hidden="true">${I[name]}</svg>`;
+const ib = (name, title, cls = '') => `<span class="ib ${cls}" title="${title}">${svg(name)}</span>`;
+
+function section(title, count, acts, cls = '') {
+  return `<div class="sec ${cls}"><span class="chev">${svg('down')}</span><span class="t">${title}</span>` +
+    `<span class="pill">${count}</span><span class="sp"></span><span class="acts">${acts}</span></div>`;
+}
+
+const breakpoints = [
+  ['main.rs', 'src', 42],
+  ['settings.rs', 'src', 118],
+  ['document.rs', 'src', 1290],
+];
+const frames = [
+  ['lightline::main', 'main.rs:42'],
+  ['core::ops::function::FnOnce::call_once', 'function.rs:250'],
+  ['std::sys::backtrace::__rust_begin_short_backtrace', 'backtrace.rs:152'],
+  ['std::rt::lang_start::{{closure}}', 'rt.rs:206'],
+  ['std::rt::lang_start_internal', 'rt.rs:174'],
+  ['std::rt::lang_start', 'rt.rs:205'],
+  ['main', ''],
+];
+
+function breakpointRows(hover) {
+  return breakpoints.map(([file, dir, line], i) =>
+    `<div class="row ${hover && i === 1 ? 'hov' : ''}"><span class="dot"></span><span class="file">${file}</span>` +
+    `<span class="dir">${dir}</span><span class="acts">${ib('close', 'Remove Breakpoint')}</span><span class="ln">${line}</span></div>`).join('');
+}
+
+function render(state) {
+  const session = state === 'paused' || state === 'running';
+  const paused = state === 'paused';
+
+  let bar;
+  if (session) {
+    const first = paused ? ib('cont', 'Continue (F5)', 'cont') : ib('pause', 'Pause (F5)', 'step');
+    const step = paused ? 'step' : 'off';
+    bar = `<div class="tools">${first}${ib('over', 'Step Over (F10)', step)}${ib('into', 'Step Into (F11)', step)}` +
+      `${ib('out', 'Step Out (Shift+F11)', step)}<span class="sep"></span>${ib('restart', 'Restart', 'step')}` +
+      `${ib('stop', 'Stop (Shift+F5)', 'stop')}<span class="cfg">Rust · LLDB</span></div>`;
+  } else {
+    const label = state === 'none'
+      ? '<span style="color:var(--muted)">No configuration</span>'
+      : '<span>Rust: Current Workspace</span><em>Auto</em>';
+    bar = `<div class="launch ${state === 'none' ? 'off' : ''}"><span class="go" title="Start Debugging (F5)">${svg('play')}</span>` +
+      `<span class="pick">${label}<span style="flex:none;color:var(--muted)">${svg('down')}</span></span></div>`;
+  }
+
+  const states = {
+    ready: ['var(--muted)', 'Ready', 'builds and debugs the Cargo workspace', ''],
+    paused: ['var(--amber)', 'Paused on breakpoint', 'main.rs:42', ''],
+    running: ['var(--green)', 'Running', 'LLDB', ''],
+    none: ['var(--muted)', 'Nothing to debug', 'open a Rust or Python file', ''],
+    failed: ['var(--red)', 'Build failed', 'cargo build exited with code 101', '<a href="#" onclick="return false">Show Output</a>'],
+  };
+  const [color, title, detail, link] = states[state];
+  const status = `<div class="state"><i style="background:${color}"></i><b>${title}</b><span>· ${detail}</span>${link}</div>`;
+
+  let list = '';
+  if (paused) {
+    list += section('VARIABLES', 6, ib('collapse', 'Collapse All'));
+    list += `<div class="row" style="padding-left:4px"><span class="tw">${svg('down')}</span><span class="nm scope">Locals</span></div>`;
+    const vars = [
+      [0, false, false, 'name', '"LightLine"', 'str'],
+      [0, false, false, 'count', '3', 'num'],
+      [0, false, false, 'ready', 'true', 'kw'],
+      [0, true, true, 'items', 'Vec&lt;i32&gt; { len: 3 }', 'obj'],
+      [1, false, false, '[0]', '10', 'num'],
+      [1, false, false, '[1]', '20', 'num'],
+      [1, false, false, '[2]', '30', 'num'],
+      [0, true, false, 'settings', 'Settings { font_size: 14, … }', 'obj'],
+    ];
+    list += vars.map(([depth, expandable, open, name, value, kind], i) =>
+      `<div class="row ${i === 3 ? 'hov' : ''}" style="padding-left:${20 + depth * 12}px"><span class="tw">${expandable ? svg(open ? 'down' : 'right') : ''}</span>` +
+      `<span class="nm">${name}</span><span style="color:var(--muted);margin-left:-6px">:</span><span class="v ${kind}">${value}</span></div>`).join('');
+    list += section('CALL STACK', frames.length, '');
+    list += frames.map(([fn, loc], i) =>
+      `<div class="row ${i === 0 ? 'cur' : ''}"><span class="arrow">${i === 0 ? svg('arrow') : ''}</span>` +
+      `<span class="fn">${fn}</span><span class="loc">${loc}</span></div>`).join('');
+    list += section('BREAKPOINTS', breakpoints.length, ib('closeAll', 'Remove All Breakpoints'), 'hov');
+    list += breakpointRows(true);
+  } else {
+    list += section('VARIABLES', 0, '');
+    list += `<div class="note">${state === 'running' ? 'Pause to see variables.' : 'Variables appear when execution pauses.'}</div>`;
+    list += section('CALL STACK', 0, '');
+    list += `<div class="note">${state === 'running' ? 'Running. Pause to see the call stack.' : 'The call stack appears while debugging.'}</div>`;
+    if (state === 'ready' || state === 'running') {
+      list += section('BREAKPOINTS', breakpoints.length, ib('closeAll', 'Remove All Breakpoints'));
+      list += breakpointRows(state === 'ready');
+    } else {
+      list += section('BREAKPOINTS', 0, '');
+      list += `<div class="note">Click the gutter or press F9 to add one.</div>`;
+    }
+    if (state === 'none') {
+      list += `<div class="note welcome"><span>LightLine debugs Rust with LLDB and Python with debugpy.</span>` +
+        `<span>Open a <b style="font-weight:600;color:var(--text)">.rs</b> file or a Cargo folder, or a <b style="font-weight:600;color:var(--text)">.py</b> file, then press <kbd>F5</kbd>.</span></div>`;
+    }
+  }
+
+  const rail = ['menu', 'files', 'search', 'git', 'run', 'ext', 'ai'].map((n) =>
+    `<span class="ri${n === 'run' ? ' on' : ''}">${svg(n)}</span>`).join('') +
+    `<span class="grow"></span><span class="ri">${svg('gear')}</span>`;
+
+  document.getElementById('mock').innerHTML =
+    `<div class="titlebar"><span class="logo"><i></i>LightLine <span class="ide">IDE</span></span><span>File</span><span>Edit</span><span>Selection</span><span>View</span></div>` +
+    `<div class="rail">${rail}</div>` +
+    `<div class="side"><div class="head"><span class="t">RUN AND DEBUG</span>${ib('more', 'More Actions…')}</div>` +
+    `<div style="height:8px;flex:none"></div>${bar}${status}<div class="list">${list}</div></div>` +
+    `<div class="ed"></div>` +
+    `<div class="status ${session ? 'debugging' : ''}"><span>${svg('branch')}main</span>` +
+    `<span style="color:var(--red)">${svg('error')}<span style="color:var(--text)">0</span></span>` +
+    `<span style="color:var(--amber)">${svg('warn')}<span style="color:var(--text)">0</span></span>` +
+    `${session ? '<span style="margin-left:auto;color:#fde7b0">Debugging: Rust · LLDB</span>' : ''}</div>`;
+}
+
+document.querySelectorAll('[data-state]').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+    render(button.dataset.state);
+  });
+});
+const initial = new URLSearchParams(location.search).get('state') || 'ready';
+document.querySelectorAll('[data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.state === initial)));
+render(initial);
+</script>
+</body>
+</html>

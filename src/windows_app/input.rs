@@ -1648,33 +1648,6 @@ impl App {
         }
         let rail = self.scale(RAIL);
         let editor_left = self.editor_left();
-        // The themed debug picker behaves like a popup: its rows take the
-        // click first, and clicking anywhere else dismisses it before normal
-        // workbench hit-testing continues.
-        if self.debug_config_menu_open {
-            let panel_y = y - self.side_origin();
-            let menu = self.debug_config_menu_rect(rail, editor_left);
-            if x >= menu.left && x < menu.right && panel_y >= menu.top && panel_y < menu.bottom {
-                if let Some(index) = self.debug_config_menu_row(panel_y) {
-                    let choice = match index {
-                        0 => None,
-                        1 => Some(DebugConfig::RustWorkspace),
-                        _ => Some(DebugConfig::PythonFile),
-                    };
-                    self.select_debug_config(hwnd, choice);
-                }
-                return;
-            }
-            let selector = self.debug_config_rect(rail, editor_left);
-            let on_selector = x >= selector.left
-                && x < selector.right
-                && panel_y >= selector.top
-                && panel_y < selector.bottom;
-            if !on_selector {
-                self.debug_config_menu_open = false;
-                unsafe { InvalidateRect(hwnd, null(), 0) };
-            }
-        }
         if x < rail {
             self.terminal_focus = false;
             // The same hit test as the hover highlight (hot.rs).
@@ -1731,13 +1704,9 @@ impl App {
                     }
                 }
                 if self.side_view == SideView::Debug {
-                    if x >= editor_left - self.scale(38) {
-                        self.show_quick_open(hwnd);
-                        self.quick_query = ">".into();
-                        return;
-                    }
-                    if x >= editor_left - self.scale(68) {
-                        self.open_settings(hwnd);
+                    // ··· and the hidden-close strip share the right edge.
+                    if x >= self.sidebar_right() - self.scale(40) {
+                        self.debug_panel_click(hwnd, x, y);
                         return;
                     }
                 }
@@ -1840,66 +1809,7 @@ impl App {
                 return;
             }
             if self.side_view == SideView::Debug {
-                let rail = self.scale(RAIL);
-                let config = self.debug_config_rect(rail, editor_left);
-                if x >= config.left && x < config.right && y >= config.top && y < config.bottom {
-                    self.show_debug_config_menu(hwnd, config.left, config.bottom);
-                    return;
-                }
-                let start = self.debug_start_button(editor_left);
-                if x >= start.left && x < start.right && y >= start.top && y < start.bottom {
-                    if self.debug.is_none() {
-                        self.start_debug_session(hwnd);
-                    }
-                    return;
-                }
-                if y >= self.scale(94) && y < self.scale(130) {
-                    for index in 0..6 {
-                        let rect = self.debug_toolbar_button(rail, editor_left, index);
-                        if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
-                            let enabled = match index {
-                                0 => self.debug.is_some(),
-                                1..=3 => self.debug_paused(),
-                                _ => self.debug.is_some(),
-                            };
-                            if !enabled {
-                                return;
-                            }
-                            match index {
-                                0 if self.debug_state.running => self.debug_pause(hwnd),
-                                0 => self.debug_continue(hwnd),
-                                1 => self.debug_step_over(hwnd),
-                                2 => self.debug_step_in(hwnd),
-                                3 => self.debug_step_out(hwnd),
-                                4 => self.debug_restart(hwnd),
-                                _ => self.debug_stop(hwnd),
-                            }
-                            return;
-                        }
-                    }
-                    return;
-                }
-                if x >= rail && x < editor_left {
-                    let bottom = (panel_bottom - self.scale(STATUS)).max(0);
-                    let layout = self.debug_panel_layout(bottom);
-                    let section_headers = [
-                        layout.variables_header_y,
-                        layout.call_stack_header_y,
-                        layout.breakpoints_header_y,
-                    ];
-                    for (section, header_y) in section_headers.iter().enumerate() {
-                        if y >= *header_y && y < *header_y + self.scale(28) {
-                            self.toggle_debug_section(hwnd, section);
-                            return;
-                        }
-                    }
-                    for row in &layout.variable_rows {
-                        if row.expandable && y >= row.y && y < row.y + self.scale(23) {
-                            self.toggle_debug_variable(hwnd, row.reference);
-                            return;
-                        }
-                    }
-                }
+                self.debug_panel_click(hwnd, x, y);
                 return;
             }
             if self.side_view == SideView::Extensions {

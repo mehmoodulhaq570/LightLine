@@ -149,6 +149,14 @@ Add cursors with `Alt+Click`, `Ctrl+Alt+Up` / `Ctrl+Alt+Down` or `Ctrl+D`. Typin
 | `F11` / `Shift+F11` | Step into / step out |
 | `F9` or a click in the gutter | Toggle a breakpoint |
 
+The **Run and Debug** panel (`Ctrl+Shift+D`) starts a session with its green **▶**; the picker beside it chooses **Automatic** (follows the open file), **Rust: Current Workspace** or **Python: Current File**. While you debug, the same bar holds Continue/Pause, Step Over, Step Into, Step Out, Restart and Stop, and the status bar turns amber. Below it:
+
+- **Variables**: `name: value` for each scope; click an arrow to expand a struct or list.
+- **Call Stack**: every frame, the paused one marked with the yellow arrow; click a frame to open its line.
+- **Breakpoints**: those in open files; click one to go to it, point at it for **✕** to remove it, or point at the title to remove them all.
+
+The **···** menu has Start Debugging, Select Configuration, Debug Console, Python: Install debugpy and Remove All Breakpoints.
+
 In the search results and the Source Control list, `↑` / `↓` move, `Enter` opens, and `Space` stages or unstages. While your program runs in the Output pane, it receives what you type, including `Enter`.
 
 ### Direct language runners

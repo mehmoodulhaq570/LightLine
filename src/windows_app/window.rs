@@ -672,6 +672,21 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                     app.scroll_settings_panel(hwnd, delta as i32);
                     return 0;
                 }
+                if app.side_view == SideView::Debug {
+                    // Variables, call stack and breakpoints are one list.
+                    let max = app
+                        .debug_rows()
+                        .len()
+                        .saturating_sub(app.debug_visible_rows(hwnd));
+                    app.debug_first = if delta > 0 {
+                        app.debug_first.saturating_sub(3)
+                    } else {
+                        (app.debug_first + 3).min(max)
+                    };
+                    app.forget_debug_hot_row(hwnd);
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                    return 0;
+                }
                 if app.side_view != SideView::Files {
                     // Every list scrolls by whole rows, and the source control
                     // list mixes headers, files and commits, so its bound and
