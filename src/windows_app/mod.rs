@@ -10,6 +10,7 @@ mod code_actions;
 mod codelens;
 mod comment;
 mod crash;
+mod debug_panel;
 mod dialog;
 mod editor_context;
 mod file_dialog;
@@ -67,10 +68,11 @@ use app::{
     SideView, Tab, TerminalPane, TerminalTab, WATCHER_EVENT_MESSAGE, WORKER_EVENT_MESSAGE,
     WorkerMessage, is_c_family_path, is_cpp_path,
 };
+use debug_panel::{DebugButton, DebugHot};
 use editor_context::{EditorContextDiagnostic, EditorContextMenu};
 use git::{GitButton, GitHot};
 use menu_bar::MenuBar;
-use more_menu::{GitMenu, MoreMenu};
+use more_menu::{DebugMenu, GitMenu, MoreMenu};
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
 mod input;

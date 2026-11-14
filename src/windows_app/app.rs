@@ -1116,9 +1116,8 @@ pub(super) struct App {
     // The configuration picked in the Run & Debug dropdown; None follows the
     // active file (see App::auto_debug_config).
     pub(super) debug_config: Option<DebugConfig>,
-    // Custom-drawn launch picker. Keeping it in the workbench surface avoids
-    // the bright, platform-native popup that clashes with the dark theme.
-    pub(super) debug_config_menu_open: bool,
+    // The first Run & Debug list row on screen (the list scrolls).
+    pub(super) debug_first: usize,
     // Folders whose Markdown previews may load web images; read from disk
     // when the first preview opens.
     pub(super) web_image_folders: Option<Vec<PathBuf>>,
@@ -1728,7 +1727,7 @@ impl App {
             debug_pending_breakpoints: Vec::new(),
             debug_sections_expanded: [true; 3],
             debug_config: None,
-            debug_config_menu_open: false,
+            debug_first: 0,
             web_image_folders: None,
             ghost_text: None,
             ghost_cancel: Arc::new(AtomicBool::new(false)),

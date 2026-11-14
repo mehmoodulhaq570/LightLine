@@ -1,6 +1,7 @@
 mod ai_assistant;
 mod code_pane;
 mod completion;
+mod debug;
 mod editor;
 mod git;
 mod hover;

@@ -253,14 +253,8 @@ impl App {
             31 => self.set_default_terminal_profile(hwnd, ShellKind::GitBash),
             32 => self.set_default_terminal_profile(hwnd, ShellKind::Wsl),
             33 => self.start_debug_session(hwnd),
-            34 => {
-                // Open the panel and drop the menu down from its selector.
-                if !(self.side_view == SideView::Debug && self.explorer_visible) {
-                    self.toggle_side_view(hwnd, SideView::Debug);
-                }
-                let config = self.debug_config_rect(self.scale(RAIL), self.editor_left());
-                self.show_debug_config_menu(hwnd, config.left, config.bottom);
-            }
+            // Opens the panel and drops the picker from its launch bar.
+            34 => self.show_debug_config_menu(hwnd),
             35 => self.install_debugpy(hwnd),
             36 => self.open_markdown_preview(hwnd, false),
             37 => self.open_markdown_preview(hwnd, true),

@@ -36,6 +36,8 @@ pub(super) enum Hot {
     Welcome(usize),
     // A Source Control button or row (git.rs).
     Git(GitHot),
+    // A Run & Debug button or row (debug_panel.rs).
+    Debug(DebugHot),
 }
 
 impl App {
@@ -48,7 +50,6 @@ impl App {
             || self.more_menu.is_some()
             || self.menu_bar.is_some()
             || self.quick_open
-            || self.debug_config_menu_open
         {
             return None;
         }
@@ -94,6 +95,15 @@ impl App {
             && y < client.bottom - self.scale(STATUS)
         {
             return self.git_hot_at(x, y - self.side_origin()).map(Hot::Git);
+        }
+        if self.side_view == SideView::Debug
+            && self.explorer_visible
+            && self.sidebar_width > 0
+            && x < self.sidebar_right()
+            && y >= chrome_top
+            && y < client.bottom - self.scale(STATUS)
+        {
+            return self.debug_hot_at(x, y - self.side_origin()).map(Hot::Debug);
         }
         None
     }
@@ -169,6 +179,14 @@ impl App {
                     ..rect
                 })
             }
+            Hot::Debug(debug) => {
+                let origin = self.side_origin();
+                self.debug_hot_rect(debug).map(|rect| RECT {
+                    top: rect.top + origin,
+                    bottom: rect.bottom + origin,
+                    ..rect
+                })
+            }
             rail => {
                 let editor_bottom = client.bottom - self.scale(STATUS) - chrome_top;
                 self.rail_item_rect(rail, editor_bottom).map(|rect| RECT {
@@ -211,6 +229,18 @@ impl App {
                 GitButton::Fetch => "Fetch",
                 GitButton::Primary => return None,
             },
+            Hot::Debug(DebugHot::Button(button)) => match button {
+                DebugButton::More => "More actions",
+                DebugButton::Go => "Start Debugging (F5)",
+                DebugButton::Tool(0) if self.debug_state.running => "Pause (F5)",
+                DebugButton::Tool(0) => "Continue (F5)",
+                DebugButton::Tool(1) => "Step Over (F10)",
+                DebugButton::Tool(2) => "Step Into (F11)",
+                DebugButton::Tool(3) => "Step Out (Shift+F11)",
+                DebugButton::Tool(4) => "Restart",
+                DebugButton::Tool(_) => "Stop (Shift+F5)",
+                DebugButton::Pick | DebugButton::Link => return None,
+            },
             _ => return None,
         })
     }
@@ -231,7 +261,7 @@ impl App {
         let height = s(28);
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let card = if let Hot::TitleButton(_) | Hot::Git(_) = hot {
+        let card = if let Hot::TitleButton(_) | Hot::Git(_) | Hot::Debug(_) = hot {
             let right = item.right.min(client.right - s(6));
             RECT {
                 left: right - width,

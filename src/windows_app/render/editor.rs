@@ -1,4 +1,5 @@
 use super::super::*;
+use super::blend;
 
 // The status bar names the language the way an editor does ("Rust", not "RS"),
 // falling back to the bare extension for types we have no display name for.
@@ -93,7 +94,17 @@ impl App {
 
     /// Where "Ready" (and its dot) starts at the status bar's right end.
     pub(in crate::windows_app) fn status_ready_x(&self, hdc: HDC, rect: RECT) -> i32 {
-        rect.right - self.text_width(hdc, "Ready") - self.scale(16 + 14)
+        rect.right - self.text_width(hdc, self.status_ready_label()) - self.scale(16 + 14)
+    }
+
+    /// The status bar's right-hand indicator: "Debugging" during a debug
+    /// session (the bar turns amber too), "Ready" otherwise.
+    fn status_ready_label(&self) -> &'static str {
+        if self.debug_session_shown() {
+            "Debugging"
+        } else {
+            "Ready"
+        }
     }
 
     // Geometry for the trailing "{Language}" name in the bottom status bar's
@@ -376,7 +387,13 @@ impl App {
                     right: rect.right,
                     bottom: rect.bottom,
                 },
-                self.theme.status_bg,
+                if self.debug_session_shown() {
+                    // Amber while debugging, as in VS Code, so a session is
+                    // visible with the Run & Debug panel closed.
+                    blend(self.theme.status_bg, ui(245, 166, 35), 0.22)
+                } else {
+                    self.theme.status_bg
+                },
             );
             Self::fill(
                 hdc,
@@ -475,14 +492,18 @@ impl App {
                 self.icons.draw_glyph(
                     hdc,
                     DebugGlyph::GutterDot,
-                    ui(52, 211, 153),
+                    if self.debug_session_shown() {
+                        ui(245, 184, 95)
+                    } else {
+                        ui(52, 211, 153)
+                    },
                     ready_x,
                     middle - dot / 2,
                     dot,
                 );
                 self.label_mid(
                     hdc,
-                    "Ready",
+                    self.status_ready_label(),
                     ready_x + self.scale(14),
                     middle,
                     self.theme.text,

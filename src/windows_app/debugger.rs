@@ -71,32 +71,6 @@ pub(super) fn debug_terminal_command(
     Some(statements.join("; "))
 }
 
-// A single flattened VARIABLES-tree row: either a scope header, a variable
-// (leaf or expandable), or a "Loading..." placeholder for children still in
-// flight. See `App::debug_variable_rows`.
-pub(super) struct DebugVariableRow {
-    pub(super) y: i32,
-    pub(super) depth: usize,
-    // DAP variablesReference; 0 for headers, leaves, and the loading row.
-    pub(super) reference: i64,
-    pub(super) expandable: bool,
-    pub(super) expanded: bool,
-    pub(super) is_header: bool,
-    pub(super) loading: bool,
-    pub(super) name: String,
-    pub(super) value: String,
-}
-
-pub(super) struct DebugPanelLayout {
-    pub(super) variables_header_y: i32,
-    pub(super) variables_body_y: i32,
-    pub(super) variable_rows: Vec<DebugVariableRow>,
-    pub(super) call_stack_header_y: i32,
-    pub(super) call_stack_body_y: i32,
-    pub(super) breakpoints_header_y: i32,
-    pub(super) breakpoints_body_y: i32,
-}
-
 impl App {
     // The configuration the active file calls for: Python for a .py file,
     // Rust for a .rs file or a Cargo workspace, nothing otherwise.
@@ -272,6 +246,14 @@ impl App {
             Err(error) => {
                 self.debug_pending_root = None;
                 self.debug_pending_breakpoints.clear();
+                self.debug_console.clear();
+                self.debug_console.push(
+                    "stderr",
+                    &format!(
+                        "{error}
+"
+                    ),
+                );
                 self.debug_state.status = format!("Build failed: {error}");
                 self.status = "Debug build failed".into();
             }
@@ -333,28 +315,9 @@ impl App {
                         && let Some(path) = frame.path.clone()
                     {
                         let line = frame.line.saturating_sub(1) as usize;
-                        let showing = self
-                            .doc()
-                            .path
-                            .as_deref()
-                            .is_some_and(|open| Self::same_path(open, &path));
-                        if !showing {
-                            // Opening a file switches the sidebar to Files;
-                            // keep Run & Debug so the variables stay in view.
-                            let side_view = self.side_view;
-                            self.open(hwnd, Some(path));
-                            if side_view == SideView::Debug {
-                                self.side_view = SideView::Debug;
-                            }
-                        }
-                        let byte_pos = {
-                            let doc = self.doc();
-                            let line = line.min(doc.line_count().saturating_sub(1));
-                            Pos { line, byte: 0 }
-                        };
-                        self.move_cursor(byte_pos, false);
-                        self.keep_cursor_visible(hwnd);
+                        self.debug_show_line(hwnd, path, line);
                     }
+                    self.debug_first = 0;
                 }
                 DebugEvent::Continued => {
                     self.debug_state.status = "Running".into();
@@ -393,6 +356,7 @@ impl App {
                         ..Default::default()
                     };
                     self.status = "Debug session ended".into();
+                    self.debug_first = 0;
                 }
                 DebugEvent::Failed { message } => {
                     self.debug_console.push("stderr", &format!("{message}\n"));
@@ -489,21 +453,7 @@ impl App {
         }
     }
 
-    // The configuration dropdown: Automatic follows the active file; picking
-    // Rust or Python pins that configuration until Automatic is chosen again.
-    // The menu is painted by the sidebar so it shares the workbench theme.
-    pub(super) fn show_debug_config_menu(&mut self, hwnd: HWND, _x: i32, _y: i32) {
-        if self.debug.is_some() || self.debug_pending_root.is_some() {
-            self.status = "Stop the debug session to change its configuration".into();
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-            return;
-        }
-        self.debug_config_menu_open = !self.debug_config_menu_open;
-        unsafe { InvalidateRect(hwnd, null(), 0) };
-    }
-
     pub(super) fn select_debug_config(&mut self, hwnd: HWND, choice: Option<DebugConfig>) {
-        self.debug_config_menu_open = false;
         self.debug_config = choice;
         self.debug_state = DebugState {
             status: "Not running".into(),
@@ -542,170 +492,13 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
-    // Where the VARIABLES tree body starts, in the same window coordinates
-    // paint_debug_panel draws in: past the toolbar, the status line, and the
-    // "VARIABLES" section header. Shared so the click handler in input.rs
-    // lands on exactly the rows that were actually painted.
-    pub(super) fn debug_panel_layout(&self, bottom: i32) -> DebugPanelLayout {
-        let s = |v: i32| self.scale(v);
-        let header_height = s(28);
-        let row_height = s(23);
-        let scope_height = s(22);
-        let gap = s(7);
-        let variables_header_y = if self.debug.is_some() { s(208) } else { s(162) };
-        let variables_body_y = variables_header_y + header_height;
-        let mut variable_rows = Vec::new();
-        let mut y = variables_body_y;
-        if self.debug_sections_expanded[0] {
-            if self.debug_state.scopes.is_empty() {
-                y += s(34);
-            } else {
-                // Keep enough room for the remaining section headers even
-                // when the debugger reports a very large locals tree.
-                let rows_bottom = (bottom - header_height * 2 - gap * 2).max(y);
-                let (rows, next_y) =
-                    self.debug_variable_rows(y, rows_bottom, row_height, scope_height);
-                variable_rows = rows;
-                y = next_y + s(5);
-            }
-        }
-        let call_stack_header_y = y + gap;
-        let call_stack_body_y = call_stack_header_y + header_height;
-        y = call_stack_body_y;
-        if self.debug_sections_expanded[1] {
-            y += if self.debug_state.frames.is_empty() {
-                s(34)
-            } else {
-                row_height * self.debug_state.frames.len().min(5) as i32 + s(5)
-            };
-        }
-        let breakpoints_header_y = y + gap;
-        let breakpoints_body_y = breakpoints_header_y + header_height;
-        DebugPanelLayout {
-            variables_header_y,
-            variables_body_y,
-            variable_rows,
-            call_stack_header_y,
-            call_stack_body_y,
-            breakpoints_header_y,
-            breakpoints_body_y,
-        }
-    }
-
-    // Flattens the VARIABLES tree (scope headers, their variables, and any
-    // expanded children) into rows with absolute y positions. Used by both
-    // paint_debug_panel (to draw) and the click handler (to hit-test), so the
-    // two can never drift apart the way "renders one thing, clicks another"
-    // bugs usually happen.
-    pub(super) fn debug_variable_rows(
-        &self,
-        start_y: i32,
-        bottom: i32,
-        row_height: i32,
-        header_height: i32,
-    ) -> (Vec<DebugVariableRow>, i32) {
-        let mut rows = Vec::new();
-        let mut y = start_y;
-        for scope in &self.debug_state.scopes {
-            if y + header_height > bottom {
-                break;
-            }
-            rows.push(DebugVariableRow {
-                y,
-                depth: 0,
-                reference: 0,
-                expandable: false,
-                expanded: false,
-                is_header: true,
-                loading: false,
-                name: scope.name.clone(),
-                value: String::new(),
-            });
-            y += header_height;
-            let mut truncated = false;
-            for variable in &scope.variables {
-                if !self.push_debug_variable_row(&mut rows, variable, 0, &mut y, bottom, row_height)
-                {
-                    truncated = true;
-                    break;
-                }
-            }
-            if truncated {
-                break;
-            }
-        }
-        (rows, y)
-    }
-
-    // Returns false once `bottom` is reached, so the caller can stop walking
-    // remaining scopes/siblings instead of producing invisible rows.
-    fn push_debug_variable_row(
-        &self,
-        rows: &mut Vec<DebugVariableRow>,
-        variable: &DebugVariable,
-        depth: usize,
-        y: &mut i32,
-        bottom: i32,
-        row_height: i32,
-    ) -> bool {
-        if *y + row_height > bottom {
-            return false;
-        }
-        let expandable = variable.variables_reference != 0;
-        let expanded = expandable
-            && self
-                .debug_state
-                .expanded
-                .contains(&variable.variables_reference);
-        rows.push(DebugVariableRow {
-            y: *y,
-            depth,
-            reference: variable.variables_reference,
-            expandable,
-            expanded,
-            is_header: false,
-            loading: false,
-            name: variable.name.clone(),
-            value: variable.value.clone(),
-        });
-        *y += row_height;
-        if !expanded {
-            return true;
-        }
-        match self.debug_state.children.get(&variable.variables_reference) {
-            Some(children) => {
-                for child in children {
-                    if !self.push_debug_variable_row(rows, child, depth + 1, y, bottom, row_height)
-                    {
-                        return false;
-                    }
-                }
-                true
-            }
-            None => {
-                if *y + row_height > bottom {
-                    return false;
-                }
-                rows.push(DebugVariableRow {
-                    y: *y,
-                    depth: depth + 1,
-                    reference: 0,
-                    expandable: false,
-                    expanded: false,
-                    is_header: false,
-                    loading: true,
-                    name: "Loading\u{2026}".into(),
-                    value: String::new(),
-                });
-                *y += row_height;
-                true
-            }
-        }
-    }
-
     pub(super) fn debug_stop(&mut self, hwnd: HWND) {
-        // Dropping the client sends Disconnect and tears the adapter down.
+        // Dropping the client sends Disconnect and tears the adapter down;
+        // forgetting the pending root makes a build still running end there.
         self.debug = None;
+        self.debug_pending_root = None;
+        self.debug_pending_breakpoints.clear();
+        self.debug_first = 0;
         self.debug_state = DebugState {
             status: "Not running".into(),
             config: self.debug_state.config,
