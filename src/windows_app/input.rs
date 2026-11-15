@@ -130,6 +130,7 @@ impl App {
             && !self.quick_open
             && !self.search_input
             && !(self.side_view == SideView::Extensions && self.extensions_search_active)
+            && !self.settings_typing()
             && !(self.side_view == SideView::Review && self.commit_focus)
             && self.explorer_input.is_none()
         {
@@ -350,6 +351,14 @@ impl App {
             if key == VK_ESCAPE as u32 || key == VK_RETURN as u32 || key == VK_BACK as u32 {
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 return true;
+            }
+        }
+        if self.settings_typing() {
+            if self.settings_search_key(hwnd, key, ctrl) {
+                return true;
+            }
+            if !ctrl {
+                return false;
             }
         }
         // The commit message box borrows the same single-line text handling as
@@ -1126,6 +1135,7 @@ impl App {
             && !self.quick_open
             && !self.search_input
             && !(self.side_view == SideView::Extensions && self.extensions_search_active)
+            && !self.settings_typing()
             && !(self.side_view == SideView::Review && self.commit_focus)
             && self.explorer_input.is_none()
         {
@@ -1171,6 +1181,16 @@ impl App {
             {
                 self.commit_message.push(ch);
                 unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
+            return;
+        }
+        if self.settings_typing() {
+            if unit >= 32
+                && unit != 127
+                && let Some(ch) = char::from_u32(unit as u32)
+            {
+                self.settings_query.push(ch);
+                self.settings_query_changed(hwnd);
             }
             return;
         }
@@ -1580,21 +1600,27 @@ impl App {
             return;
         }
         if self.quick_open {
-            let width = self.scale(560).min(rect.right - self.scale(30));
-            let left = (rect.right - width) / 2;
-            let top = self.scale(52);
-            if x >= left
-                && x < left + width
-                && y >= top + self.scale(68)
-                && y < top + self.scale(70 + 8 * 34)
-            {
-                // The hint line below the rows isn't an item.
-                let row = ((y - top - self.scale(68)) / self.scale(34).max(1)) as usize;
-                if row < QUICK_ROWS {
-                    self.activate_quick_item(hwnd, self.quick_first + row);
+            let count = self.quick_count();
+            let layout = unsafe {
+                let hdc = GetDC(hwnd);
+                let layout = self.quick_layout(hdc, rect.right, count);
+                ReleaseDC(hwnd, hdc);
+                layout
+            };
+            let inside =
+                |area: RECT| x >= area.left && x < area.right && y >= area.top && y < area.bottom;
+            if inside(layout.card) {
+                if let Some(row) = layout.rows.iter().position(|row| inside(*row)) {
+                    if row < count {
+                        self.activate_quick_item(hwnd, self.quick_first + row);
+                    }
+                } else if let Some(&(_, prefix)) =
+                    layout.modes.iter().find(|(area, _)| inside(*area))
+                {
+                    self.quick_mode(hwnd, prefix);
                 }
-            } else if x < left || x >= left + width || y < top || y >= top + self.scale(70 + 8 * 34)
-            {
+            } else if !inside(self.quick_input_rect(hwnd)) {
+                // The title bar's box is where Quick Open's text is typed.
                 self.quick_open = false;
                 unsafe { InvalidateRect(hwnd, null(), 0) };
             }
@@ -1691,6 +1717,13 @@ impl App {
                     && x >= self.sidebar_right() - self.scale(70)
                 {
                     self.extensions_panel_click(hwnd, x, y);
+                    return;
+                }
+                if self.side_view == SideView::Settings
+                    && x >= self.sidebar_right() - self.scale(40)
+                    && x < self.sidebar_right()
+                {
+                    self.settings_panel_click(hwnd, x, y);
                     return;
                 }
                 if self.side_view == SideView::Review {
@@ -2091,12 +2124,14 @@ impl App {
             && !(self.panel_focus
                 || self.terminal_focus
                 || self.extensions_search_active
+                || self.settings_search_active
                 || self.search_input
                 || self.commit_focus);
         let before = self.caret_frame(hwnd);
         self.panel_focus = false;
         self.terminal_focus = false;
         self.extensions_search_active = false;
+        self.settings_search_active = false;
         self.search_input = false;
         // Typing goes back to the document, so the find box closes.
         self.find_mode = false;

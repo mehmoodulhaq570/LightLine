@@ -1472,7 +1472,13 @@ impl App {
         unsafe { SelectObject(hdc, self.ui_font) };
         match self.menu_titles(hwnd) {
             Titles::Full(rects) => {
+                // Quick Open's input covers the titles it reaches; they're
+                // left out, not cut in half.
+                let covered_from = self.quick_open.then(|| self.quick_input_rect(hwnd).left);
                 for (index, rect) in rects.iter().enumerate() {
+                    if covered_from.is_some_and(|left| rect.right > left) {
+                        continue;
+                    }
                     let (title, access, _) = MENUS[index];
                     let focused = self.menu_bar_focus == Some(index);
                     let color = if open == Some(index) {

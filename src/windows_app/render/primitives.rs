@@ -237,6 +237,10 @@ impl App {
     /// The search box in the title bar (Quick Open, Ctrl+P).
     pub(in crate::windows_app) fn paint_command_center(&self, hdc: HDC, hwnd: HWND) {
         let s = |value: i32| self.scale(value);
+        if self.quick_open {
+            self.paint_quick_input(hdc, self.quick_input_rect(hwnd));
+            return;
+        }
         let rect = self.command_center_rect(hwnd);
         if rect.right <= rect.left {
             return;
@@ -285,6 +289,87 @@ impl App {
             key,
         );
         unsafe { SelectObject(hdc, self.ui_font) };
+    }
+
+    /// While Quick Open is open, the command center is where its text is
+    /// typed: the query and the caret, or what to type.
+    fn paint_quick_input(&self, hdc: HDC, rect: RECT) {
+        let s = |value: i32| self.scale(value);
+        let middle = (rect.top + rect.bottom) / 2;
+        // Square at the bottom, where the list joins it: the card runs on
+        // below and is clipped.
+        let state = unsafe { SaveDC(hdc) };
+        unsafe { IntersectClipRect(hdc, rect.left, rect.top, rect.right, rect.bottom) };
+        self.panel_card(
+            hdc,
+            RECT {
+                bottom: rect.bottom + s(8),
+                ..rect
+            },
+            s(5),
+            self.theme.blue,
+            ui(12, 25, 48),
+        );
+        unsafe { RestoreDC(hdc, state) };
+        self.glyph_in(
+            hdc,
+            DebugGlyph::Search,
+            self.theme.muted,
+            RECT {
+                left: rect.left + s(4),
+                right: rect.left + s(28),
+                ..rect
+            },
+            s(16),
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let text_left = rect.left + s(30);
+        let clip = RECT {
+            left: text_left,
+            right: rect.right - s(10),
+            ..rect
+        };
+        let caret = self.focused && self.caret_on;
+        if self.quick_query.is_empty() {
+            let hint = if self.language_pick {
+                "Language of this file".to_string()
+            } else if self.history_pick.is_some() {
+                format!("Saved versions of {}", self.history_file_name())
+            } else {
+                "Search files by name  (> for commands)".to_string()
+            };
+            self.label_mid(hdc, &hint, text_left, middle, self.theme.muted, clip);
+            if caret {
+                self.paint_quick_caret(hdc, text_left, middle);
+            }
+            return;
+        }
+        // The end of a long query stays in view, as in a text box.
+        let room = clip.right - clip.left - s(2);
+        let mut shown = self.quick_query.as_str();
+        while self.text_width(hdc, shown) > room {
+            let mut chars = shown.chars();
+            chars.next();
+            shown = chars.as_str();
+        }
+        self.label_mid(hdc, shown, text_left, middle, self.theme.text, clip);
+        if caret {
+            self.paint_quick_caret(hdc, text_left + self.text_width(hdc, shown), middle);
+        }
+    }
+
+    fn paint_quick_caret(&self, hdc: HDC, x: i32, middle: i32) {
+        let s = |value: i32| self.scale(value);
+        Self::fill(
+            hdc,
+            RECT {
+                left: x,
+                top: middle - s(8),
+                right: x + s(1).max(1),
+                bottom: middle + s(8),
+            },
+            self.theme.text,
+        );
     }
 
     /// The "IDE" badge after the name: `at` is its left edge and middle,
@@ -438,6 +523,7 @@ impl App {
                     self.search_input,
                     self.commit_focus,
                     self.extensions_search_active,
+                    self.settings_search_active,
                 ],
                 stays: self.keystroke_stays_in_editor(),
             },
@@ -666,12 +752,24 @@ impl App {
     }
 
     /// Redraws what a caret blink changes. Usually that's just the editor's
-    /// caret; when a text box elsewhere has the caret (Quick Open, the
-    /// terminal, a search box or the commit message), the whole window is
+    /// caret; when another text box has the caret (the terminal, the search
+    /// in files box or the commit message), the whole window is
     /// redrawn, as each paints its own caret from `caret_on`.
     pub(in crate::windows_app) fn invalidate_blink(&self, hwnd: HWND) {
         if self.debug_prompt_has_keyboard(hwnd) {
             self.invalidate_debug_prompt(hwnd);
+            return;
+        }
+        // Quick Open's caret is in the title bar's box; the Settings
+        // search has its own field. Only that box is redrawn.
+        if self.quick_open {
+            let rect = self.quick_input_rect(hwnd);
+            unsafe { InvalidateRect(hwnd, &rect, 0) };
+            return;
+        }
+        if self.settings_typing() {
+            let rect = self.settings_field_in_window();
+            unsafe { InvalidateRect(hwnd, &rect, 0) };
             return;
         }
         let editor_only = !self.welcome
@@ -768,6 +866,52 @@ impl App {
             color,
             clip,
         );
+    }
+
+    /// `text` from `x`, centred on `middle` and clipped at `right`, with the
+    /// first match of `needle` (lowercase ASCII; empty for none) in
+    /// `accent`. Text that doesn't fit is cut with an ellipsis instead, and
+    /// isn't highlighted. Returns where the text ends.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::windows_app) fn label_match(
+        &self,
+        hdc: HDC,
+        text: &str,
+        (x, middle, right): (i32, i32, i32),
+        needle: &str,
+        color: u32,
+        accent: u32,
+    ) -> i32 {
+        let height = self.text_height(hdc);
+        let top = middle - height / 2;
+        let clip = RECT {
+            left: x,
+            top,
+            right,
+            bottom: top + height,
+        };
+        let width = self.text_width(hdc, text);
+        let found = (!needle.is_empty())
+            .then(|| text.to_ascii_lowercase().find(needle))
+            .flatten();
+        match found {
+            Some(at) if width <= right - x => {
+                let (before, rest) = text.split_at(at);
+                let (hit, after) = rest.split_at(needle.len());
+                let mut x = x;
+                for (part, part_color) in [(before, color), (hit, accent), (after, color)] {
+                    if !part.is_empty() {
+                        Self::label(hdc, part, x, top, part_color, clip);
+                        x += self.text_width(hdc, part);
+                    }
+                }
+                x
+            }
+            _ => {
+                self.label_ellipsis(hdc, text, x, top, color, clip);
+                (x + width).min(right)
+            }
+        }
     }
 
     /// The byte length of the longest start of `text` that is at most
@@ -1134,7 +1278,7 @@ struct CaretScene {
     shown_lines: usize,
     breakpoints: usize,
     find: bool,
-    keyboard: [bool; 6],
+    keyboard: [bool; 7],
     stays: bool,
 }
 

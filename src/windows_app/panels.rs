@@ -1,6 +1,31 @@
 use super::run_language::RunLanguage;
 use super::*;
 
+// Quick Open's list: centred under the title bar, as wide as the command
+// center at its widest, and as tall as the rows it shows.
+const QUICK_WIDTH: i32 = 520;
+const QUICK_ROW: i32 = 26;
+const QUICK_PAD: i32 = 4;
+const QUICK_FOOTER: i32 = 30;
+
+/// The footer's mode buttons: the prefix each types, and its name.
+pub(super) const QUICK_MODES: [(char, &str); 4] = [
+    ('>', "Commands"),
+    ('@', "Symbols"),
+    ('#', "Workspace"),
+    (':', "Line"),
+];
+
+/// Where Quick Open's parts are, in the window. Painting and clicks share it.
+pub(super) struct QuickLayout {
+    pub(super) card: RECT,
+    // The rows shown (one, for the message, when nothing matches).
+    pub(super) rows: Vec<RECT>,
+    pub(super) footer: RECT,
+    // The mode buttons, with their prefixes; none in the pickers.
+    pub(super) modes: Vec<(RECT, char)>,
+}
+
 /// The Command Palette's commands: name and the id `run_command` runs.
 /// Ids are global (the menu bar uses them too); pick an unused one.
 pub(super) const QUICK_COMMANDS: &[(&str, u8)] = &[
@@ -128,6 +153,104 @@ impl App {
             })
             .filter(|(name, _)| name.to_ascii_lowercase().contains(&query))
             .collect()
+    }
+
+    /// Quick Open's layout for a window `client_right` wide, with `count`
+    /// items. `hdc` measures the mode buttons' names.
+    pub(super) fn quick_layout(&self, hdc: HDC, client_right: i32, count: usize) -> QuickLayout {
+        let s = |value: i32| self.scale(value);
+        let (left, right) = self.quick_span(client_right);
+        let width = right - left;
+        // Joined to the input above it: they share a 1 px edge.
+        let top = s(WORKBENCH_HEADER - 4) - s(1).max(1);
+        let shown = count.saturating_sub(self.quick_first).clamp(1, QUICK_ROWS);
+        let rows = (0..shown as i32)
+            .map(|row| RECT {
+                left: left + s(4),
+                top: top + s(QUICK_PAD) + row * s(QUICK_ROW),
+                right: left + width - s(4),
+                bottom: top + s(QUICK_PAD) + (row + 1) * s(QUICK_ROW),
+            })
+            .collect();
+        let footer_top = top + s(QUICK_PAD * 2) + shown as i32 * s(QUICK_ROW);
+        let footer = RECT {
+            left,
+            top: footer_top,
+            right: left + width,
+            bottom: footer_top + s(QUICK_FOOTER),
+        };
+        let mut modes = Vec::new();
+        if !self.language_pick && self.history_pick.is_none() {
+            let old = unsafe { SelectObject(hdc, self.small_font) };
+            let mut x = left + s(6);
+            for (prefix, name) in QUICK_MODES {
+                let width = self.text_width(hdc, &format!("{prefix}  {name}")) + s(14);
+                modes.push((
+                    RECT {
+                        left: x,
+                        top: footer.top + s(5),
+                        right: x + width,
+                        bottom: footer.bottom - s(5),
+                    },
+                    prefix,
+                ));
+                x += width + s(2);
+            }
+            unsafe { SelectObject(hdc, old) };
+        }
+        QuickLayout {
+            card: RECT {
+                left,
+                top,
+                right: left + width,
+                bottom: footer.bottom,
+            },
+            rows,
+            footer,
+            modes,
+        }
+    }
+
+    /// Quick Open's left and right edges, centred on the window.
+    fn quick_span(&self, client_right: i32) -> (i32, i32) {
+        let s = |value: i32| self.scale(value);
+        let width = s(QUICK_WIDTH).min(client_right - s(32)).max(s(240));
+        let left = (client_right - width) / 2;
+        (left, left + width)
+    }
+
+    /// Where Quick Open's text is typed while it's open: the command
+    /// center, widened to the list below it (over the menu titles, which
+    /// can't be used while it's open).
+    pub(super) fn quick_input_rect(&self, hwnd: HWND) -> RECT {
+        let mut client = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client) };
+        let (left, right) = self.quick_span(client.right);
+        RECT {
+            left,
+            right,
+            ..self.command_center_rect(hwnd)
+        }
+    }
+
+    /// A mode button: the query starts with `prefix` (or, when it already
+    /// does, goes back to file names), keeping what was typed after it.
+    pub(super) fn quick_mode(&mut self, hwnd: HWND, prefix: char) {
+        let rest = self
+            .quick_query
+            .strip_prefix(['>', '@', '#', ':'])
+            .unwrap_or(&self.quick_query)
+            .to_string();
+        self.quick_query = if self.quick_query.starts_with(prefix) {
+            rest
+        } else {
+            format!("{prefix}{rest}")
+        };
+        self.quick_selected = 0;
+        self.quick_first = 0;
+        self.ensure_symbols(hwnd);
+        self.ensure_workspace_symbols();
+        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn quick_count(&self) -> usize {

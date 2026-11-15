@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings and Quick Open</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme, sampled from settings-current.png */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --link: #6ea8ff; --sky: #38bdf8;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 10px; }
+  p.lead { color: var(--label); max-width: 940px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .gap { width: 14px; }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+  figure { margin: 0 0 22px; }
+  figcaption { margin: 0 0 8px; font-weight: 600; }
+  figcaption span { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .stage { width: 100%; border: 1px solid var(--edge-page); border-radius: 8px; overflow: hidden; position: relative; background: #000; }
+  .stage > img { display: block; width: 100%; height: auto; }
+  .cols { display: flex; flex-wrap: wrap; gap: 28px; }
+  .cols > div { flex: 1 1 420px; min-width: 0; }
+  ol, ul { padding-left: 20px; margin: 0; }
+  li { margin: 0 0 10px; }
+  li b { color: #fff; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; }
+
+  /* ---------- The mock: logical pixels (1534×818 = 1917×1022 at 125%), fitted to the page. ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 1534px; height: 818px; transform-origin: 0 0;
+          background: var(--editor); font-size: 13px; color: var(--text); user-select: none; overflow: hidden; }
+  .mock svg { flex: none; display: block; }
+  .mock .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Title bar, as today. While Quick Open is open, its box is the input. */
+  .tb { position: absolute; left: 0; top: 0; right: 0; height: 35px; background: var(--title); border-bottom: 1px solid var(--edge); display: flex; align-items: center; z-index: 3; }
+  .tb .brand { display: flex; align-items: center; gap: 7px; padding: 0 12px; font-size: 14px; font-weight: 600; }
+  .tb .brand i { font-style: normal; font-size: 11px; font-weight: 600; color: #c4b5fd; background: #3b2a7a; border-radius: 3px; padding: 0 4px; }
+  .tb .menus { display: flex; }
+  .tb .menus span { padding: 3px 9px; color: var(--label); border-radius: 4px; }
+  .tb .search { position: absolute; left: 618px; top: 5px; width: 298px; height: 25px; border: 1px solid #2b4c84; border-radius: 5px; background: var(--field);
+                display: flex; align-items: center; gap: 7px; padding: 0 4px 0 9px; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+  .tb .search b { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--label); background: #19294c; border-radius: 3px; padding: 0 5px; }
+  .tb .search.open { left: 507px; width: 520px; border-color: var(--blue); border-radius: 5px 5px 0 0; color: var(--text); z-index: 2; }
+  /* Titles under the open input are left out until it closes. */
+  .mock.qopen .tb .menus span:nth-child(n+7) { visibility: hidden; }
+  .tb .search .q { color: var(--text); }
+  .tb .search .caret { width: 1px; height: 15px; background: var(--text); margin-left: -6px; }
+  .tb .search .ph { color: var(--muted); }
+  .tb .win { position: absolute; right: 0; top: 0; display: flex; }
+  .tb .win span { width: 46px; height: 35px; display: grid; place-items: center; color: #c8d3e6; }
+
+  .rail { position: absolute; left: 0; top: 35px; bottom: 22px; width: 48px; background: var(--rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; }
+  .rail .it { width: 48px; height: 48px; display: grid; place-items: center; color: var(--muted); position: relative; }
+  .rail .it.on { color: var(--text); }
+  .rail .it.on::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--violet); }
+  .rail .it .ic { width: 22px; height: 22px; stroke-width: 1.4; }
+  .rail .bottom { margin-top: auto; }
+
+  .sb { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; background: var(--editor); border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; color: var(--label); }
+  .sb .ic { width: 13px; height: 13px; }
+  .sb span { display: flex; align-items: center; gap: 5px; }
+  .sb .ready { margin-left: auto; }
+  .sb .ready i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+  /* ---------- Settings (side panel, 286 logical px) ---------- */
+  .side { position: absolute; left: 48px; top: 35px; bottom: 22px; width: 286px; background: var(--side); border-right: 1px solid var(--edge); }
+  .side .hd { height: 35px; display: flex; align-items: center; padding: 0 8px 0 16px; font-size: 11px; letter-spacing: .08em; color: var(--label); }
+  .side .hd .acts { margin-left: auto; display: flex; gap: 2px; }
+  .side .hd .acts span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
+  .side .hd .acts span:hover { background: var(--active); color: var(--text); }
+  .find { margin: 0 12px 6px; height: 26px; border: 1px solid var(--edge); border-radius: 4px; background: var(--field); display: flex; align-items: center; gap: 7px; padding: 0 8px; color: var(--muted); font-size: 12.5px; }
+  .find .ic { width: 13px; height: 13px; }
+  .find .q { color: var(--text); }
+  .find .caret { width: 1px; height: 14px; background: var(--text); margin-left: -6px; }
+  .find .n { margin-left: auto; font-size: 11.5px; }
+  .find.on { border-color: var(--blue); }
+  .list { position: absolute; left: 0; right: 0; top: 67px; bottom: 0; overflow: hidden; padding: 0 0 12px; }
+  .grp { height: 30px; display: flex; align-items: flex-end; padding: 0 16px 6px; font-size: 11px; letter-spacing: .08em; color: var(--label); }
+  .grp em { font-style: normal; color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+  .set { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; position: relative; }
+  .set:hover, .set.hov { background: var(--active); }
+  .set .l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .set .l mark { background: none; color: var(--link); font-weight: 600; }
+  /* Changed from the default: a violet bar, like VS Code's. */
+  .set.mod::before { content: ""; position: absolute; left: 6px; top: 7px; bottom: 7px; width: 2px; border-radius: 1px; background: var(--violet); }
+  .set .reset { display: none; color: var(--muted); width: 20px; height: 20px; place-items: center; border-radius: 3px; }
+  .set.mod:hover .reset, .set.mod.hov .reset { display: grid; }
+  .set .reset:hover { background: var(--select); color: var(--text); }
+  .sw { width: 28px; height: 16px; border-radius: 8px; background: transparent; border: 1px solid #34507e; position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; left: 3px; top: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .sw.on { background: var(--sky); border-color: var(--sky); }
+  .sw.on::after { left: 15px; background: var(--editor); }
+  .step { display: flex; align-items: center; height: 22px; border: 1px solid var(--edge); border-radius: 4px; background: var(--field); flex: none; }
+  .step span { width: 22px; height: 20px; display: grid; place-items: center; color: var(--label); }
+  .step span:hover { background: var(--active); color: var(--text); }
+  .step b { min-width: 28px; text-align: center; font-weight: 400; border-left: 1px solid var(--edge); border-right: 1px solid var(--edge); line-height: 20px; }
+  .sel { display: flex; align-items: center; gap: 6px; height: 22px; width: 134px; padding: 0 6px 0 8px; border: 1px solid var(--edge); border-radius: 4px; background: var(--field); flex: none; font-size: 12.5px; }
+  .sel:hover { border-color: #2b4c84; }
+  .sel span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel .ic { width: 12px; height: 12px; color: var(--muted); }
+  .info { color: var(--muted); font-size: 12.5px; flex: none; max-width: 134px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tip { display: none; position: absolute; left: 16px; right: 12px; top: 31px; z-index: 2; background: #0c1730; border: 1px solid var(--edge); border-radius: 5px; padding: 6px 9px; font-size: 12px; color: var(--label); line-height: 1.45; }
+  .tip code { font-size: 11px; padding: 0 4px; color: var(--muted); }
+  .set.hov .tip { display: block; }
+  .jsonrow { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 16px; margin-top: 10px; color: var(--link); }
+  .jsonrow:hover { background: var(--active); }
+  .jsonrow .ic { width: 14px; height: 14px; }
+  .jsonrow small { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .nomatch { padding: 10px 16px; color: var(--muted); }
+
+  /* ---------- Editor and AI panel (unchanged; context only) ---------- */
+  .ed { position: absolute; left: 334px; top: 35px; bottom: 22px; width: 780px; }
+  .tabs { height: 35px; display: flex; border-bottom: 1px solid var(--edge); background: var(--title); }
+  .tab { display: flex; align-items: center; gap: 7px; padding: 0 14px; background: var(--editor); border-right: 1px solid var(--edge); border-top: 1px solid var(--violet); }
+  .tab .ic { width: 13px; height: 13px; }
+  .crumbs { height: 22px; display: flex; align-items: center; padding: 0 16px; color: var(--muted); font-size: 12px; }
+  .code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; line-height: 20px; padding-top: 4px; }
+  .code div { display: flex; white-space: pre; }
+  .code .n { width: 52px; text-align: right; padding-right: 18px; color: #3d5175; }
+  .k { color: #c792ea; } .s { color: #a5e3a0; } .f { color: #82aaff; } .c { color: #5c6f91; font-style: italic; }
+  .ai { position: absolute; right: 0; top: 35px; bottom: 22px; width: 420px; border-left: 1px solid var(--edge); background: var(--side); padding: 0 16px; }
+  .ai .h { height: 52px; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; }
+  .ai .h i { font-style: normal; font-weight: 400; font-size: 12px; background: #3b2a7a; color: #ddd6fe; border-radius: 4px; padding: 1px 8px; }
+  .ai p { color: var(--label); margin: 14px 0; }
+  .ai .ask { position: absolute; left: 16px; right: 16px; bottom: 14px; height: 50px; border: 1px solid var(--edge); border-radius: 6px; color: var(--muted); display: flex; align-items: center; padding: 0 14px; }
+
+  /* ---------- Quick Open: drops from the title-bar box, same left edge and width ---------- */
+  .qo { position: absolute; left: 507px; top: 30px; width: 520px; z-index: 4; background: #0b1428; border: 1px solid var(--blue); border-top: 0;
+        border-radius: 0 0 6px 6px; box-shadow: 0 10px 28px rgba(0,0,0,.55); padding: 4px 0 0; }
+  .qo .r { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 10px; margin: 0 4px; border-radius: 4px; white-space: nowrap; }
+  .qo .r:hover { background: var(--active); }
+  .qo .r.pick { background: var(--select); }
+  .qo .r .nm mark { background: none; color: var(--link); font-weight: 600; }
+  .qo .r.pick .nm mark { color: #a5c8ff; }
+  .qo .r .dir { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .qo .r .kb { margin-left: auto; display: flex; gap: 3px; }
+  .qo .r .kb kbd { font-size: 11px; color: var(--label); background: #19294c; border: 0; border-radius: 3px; padding: 0 5px; line-height: 17px; }
+  .qo .r .grp2 { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .fi { width: 16px; height: 16px; border-radius: 3px; display: grid; place-items: center; font-size: 8.5px; font-weight: 700; font-family: "Segoe UI", sans-serif; flex: none; }
+  .fi.js { background: #f7df1e; color: #1b1b1b; }
+  .fi.json { background: #2a3f66; color: #f5c96b; }
+  .fi.cmd { background: none; color: var(--muted); font-size: 13px; }
+  .qo .ft { margin-top: 4px; height: 30px; border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 4px; padding: 0 8px; font-size: 12px; color: var(--muted); }
+  .qo .ft .mode { display: flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 3px; }
+  .qo .ft .mode b { font-family: "Cascadia Mono", Consolas, monospace; color: var(--label); font-weight: 400; }
+  .qo .ft .mode:hover { background: var(--active); color: var(--text); }
+  .qo .ft .mode.on { background: var(--active); color: var(--text); }
+  .qo .ft .keys { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .qo .ft kbd { font-size: 10.5px; padding: 0 4px; line-height: 15px; color: var(--label); background: #19294c; border: 0; }
+  .qo .count { color: var(--muted); font-size: 11.5px; padding: 0 14px; height: 22px; display: flex; align-items: center; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Settings and Quick Open: proposal</h1>
+  <p class="lead">Today's Settings view and Quick Open beside a proposal at the same 125% scale. Quick Open stops floating in the middle of the editor: it drops straight down from the search box in the title bar, the box you click or reach with <kbd>Ctrl P</kbd>, and becomes the field you type in. Settings get grouped, searchable, and show which values you changed. Point at rows to see hover; the toolbar switches states.</p>
+
+  <div class="toolbar" role="group" aria-label="View">
+    <button type="button" data-view="new" aria-pressed="true">Proposal</button>
+    <button type="button" data-view="old" aria-pressed="false">Today</button>
+    <span class="gap"></span>
+    <button type="button" data-mode="files" aria-pressed="true">Quick Open: files</button>
+    <button type="button" data-mode="cmds" aria-pressed="false">Commands (&gt;run)</button>
+    <button type="button" data-mode="closed" aria-pressed="false">Closed</button>
+    <span class="gap"></span>
+    <button type="button" id="t-filter" aria-pressed="false">Search settings: “brack”</button>
+  </div>
+
+  <figure id="fig-new">
+    <figcaption>Proposal<span>1534 × 818 logical px at 125%, the size of the screenshot</span></figcaption>
+    <div class="stage" id="stage"><div class="mock qopen" id="mock">
+      <div class="tb">
+        <div class="brand">
+          <svg width="16" height="18" viewBox="0 0 16 18"><path d="M9.5 1 2 10.2h5.2L6.2 17 14 7.6H8.8z" fill="#a78bfa"/></svg>
+          LightLine <i>IDE</i>
+        </div>
+        <div class="menus"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span><span>Help</span></div>
+        <div class="search open" id="cc">
+          <svg class="ic" viewBox="0 0 16 16" style="width:13px;height:13px"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
+          <span id="cc-text"><span class="ph">Search files by name</span></span><i class="caret" id="cc-caret"></i>
+          <b id="cc-key" hidden>Ctrl P</b>
+        </div>
+        <div class="win">
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><path d="M1 6h10" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+        </div>
+      </div>
+
+      <!-- Quick Open dropdown: files -->
+      <div class="qo" id="qo-files">
+        <div class="r pick"><span class="fi js">JS</span><span class="nm">main.js</span></div>
+        <div class="r"><span class="fi json">{ }</span><span class="nm">receipt.json</span></div>
+        <div class="r"><span class="fi json">{ }</span><span class="nm">run.json</span><span class="dir">.lightline</span></div>
+        <div class="ft">
+          <span class="mode"><b>&gt;</b>Commands</span>
+          <span class="mode"><b>@</b>Symbols</span>
+          <span class="mode"><b>#</b>Workspace</span>
+          <span class="mode"><b>:</b>Line</span>
+          <span class="keys"><kbd>Enter</kbd> open <kbd>Esc</kbd> close</span>
+        </div>
+      </div>
+
+      <!-- Quick Open dropdown: commands -->
+      <div class="qo" id="qo-cmds" hidden>
+        <div class="r pick"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark> Active File</span><span class="kb"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd></span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark> Rust tests</span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark> Python File</span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark> C/C++ File</span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm">Stop <mark>Run</mark>ning Program</span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark>: Configure / Select Saved Configuration</span></div>
+        <div class="r"><span class="fi cmd">›</span><span class="nm"><mark>Run</mark>: Choose the File's Language</span></div>
+        <div class="ft">
+          <span class="mode on"><b>&gt;</b>Commands</span>
+          <span class="mode"><b>@</b>Symbols</span>
+          <span class="mode"><b>#</b>Workspace</span>
+          <span class="mode"><b>:</b>Line</span>
+          <span class="keys"><kbd>Enter</kbd> run <kbd>Esc</kbd> close</span>
+        </div>
+      </div>
+
+      <div class="rail">
+        <div class="it" title="Explorer"><svg class="ic" viewBox="0 0 22 22"><path d="M7 4.5h7l3.5 3.5v10H7z"/><path d="M14 4.5V8h3.5M4.5 7v12.5H14"/></svg></div>
+        <div class="it" title="Search"><svg class="ic" viewBox="0 0 22 22"><circle cx="9.5" cy="9.5" r="5.5"/><path d="m13.5 13.5 5 5"/></svg></div>
+        <div class="it" title="Source Control"><svg class="ic" viewBox="0 0 22 22"><circle cx="7" cy="5.5" r="2"/><circle cx="7" cy="16.5" r="2"/><circle cx="15" cy="9" r="2"/><path d="M7 7.5v7M15 11c0 3-8 2.5-8 3.5"/></svg></div>
+        <div class="it" title="Run &amp; Debug"><svg class="ic" viewBox="0 0 22 22"><path d="M6 4.5v13l11-6.5z"/></svg></div>
+        <div class="it" title="Extensions"><svg class="ic" viewBox="0 0 22 22"><rect x="4" y="4" width="6" height="6"/><rect x="12" y="4" width="6" height="6"/><rect x="4" y="12" width="6" height="6"/><rect x="12" y="12" width="6" height="6"/></svg></div>
+        <div class="it" title="AI Assistant"><svg class="ic" viewBox="0 0 22 22"><path d="M11 3 12.8 9.2 19 11l-6.2 1.8L11 19l-1.8-6.2L3 11l6.2-1.8z"/></svg></div>
+        <div class="it on bottom" title="Settings (Ctrl+,)"><svg class="ic" viewBox="0 0 22 22"><circle cx="11" cy="11" r="3"/><path d="M11 2.5v2.5M11 17v2.5M2.5 11H5M17 11h2.5M5 5l1.8 1.8M15.2 15.2 17 17M5 17l1.8-1.8M15.2 6.8 17 5"/></svg></div>
+      </div>
+
+      <div class="side">
+        <div class="hd">SETTINGS
+          <div class="acts">
+            <span title="Open settings.json"><svg class="ic" viewBox="0 0 16 16" style="width:14px;height:14px"><path d="M5.5 2.5c-1.5 0-2 .6-2 2v1.5c0 1-.5 1.5-1.5 2 1 .5 1.5 1 1.5 2v1.5c0 1.4.5 2 2 2M10.5 2.5c1.5 0 2 .6 2 2v1.5c0 1 .5 1.5 1.5 2-1 .5-1.5 1-1.5 2v1.5c0 1.4-.5 2-2 2"/></svg></span>
+          </div>
+        </div>
+        <div class="find" id="find">
+          <svg class="ic" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
+          <span id="find-text">Search settings</span><i class="caret" id="find-caret" hidden></i><span class="n" id="find-n"></span>
+        </div>
+
+        <div class="list" id="all">
+          <div class="grp">EDITOR</div>
+          <div class="set"><span class="l">Font size</span><span class="step"><span>−</span><b>15</b><span>+</span></span></div>
+          <div class="set"><span class="l">Tab size</span><span class="step"><span>−</span><b>4</b><span>+</span></span></div>
+          <div class="set"><span class="l">Indent with spaces</span><i class="sw on"></i></div>
+          <div class="set mod hov"><span class="l">Word wrap</span><span class="reset" title="Reset to default (off)"><svg class="ic" viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5"/></svg></span><i class="sw on"></i>
+            <div class="tip">Wrap long lines at the edge of the editor instead of scrolling sideways. <kbd style="font-size:11px">Alt Z</kbd> toggles it. Changed from the default (off). <code>wordWrap</code></div></div>
+          <div class="set"><span class="l">Auto indent</span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Close brackets and quotes</span><i class="sw on"></i></div>
+          <div class="grp">VISUAL AIDS</div>
+          <div class="set"><span class="l">Highlight matching brackets</span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Color bracket pairs</span><i class="sw on"></i></div>
+          <div class="set mod"><span class="l">Indent guides</span><span class="reset" title="Reset to default (on)"><svg class="ic" viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5"/></svg></span><i class="sw"></i></div>
+          <div class="set"><span class="l">Minimap</span><i class="sw"></i></div>
+          <div class="set"><span class="l">Git blame on the current line</span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Run and Debug links</span><i class="sw on"></i></div>
+          <div class="grp">FILES</div>
+          <div class="set mod"><span class="l">Format on save</span><span class="reset" title="Reset to default (off)"><svg class="ic" viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5"/></svg></span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Syntax colors up to</span><span class="sel"><span>4 MB</span><svg class="ic" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"/></svg></span></div>
+          <div class="grp">APPEARANCE</div>
+          <div class="set"><span class="l">Color theme</span><span class="sel"><span>LightLine</span><svg class="ic" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"/></svg></span></div>
+          <div class="set"><span class="l">Animations</span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Smooth scrolling</span><i class="sw"></i></div>
+          <div class="grp">TERMINAL</div>
+          <div class="set mod"><span class="l">Default shell</span><span class="sel"><span>Command Prompt</span><svg class="ic" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"/></svg></span></div>
+          <div class="grp">MARKDOWN</div>
+          <div class="set"><span class="l">Load web images in previews</span><i class="sw"></i></div>
+          <div class="grp">AI ASSISTANT</div>
+          <div class="set"><span class="l">Server</span><span class="sel"><span>Ollama</span><svg class="ic" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"/></svg></span></div>
+          <div class="set"><span class="l">Model</span><span class="info">llama3.2:1b</span></div>
+          <div class="jsonrow"><svg class="ic" viewBox="0 0 16 16"><path d="M5.5 2.5c-1.5 0-2 .6-2 2v1.5c0 1-.5 1.5-1.5 2 1 .5 1.5 1 1.5 2v1.5c0 1.4.5 2 2 2M10.5 2.5c1.5 0 2 .6 2 2v1.5c0 1 .5 1.5 1.5 2-1 .5-1.5 1-1.5 2v1.5c0 1.4-.5 2-2 2"/></svg>Open settings.json<small>for everything else</small></div>
+        </div>
+
+        <div class="list" id="filtered" hidden>
+          <div class="grp">EDITOR</div>
+          <div class="set"><span class="l">Close <mark>brack</mark>ets and quotes</span><i class="sw on"></i></div>
+          <div class="grp">VISUAL AIDS</div>
+          <div class="set"><span class="l">Highlight matching <mark>brack</mark>ets</span><i class="sw on"></i></div>
+          <div class="set"><span class="l">Color <mark>brack</mark>et pairs</span><i class="sw on"></i></div>
+          <div class="jsonrow"><svg class="ic" viewBox="0 0 16 16"><path d="M5.5 2.5c-1.5 0-2 .6-2 2v1.5c0 1-.5 1.5-1.5 2 1 .5 1.5 1 1.5 2v1.5c0 1.4.5 2 2 2M10.5 2.5c1.5 0 2 .6 2 2v1.5c0 1 .5 1.5 1.5 2-1 .5-1.5 1-1.5 2v1.5c0 1.4-.5 2-2 2"/></svg>Open settings.json<small>for everything else</small></div>
+        </div>
+      </div>
+
+      <div class="ed">
+        <div class="tabs"><div class="tab"><span class="fi js" style="width:13px;height:13px;font-size:7px">JS</span>main.js</div></div>
+        <div class="crumbs">main.js</div>
+        <div class="code">
+          <div><span class="n">1</span><span class="c">// Totals a receipt and prints it.</span></div>
+          <div><span class="n">2</span><span><span class="k">const</span> receipt = <span class="f">require</span>(<span class="s">'./receipt.json'</span>);</span></div>
+          <div><span class="n">3</span><span></span></div>
+          <div><span class="n">4</span><span><span class="k">function</span> <span class="f">total</span>(items) {</span></div>
+          <div><span class="n">5</span><span>  <span class="k">return</span> items.<span class="f">reduce</span>((sum, item) =&gt; sum + item.price * item.qty, <span class="f">0</span>);</span></div>
+          <div><span class="n">6</span><span>}</span></div>
+          <div><span class="n">7</span><span></span></div>
+          <div><span class="n">8</span><span>console.<span class="f">log</span>(<span class="s">`Total: ${</span><span class="f">total</span>(receipt.items).<span class="f">toFixed</span>(<span class="f">2</span>)<span class="s">}`</span>);</span></div>
+        </div>
+      </div>
+
+      <div class="ai">
+        <div class="h"><svg class="ic" viewBox="0 0 22 22" style="width:20px;height:20px;color:#a78bfa"><path d="M11 3 12.8 9.2 19 11l-6.2 1.8L11 19l-1.8-6.2L3 11l6.2-1.8z"/></svg>AI Assistant <i>llama3.2:1b ▾</i></div>
+        <p>Select code in the editor to include it with your question. Answers come from llama3.2:1b, running on your PC.</p>
+        <div class="ask">Ask about your code…</div>
+      </div>
+
+      <div class="sb">
+        <span><svg class="ic" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="6" r="1.6"/><path d="M5 5.6v4.8M11 7.6c0 2.5-6 2-6 2.8"/></svg></span>
+        <span>⊗ 0</span><span>△ 0</span>
+        <span class="ready"><i></i>Ready</span>
+      </div>
+    </div></div>
+  </figure>
+
+  <figure id="fig-old" hidden>
+    <figcaption>Today<span>v0.11.0, 1917 × 1015 screenshot</span></figcaption>
+    <div class="stage"><img src="screens/settings-current.png" alt="Today's Settings panel and Quick Open: the Quick Open box floats in the middle of the editor, away from the title-bar search box"></div>
+  </figure>
+
+  <h2>What changes</h2>
+  <div class="cols">
+    <div>
+      <h3>Quick Open</h3>
+      <ol>
+        <li><b>Centred, and it drops from the title-bar box.</b> The search box in the title bar is centred on the window. It narrows rather than leave the centre when the menus are in the way. Opening Quick Open widens it to the list's full 520 px, and it turns blue and becomes the input, joined to the list below (the menu titles it covers come back when it closes). <kbd>Ctrl P</kbd>, <kbd>Ctrl Shift P</kbd>, <kbd>Ctrl G</kbd> and the menu all open it there.</li>
+        <li><b>A clear edge.</b> Today it's filled with the editor's own colour and has no border, so it blends into the page and the Welcome text shows under it. The proposal has a blue border joined to the input, a slightly lighter fill and a drop shadow.</li>
+        <li><b>Sized to what it lists.</b> Today it's always 342 px tall, so three files leave a large empty gap before the hint line. The proposal grows with its rows (up to 8) and puts the hints in a footer right under them.</li>
+        <li><b>Rows read faster.</b> 26 px rows with a file-type badge, the file name first and its folder dimmed after it (<code>run.json  .lightline</code>), and the typed letters highlighted.</li>
+        <li><b>Commands show their keys.</b> Shortcuts already in the names, like “Run Active File (Ctrl+Shift+R)”, move to keycaps on the right, so names line up and stay short.</li>
+        <li><b>The modes are clickable.</b> The footer's <code>&gt; @ # :</code> become small buttons that switch mode; the current one is lit, and clicking it again goes back to files. Enter and Esc hints sit on the right.</li>
+        <li>The title still names special pickers (“Language of this file”, “Saved versions of main.js”); it moves into the input as its placeholder.</li>
+      </ol>
+    </div>
+    <div>
+      <h3>Settings</h3>
+      <ol>
+        <li><b>Search settings.</b> A field under the title filters the rows as you type, highlights the match and shows the count. With 21 rows this is an in-memory filter, no index.</li>
+        <li><b>Smaller groups.</b> “Editor” is split into Editor (typing), Visual aids (what's drawn) and Files (saving, parsing), so the first group isn't 14 rows long.</li>
+        <li><b>You can see what you changed.</b> A violet bar marks every value that differs from the default; hovering shows a reset arrow. In your screenshot that's Word wrap, Indent guides, Format on save and Default shell.</li>
+        <li><b>Controls that look like controls.</b> Choices become small drop-down boxes of one width, instead of blue text with a ▾. The − 15 + stepper becomes one joined control. Switches are smaller, and an off switch has an outline, so it isn't a grey blob.</li>
+        <li><b>Hover explains the row.</b> A tip under the row says what it does and gives its <code>settings.json</code> key. It uses the existing tip code (<code>tip_layout</code>), like the Welcome page.</li>
+        <li><b>No more cut-off labels.</b> “Run and Debug links on main a…” becomes “Run and Debug links” (the tip says where), and “Syntax parse limit” becomes “Syntax colors up to”. The AI server shows its provider's name (Ollama) instead of the raw address.</li>
+        <li><b>settings.json moves to the header</b> as a <code>{ }</code> button and stays as a link row at the end, instead of a full-width button.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h2>Cost and rules</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Concern</th><th>Plan</th></tr>
+    <tr><td>Paint</td><td>The dropdown is smaller than today's box for short lists, and its invalidated rect is just the box under the title bar. Rows stay capped at 8. A highlighted match draws one name in up to 3 runs; 8 rows at most.</td></tr>
+    <tr><td>Shadow</td><td>GDI has no blur. It's drawn as two 1 px darker bands below and to the right, with no alpha.</td></tr>
+    <tr><td>Icons</td><td>File badges are drawn shapes plus 2 letters in the UI font, with no new glyphs. Keycaps reuse <code>rounded_fill</code>.</td></tr>
+    <tr><td>Narrow window</td><td>The command center stays centred down to 260 px; narrower than that, it centres between the menus and the window buttons as before. The list is 520 px, or the window less 32 px.</td></tr>
+    <tr><td>Settings search</td><td>It filters the static <code>ROWS</code> list on each key and repaints only the side panel. No timer, no worker.</td></tr>
+    <tr><td>Defaults</td><td>The “changed” bar compares with <code>Settings::default()</code>, built once.</td></tr>
+    <tr><td>Unchanged</td><td>Every setting, every Quick Open mode, the AI and editor panes, the keyboard behaviour (↑ ↓ PgUp PgDn Enter Esc).</td></tr>
+  </table></div>
+</div>
+
+<script>
+  const mock = document.getElementById('mock');
+  const stage = document.getElementById('stage');
+  function fit() {
+    const k = stage.clientWidth / 1534;
+    mock.style.transform = 'scale(' + k + ')';
+    stage.style.height = (818 * k) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+    const v = b.dataset.view;
+    document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    document.getElementById('fig-new').hidden = v !== 'new';
+    document.getElementById('fig-old').hidden = v !== 'old';
+    fit();
+  }));
+  const cc = document.getElementById('cc'), ccText = document.getElementById('cc-text');
+  function mode(m) {
+    document.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mode === m)));
+    document.getElementById('qo-files').hidden = m !== 'files';
+    document.getElementById('qo-cmds').hidden = m !== 'cmds';
+    cc.classList.toggle('open', m !== 'closed');
+    mock.classList.toggle('qopen', m !== 'closed');
+    document.getElementById('cc-caret').hidden = m === 'closed';
+    document.getElementById('cc-key').hidden = m !== 'closed';
+    ccText.innerHTML = m === 'files' ? '<span class="ph">Search files by name</span>'
+      : m === 'cmds' ? '<span class="q">&gt;run</span>' : 'Search files, symbols, commands...';
+  }
+  document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => mode(b.dataset.mode)));
+  const tf = document.getElementById('t-filter');
+  tf.addEventListener('click', () => {
+    const p = tf.getAttribute('aria-pressed') !== 'true';
+    tf.setAttribute('aria-pressed', String(p));
+    document.getElementById('all').hidden = p;
+    document.getElementById('filtered').hidden = !p;
+    document.getElementById('find').classList.toggle('on', p);
+    document.getElementById('find-text').innerHTML = p ? '<span class="q">brack</span>' : 'Search settings';
+    document.getElementById('find-caret').hidden = !p;
+    document.getElementById('find-n').textContent = p ? '3 of 21' : '';
+  });
+  // The fixed hover demo goes once the mouse is used.
+  mock.addEventListener('mousemove', () => mock.querySelectorAll('.hov').forEach(e => e.classList.remove('hov')), { once: true });
+  fit();
+  // #cmds, #closed, #filter (comma-separated) open the page in that state.
+  const h = location.hash.slice(1).split(',');
+  if (h.includes('cmds')) mode('cmds');
+  if (h.includes('closed')) mode('closed');
+  if (h.includes('filter')) tf.click();
+</script>
+</body>
+</html>

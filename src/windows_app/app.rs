@@ -884,6 +884,9 @@ pub(super) struct App {
     pub(super) ai_provider: Option<ai_provider::ProviderCard>,
     // How far the Settings view in the side panel is scrolled, in pixels.
     pub(super) settings_scroll: i32,
+    // The Settings view's search: its text, and whether it has the keyboard.
+    pub(super) settings_query: String,
+    pub(super) settings_search_active: bool,
     pub(super) dragging: bool,
     pub(super) find_mode: bool,
     pub(super) find_query: String,
@@ -1552,6 +1555,8 @@ impl App {
             run_config_panel: None,
             ai_provider: None,
             settings_scroll: 0,
+            settings_query: String::new(),
+            settings_search_active: false,
             dragging: false,
             find_mode: false,
             find_query: String::new(),
@@ -2165,17 +2170,31 @@ impl App {
     // The command center is shared by painting and hit testing. Keeping it in
     // the tab chrome makes Quick Open discoverable without spending another
     // permanent row of vertical editor space.
+    //
+    // It's centred on the window, as Quick Open's list below it is, and
+    // narrows (to 260 px) rather than leave the centre when the menu bar is
+    // in the way. Only a window too narrow for that centres it between the
+    // menu bar and the window buttons.
     pub(super) fn command_center_rect(&self, hwnd: HWND) -> RECT {
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
         // Right of the menu bar (menu_bar.rs).
         let usable_left = self.menu_bar_right(hwnd) + self.scale(menu_bar::SEARCH_GAP);
         let usable_right = client.right - self.scale(46 * 3 + 16);
-        let available = (usable_right - usable_left).max(0);
-        let width = self
-            .scale(520)
-            .min((available - self.scale(32)).max(self.scale(260)));
-        let left = usable_left + (available - width) / 2;
+        let centre = client.right / 2;
+        let half = self
+            .scale(260)
+            .min(centre - usable_left)
+            .min(usable_right - centre);
+        let (left, width) = if half >= self.scale(130) {
+            (centre - half, half * 2)
+        } else {
+            let available = (usable_right - usable_left).max(0);
+            let width = self
+                .scale(520)
+                .min((available - self.scale(32)).max(self.scale(260)));
+            (usable_left + (available - width) / 2, width)
+        };
         RECT {
             left,
             top: self.scale(4),
@@ -2285,6 +2304,7 @@ impl App {
             self.panel_focus = false;
             self.search_input = false;
             self.extensions_search_active = false;
+            self.settings_search_active = false;
             self.commit_focus = false;
         }
         self.set_sidebar_visible(hwnd, visible);
@@ -2301,6 +2321,7 @@ impl App {
         if view != SideView::Extensions {
             self.extensions_search_active = false;
         }
+        self.settings_search_active = false;
         if self.side_view == view && self.explorer_visible {
             self.set_sidebar_visible(hwnd, false);
         } else {
@@ -2546,6 +2567,7 @@ impl App {
             self.close_diff();
             self.search_input = false;
             self.extensions_search_active = false;
+            self.settings_search_active = false;
             self.panel_focus = false;
             self.set_active_index(index);
             self.show_active_tab(hwnd);

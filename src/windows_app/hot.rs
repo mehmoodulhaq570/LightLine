@@ -42,6 +42,8 @@ pub(super) enum Hot {
     Extensions(ExtensionsHot),
     // A bottom panel tab, toolbar button or shell (terminal.rs).
     Terminal(TerminalHot),
+    // The Settings view's { } button or a setting's row (settings_panel.rs).
+    Settings(SettingsHot),
 }
 
 impl App {
@@ -128,6 +130,17 @@ impl App {
             return self
                 .extensions_hot_at(x, y - self.side_origin())
                 .map(Hot::Extensions);
+        }
+        if self.side_view == SideView::Settings
+            && self.explorer_visible
+            && self.sidebar_width > 0
+            && x < self.sidebar_right()
+            && y >= chrome_top
+            && y < client.bottom - self.scale(STATUS)
+        {
+            return self
+                .settings_hot_at(x, y - self.side_origin())
+                .map(Hot::Settings);
         }
         None
     }
@@ -216,6 +229,14 @@ impl App {
                     ..rect
                 })
             }
+            Hot::Settings(settings) => {
+                let origin = self.side_origin();
+                self.settings_hot_rect(settings).map(|rect| RECT {
+                    top: rect.top + origin,
+                    bottom: rect.bottom + origin,
+                    ..rect
+                })
+            }
             rail => {
                 let editor_bottom = client.bottom - self.scale(STATUS) - chrome_top;
                 self.rail_item_rect(rail, editor_bottom).map(|rect| RECT {
@@ -248,6 +269,7 @@ impl App {
                 return welcome_tip(&self.welcome_layout(client).targets, index);
             }
             Hot::MenuButton => "Menu (Alt)",
+            Hot::Settings(settings) => return self.settings_tip(settings),
             Hot::Git(GitHot::Button(button)) => match button {
                 GitButton::Commit => "Commit",
                 GitButton::Refresh => "Refresh",
@@ -313,15 +335,33 @@ impl App {
         unsafe { GetClientRect(hwnd, &mut client) };
         // The Welcome page's own tips (not its rail's) go under the item.
         let on_page = matches!(hot, Hot::Welcome(_)) && item.left >= s(RAIL);
-        let card = if on_page
+        let card = if let Hot::Settings(SettingsHot::Row(_)) = hot {
+            // A setting's tip: under its name, or above it near the bottom.
+            let left = item.left + s(16);
+            let right = (left + width).min(client.right - s(6));
+            let below = item.bottom + s(2) + height <= client.bottom - s(STATUS);
+            let top = if below {
+                item.bottom + s(2)
+            } else {
+                item.top - s(2) - height
+            };
+            RECT {
+                left: right - width,
+                top,
+                right,
+                bottom: top + height,
+            }
+        } else if on_page
             || matches!(
                 hot,
                 Hot::TitleButton(_)
+                    | Hot::Settings(_)
                     | Hot::Git(_)
                     | Hot::Debug(_)
                     | Hot::Extensions(_)
                     | Hot::Terminal(_)
-            ) {
+            )
+        {
             let right = item.right.min(client.right - s(6));
             RECT {
                 left: right - width,
