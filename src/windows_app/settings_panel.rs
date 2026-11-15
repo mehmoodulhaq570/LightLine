@@ -45,6 +45,7 @@ enum Setting {
     Minimap,
     GitBlame,
     CodeLens,
+    TodoHighlight,
     InlineProblems,
     FormatOnSave,
     EditorConfig,
@@ -96,6 +97,7 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::Minimap),
     Row::Toggle(Setting::GitBlame),
     Row::Toggle(Setting::CodeLens),
+    Row::Toggle(Setting::TodoHighlight),
     Row::Choice(Setting::InlineProblems),
     Row::Heading("FILES"),
     Row::Toggle(Setting::FormatOnSave),
@@ -136,6 +138,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::Minimap => "Minimap",
         Setting::GitBlame => "Git blame on the current line",
         Setting::CodeLens => "Run and Debug links",
+        Setting::TodoHighlight => "Highlight TODOs",
         Setting::InlineProblems => "Inline problems",
         Setting::FormatOnSave => "Format on save",
         Setting::EditorConfig => "Use .editorconfig",
@@ -165,6 +168,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::Minimap => "showMinimap",
         Setting::GitBlame => "gitBlame",
         Setting::CodeLens => "codeLens",
+        Setting::TodoHighlight => "todoHighlight",
         Setting::InlineProblems => "inlineDiagnostics",
         Setting::FormatOnSave => "formatOnSave",
         Setting::EditorConfig => "editorConfig",
@@ -196,6 +200,9 @@ fn tip(setting: Setting) -> &'static str {
         Setting::Minimap => "A small map of the file at the right  \u{b7}  showMinimap",
         Setting::GitBlame => "Who last changed the caret's line  \u{b7}  gitBlame",
         Setting::CodeLens => "Run, Debug and Run test after main and tests  \u{b7}  codeLens",
+        Setting::TodoHighlight => {
+            "Colour TODO, FIXME, HACK and NOTE in comments  \u{b7}  todoHighlight"
+        }
         Setting::InlineProblems => {
             "Write each line's worst problem after it  \u{b7}  inlineDiagnostics"
         }
@@ -256,6 +263,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::Minimap => settings.minimap,
         Setting::GitBlame => settings.git_blame,
         Setting::CodeLens => settings.code_lens,
+        Setting::TodoHighlight => settings.todo_highlight,
         Setting::FormatOnSave => settings.format_on_save,
         Setting::EditorConfig => settings.editor_config,
         Setting::MarkdownImages => settings.markdown_load_remote_images,
@@ -731,6 +739,7 @@ impl App {
             Setting::Minimap => &mut settings.minimap,
             Setting::GitBlame => &mut settings.git_blame,
             Setting::CodeLens => &mut settings.code_lens,
+            Setting::TodoHighlight => &mut settings.todo_highlight,
             Setting::FormatOnSave => &mut settings.format_on_save,
             Setting::EditorConfig => &mut settings.editor_config,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
@@ -1195,7 +1204,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 23);
+        assert_eq!(setting_count(), 24);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

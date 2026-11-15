@@ -41,6 +41,7 @@ mod occurrences;
 mod scroll_blit;
 mod snippet;
 mod sticky;
+mod todo_highlight;
 use debug_console::DebugConsole;
 use hot::{Hot, hover_fill};
 use inlay::{INLAY_TIMER, InlayHintAt, InlayRequest};

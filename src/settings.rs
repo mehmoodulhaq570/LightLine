@@ -38,6 +38,8 @@ pub struct Settings {
     pub git_blame: bool,
     /// Show Run and Debug above `main` and tests.
     pub code_lens: bool,
+    /// Colour TODO, FIXME, HACK and NOTE in comments.
+    pub todo_highlight: bool,
     /// Write the worst problem's message after its line. Saved as
     /// `inlineDiagnostics`: "off", "errors" or "errorsAndWarnings".
     pub inline_diagnostics: InlineDiagnostics,
@@ -98,6 +100,7 @@ impl Default for Settings {
             bracket_pair_colors: true,
             git_blame: true,
             code_lens: true,
+            todo_highlight: true,
             inline_diagnostics: InlineDiagnostics::ErrorsAndWarnings,
             local_history: true,
             editor_config: true,
@@ -245,6 +248,9 @@ impl Settings {
         }
         if let Some(b) = value.get("codeLens").and_then(|v| v.as_bool()) {
             settings.code_lens = b;
+        }
+        if let Some(b) = value.get("todoHighlight").and_then(|v| v.as_bool()) {
+            settings.todo_highlight = b;
         }
         if let Some(mode) = value
             .get("inlineDiagnostics")
@@ -428,6 +434,10 @@ impl Settings {
         obj.insert("gitBlame".into(), serde_json::Value::Bool(self.git_blame));
         obj.insert("codeLens".into(), serde_json::Value::Bool(self.code_lens));
         obj.insert(
+            "todoHighlight".into(),
+            serde_json::Value::Bool(self.todo_highlight),
+        );
+        obj.insert(
             "inlineDiagnostics".into(),
             serde_json::Value::String(self.inline_diagnostics.key().into()),
         );
@@ -552,6 +562,7 @@ const OWN_KEYS: &[&str] = &[
     "bracketPairColorization",
     "gitBlame",
     "codeLens",
+    "todoHighlight",
     "inlineDiagnostics",
     "localHistory",
     "editorConfig",
@@ -651,6 +662,16 @@ mod tests {
             read(r#"{"inlineDiagnostics": "loud"}"#),
             InlineDiagnostics::ErrorsAndWarnings
         );
+    }
+
+    #[test]
+    fn todo_highlight_is_on_until_turned_off() {
+        assert!(Settings::default().todo_highlight);
+        let s = Settings {
+            todo_highlight: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().todo_highlight);
     }
 
     #[test]

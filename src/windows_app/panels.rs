@@ -31,6 +31,7 @@ pub(super) struct QuickLayout {
 pub(super) const QUICK_COMMANDS: &[(&str, u8)] = &[
     ("Search in files", 0),
     ("Replace in Files", 63),
+    ("Find TODOs in Workspace", 71),
     ("Run Rust tests", 1),
     ("Run Python File", 8),
     ("Run Active File (Ctrl+Shift+R)", 48),
@@ -303,6 +304,7 @@ impl App {
     pub(super) fn run_command(&mut self, hwnd: HWND, id: u8) {
         match id {
             0 => self.open_project_search(hwnd),
+            super::todo_highlight::FIND_TODOS => self.find_todos(hwnd),
             63 => {
                 self.open_project_search(hwnd);
                 self.replace_focus = !self.project_query.is_empty();

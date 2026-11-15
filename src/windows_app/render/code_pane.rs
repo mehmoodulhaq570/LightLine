@@ -229,6 +229,13 @@ impl App {
                     }
                     _ => Vec::new(),
                 };
+                // TODO, FIXME, HACK and NOTE in the line's comments
+                // (todo_highlight.rs).
+                let todos = if self.settings.todo_highlight {
+                    crate::windows_app::todo_highlight::todo_marks(source, &spans)
+                } else {
+                    Vec::new()
+                };
                 let lens = if line_shows {
                     self.lens_on_line(self.tab_for_pane(pane), index)
                 } else {
@@ -772,6 +779,34 @@ impl App {
                         // instead of re-checking a HashMap on every span of
                         // every repaint.
                         draw_text(from, to, self.theme.syntax(span.color), &clip);
+                    }
+                    // Marker words on a faint tint of their colour; the
+                    // tint is left out where the text is selected.
+                    for &(start, end, kind) in &todos {
+                        let (from, to) = (start.max(anchor), end.min(shown_end));
+                        if from >= to {
+                            continue;
+                        }
+                        let selected = line_selections
+                            .iter()
+                            .any(|&(s, e, past)| s < to && (e > from || past));
+                        if !selected {
+                            let x1 = x_after(from).max(code_left);
+                            let x2 = x_to(to).min(right);
+                            if x2 > x1 {
+                                Self::fill(
+                                    hdc,
+                                    RECT {
+                                        left: x1,
+                                        top: y + self.scale(2),
+                                        right: x2,
+                                        bottom: (y + self.line_height - self.scale(2)).min(bottom),
+                                    },
+                                    self.todo_tint(kind),
+                                );
+                            }
+                        }
+                        draw_text(from, to, self.todo_color(kind), &clip);
                     }
                     // Brackets in their pair's color, over the text color.
                     for &(byte, color) in &bracket_colors {
