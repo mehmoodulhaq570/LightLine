@@ -39,6 +39,7 @@ enum Setting {
     WordWrap,
     AutoIndent,
     AutoClosePairs,
+    LinkedTags,
     BracketMatching,
     IndentGuides,
     BracketColors,
@@ -90,6 +91,7 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::WordWrap),
     Row::Toggle(Setting::AutoIndent),
     Row::Toggle(Setting::AutoClosePairs),
+    Row::Toggle(Setting::LinkedTags),
     Row::Heading("VISUAL AIDS"),
     Row::Toggle(Setting::BracketMatching),
     Row::Toggle(Setting::BracketColors),
@@ -132,6 +134,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::WordWrap => "Word wrap",
         Setting::AutoIndent => "Auto indent",
         Setting::AutoClosePairs => "Close brackets and quotes",
+        Setting::LinkedTags => "Rename matching tag",
         Setting::BracketMatching => "Highlight matching brackets",
         Setting::IndentGuides => "Indent guides",
         Setting::BracketColors => "Color bracket pairs",
@@ -162,6 +165,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::WordWrap => "wordWrap",
         Setting::AutoIndent => "autoIndent",
         Setting::AutoClosePairs => "autoClosePairs",
+        Setting::LinkedTags => "linkedTagRename",
         Setting::BracketMatching => "bracketMatching",
         Setting::IndentGuides => "indentGuides",
         Setting::BracketColors => "bracketPairColorization",
@@ -192,6 +196,7 @@ fn tip(setting: Setting) -> &'static str {
         Setting::WordWrap => "Wrap long lines at the edge (Alt+Z)  \u{b7}  wordWrap",
         Setting::AutoIndent => "A new line keeps the indent above  \u{b7}  autoIndent",
         Setting::AutoClosePairs => "Typing ( [ { or a quote adds its pair  \u{b7}  autoClosePairs",
+        Setting::LinkedTags => "Editing <div> edits its </div> too  \u{b7}  linkedTagRename",
         Setting::BracketMatching => {
             "Mark the bracket that pairs with the caret's  \u{b7}  bracketMatching"
         }
@@ -257,6 +262,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::WordWrap => settings.word_wrap,
         Setting::AutoIndent => settings.auto_indent,
         Setting::AutoClosePairs => settings.auto_close_pairs,
+        Setting::LinkedTags => settings.linked_tag_rename,
         Setting::BracketMatching => settings.bracket_matching,
         Setting::IndentGuides => settings.indent_guides,
         Setting::BracketColors => settings.bracket_pair_colors,
@@ -733,6 +739,7 @@ impl App {
             Setting::WordWrap => &mut settings.word_wrap,
             Setting::AutoIndent => &mut settings.auto_indent,
             Setting::AutoClosePairs => &mut settings.auto_close_pairs,
+            Setting::LinkedTags => &mut settings.linked_tag_rename,
             Setting::BracketMatching => &mut settings.bracket_matching,
             Setting::IndentGuides => &mut settings.indent_guides,
             Setting::BracketColors => &mut settings.bracket_pair_colors,
@@ -1204,7 +1211,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 24);
+        assert_eq!(setting_count(), 25);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

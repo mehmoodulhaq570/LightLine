@@ -1090,6 +1090,8 @@ pub(super) struct App {
     pub(super) inlay_request: Option<InlayRequest>,
     // The other uses of the name at the caret (occurrences.rs).
     pub(super) occurrences: Occurrences,
+    // The tag pair at the caret (linked_tag.rs), and what it was found for.
+    pub(super) tag_pair: super::linked_tag::TagPairCache,
     // The Debug Console tab's lines (debug_console.rs).
     pub(super) debug_console: DebugConsole,
     // A completion's snippet being filled in (snippet.rs).
@@ -1713,6 +1715,7 @@ impl App {
             workspace_search: WorkspaceSearch::default(),
             inlay_request: None,
             occurrences: Occurrences::default(),
+            tag_pair: (None, None),
             debug_console: DebugConsole::default(),
             snippet: None,
             sticky_shown: RefCell::new([Vec::new(), Vec::new()]),

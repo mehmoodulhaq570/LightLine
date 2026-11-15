@@ -16,6 +16,8 @@ pub struct Settings {
     pub word_wrap: bool,
     pub auto_close_pairs: bool,
     pub auto_indent: bool,
+    /// Typing in a tag's name renames its matching tag too.
+    pub linked_tag_rename: bool,
     pub format_on_save: bool,
     /// False once the user turns Prettier off in the Extensions panel; its
     /// file types are then left to the language server.
@@ -89,6 +91,7 @@ impl Default for Settings {
             word_wrap: false,
             auto_close_pairs: true,
             auto_indent: true,
+            linked_tag_rename: true,
             format_on_save: false,
             prettier_enabled: true,
             inlay_hints: true,
@@ -248,6 +251,9 @@ impl Settings {
         }
         if let Some(b) = value.get("codeLens").and_then(|v| v.as_bool()) {
             settings.code_lens = b;
+        }
+        if let Some(b) = value.get("linkedTagRename").and_then(|v| v.as_bool()) {
+            settings.linked_tag_rename = b;
         }
         if let Some(b) = value.get("todoHighlight").and_then(|v| v.as_bool()) {
             settings.todo_highlight = b;
@@ -434,6 +440,10 @@ impl Settings {
         obj.insert("gitBlame".into(), serde_json::Value::Bool(self.git_blame));
         obj.insert("codeLens".into(), serde_json::Value::Bool(self.code_lens));
         obj.insert(
+            "linkedTagRename".into(),
+            serde_json::Value::Bool(self.linked_tag_rename),
+        );
+        obj.insert(
             "todoHighlight".into(),
             serde_json::Value::Bool(self.todo_highlight),
         );
@@ -562,6 +572,7 @@ const OWN_KEYS: &[&str] = &[
     "bracketPairColorization",
     "gitBlame",
     "codeLens",
+    "linkedTagRename",
     "todoHighlight",
     "inlineDiagnostics",
     "localHistory",
@@ -662,6 +673,16 @@ mod tests {
             read(r#"{"inlineDiagnostics": "loud"}"#),
             InlineDiagnostics::ErrorsAndWarnings
         );
+    }
+
+    #[test]
+    fn linked_tag_rename_is_on_until_turned_off() {
+        assert!(Settings::default().linked_tag_rename);
+        let s = Settings {
+            linked_tag_rename: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().linked_tag_rename);
     }
 
     #[test]
