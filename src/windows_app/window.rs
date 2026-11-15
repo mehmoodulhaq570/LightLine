@@ -929,7 +929,9 @@ pub fn run() -> io::Result<()> {
         connect_parent_console(hwnd);
         app.borrow().update_title(hwnd);
         ShowWindow(hwnd, SW_SHOW);
-        SetFocus(hwnd);
+        // SetFocus would activate the window even when the launcher asked
+        // for it to open without taking the foreground (SW_SHOWNOACTIVATE).
+        take_keyboard(hwnd);
         if let Some(path) = std::env::args_os().nth(1) {
             if workflow::load_session()
                 .tabs
