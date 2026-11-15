@@ -14,7 +14,7 @@
 
 <br>
 
-<img src="design/screens/welcome.png" alt="LightLine Welcome Screen" width="820">
+<img src="design/screens/welcome.png" alt="LightLine's Welcome page: Start and Recent folders on the left, Get started and Learn on the right" width="820">
 
 </div>
 
