@@ -53,6 +53,29 @@ impl App {
         })
     }
 
+    /// Columns a tab character takes in tab `index`: its .editorconfig's
+    /// `tab_width` (which defaults to `indent_size`), else the tabSize
+    /// setting.
+    pub(super) fn tab_width_for(&self, index: usize) -> usize {
+        self.editorconfig_for(index)
+            .and_then(|rules| rules.tab_width)
+            .unwrap_or(self.settings.tab_size)
+            .max(1)
+    }
+
+    /// `tab_width_for` the tab holding `doc`.
+    pub(super) fn tab_width_of(&self, doc: &Document) -> usize {
+        if !self.settings.editor_config {
+            return self.settings.tab_size.max(1);
+        }
+        self.tabs
+            .iter()
+            .position(|tab| tab.document.id() == doc.id())
+            .map_or(self.settings.tab_size.max(1), |index| {
+                self.tab_width_for(index)
+            })
+    }
+
     /// An .editorconfig changed, or a folder gained or lost one: every tab
     /// reads its rules again when next asked.
     pub(super) fn forget_editorconfig(&mut self) {

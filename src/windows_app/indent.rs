@@ -47,7 +47,7 @@ impl App {
             .unwrap_or(self.settings.insert_spaces);
         let size = size
             .or_else(|| rules.and_then(|rules| rules.tab_size))
-            .unwrap_or(self.settings.tab_size)
+            .unwrap_or(self.tab_width_for(self.active))
             .max(1);
         (spaces, size)
     }

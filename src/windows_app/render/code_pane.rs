@@ -98,6 +98,11 @@ impl App {
             let tab = &self.tabs[self.tab_for_pane(pane)];
             let doc = &tab.document;
             let view = self.view_for_pane(pane);
+            // Tabs as wide as this file's .editorconfig says; text_width
+            // measures with it too while this pane is drawn.
+            let tab_width = self.tab_width_for(self.tab_for_pane(pane));
+            self.measure_tab_width.set(Some(tab_width));
+            let _measured = MeasureTabWidth(&self.measure_tab_width);
             let code_left = left + self.scale(GUTTER + PAD);
             let ordered = |cursor: Pos, anchor: Option<Pos>| {
                 anchor.and_then(|anchor| {
@@ -216,7 +221,7 @@ impl App {
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
-                let rows = super::super::wrap::layout_line(source, columns, self.settings.tab_size);
+                let rows = super::super::wrap::layout_line(source, columns, tab_width);
                 // Lines and rows outside the area being redrawn are skipped:
                 // the backbuffer still shows them. Dragging a selection
                 // redraws only the rows it changes.
@@ -406,7 +411,7 @@ impl App {
                                 continue;
                             }
                             let text = safe_slice_range(source, piece_start, cut)
-                                .replace('\t', &" ".repeat(self.settings.tab_size));
+                                .replace('\t', &" ".repeat(tab_width));
                             let chars: Vec<u16> = text.encode_utf16().collect();
                             ExtTextOutW(
                                 hdc,
@@ -1229,5 +1234,15 @@ impl App {
             },
             match_pos.map(|(line, byte)| Pos { line, byte }),
         ))
+    }
+}
+
+/// Clears `App::measure_tab_width` when a pane is done being drawn, however
+/// the drawing returns.
+struct MeasureTabWidth<'a>(&'a std::cell::Cell<Option<usize>>);
+
+impl Drop for MeasureTabWidth<'_> {
+    fn drop(&mut self) {
+        self.0.set(None);
     }
 }
