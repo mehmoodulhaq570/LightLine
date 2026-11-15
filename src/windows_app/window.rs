@@ -216,6 +216,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.find_count_timer(hwnd);
             0
         }
+        WM_TIMER if wparam == todo_highlight::TODO_TIMER => {
+            app.todo_timer(hwnd);
+            0
+        }
         WM_TIMER if wparam == OCCURRENCE_TIMER => {
             unsafe { KillTimer(hwnd, OCCURRENCE_TIMER) };
             app.request_occurrences();

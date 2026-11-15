@@ -193,6 +193,25 @@ impl Syntax {
         }
     }
 
+    /// Whether every line of `document` has its final colors, with no
+    /// parse pending: a pass over all lines' spans then sees what's drawn.
+    pub fn colored(&self, document: &Document) -> bool {
+        match self {
+            Syntax::Rust(syntax) => {
+                (syntax.tree_spans.is_some() && !syntax.pending)
+                    || (syntax.worker.is_none() && syntax.states.len() >= document.line_count())
+            }
+            Syntax::Python(syntax) => syntax.inner.colored(),
+            Syntax::C(syntax)
+            | Syntax::JavaScript(syntax)
+            | Syntax::TypeScript(syntax)
+            | Syntax::Tsx(syntax)
+            | Syntax::Json(syntax)
+            | Syntax::Extension(syntax) => syntax.colored(),
+            Syntax::Markdown(_) => true,
+        }
+    }
+
     /// Which lines' colors `advance_to` changed since the last call, so
     /// only those are redrawn.
     pub fn take_recolored(&mut self) -> Recolored {
@@ -1194,6 +1213,10 @@ impl TreeSitterSyntax {
             .as_ref()
             .and_then(|spans| spans.get(line).cloned())
             .unwrap_or_default()
+    }
+
+    fn colored(&self) -> bool {
+        self.tree_spans.is_some() && !self.pending
     }
 }
 

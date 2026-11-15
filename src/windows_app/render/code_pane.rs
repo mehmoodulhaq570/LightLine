@@ -1118,6 +1118,8 @@ impl App {
                     },
                     blend(self.theme.editor_bg, self.theme.text, strength),
                 );
+                // TODO markers along the track (todo_highlight.rs).
+                self.paint_todo_marks(hdc, hwnd, pane, track);
             }
             RestoreDC(hdc, saved);
         }
