@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-11-15
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.11.0-windows-x86_64.zip`, `lightline-v0.11.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
+A new look, laid out like VS Code, with a menu bar and redone Source Control, Run and Debug, Extensions and terminal panels, and it's as fast as v0.10.0. Measured against the published v0.10.0 exe on the same PC (x64 release builds; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running; four runs each, alternating):
+- **Typing:** 7.3–14.0 million CPU cycles of work on the window's thread per keystroke, against 8.5–15.9 million for v0.10.0. The PC was busy during some runs, so both ranges are wide, and they overlap.
+- **Start:** a responding window in 0.08–0.15 s (median of five launches), against 0.07–0.19 s for v0.10.0.
+- **Idle:** no wakeups while in the background in three of the four runs. In the other there were 7 in 20 seconds, costing almost nothing (60,000 cycles a second), during a run when the PC was busy. v0.10.0 had none in its four runs.
+
 #### Added
 
 - **Menu Bar**: The title bar now has **File**, **Edit**, **Selection**, **View**, **Go**, **Run**, **Terminal** and **Help** menus, as in VS Code, between the logo and the search box. Every item does what LightLine could already do from a shortcut or the Command Palette, and shows its shortcut beside it, so the menus also show you the keys. **File → Open Recent** reopens a recent folder; **Help** opens the User Guide, the keyboard shortcuts, the release notes or a new issue, and **About LightLine** shows the version. Click a title, or press `Alt` with its underlined letter (`Alt+F`, `Alt+E`...); tapping `Alt` alone puts the keyboard on the titles, and the arrow keys, `Enter` and `Esc` work in the menus. Items that need an open file are greyed out on the Welcome screen. In a narrow window the menus fold into one ☰ button. Nothing runs until a menu opens, so starting and typing are as fast as before; the terminal keeps its `Alt` keys and the find box keeps `Alt+R` for Regular Expression.
