@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **Follows the Project's .editorconfig**: When a project has an `.editorconfig` file, LightLine follows it: Tab inserts the indent it sets (spaces or a tab, and how many), and saving trims spaces at the ends of lines, adds the final newline and uses the line endings it asks for. The status bar says where the indent came from, **Spaces: 2 · .editorconfig**; clicking it lists the rules and opens the file. Editing the `.editorconfig` takes effect at once. **Use .editorconfig** in Settings (Files), or `editorConfig` in settings.json, turns it off. The files are read when a file is first shown or saved, never while you type.
 - **Problems Written After the Line**: Each line with an error or warning now shows the problem's message after its code, in the problem's colour with a small dot, like VS Code's Error Lens, so you can read it without hovering or opening Problems. The line the caret is on shows it brighter; **+1** means the line has more problems; a message too long for the window ends in **…**, and nothing is written after a line that already fills the window. **Inline problems** in Settings (Visual aids), or `inlineDiagnostics` in settings.json, chooses errors and warnings (the default), errors only, or off. It uses the problems the language server already sent, so nothing extra runs.
 
 #### Changed

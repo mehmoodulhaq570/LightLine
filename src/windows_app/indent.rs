@@ -38,13 +38,15 @@ impl App {
     /// wide a level is. An extension language's `tab_size` and `hard_tabs`
     /// come before the settings.
     pub(super) fn indent_style(&self) -> (bool, usize) {
+        // The project's .editorconfig, then the language's own rules, then
+        // the settings.
+        let (style, size) = self.editorconfig_indent(self.active);
         let rules = self.tab().editing_rules();
-        let spaces = match rules.and_then(|rules| rules.hard_tabs) {
-            Some(hard_tabs) => !hard_tabs,
-            None => self.settings.insert_spaces,
-        };
-        let size = rules
-            .and_then(|rules| rules.tab_size)
+        let spaces = style
+            .or_else(|| rules.and_then(|rules| rules.hard_tabs).map(|hard| !hard))
+            .unwrap_or(self.settings.insert_spaces);
+        let size = size
+            .or_else(|| rules.and_then(|rules| rules.tab_size))
             .unwrap_or(self.settings.tab_size)
             .max(1);
         (spaces, size)

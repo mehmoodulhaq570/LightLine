@@ -32,6 +32,7 @@ mod workspace_edit;
 mod wrap;
 use code_actions::{CodeActionMenu, CodeActionRequest};
 mod debug_console;
+mod editor_config;
 mod hot;
 mod indent;
 mod inlay;

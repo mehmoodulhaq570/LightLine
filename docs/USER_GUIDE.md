@@ -252,6 +252,7 @@ To edit the file directly, click the **{ }** button in the panel's header, **Ope
   "codeLens": true,
   "inlineDiagnostics": "errorsAndWarnings",
   "localHistory": true,
+  "editorConfig": true,
   "animations": true,
   "smoothScrolling": false,
   "markdownLoadRemoteImages": false,
@@ -285,6 +286,7 @@ To edit the file directly, click the **{ }** button in the panel's header, **Ope
 | `animations` | Ease the side panel and the bottom panel open and closed, and fade in the button under the mouse. Short, and never while you type or while LightLine is idle. Windows' **Show animations** (Settings → Accessibility → Visual effects) turns it off too |
 | `smoothScrolling` | A mouse-wheel notch or Page Up/Down glides into place instead of jumping (off by default: a glide draws three frames where a jump draws one). Needs `animations` |
 | `formatOnSave` | Format the file before each save |
+| `editorConfig` | Follow the project's `.editorconfig` files (on by default): `indent_style`, `indent_size` and `tab_width` set what Tab inserts and the indent guides; at each save, `trim_trailing_whitespace`, `insert_final_newline` (`true`) and `end_of_line` (`lf` or `crlf`) are applied, as one step Ctrl+Z undoes. The status bar then says **Spaces: 2 · .editorconfig**; click it to see the rules and open the file. Tabs are still drawn `tabSize` wide |
 | `inlayHints` | Show the language server's type and parameter-name hints inside the code (`let total: i32`) |
 | `occurrencesHighlight` | Highlight the other uses of the name at the caret |
 | `stickyScroll` | Pin the first lines of the blocks you're scrolled into (function, loop...) at the top of the editor |

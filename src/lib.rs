@@ -6,6 +6,7 @@ pub mod color_theme;
 pub mod credentials;
 pub mod debug;
 pub mod document;
+pub mod editorconfig;
 pub mod extensions;
 pub mod formatter;
 pub mod gitignore;

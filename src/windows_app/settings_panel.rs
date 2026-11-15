@@ -47,6 +47,7 @@ enum Setting {
     CodeLens,
     InlineProblems,
     FormatOnSave,
+    EditorConfig,
     ParseLimit,
     ColorTheme,
     Animations,
@@ -98,6 +99,7 @@ const ROWS: &[Row] = &[
     Row::Choice(Setting::InlineProblems),
     Row::Heading("FILES"),
     Row::Toggle(Setting::FormatOnSave),
+    Row::Toggle(Setting::EditorConfig),
     Row::Choice(Setting::ParseLimit),
     Row::Heading("APPEARANCE"),
     Row::Choice(Setting::ColorTheme),
@@ -136,6 +138,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::CodeLens => "Run and Debug links",
         Setting::InlineProblems => "Inline problems",
         Setting::FormatOnSave => "Format on save",
+        Setting::EditorConfig => "Use .editorconfig",
         Setting::ParseLimit => "Syntax colors up to",
         Setting::ColorTheme => "Color theme",
         Setting::Animations => "Animations",
@@ -164,6 +167,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::CodeLens => "codeLens",
         Setting::InlineProblems => "inlineDiagnostics",
         Setting::FormatOnSave => "formatOnSave",
+        Setting::EditorConfig => "editorConfig",
         Setting::ParseLimit => "parseLimitKb",
         Setting::ColorTheme => "colorTheme",
         Setting::Animations => "animations",
@@ -196,6 +200,9 @@ fn tip(setting: Setting) -> &'static str {
             "Write each line's worst problem after it  \u{b7}  inlineDiagnostics"
         }
         Setting::FormatOnSave => "Format the file after each save  \u{b7}  formatOnSave",
+        Setting::EditorConfig => {
+            "Indent, line endings and whitespace from the project  \u{b7}  editorConfig"
+        }
         Setting::ParseLimit => "Larger files open without syntax colors  \u{b7}  parseLimitKb",
         Setting::ColorTheme => "The colors of LightLine  \u{b7}  colorTheme",
         Setting::Animations => "Panels slide and hovers fade  \u{b7}  animations",
@@ -250,6 +257,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::GitBlame => settings.git_blame,
         Setting::CodeLens => settings.code_lens,
         Setting::FormatOnSave => settings.format_on_save,
+        Setting::EditorConfig => settings.editor_config,
         Setting::MarkdownImages => settings.markdown_load_remote_images,
         Setting::Animations => settings.animations,
         Setting::SmoothScrolling => settings.smooth_scrolling,
@@ -724,6 +732,7 @@ impl App {
             Setting::GitBlame => &mut settings.git_blame,
             Setting::CodeLens => &mut settings.code_lens,
             Setting::FormatOnSave => &mut settings.format_on_save,
+            Setting::EditorConfig => &mut settings.editor_config,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
             Setting::Animations => &mut settings.animations,
             Setting::SmoothScrolling => &mut settings.smooth_scrolling,
@@ -1186,7 +1195,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 22);
+        assert_eq!(setting_count(), 23);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

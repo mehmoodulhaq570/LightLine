@@ -342,12 +342,13 @@ impl App {
     /// language's own `tab_size` when it indents with spaces, else the tab
     /// size setting (tabs are drawn that wide).
     pub(super) fn guide_unit(&self, pane: usize) -> usize {
-        let rules = self.tabs[self.tab_for_pane(pane)].editing_rules();
-        let spaces = rules
-            .and_then(|rules| rules.hard_tabs)
-            .map_or(self.settings.insert_spaces, |hard_tabs| !hard_tabs);
-        rules
-            .and_then(|rules| rules.tab_size)
+        let index = self.tab_for_pane(pane);
+        let (style, size) = self.editorconfig_indent(index);
+        let rules = self.tabs[index].editing_rules();
+        let spaces = style
+            .or_else(|| rules.and_then(|rules| rules.hard_tabs).map(|hard| !hard))
+            .unwrap_or(self.settings.insert_spaces);
+        size.or_else(|| rules.and_then(|rules| rules.tab_size))
             .filter(|_| spaces)
             .unwrap_or(self.settings.tab_size)
             .max(1)

@@ -349,6 +349,10 @@ impl Extension {
 
 pub(super) struct Tab {
     pub(super) document: Document,
+    // The .editorconfig rules for the file at this path (editor_config.rs),
+    // read when first needed; None until then or after a change.
+    pub(super) editorconfig:
+        RefCell<Option<(PathBuf, std::rc::Rc<lightline::editorconfig::Rules>)>>,
     pub(super) views: [EditorView; 2],
     pub(super) syntax: Option<Syntax>,
     pub(super) diagnostics: Vec<LspDiagnostic>,
@@ -509,6 +513,7 @@ impl Tab {
             unloaded: false,
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
+            editorconfig: RefCell::default(),
         }
     }
 
@@ -604,6 +609,7 @@ impl Tab {
             unloaded: false,
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
+            editorconfig: RefCell::default(),
         }
     }
 
@@ -3307,7 +3313,25 @@ impl App {
                 {
                     git_changed = true;
                 }
+                lightline::watcher::WatchEvent::FileChanged(path)
+                    if path.file_name().is_some_and(|name| {
+                        name.eq_ignore_ascii_case(lightline::editorconfig::FILE_NAME)
+                    }) && !self.tabs.iter().any(|tab| {
+                        tab.document
+                            .path
+                            .as_deref()
+                            .is_some_and(|p| Self::same_path(p, &path))
+                    }) =>
+                {
+                    self.forget_editorconfig();
+                    needs_refresh = true;
+                }
                 lightline::watcher::WatchEvent::FileChanged(path) => {
+                    if path.file_name().is_some_and(|name| {
+                        name.eq_ignore_ascii_case(lightline::editorconfig::FILE_NAME)
+                    }) {
+                        self.forget_editorconfig();
+                    }
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
                     // A tab not read yet reads the latest file when shown.
                     // LightLine's own save fires this event too; reloading
@@ -3342,6 +3366,8 @@ impl App {
                     }
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
+                    // It may have gained or lost an .editorconfig.
+                    self.forget_editorconfig();
                     self.directory_cache.remove(&dir);
                     self.directory_requests.remove(&dir);
                     if self.workspace_root.as_ref() == Some(&dir)
@@ -3875,6 +3901,9 @@ impl App {
         if overwrite && !self.keep_own_version(hwnd, &path) {
             return false;
         }
+        // The project's .editorconfig: trailing whitespace, final newline,
+        // line endings (editor_config.rs).
+        self.apply_editorconfig_on_save(&path);
         let format_after = format && self.format_before_save(&path);
         // A large file already open from this path is written on a worker.
         // An external formatter's run after the save stays on this path,
