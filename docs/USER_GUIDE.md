@@ -287,7 +287,7 @@ To edit the file directly, click the **{ }** button in the panel's header, **Ope
 | `gitBlame` | After the caret's line, show who last changed it, when, and the commit message |
 | `codeLens` | Show **▶ Run** / **Debug** after `main` and **▶ Run test** after test functions (Rust, Python, Go, C/C++) |
 | `inlineDiagnostics` | Write each line's worst problem after it, from its language server: `"errorsAndWarnings"` (the default), `"errors"` or `"off"`. **+1** means the line has more; the full list is in Problems. Nothing is written after a line that fills the window |
-| `todoHighlight` | Colour `TODO`, `FIXME`, `HACK` and `NOTE` inside comments, each in its own colour on a faint tint (on by default). **Find TODOs in Workspace** (Command Palette, or Edit menu) searches the whole folder for them with Search in Files |
+| `todoHighlight` | Colour `TODO`, `FIXME`, `HACK` and `NOTE` inside comments, each in its own colour on a faint tint, with a mark at their place on the scrollbar (on by default). **Find TODOs in Workspace** (Command Palette, or Edit menu) lists the ones in comments across the whole folder with Search in Files |
 | `localHistory` | Keep a copy of a file each time it's saved, for [Local History](#local-history) |
 | `animations` | Ease the side panel and the bottom panel open and closed, and fade in the button under the mouse. Short, and never while you type or while LightLine is idle. Windows' **Show animations** (Settings → Accessibility → Visual effects) turns it off too |
 | `smoothScrolling` | A mouse-wheel notch or Page Up/Down glides into place instead of jumping (off by default: a glide draws three frames where a jump draws one). Needs `animations` |

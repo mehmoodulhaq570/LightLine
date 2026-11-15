@@ -148,9 +148,63 @@ impl Matcher {
     }
 }
 
+/// Whether `byte` of `line` is inside a comment, judged from the line alone,
+/// for any common language: after `//`, `/*`, `#`, `--` (followed by a
+/// space) or `<!--` outside a string, or on a line that continues a block
+/// comment (starting with `*`). A guess for searches across files, where
+/// no syntax tree is at hand.
+pub fn in_comment(line: &str, byte: usize) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('*') && !trimmed.starts_with("*/") {
+        return true;
+    }
+    let bytes = line.as_bytes();
+    let end = byte.min(bytes.len());
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < end {
+        let b = bytes[i];
+        match quote {
+            Some(_) if b == b'\\' => i += 1,
+            Some(q) if b == q => quote = None,
+            Some(_) => {}
+            None => match b {
+                b'"' | b'\'' | b'`' => quote = Some(b),
+                b'#' => return true,
+                b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => return true,
+                b'-' if bytes.get(i + 1) == Some(&b'-')
+                    && matches!(bytes.get(i + 2), None | Some(b' ' | b'\t')) =>
+                {
+                    return true;
+                }
+                b'<' if line[i..].starts_with("<!--") => return true,
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comments_are_told_from_code_and_strings() {
+        let at = |line: &str| in_comment(line, line.find("TODO").unwrap());
+        assert!(at("x = 1  // TODO: fix"));
+        assert!(at("# TODO later"));
+        assert!(at("  /* TODO */"));
+        assert!(at("   * TODO: inside a block comment"));
+        assert!(at("-- TODO in SQL"));
+        assert!(at("<!-- TODO -->"));
+        assert!(at("let s = \"a // b\"; // TODO"));
+        assert!(!at("let s = \"TODO in a string\";"));
+        assert!(!at("print('# not a comment TODO')"));
+        assert!(!at("i--; TODO_LIST.push(1)"));
+        assert!(!at("const TODO = 1;"));
+    }
 
     fn opts(regex: bool, match_case: bool, whole_word: bool) -> SearchOptions {
         SearchOptions {

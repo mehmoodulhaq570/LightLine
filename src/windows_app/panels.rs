@@ -564,8 +564,20 @@ impl App {
         self.panel_selected = 0;
         self.panel_first = 0;
         let tx = self.worker_tx.clone();
+        // Find TODOs in Workspace lists only markers in comments.
+        let comments_only =
+            self.search_options.regex && query == super::todo_highlight::TODO_PATTERN;
         std::thread::spawn(move || {
-            let hits = workflow::search_workspace_with_cancel(&root, &matcher, &cancel);
+            let hits = if comments_only {
+                workflow::search_workspace_where(
+                    &root,
+                    &matcher,
+                    &cancel,
+                    &lightline::text_search::in_comment,
+                )
+            } else {
+                workflow::search_workspace_with_cancel(&root, &matcher, &cancel)
+            };
             tx.send(WorkerMessage::Search(root, query, cancel, hits));
         });
     }

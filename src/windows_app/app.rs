@@ -353,6 +353,8 @@ pub(super) struct Tab {
     // read when first needed; None until then or after a change.
     pub(super) editorconfig:
         RefCell<Option<(PathBuf, std::rc::Rc<lightline::editorconfig::Rules>)>>,
+    // The lines with a TODO marker, for the scrollbar (todo_highlight.rs).
+    pub(super) todo_lines: RefCell<Option<super::todo_highlight::TodoLines>>,
     pub(super) views: [EditorView; 2],
     pub(super) syntax: Option<Syntax>,
     pub(super) diagnostics: Vec<LspDiagnostic>,
@@ -514,6 +516,7 @@ impl Tab {
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
             editorconfig: RefCell::default(),
+            todo_lines: RefCell::default(),
         }
     }
 
@@ -610,6 +613,7 @@ impl Tab {
             bracket_depths: RefCell::default(),
             recovery_cache: RefCell::new(None),
             editorconfig: RefCell::default(),
+            todo_lines: RefCell::default(),
         }
     }
 

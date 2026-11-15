@@ -555,6 +555,18 @@ pub fn search_workspace_with_cancel(
     matcher: &Matcher,
     cancel: &AtomicBool,
 ) -> Vec<SearchHit> {
+    search_workspace_where(root, matcher, cancel, &|_, _| true)
+}
+
+/// Like `search_workspace_with_cancel`, keeping only the matches `keep`
+/// accepts, given the line and the match's byte in it (each line's first
+/// accepted match is the hit).
+pub fn search_workspace_where(
+    root: &Path,
+    matcher: &Matcher,
+    cancel: &AtomicBool,
+    keep: &(dyn Fn(&str, usize) -> bool + Sync),
+) -> Vec<SearchHit> {
     let files = workspace_files_inner(root, Some(cancel));
     let next = std::sync::atomic::AtomicUsize::new(0);
     let found = std::sync::atomic::AtomicUsize::new(0);
@@ -571,7 +583,7 @@ pub fn search_workspace_with_cancel(
                         let Some(path) = files.get(index) else {
                             break;
                         };
-                        let file_hits = search_file(path, matcher, cancel);
+                        let file_hits = search_file(path, matcher, cancel, keep);
                         if !file_hits.is_empty() {
                             found.fetch_add(file_hits.len(), Ordering::Relaxed);
                             hits.push((index, file_hits));
@@ -667,7 +679,12 @@ pub fn replace_targets(
         .collect()
 }
 
-fn search_file(path: &Path, matcher: &Matcher, cancel: &AtomicBool) -> Vec<SearchHit> {
+fn search_file(
+    path: &Path,
+    matcher: &Matcher,
+    cancel: &AtomicBool,
+    keep: &(dyn Fn(&str, usize) -> bool + Sync),
+) -> Vec<SearchHit> {
     if !fs::metadata(path).is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES) {
         return Vec::new();
     }
@@ -684,7 +701,7 @@ fn search_file(path: &Path, matcher: &Matcher, cancel: &AtomicBool) -> Vec<Searc
         if line_index % 128 == 0 && cancel.load(Ordering::Relaxed) {
             break;
         }
-        if let Some((byte, _)) = matcher.find_at(line, 0) {
+        if let Some((byte, _)) = matcher.matches(line).find(|&(byte, _)| keep(line, byte)) {
             hits.push(SearchHit {
                 path: path.to_path_buf(),
                 line: line_index,
