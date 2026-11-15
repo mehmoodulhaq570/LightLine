@@ -37,6 +37,7 @@ mod hot;
 mod indent;
 mod inlay;
 mod inline_diagnostics;
+mod linked_tag;
 mod occurrences;
 mod scroll_blit;
 mod snippet;

@@ -972,6 +972,7 @@ pub fn run() -> io::Result<()> {
             ) && let Ok(mut app) = app.try_borrow_mut()
             {
                 app.track_caret(hwnd);
+                app.check_tag_pair(hwnd);
                 app.check_sticky(hwnd);
             }
             // Whatever changed the text, its colors or the view (keys, a

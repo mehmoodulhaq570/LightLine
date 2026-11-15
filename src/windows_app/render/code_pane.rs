@@ -205,6 +205,14 @@ impl App {
                 .map(|(bracket, matching)| std::iter::once(bracket).chain(matching).collect())
                 .unwrap_or_default();
             let mut pair_marks: Vec<(i32, i32, i32, &str, u32)> = Vec::new();
+            // A tag's name and its matching tag's, outlined while the caret
+            // is in one (linked_tag.rs).
+            let tag_names: Vec<(Pos, Pos)> = self
+                .tag_outline(self.tab_for_pane(pane))
+                .filter(|_| pane == self.focused_pane)
+                .map(|pair| vec![pair.open, pair.close])
+                .unwrap_or_default();
+            let tag_edge = blend(self.theme.editor_bg, self.theme.blue, 0.65);
             'lines: while screen_row < visible {
                 let source = doc.line(index);
                 let line_hints = self.hints_on_line(self.tab_for_pane(pane), index);
@@ -835,6 +843,47 @@ impl App {
                             bracket,
                             color,
                         ));
+                    }
+                    for &(start, end) in tag_names.iter().filter(|(start, _)| start.line == index) {
+                        let (from, to) = (start.byte.max(row_start), end.byte.min(row_end));
+                        if from >= to || starts_hidden(from) {
+                            continue;
+                        }
+                        let x1 = x_after(from) - 1;
+                        let x2 = x_to(to) + 1;
+                        let (top, low) = (y, (y + self.line_height).min(bottom));
+                        let edge = self.scale(1).max(1);
+                        if x2 > code_left && x1 < right {
+                            let (x1, x2) = (x1.max(code_left), x2.min(right));
+                            for side in [
+                                RECT {
+                                    left: x1,
+                                    top,
+                                    right: x2,
+                                    bottom: top + edge,
+                                },
+                                RECT {
+                                    left: x1,
+                                    top: low - edge,
+                                    right: x2,
+                                    bottom: low,
+                                },
+                                RECT {
+                                    left: x1,
+                                    top,
+                                    right: x1 + edge,
+                                    bottom: low,
+                                },
+                                RECT {
+                                    left: x2 - edge,
+                                    top,
+                                    right: x2,
+                                    bottom: low,
+                                },
+                            ] {
+                                Self::fill(hdc, side, tag_edge);
+                            }
+                        }
                     }
                     for diagnostic in tab
                         .diagnostics

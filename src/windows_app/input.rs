@@ -1017,6 +1017,8 @@ impl App {
             x if x == VK_BACK as u32 => {
                 if self.selection_range().is_some() {
                     self.replace_selection("");
+                } else if self.delete_in_linked_tag(hwnd, false) {
+                    // Both tag names lost the character.
                 } else {
                     // Delete both characters of an empty auto-closed pair.
                     let line = self.doc().line(cursor.line);
@@ -1048,6 +1050,8 @@ impl App {
             x if x == VK_DELETE as u32 => {
                 if self.selection_range().is_some() {
                     self.replace_selection("");
+                } else if self.delete_in_linked_tag(hwnd, true) {
+                    // Both tag names lost the character.
                 } else {
                     let next = self.doc().next(cursor);
                     self.replace_range(cursor, next, "");
@@ -1078,6 +1082,9 @@ impl App {
         } else {
             self.refresh(hwnd);
         }
+        // The tag pair at the caret's outline (linked_tag.rs); the message
+        // loop checks again after clicks and other input.
+        self.check_tag_pair(hwnd);
     }
 
     pub(super) fn character(&mut self, hwnd: HWND, unit: u16) {
@@ -1262,6 +1269,16 @@ impl App {
             }
             if self.multi_cursor_char(hwnd, ch) {
                 return;
+            }
+            // In a tag's name: the matching tag's name changes too
+            // (linked_tag.rs).
+            if !ch.is_control() && self.links_tags_here() {
+                let stays_in_editor = self.keystroke_stays_in_editor();
+                let before = self.caret_frame(hwnd);
+                if self.type_in_linked_tag(hwnd, ch.encode_utf8(&mut [0; 4])) {
+                    self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
+                    return;
+                }
             }
             // Auto-closing pairs: when typing an opening bracket or quote,
             // insert the closing counterpart and leave the cursor between them.
