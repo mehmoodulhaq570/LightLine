@@ -38,6 +38,9 @@ pub struct Settings {
     pub git_blame: bool,
     /// Show Run and Debug above `main` and tests.
     pub code_lens: bool,
+    /// Write the worst problem's message after its line. Saved as
+    /// `inlineDiagnostics`: "off", "errors" or "errorsAndWarnings".
+    pub inline_diagnostics: InlineDiagnostics,
     /// Keep a copy of a file each time it's saved (see local_history.rs).
     pub local_history: bool,
     /// Wheel and Page Up/Down scrolls glide instead of jumping. Off by
@@ -93,6 +96,7 @@ impl Default for Settings {
             bracket_pair_colors: true,
             git_blame: true,
             code_lens: true,
+            inline_diagnostics: InlineDiagnostics::ErrorsAndWarnings,
             local_history: true,
             smooth_scrolling: false,
             animations: true,
@@ -238,6 +242,13 @@ impl Settings {
         }
         if let Some(b) = value.get("codeLens").and_then(|v| v.as_bool()) {
             settings.code_lens = b;
+        }
+        if let Some(mode) = value
+            .get("inlineDiagnostics")
+            .and_then(|v| v.as_str())
+            .and_then(InlineDiagnostics::parse)
+        {
+            settings.inline_diagnostics = mode;
         }
         if let Some(b) = value.get("localHistory").and_then(|v| v.as_bool()) {
             settings.local_history = b;
@@ -411,6 +422,10 @@ impl Settings {
         obj.insert("gitBlame".into(), serde_json::Value::Bool(self.git_blame));
         obj.insert("codeLens".into(), serde_json::Value::Bool(self.code_lens));
         obj.insert(
+            "inlineDiagnostics".into(),
+            serde_json::Value::String(self.inline_diagnostics.key().into()),
+        );
+        obj.insert(
             "localHistory".into(),
             serde_json::Value::Bool(self.local_history),
         );
@@ -467,6 +482,46 @@ impl Settings {
     }
 }
 
+/// Which problems get their message written after their line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InlineDiagnostics {
+    Off,
+    Errors,
+    ErrorsAndWarnings,
+}
+
+impl InlineDiagnostics {
+    /// The worst LSP severity that still shows (1 error, 2 warning); 0 for
+    /// none.
+    pub fn max_severity(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Errors => 1,
+            Self::ErrorsAndWarnings => 2,
+        }
+    }
+
+    /// Its value in settings.json.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Errors => "errors",
+            Self::ErrorsAndWarnings => "errorsAndWarnings",
+        }
+    }
+
+    /// Reads a settings.json value; `true`/`false` style words are accepted
+    /// too. None leaves the default.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "false" => Some(Self::Off),
+            "errors" | "error" => Some(Self::Errors),
+            "errorsandwarnings" | "all" | "on" | "true" => Some(Self::ErrorsAndWarnings),
+            _ => None,
+        }
+    }
+}
+
 // Every key `to_object` can write.
 const OWN_KEYS: &[&str] = &[
     "fontFamily",
@@ -487,6 +542,7 @@ const OWN_KEYS: &[&str] = &[
     "bracketPairColorization",
     "gitBlame",
     "codeLens",
+    "inlineDiagnostics",
     "localHistory",
     "smoothScrolling",
     "animations",
@@ -548,6 +604,42 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert!(loaded.format_on_save);
+    }
+
+    #[test]
+    fn inline_diagnostics_round_trip_and_read_loose_values() {
+        assert_eq!(
+            Settings::default().inline_diagnostics,
+            InlineDiagnostics::ErrorsAndWarnings
+        );
+        for mode in [
+            InlineDiagnostics::Off,
+            InlineDiagnostics::Errors,
+            InlineDiagnostics::ErrorsAndWarnings,
+        ] {
+            let s = Settings {
+                inline_diagnostics: mode,
+                ..Settings::default()
+            };
+            assert_eq!(
+                Settings::parse(&s.to_json()).unwrap().inline_diagnostics,
+                mode
+            );
+        }
+        let read = |text: &str| Settings::parse(text).unwrap().inline_diagnostics;
+        assert_eq!(
+            read(r#"{"inlineDiagnostics": "Errors"}"#),
+            InlineDiagnostics::Errors
+        );
+        assert_eq!(
+            read(r#"{"inlineDiagnostics": "off"}"#),
+            InlineDiagnostics::Off
+        );
+        // Anything else keeps the default.
+        assert_eq!(
+            read(r#"{"inlineDiagnostics": "loud"}"#),
+            InlineDiagnostics::ErrorsAndWarnings
+        );
     }
 
     #[test]

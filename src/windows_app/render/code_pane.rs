@@ -686,6 +686,25 @@ impl App {
                         }
                         self.record_lens_hits(doc.id(), index, hits);
                     }
+                    // The line's worst problem, in words (inline_diagnostics.rs).
+                    if last_row
+                        && !cut
+                        && let Some((problem, more)) =
+                            crate::windows_app::inline_diagnostics::line_problem(
+                                &tab.diagnostics,
+                                index,
+                                self.settings.inline_diagnostics.max_severity(),
+                            )
+                    {
+                        after = self.paint_line_problem(
+                            hdc,
+                            problem,
+                            more,
+                            index == view.cursor.line,
+                            (after, y, text_right),
+                            clip,
+                        );
+                    }
                     if last_row
                         && index == view.cursor.line
                         && let Some(label) = &blame

@@ -35,6 +35,7 @@ mod debug_console;
 mod hot;
 mod indent;
 mod inlay;
+mod inline_diagnostics;
 mod occurrences;
 mod scroll_blit;
 mod snippet;
