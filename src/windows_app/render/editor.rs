@@ -107,11 +107,11 @@ impl App {
         }
     }
 
-    // Geometry for the trailing "{Language}" name in the bottom status bar's
-    // "Ln X, Col Y  Spaces: 4  UTF-8  {Language}" line. Shared between
-    // painting and the click handler (input.rs) so clicking it is guaranteed
-    // to land on exactly what was drawn. Previously this whole line was a
-    // single opaque label with nothing behind it to click.
+    // Geometry for the bottom status bar's middle line, "Ln X, Col Y
+    // Spaces: 4  UTF-8  {Language}". Shared between painting and the click
+    // handler (input.rs) so clicks land on exactly what was drawn. The
+    // language name is clickable, and so is the indent when it comes from
+    // an .editorconfig ("Spaces: 2 · .editorconfig").
     pub(in crate::windows_app) fn status_language_control(
         &self,
         hdc: HDC,
@@ -119,33 +119,57 @@ impl App {
         editor_bottom: i32,
         chip_right: i32,
         branch_x: i32,
-    ) -> (i32, i32, String, RECT) {
+    ) -> StatusMiddle {
         let s = |v: i32| self.scale(v);
         let left_bound = chip_right + s(24);
         let clip_right = (branch_x - s(16)).max(left_bound);
         let (spaces, indent_size) = self.indent_style();
         let indent_label = if spaces { "Spaces" } else { "Tab Size" };
-        let prefix = format!(
-            "Ln {}, Col {}    {indent_label}: {}    UTF-8    ",
+        let from_file = self
+            .editorconfig_for(self.active)
+            .is_some_and(|rules| rules.sets_indent());
+        let position = format!(
+            "Ln {}, Col {}    ",
             self.view().cursor.line + 1,
             self.doc().line(self.view().cursor.line)[..self.view().cursor.byte]
                 .chars()
                 .count()
                 + 1,
-            indent_size,
         );
-        let prefix_width = self.text_width(hdc, &prefix);
+        let indent = if from_file {
+            format!("{indent_label}: {indent_size} \u{b7} .editorconfig")
+        } else {
+            format!("{indent_label}: {indent_size}")
+        };
+        let rest = "    UTF-8    ";
+        let (position_width, indent_width, rest_width) = (
+            self.text_width(hdc, &position),
+            self.text_width(hdc, &indent),
+            self.text_width(hdc, rest),
+        );
         let language = self.language_name();
         let language_width = self.text_width(hdc, &language);
-        let mid_x = (clip_right - prefix_width - language_width).max(left_bound);
-        let language_left = (mid_x + prefix_width).min(clip_right);
-        let hit_rect = RECT {
-            left: language_left,
+        let mid_x = (clip_right - position_width - indent_width - rest_width - language_width)
+            .max(left_bound);
+        let indent_left = (mid_x + position_width).min(clip_right);
+        let language_left = (indent_left + indent_width + rest_width).min(clip_right);
+        let rect_from = |left: i32, width: i32| RECT {
+            left,
             top: editor_bottom,
-            right: (language_left + language_width).min(clip_right),
+            right: (left + width).min(clip_right),
             bottom: rect.bottom,
         };
-        (mid_x, clip_right, prefix, hit_rect)
+        StatusMiddle {
+            mid_x,
+            clip_right,
+            position,
+            indent,
+            indent_rect: rect_from(indent_left, indent_width),
+            indent_from_file: from_file,
+            rest: rest.into(),
+            rest_x: indent_left + indent_width,
+            language_rect: rect_from(language_left, language_width),
+        }
     }
 
     // Mirrors the paint-time geometry in status_language_control using a
@@ -162,23 +186,30 @@ impl App {
             return;
         }
         let editor_bottom = (rect.bottom - self.scale(STATUS)).max(0);
-        let (health_left, health_right, language_rect) = unsafe {
+        let (health_left, health_right, middle) = unsafe {
             let hdc = GetDC(hwnd);
             let old = SelectObject(hdc, self.small_font);
             let left = self.status_left(hdc);
             let (health_left, left_info_right) = (left.health_left, left.health_right);
             let ready_x = self.status_ready_x(hdc, rect);
-            let (_, _, _, language_rect) =
+            let middle =
                 self.status_language_control(hdc, rect, editor_bottom, left_info_right, ready_x);
             SelectObject(hdc, old);
             ReleaseDC(hwnd, hdc);
-            (health_left, left_info_right, language_rect)
+            (health_left, left_info_right, middle)
         };
+        let (language_rect, indent_rect) = (middle.language_rect, middle.indent_rect);
         // The error and warning counts open the Problems list.
         if x >= health_left - self.scale(6) && x < health_right + self.scale(6) {
             self.show_problems(hwnd);
         } else if x >= language_rect.left && x < language_rect.right && y >= language_rect.top {
             self.show_language_pick(hwnd);
+        } else if middle.indent_from_file
+            && x >= indent_rect.left
+            && x < indent_rect.right
+            && y >= indent_rect.top
+        {
+            self.show_editorconfig_rules(hwnd, indent_rect.left, indent_rect.top);
         }
     }
 
@@ -519,7 +550,7 @@ impl App {
                 let mid_x = if self.tab().is_placeholder() || self.tab().markdown.is_some() {
                     ready_x
                 } else {
-                    let (mid_x, clip_right, prefix, language_rect) = self.status_language_control(
+                    let line = self.status_language_control(
                         hdc,
                         rect,
                         editor_bottom,
@@ -527,22 +558,29 @@ impl App {
                         ready_x,
                     );
                     let label_clip = RECT {
-                        left: mid_x,
+                        left: line.mid_x,
                         top: editor_bottom,
-                        right: clip_right,
+                        right: line.clip_right,
                         bottom: rect.bottom,
                     };
-                    self.label_mid(hdc, &prefix, mid_x, middle, self.theme.muted, label_clip);
-                    let language = self.language_name();
+                    let link = ui(80, 160, 220);
+                    let muted = self.theme.muted;
+                    self.label_mid(hdc, &line.position, line.mid_x, middle, muted, label_clip);
+                    let indent_color = if line.indent_from_file { link } else { muted };
+                    let indent_x = line.indent_rect.left;
                     self.label_mid(
                         hdc,
-                        &language,
-                        language_rect.left,
+                        &line.indent,
+                        indent_x,
                         middle,
-                        ui(80, 160, 220),
+                        indent_color,
                         label_clip,
                     );
-                    mid_x
+                    self.label_mid(hdc, &line.rest, line.rest_x, middle, muted, label_clip);
+                    let language = self.language_name();
+                    let language_x = line.language_rect.left;
+                    self.label_mid(hdc, &language, language_x, middle, link, label_clip);
+                    line.mid_x
                 };
                 // What the last action reported ("Formatted with ...", "WSL is not
                 // available ..."), shown for a few seconds in the free space
@@ -1656,4 +1694,17 @@ impl App {
     pub(in crate::windows_app) fn draw_collapse_all_icon(&self, hdc: HDC, rect: RECT, color: u32) {
         self.glyph_in(hdc, DebugGlyph::CollapseAll, color, rect, self.scale(16));
     }
+}
+
+/// The status bar's middle line, in pieces (`status_language_control`).
+pub(in crate::windows_app) struct StatusMiddle {
+    pub mid_x: i32,
+    pub clip_right: i32,
+    pub position: String,
+    pub indent: String,
+    pub indent_rect: RECT,
+    pub indent_from_file: bool,
+    pub rest: String,
+    pub rest_x: i32,
+    pub language_rect: RECT,
 }

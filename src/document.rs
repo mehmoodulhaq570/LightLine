@@ -1210,6 +1210,26 @@ impl Document {
         self.saved_revision = revision;
     }
 
+    /// Whether lines end in CRLF (true), LF (false), or a mix (None).
+    pub fn line_ending(&self) -> Option<bool> {
+        match &self.crlf {
+            Some(_) => None,
+            None => Some(self.eol == "\r\n"),
+        }
+    }
+
+    /// Ends every line with CRLF (`crlf`) or LF from the next save on; a
+    /// file that mixes them becomes uniform. True when that changes what a
+    /// save writes. Not an edit: it isn't undone with Ctrl+Z.
+    pub fn set_line_ending(&mut self, crlf: bool) -> bool {
+        if self.line_ending() == Some(crlf) {
+            return false;
+        }
+        self.eol = if crlf { "\r\n" } else { "\n" };
+        self.crlf = None;
+        true
+    }
+
     /// The revision the text is at; `snapshot_for_save` records it.
     pub fn revision(&self) -> u64 {
         self.revision
@@ -1553,6 +1573,22 @@ mod tests {
             assert_eq!(fs::read(&path).unwrap(), original);
             fs::remove_dir_all(path.parent().unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn a_chosen_line_ending_makes_the_file_uniform() {
+        let path = temp_file("eol-chosen", b"a\r\nb\nc\r\nd");
+        let mut doc = Document::open(path.clone()).unwrap();
+        assert_eq!(doc.line_ending(), None);
+        assert!(doc.set_line_ending(false));
+        assert_eq!(doc.line_ending(), Some(false));
+        assert!(!doc.set_line_ending(false));
+        doc.save(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"a\nb\nc\nd");
+        assert!(doc.set_line_ending(true));
+        doc.save(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"a\r\nb\r\nc\r\nd");
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]

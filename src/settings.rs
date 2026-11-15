@@ -43,6 +43,8 @@ pub struct Settings {
     pub inline_diagnostics: InlineDiagnostics,
     /// Keep a copy of a file each time it's saved (see local_history.rs).
     pub local_history: bool,
+    /// Follow the project's `.editorconfig` files (editorconfig.rs).
+    pub editor_config: bool,
     /// Wheel and Page Up/Down scrolls glide instead of jumping. Off by
     /// default: a gliding notch paints three frames, ~2.4x a jump's cost.
     pub smooth_scrolling: bool,
@@ -98,6 +100,7 @@ impl Default for Settings {
             code_lens: true,
             inline_diagnostics: InlineDiagnostics::ErrorsAndWarnings,
             local_history: true,
+            editor_config: true,
             smooth_scrolling: false,
             animations: true,
             parse_limit_kb: 4096,
@@ -252,6 +255,9 @@ impl Settings {
         }
         if let Some(b) = value.get("localHistory").and_then(|v| v.as_bool()) {
             settings.local_history = b;
+        }
+        if let Some(b) = value.get("editorConfig").and_then(|v| v.as_bool()) {
+            settings.editor_config = b;
         }
         if let Some(b) = value.get("smoothScrolling").and_then(|v| v.as_bool()) {
             settings.smooth_scrolling = b;
@@ -430,6 +436,10 @@ impl Settings {
             serde_json::Value::Bool(self.local_history),
         );
         obj.insert(
+            "editorConfig".into(),
+            serde_json::Value::Bool(self.editor_config),
+        );
+        obj.insert(
             "smoothScrolling".into(),
             serde_json::Value::Bool(self.smooth_scrolling),
         );
@@ -544,6 +554,7 @@ const OWN_KEYS: &[&str] = &[
     "codeLens",
     "inlineDiagnostics",
     "localHistory",
+    "editorConfig",
     "smoothScrolling",
     "animations",
     "parseLimitKb",
@@ -640,6 +651,16 @@ mod tests {
             read(r#"{"inlineDiagnostics": "loud"}"#),
             InlineDiagnostics::ErrorsAndWarnings
         );
+    }
+
+    #[test]
+    fn editor_config_is_on_until_turned_off() {
+        assert!(Settings::default().editor_config);
+        let s = Settings {
+            editor_config: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().editor_config);
     }
 
     #[test]
