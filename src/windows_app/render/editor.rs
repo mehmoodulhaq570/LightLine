@@ -1,5 +1,5 @@
 use super::super::*;
-use super::blend;
+use super::{blend, process_age_ms};
 
 // The status bar names the language the way an editor does ("Rust", not "RS"),
 // falling back to the bare extension for types we have no display name for.
@@ -586,6 +586,10 @@ impl App {
     }
 
     pub(in crate::windows_app) fn paint(&mut self, hwnd: HWND) {
+        // Launch to first frame, for the Welcome page: one call, once.
+        if self.startup_ms.is_none() {
+            self.startup_ms = Some(process_age_ms().unwrap_or(0));
+        }
         self.arm_recovery();
         self.sync_terminal_motion(hwnd);
         unsafe {
@@ -706,7 +710,6 @@ impl App {
             SetBkMode(hdc, TRANSPARENT as i32);
             if self.welcome {
                 self.paint_welcome(hwnd, hdc, rect);
-                self.paint_hot_welcome(hdc, hwnd);
                 self.paint_hot_tip(hdc, hwnd);
                 self.paint_quick_open(hdc, rect);
                 self.paint_run_configurations(hwnd, hdc);

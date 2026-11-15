@@ -118,6 +118,16 @@ pub(super) enum DebugGlyph {
     // The bottom panel's toolbar: kill a shell, maximize the panel.
     Trash,
     ChevronUp,
+    // The Welcome page: its rail's Home, and the icons of its rows.
+    Home,
+    Folder,
+    Terminal,
+    Palette,
+    GoToFile,
+    ColorTheme,
+    Keyboard,
+    Book,
+    Notes,
 }
 
 impl DebugGlyph {
@@ -219,6 +229,36 @@ impl DebugGlyph {
                 r#"<path {ui} d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l.9 13h9.2l.9-13"/><path {ui} d="M10.25 10.5v5.5M13.75 10.5v5.5"/>"#
             ),
             DebugGlyph::ChevronUp => format!(r#"<path {ui} d="M6.5 14.5 12 9l5.5 5.5"/>"#),
+            DebugGlyph::Home => format!(
+                r#"<path {ui} d="M3.5 11 12 3.8l8.5 7.2"/><path {ui} d="M6 9.2v10.3h4.5v-5.5h3v5.5H18V9.2"/>"#
+            ),
+            DebugGlyph::Folder => format!(
+                r#"<path {ui} d="M3.5 7.3a1.8 1.8 0 0 1 1.8-1.8h3.9l2 2h7.5a1.8 1.8 0 0 1 1.8 1.8v8.4a1.8 1.8 0 0 1-1.8 1.8H5.3a1.8 1.8 0 0 1-1.8-1.8z"/>"#
+            ),
+            // A window with a prompt in it.
+            DebugGlyph::Terminal => format!(
+                r#"<rect {ui} x="3" y="4.5" width="18" height="15" rx="1.8"/><path {ui} d="m7 9.5 3 2.5-3 2.5M12 15h5"/>"#
+            ),
+            // The Command Palette: a prompt chevron and a cursor.
+            DebugGlyph::Palette => format!(r#"<path {ui} d="m5.5 7 5 5-5 5M12.5 17.5h6"/>"#),
+            DebugGlyph::GoToFile => format!(
+                r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5"/><circle {ui} cx="11.5" cy="13.5" r="2.6"/><path {ui} d="m13.4 15.4 2.1 2.1"/>"#
+            ),
+            // A painter's palette.
+            DebugGlyph::ColorTheme => format!(
+                r#"<path {ui} d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 1.8-1.1 1.2-2.1-.7-1.3.1-2.6 1.6-2.6h1.9a3.8 3.8 0 0 0 3.8-3.8C20.5 7.3 16.7 3.5 12 3.5z"/><circle fill="{color}" cx="7.6" cy="11" r="1.2"/><circle fill="{color}" cx="11.2" cy="7.4" r="1.2"/><circle fill="{color}" cx="15.6" cy="8.6" r="1.2"/>"#
+            ),
+            DebugGlyph::Keyboard => format!(
+                r#"<rect {ui} x="2.5" y="6" width="19" height="12" rx="1.8"/><path {ui} d="M6 9.8h.01M9.3 9.8h.01M12.6 9.8h.01M15.9 9.8h.01M18 9.8h.01M7.5 14.3h9"/>"#
+            ),
+            // An open book.
+            DebugGlyph::Book => format!(
+                r#"<path {ui} d="M3.5 5h5.3A3.2 3.2 0 0 1 12 8.2V20a2.4 2.4 0 0 0-2.4-2.4H3.5z"/><path {ui} d="M20.5 5h-5.3A3.2 3.2 0 0 0 12 8.2V20a2.4 2.4 0 0 1 2.4-2.4h6.1z"/>"#
+            ),
+            // A page of notes.
+            DebugGlyph::Notes => format!(
+                r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>"#
+            ),
             DebugGlyph::Filter => {
                 format!(r#"<path {ui} d="M4 5h16l-6.2 7.3v5.2l-3.6 1.8v-7z"/>"#)
             }
@@ -754,6 +794,15 @@ mod icon_tests {
             DebugGlyph::Filter,
             DebugGlyph::Trash,
             DebugGlyph::ChevronUp,
+            DebugGlyph::Home,
+            DebugGlyph::Folder,
+            DebugGlyph::Terminal,
+            DebugGlyph::Palette,
+            DebugGlyph::GoToFile,
+            DebugGlyph::ColorTheme,
+            DebugGlyph::Keyboard,
+            DebugGlyph::Book,
+            DebugGlyph::Notes,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");

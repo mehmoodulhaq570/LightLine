@@ -1,26 +1,39 @@
+//! The Welcome page, flat like the rest of the workbench (approved design:
+//! design/welcome-design.html). One centred column in two halves: Start and
+//! Recent on the left, Get started and Learn on the right; in a narrow
+//! window they stack. Every row runs something LightLine already has, and
+//! each action appears once.
+
 use super::super::*;
+use super::blend;
+use crate::windows_app::menu_bar::{
+    GUIDE_URL, NEW_ISSUE_URL, RELEASES_URL, SHORTCUTS_URL, VERSION,
+};
 
-// Welcome screen geometry, in logical pixels (everything goes through scale()).
-const PAGE_GUTTER: i32 = 20;
-const PAGE_TOP: i32 = 12;
-const WELCOME_RAIL_FIRST_ROW: i32 = 18;
-const WELCOME_RAIL_ROW: i32 = 52;
-const WELCOME_CARD_GAP: i32 = 10;
-const PANEL_HEADER_H: i32 = 45;
-const RECENT_ROW_H: i32 = 50;
-const QUICK_ROW_H: i32 = 33;
-const COMMUNITY_H: i32 = 53;
+// Geometry, in logical pixels (everything goes through scale()).
+// The two halves need this much width right of the rail; below it they stack.
+const WIDE_MIN: i32 = 1120;
+const INNER_WIDTH: i32 = 1040;
+const LEFT_WIDTH: i32 = 500;
+const HALF_GAP: i32 = 64;
+const NARROW_PAD: i32 = 40;
+const TOP_PAD: i32 = 64;
+const HEAD_H: i32 = 56;
+const HEAD_GAP: i32 = 36;
+const SECTION_H: i32 = 26;
+const ROW_H: i32 = 28;
+const STEP_H: i32 = 50;
+const BLOCK_GAP: i32 = 30;
+const LINK_H: i32 = 24;
+const LINK_CELL: i32 = 158;
+const FOOT_H: i32 = 22;
+const PILL_W: i32 = 150;
+const PILL_H: i32 = 24;
+const RECENT_WIDE: usize = 8;
+const RECENT_NARROW: usize = 5;
 
-const CARD_BG: u32 = rgb(16, 27, 45);
-// Distinct from (and one shade lighter than) the theme's general
-// card_edge -- a pre-existing welcome-screen-only variation, not a copy/
-// paste of the theme color, so it keeps its own name rather than being
-// folded into Theme.
-const WELCOME_CARD_EDGE: u32 = rgb(32, 48, 76);
-const CHIP_BG: u32 = rgb(24, 38, 62);
-
-// Everything on this screen maps to a real command; nothing is decorative.
-#[derive(Clone, Copy, PartialEq, Eq)]
+// Everything on this page maps to a real command; nothing is decorative.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::windows_app) enum WelcomeAction {
     Explorer,
     Search,
@@ -28,87 +41,200 @@ pub(in crate::windows_app) enum WelcomeAction {
     RunDebug,
     Extensions,
     AiAssistant,
+    Settings,
+    NewFile,
     OpenFile,
     OpenFolder,
-    NewFile,
-    Terminal,
-    CommandPalette,
-    Community,
     Recent(usize),
-    Settings,
+    // The × on a Recent row: take the folder off the list.
+    ForgetRecent(usize),
+    CommandPalette,
+    GoToFile,
+    Terminal,
+    ColorTheme,
+    // A Learn link, by its index in LINKS.
+    Link(usize),
+    // The "Started in" pill: a tip, no command.
+    StartTime,
 }
 
-/// What the welcome rail's button `index` (as in `WelcomeLayout::targets`,
-/// which starts with them) opens, for its tip; None past them.
-pub(in crate::windows_app) fn welcome_rail_tip(
+/// The tip for Welcome target `index` (in `WelcomeLayout::targets`), if it
+/// has one: the rail's buttons, the speed pill and a Recent row's ×.
+pub(in crate::windows_app) fn welcome_tip(
     targets: &[(RECT, WelcomeAction)],
     index: usize,
 ) -> Option<&'static str> {
-    if let Some((label, _, _)) = NAV_ITEMS.get(index) {
-        return Some(label);
+    match targets.get(index)?.1 {
+        WelcomeAction::Settings if index == NAV_ITEMS.len() => Some("Settings (Ctrl+,)"),
+        WelcomeAction::ForgetRecent(_) => Some("Remove from Recent"),
+        WelcomeAction::StartTime => Some("From launching LightLine to its first frame"),
+        _ => NAV_ITEMS.get(index).map(|(label, _, _)| *label),
     }
-    (targets.get(index)?.1 == WelcomeAction::Settings).then_some("Settings (Ctrl+,)")
 }
 
-// Rail icon indices shared with App::rail_icon, so the welcome nav and the
-// editor's rail draw the exact same glyph for the same destination.
-const NAV_ITEMS: [(&str, usize, WelcomeAction); 6] = [
-    ("Explorer", 0, WelcomeAction::Explorer),
-    ("Search", 1, WelcomeAction::Search),
-    ("Source Control", 2, WelcomeAction::SourceControl),
-    ("Run & Debug", 3, WelcomeAction::RunDebug),
-    ("Extensions", 4, WelcomeAction::Extensions),
-    ("AI Assistant", 5, WelcomeAction::AiAssistant),
-];
-
-const QUICK: [(&str, &str, WelcomeAction); 6] = [
-    ("New File", "Ctrl+N", WelcomeAction::NewFile),
-    ("Open File", "Ctrl+O", WelcomeAction::OpenFile),
-    ("Open Folder", "Ctrl+Shift+O", WelcomeAction::OpenFolder),
-    ("Command Palette", "Ctrl+P", WelcomeAction::CommandPalette),
-    ("Search in Files", "Ctrl+Shift+F", WelcomeAction::Search),
-    ("Terminal", "Ctrl+`", WelcomeAction::Terminal),
-];
-
-const STEPS: [(&str, &str, WelcomeAction); 4] = [
+// The rail, as the editor's: the same glyphs in the same rows, so going from
+// Welcome to a file doesn't move them. Home sits where the editor has ☰.
+const NAV_ITEMS: [(&str, DebugGlyph, WelcomeAction); 6] = [
+    ("Explorer", DebugGlyph::Files, WelcomeAction::Explorer),
+    ("Search", DebugGlyph::Search, WelcomeAction::Search),
     (
-        "Open a project folder",
-        "Start coding in seconds",
-        WelcomeAction::OpenFolder,
+        "Source Control",
+        DebugGlyph::SourceControl,
+        WelcomeAction::SourceControl,
+    ),
+    ("Run & Debug", DebugGlyph::RunDebug, WelcomeAction::RunDebug),
+    (
+        "Extensions",
+        DebugGlyph::Extensions,
+        WelcomeAction::Extensions,
     ),
     (
-        "Search across files",
-        "Find anything instantly",
+        "AI Assistant",
+        DebugGlyph::Sparkle,
+        WelcomeAction::AiAssistant,
+    ),
+];
+
+const START: [(&str, &str, DebugGlyph, WelcomeAction); 3] = [
+    (
+        "New File",
+        "Ctrl+N",
+        DebugGlyph::NewFile,
+        WelcomeAction::NewFile,
+    ),
+    (
+        "Open File...",
+        "Ctrl+O",
+        DebugGlyph::OpenFile,
+        WelcomeAction::OpenFile,
+    ),
+    (
+        "Open Folder...",
+        "Ctrl+Shift+O",
+        DebugGlyph::Folder,
+        WelcomeAction::OpenFolder,
+    ),
+];
+
+#[derive(Clone, Copy)]
+enum Tint {
+    Violet,
+    Blue,
+    Green,
+    Orange,
+    Muted,
+}
+
+// Title, what it's for, key, icon and its colour, command.
+const STEPS: [(&str, &str, &str, DebugGlyph, Tint, WelcomeAction); 6] = [
+    (
+        "Command Palette",
+        "Every command, by name",
+        "Ctrl+Shift+P",
+        DebugGlyph::Palette,
+        Tint::Violet,
+        WelcomeAction::CommandPalette,
+    ),
+    (
+        "Go to File",
+        "Open any file in the folder by typing part of its name",
+        "Ctrl+P",
+        DebugGlyph::GoToFile,
+        Tint::Blue,
+        WelcomeAction::GoToFile,
+    ),
+    (
+        "Search in Files",
+        "Plain text or regex, across the whole folder",
+        "Ctrl+Shift+F",
+        DebugGlyph::Search,
+        Tint::Blue,
         WelcomeAction::Search,
     ),
     (
-        "Run your first build",
-        "See your code come to life",
-        WelcomeAction::RunDebug,
+        "Terminal",
+        "PowerShell, Command Prompt, Git Bash or WSL",
+        "Ctrl+`",
+        DebugGlyph::Terminal,
+        Tint::Green,
+        WelcomeAction::Terminal,
     ),
     (
-        "Review Git changes",
-        "Track what you changed",
-        WelcomeAction::SourceControl,
+        "Color Theme",
+        "Pick a theme, or install Dracula or Catppuccin from Extensions",
+        "",
+        DebugGlyph::ColorTheme,
+        Tint::Orange,
+        WelcomeAction::ColorTheme,
+    ),
+    (
+        "Settings",
+        "Font, tab size, word wrap, format on save...",
+        "Ctrl+,",
+        DebugGlyph::Gear,
+        Tint::Muted,
+        WelcomeAction::Settings,
     ),
 ];
 
-// Computed once per paint and again per click, so painted rectangles and click
-// targets are always derived from the same numbers.
+// The Help menu's links: label, icon, address, and what the status bar
+// calls it once it's open.
+pub(in crate::windows_app) const LINKS: [(&str, DebugGlyph, &str, &str); 4] = [
+    (
+        "Keyboard Shortcuts",
+        DebugGlyph::Keyboard,
+        SHORTCUTS_URL,
+        "the keyboard shortcuts",
+    ),
+    ("User Guide", DebugGlyph::Book, GUIDE_URL, "the User Guide"),
+    (
+        "Release Notes",
+        DebugGlyph::Notes,
+        RELEASES_URL,
+        "the release notes",
+    ),
+    (
+        "Report an Issue",
+        DebugGlyph::Info,
+        NEW_ISSUE_URL,
+        "a new issue",
+    ),
+];
+
+#[derive(Clone, Copy)]
+enum RowKind {
+    Start(usize),
+    Recent(usize),
+    // "No recent folders yet": opens a folder.
+    NoRecent,
+    Step(usize),
+    Link(usize),
+}
+
+#[derive(Clone, Copy)]
+struct Row {
+    rect: RECT,
+    kind: RowKind,
+    // Its index in `targets`, and its ×'s for a Recent row.
+    target: usize,
+    forget: Option<usize>,
+}
+
+// Computed once per paint and again per mouse move or click, so painted
+// rectangles and click targets always come from the same numbers. Needs no
+// DC: nothing here depends on a text's width.
 pub(in crate::windows_app) struct WelcomeLayout {
     pub(in crate::windows_app) targets: Vec<(RECT, WelcomeAction)>,
     rail_right: i32,
     content_top: i32,
     status_top: i32,
-    hero_panel: RECT,
-    open_folder: RECT,
-    new_file: RECT,
-    recent_panel: RECT,
-    recent_rows: usize,
-    quick_panel: RECT,
-    quick_rows: usize,
-    steps_panel: Option<RECT>,
-    community: RECT,
+    head: RECT,
+    pill: Option<(RECT, usize)>,
+    // Section labels: text, left, top.
+    sections: Vec<(&'static str, i32, i32)>,
+    rows: Vec<Row>,
+    compact_steps: bool,
+    foot: Option<(i32, i32)>,
 }
 
 impl App {
@@ -118,197 +244,274 @@ impl App {
         let status_top = rect.bottom - s(STATUS);
         let rail_right = s(RAIL);
         let content_top = s(WORKBENCH_HEADER);
-        let gutter = s(PAGE_GUTTER);
-
-        let page_left = rail_right + gutter;
-        let page_right = rect.right - gutter;
-        let page_top = content_top + s(PAGE_TOP);
-        let page_bottom = status_top - s(8);
-        let gap = s(WELCOME_CARD_GAP);
-        let community = RECT {
-            left: page_left,
-            top: page_bottom - s(COMMUNITY_H),
-            right: page_right,
-            bottom: page_bottom,
-        };
-        let row_bottom = community.top - gap;
-        let row_space = (row_bottom - page_top - gap).max(0);
-        let mut hero_height = row_space * 55 / 100;
-        if row_space >= s(270) {
-            hero_height = hero_height.max(s(180)).min(row_space - s(90));
-        }
-        let lower_top = page_top + hero_height + gap;
-        let page_width = page_right - page_left;
-        let show_aside = page_width >= s(1040);
-        let aside_width = if show_aside {
-            (page_width - gap) * 312 / 1000
-        } else {
-            0
-        };
-        let hero_panel = RECT {
-            left: page_left,
-            top: page_top,
-            right: if show_aside {
-                page_right - aside_width - gap
-            } else {
-                page_right
-            },
-            bottom: page_top + hero_height,
-        };
-        let steps_panel = show_aside.then_some(RECT {
-            left: hero_panel.right + gap,
-            top: page_top,
-            right: page_right,
-            bottom: hero_panel.bottom,
-        });
 
         for (index, (_, _, action)) in NAV_ITEMS.iter().enumerate() {
-            // Home occupies row zero; the six workbench destinations follow it.
-            let top =
-                content_top + s(WELCOME_RAIL_FIRST_ROW) + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
+            let top = content_top + s(RAIL_FIRST_ROW + index as i32 * RAIL_ROW);
             targets.push((
                 RECT {
-                    left: s(7),
+                    left: 0,
                     top,
-                    right: rail_right - s(7),
-                    bottom: top + s(42),
+                    right: rail_right,
+                    bottom: top + s(RAIL_ROW),
                 },
                 *action,
             ));
         }
-
         targets.push((
             RECT {
-                left: s(7),
-                top: status_top - s(42),
-                right: rail_right - s(7),
-                bottom: status_top - s(4),
+                left: 0,
+                top: status_top - s(44),
+                right: rail_right,
+                bottom: status_top,
             },
             WelcomeAction::Settings,
         ));
 
-        let compact_hero = hero_panel.bottom - hero_panel.top < s(270);
-        let button_height = if compact_hero { s(46) } else { s(50) };
-        let button_bottom_gap = if compact_hero { s(14) } else { s(35) };
-        let button_top = hero_panel.bottom - button_bottom_gap - button_height;
-        let open_folder = RECT {
-            left: hero_panel.left + s(21),
-            top: button_top,
-            right: hero_panel.left + s(207),
-            bottom: button_top + button_height,
+        let page_width = rect.right - rail_right;
+        let page_height = status_top - content_top;
+        let wide = page_width >= s(WIDE_MIN);
+        let (inner_left, inner_right) = if wide {
+            let left = rail_right + (page_width - s(INNER_WIDTH)) / 2;
+            (left, left + s(INNER_WIDTH))
+        } else {
+            (rail_right + s(NARROW_PAD), rect.right - s(NARROW_PAD))
         };
-        let new_file = RECT {
-            left: open_folder.right + s(14),
-            top: button_top,
-            right: open_folder.right + s(169),
-            bottom: button_top + button_height,
+        let bottom = status_top - s(12);
+        let recent_cap = if wide { RECENT_WIDE } else { RECENT_NARROW };
+        let recent_count = self.recent.len().min(recent_cap);
+        let link_columns = |width: i32| (width / s(LINK_CELL)).clamp(1, LINKS.len() as i32);
+        let links_height = |width: i32| {
+            let columns = link_columns(width);
+            (LINKS.len() as i32 + columns - 1) / columns * s(LINK_H)
         };
-        targets.push((open_folder, WelcomeAction::OpenFolder));
-        targets.push((new_file, WelcomeAction::NewFile));
 
-        let lower_height = (row_bottom - lower_top).max(0);
-        let body = (lower_height - s(PANEL_HEADER_H)).max(0);
-        let recent_rows = self
-            .recent
-            .len()
-            .min(4)
-            .min((body / s(RECENT_ROW_H)).max(0) as usize);
-        let show_quick = page_width >= s(560);
-        let quick_rows = if show_quick {
-            QUICK.len().min((body / s(QUICK_ROW_H)).max(0) as usize)
+        // How tall each half is with every row, to pick the top padding and,
+        // if the window is short, the compact Get started rows.
+        let start_height = s(SECTION_H) + START.len() as i32 * s(ROW_H);
+        let recent_height = s(SECTION_H) + recent_count.max(1) as i32 * s(ROW_H);
+        let right_width = if wide {
+            inner_right - inner_left - s(LEFT_WIDTH + HALF_GAP)
         } else {
-            0
+            inner_right - inner_left
         };
-        let recent_width = if show_quick {
-            (page_width - gap) * 595 / 1000
-        } else {
-            page_width
+        let learn_height = s(SECTION_H) + links_height(right_width) + s(FOOT_H);
+        let steps_height = |compact: bool| {
+            s(SECTION_H) + STEPS.len() as i32 * s(if compact { ROW_H } else { STEP_H })
         };
-        let recent_panel = RECT {
-            left: page_left,
-            top: lower_top,
-            right: page_left + recent_width,
-            bottom: row_bottom,
-        };
-        let quick_panel = RECT {
-            left: if show_quick {
-                recent_panel.right + gap
+        let body_height = |compact: bool| {
+            let right = steps_height(compact) + s(BLOCK_GAP) + learn_height;
+            let left = start_height + s(BLOCK_GAP) + recent_height;
+            if wide {
+                left.max(right)
             } else {
-                page_right
-            },
-            top: lower_top,
-            right: page_right,
-            bottom: row_bottom,
+                left + s(BLOCK_GAP) + right
+            }
         };
-        for index in 0..recent_rows {
-            let top = recent_panel.top + s(PANEL_HEADER_H) + index as i32 * s(RECENT_ROW_H);
-            targets.push((
-                RECT {
-                    left: recent_panel.left + s(8),
-                    top,
-                    right: recent_panel.right - s(8),
-                    bottom: top + s(RECENT_ROW_H),
-                },
-                WelcomeAction::Recent(index),
-            ));
-        }
-        for (index, (_, _, action)) in QUICK.iter().take(quick_rows).enumerate() {
-            let top = quick_panel.top + s(PANEL_HEADER_H) + index as i32 * s(QUICK_ROW_H);
-            targets.push((
-                RECT {
-                    left: quick_panel.left + s(8),
-                    top,
-                    right: quick_panel.right - s(8),
-                    bottom: top + s(QUICK_ROW_H),
-                },
-                *action,
-            ));
-        }
+        let head_height = s(HEAD_H + HEAD_GAP);
+        let room = page_height - s(12);
+        let compact_steps = !wide || head_height + body_height(false) + s(24) > room;
+        let wanted_pad = s(if wide { TOP_PAD } else { NARROW_PAD });
+        let top_pad = (room - head_height - body_height(compact_steps))
+            .min(wanted_pad)
+            .max(s(16));
 
-        if let Some(steps) = steps_panel {
-            let step_height =
-                (steps.bottom - steps.top - s(PANEL_HEADER_H) - s(8)) / STEPS.len() as i32;
-            for (index, (_, _, action)) in STEPS.iter().enumerate() {
-                let top = steps.top + s(PANEL_HEADER_H) + index as i32 * step_height;
-                targets.push((
-                    RECT {
-                        left: steps.left + s(8),
-                        top,
-                        right: steps.right - s(8),
-                        bottom: top + step_height,
-                    },
-                    *action,
-                ));
+        let head = RECT {
+            left: inner_left,
+            top: content_top + top_pad,
+            right: inner_right,
+            bottom: content_top + top_pad + s(HEAD_H),
+        };
+        let pill = (wide && self.startup_ms.is_some_and(|ms| ms > 0)).then(|| {
+            let middle = (head.top + head.bottom) / 2;
+            let rect = RECT {
+                left: inner_right - s(PILL_W),
+                top: middle - s(PILL_H) / 2,
+                right: inner_right,
+                bottom: middle + s(PILL_H) / 2,
+            };
+            targets.push((rect, WelcomeAction::StartTime));
+            (rect, targets.len() - 1)
+        });
+
+        let mut sections = Vec::new();
+        let mut rows: Vec<Row> = Vec::new();
+        // Adds a row (and its target) if it fits above the page's bottom.
+        let mut push_row =
+            |targets: &mut Vec<(RECT, WelcomeAction)>, rect: RECT, kind: RowKind, action| {
+                if rect.bottom > bottom {
+                    return false;
+                }
+                let forget = if let RowKind::Recent(index) = kind {
+                    // The × comes first, so a click on it isn't the row's.
+                    let size = s(20);
+                    let middle = (rect.top + rect.bottom) / 2;
+                    targets.push((
+                        RECT {
+                            left: rect.right - s(6) - size,
+                            top: middle - size / 2,
+                            right: rect.right - s(6),
+                            bottom: middle + size / 2,
+                        },
+                        WelcomeAction::ForgetRecent(index),
+                    ));
+                    Some(targets.len() - 1)
+                } else {
+                    None
+                };
+                targets.push((rect, action));
+                rows.push(Row {
+                    rect,
+                    kind,
+                    target: targets.len() - 1,
+                    forget,
+                });
+                true
+            };
+        // A row spans its column plus 8 px each side for the hover fill.
+        let row_rect = |left: i32, right: i32, top: i32, height: i32| RECT {
+            left: left - s(8),
+            top,
+            right: right + s(8),
+            bottom: top + height,
+        };
+
+        let body_top = head.bottom + s(HEAD_GAP);
+        let (left_right, right_left) = if wide {
+            (
+                inner_left + s(LEFT_WIDTH),
+                inner_left + s(LEFT_WIDTH + HALF_GAP),
+            )
+        } else {
+            (inner_right, inner_left)
+        };
+
+        // Start and Recent.
+        let mut y = body_top;
+        sections.push(("START", inner_left, y));
+        y += s(SECTION_H);
+        for (index, (_, _, _, action)) in START.iter().enumerate() {
+            push_row(
+                &mut targets,
+                row_rect(inner_left, left_right, y, s(ROW_H)),
+                RowKind::Start(index),
+                *action,
+            );
+            y += s(ROW_H);
+        }
+        y += s(BLOCK_GAP);
+        if y + s(SECTION_H + ROW_H) <= bottom {
+            sections.push(("RECENT", inner_left, y));
+        }
+        y += s(SECTION_H);
+        // Stacked, Recent leaves room for the right half below it.
+        let recent_bottom = if wide {
+            bottom
+        } else {
+            bottom - s(BLOCK_GAP) - steps_height(true) - s(BLOCK_GAP) - learn_height
+        };
+        if self.recent.is_empty() {
+            push_row(
+                &mut targets,
+                row_rect(inner_left, left_right, y, s(ROW_H)),
+                RowKind::NoRecent,
+                WelcomeAction::OpenFolder,
+            );
+            y += s(ROW_H);
+        } else {
+            for index in 0..recent_count {
+                // At least one folder, then only as many as leave room.
+                if index > 0 && y + s(ROW_H) > recent_bottom {
+                    break;
+                }
+                push_row(
+                    &mut targets,
+                    row_rect(inner_left, left_right, y, s(ROW_H)),
+                    RowKind::Recent(index),
+                    WelcomeAction::Recent(index),
+                );
+                y += s(ROW_H);
             }
         }
-        targets.push((community, WelcomeAction::Community));
+
+        // Get started and Learn.
+        let mut y = if wide { body_top } else { y + s(BLOCK_GAP) };
+        if y + s(SECTION_H + ROW_H) <= bottom {
+            sections.push(("GET STARTED", right_left, y));
+        }
+        y += s(SECTION_H);
+        let step_height = s(if compact_steps { ROW_H } else { STEP_H });
+        let step_pad = if compact_steps { 8 } else { 10 };
+        for (index, step) in STEPS.iter().enumerate() {
+            let rect = RECT {
+                left: right_left - s(step_pad),
+                top: y,
+                right: inner_right + s(step_pad),
+                bottom: y + step_height,
+            };
+            push_row(&mut targets, rect, RowKind::Step(index), step.5);
+            y += step_height;
+        }
+        y += s(BLOCK_GAP);
+        if y + s(SECTION_H + LINK_H) <= bottom {
+            sections.push(("LEARN", right_left, y));
+        }
+        y += s(SECTION_H);
+        let columns = link_columns(right_width);
+        let cell = right_width / columns;
+        for index in 0..LINKS.len() {
+            let column = index as i32 % columns;
+            let line = index as i32 / columns;
+            let left = right_left + column * cell;
+            let top = y + line * s(LINK_H);
+            push_row(
+                &mut targets,
+                RECT {
+                    left,
+                    top,
+                    right: left + cell - s(12),
+                    bottom: top + s(LINK_H),
+                },
+                RowKind::Link(index),
+                WelcomeAction::Link(index),
+            );
+        }
+        y += links_height(right_width) + s(4);
+        let foot = (y + s(FOOT_H) <= bottom).then_some((right_left, y));
 
         WelcomeLayout {
             targets,
             rail_right,
             content_top,
             status_top,
-            hero_panel,
-            open_folder,
-            new_file,
-            recent_panel,
-            recent_rows,
-            quick_panel,
-            quick_rows,
-            steps_panel,
-            community,
+            head,
+            pill,
+            sections,
+            rows,
+            compact_steps,
+            foot,
         }
     }
 
     pub(in crate::windows_app) fn paint_welcome(&self, hwnd: HWND, hdc: HDC, rect: RECT) {
         let layout = self.welcome_layout(rect);
-        Self::fill(hdc, rect, self.theme.shell_bg);
+        let hot = match self.hot {
+            Some(Hot::Welcome(index)) => Some(index),
+            _ => None,
+        };
+        Self::fill(
+            hdc,
+            RECT {
+                left: layout.rail_right,
+                top: layout.content_top,
+                right: rect.right,
+                bottom: layout.status_top,
+            },
+            self.theme.editor_bg,
+        );
         self.paint_welcome_header(hwnd, hdc, rect, &layout);
-        self.paint_welcome_nav(hdc, &layout);
-        self.paint_welcome_hero(hdc, &layout);
-        self.paint_welcome_recent(hdc, &layout);
-        self.paint_welcome_quick(hdc, &layout);
-        self.paint_welcome_aside(hdc, &layout);
+        self.paint_welcome_nav(hdc, &layout, hot);
+        self.paint_welcome_head(hdc, &layout);
+        self.paint_welcome_rows(hdc, &layout, hot);
         self.paint_welcome_status(hdc, rect, &layout);
     }
 
@@ -338,1128 +541,507 @@ impl App {
         self.paint_title_controls(hdc, hwnd, layout.content_top);
     }
 
-    fn paint_welcome_nav(&self, hdc: HDC, layout: &WelcomeLayout) {
+    // The editor's rail (see paint_rail), with Home selected in the top row.
+    fn paint_welcome_nav(&self, hdc: HDC, layout: &WelcomeLayout, hot: Option<usize>) {
         let s = |value: i32| self.scale(value);
-        let clip = RECT {
+        let rail = RECT {
             left: 0,
             top: layout.content_top,
             right: layout.rail_right,
             bottom: layout.status_top,
         };
-        Self::fill(hdc, clip, self.theme.rail_bg);
+        Self::fill(hdc, rail, self.theme.rail_bg);
         Self::fill(
             hdc,
             RECT {
                 left: layout.rail_right - s(1).max(1),
-                top: layout.content_top,
-                right: layout.rail_right,
-                bottom: layout.status_top,
+                ..rail
             },
             self.theme.edge,
         );
-        // Welcome is the selected activity and remains intentionally inert.
-        let first_top = layout.content_top + s(WELCOME_RAIL_FIRST_ROW);
-        let welcome_row = RECT {
-            left: s(7),
-            top: first_top,
-            right: layout.rail_right - s(7),
-            bottom: first_top + s(42),
+        let size = s(22);
+        let home = RECT {
+            left: 0,
+            top: layout.content_top + s(RAIL_MENU_ROW),
+            right: layout.rail_right,
+            bottom: layout.content_top + s(RAIL_MENU_ROW + RAIL_ROW),
         };
-        self.panel_card(hdc, welcome_row, s(7), ui(50, 84, 154), ui(18, 35, 72));
         Self::fill(
             hdc,
             RECT {
                 left: 0,
-                top: welcome_row.top + s(5),
-                right: s(3),
-                bottom: welcome_row.bottom - s(5),
+                top: home.top + s(6),
+                right: s(2).max(2),
+                bottom: home.bottom - s(6),
             },
             self.theme.violet,
         );
-        self.home_glyph(
-            hdc,
-            s(19),
-            welcome_row.top + s(11),
-            s(20),
-            label_on(ui(18, 35, 72), 240, 245, 255),
-        );
-
-        for (index, (_, icon, _)) in NAV_ITEMS.iter().enumerate() {
-            let top = first_top + (index as i32 + 1) * s(WELCOME_RAIL_ROW);
-            self.rail_icon(hdc, *icon, s(19), top + s(11), self.theme.muted);
+        self.glyph_in(hdc, DebugGlyph::Home, self.theme.text, home, size);
+        let color = |index: usize| {
+            if hot == Some(index) {
+                self.hot_color(self.theme.muted, self.theme.text)
+            } else {
+                self.theme.muted
+            }
+        };
+        for (index, (_, glyph, _)) in NAV_ITEMS.iter().enumerate() {
+            self.glyph_in(hdc, *glyph, color(index), layout.targets[index].0, size);
         }
-        Self::label(
+        let gear = NAV_ITEMS.len();
+        self.glyph_in(
             hdc,
-            "⚙",
-            s(18),
-            layout.status_top - s(34),
-            self.theme.muted,
-            clip,
+            DebugGlyph::Gear,
+            color(gear),
+            layout.targets[gear].0,
+            size,
         );
     }
 
-    fn paint_welcome_hero(&self, hdc: HDC, layout: &WelcomeLayout) {
+    // The logo, name, version, one line about it, and the speed pill.
+    fn paint_welcome_head(&self, hdc: HDC, layout: &WelcomeLayout) {
         let s = |value: i32| self.scale(value);
-        let panel = layout.hero_panel;
-        let panel_width = panel.right - panel.left;
-        let panel_height = panel.bottom - panel.top;
-        let compact = panel_height < s(270);
-        self.gradient_card(
-            hdc,
-            panel,
-            s(12),
-            themed(rgb(9, 20, 39)),
-            themed(rgb(17, 22, 55)),
-        );
-        self.card_outline(hdc, panel, s(12), themed(WELCOME_CARD_EDGE));
-
-        let left = panel.left + s(21);
-        let clip = RECT {
-            left,
-            top: panel.top + s(10),
-            right: panel.right - s(18),
-            bottom: panel.bottom - s(10),
-        };
-        unsafe {
-            SelectObject(hdc, self.ui_font);
-            SetTextCharacterExtra(hdc, s(2));
-        }
-        Self::label(
-            hdc,
-            "WELCOME TO",
-            left,
-            panel.top + s(if compact { 12 } else { 17 }),
-            self.theme.violet,
-            clip,
-        );
-        unsafe { SetTextCharacterExtra(hdc, 0) };
-
-        let logo_top = panel.top + s(if compact { 30 } else { 44 });
-        let logo_size = s(if compact { 50 } else { 58 });
+        let head = layout.head;
+        let logo = s(48);
         unsafe {
             DrawIconEx(
                 hdc,
-                left,
-                logo_top,
+                head.left,
+                head.top + (head.bottom - head.top - logo) / 2,
                 self.hero_icon,
-                logo_size,
-                logo_size,
+                logo,
+                logo,
                 0,
                 null_mut(),
                 DI_NORMAL,
             );
-            SelectObject(hdc, self.hero_font);
+            SelectObject(hdc, self.title_font);
         }
-        let word_left = left + logo_size + s(14);
-        self.label_mid(
+        let text_left = head.left + logo + s(16);
+        let clip = RECT {
+            left: text_left,
+            right: layout
+                .pill
+                .map_or(head.right, |(pill, _)| pill.left - s(12)),
+            ..head
+        };
+        let name = "LightLine";
+        let name_middle = head.top + s(18);
+        self.label_mid(hdc, name, text_left, name_middle, self.theme.text, clip);
+        let name_width = self.text_width(hdc, name);
+        unsafe { SelectObject(hdc, self.small_font) };
+        let version = format!("v{VERSION}");
+        let chip = RECT {
+            left: text_left + name_width + s(10),
+            top: name_middle - s(8),
+            right: text_left + name_width + s(10) + self.text_width(hdc, &version) + s(12),
+            bottom: name_middle + s(10),
+        };
+        if chip.right <= clip.right {
+            self.card_outline(hdc, chip, s(3), self.theme.edge);
+            self.label_mid(
+                hdc,
+                &version,
+                chip.left + s(6),
+                (chip.top + chip.bottom) / 2,
+                self.theme.muted,
+                chip,
+            );
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        self.label_ellipsis(
             hdc,
-            "LightLine",
-            word_left,
-            logo_top + logo_size / 2,
-            self.theme.text,
+            "A fast, light code editor. Everything here is one click or one key away.",
+            text_left,
+            head.top + s(37),
+            self.theme.muted,
             clip,
         );
-        let badge_left = word_left + self.text_width(hdc, "LightLine") + s(16);
-        self.paint_ide_badge(
-            hdc,
-            self.title_font,
-            (badge_left, logo_top + logo_size / 2),
-            (s(if compact { 34 } else { 36 }), s(12), s(7)),
-            ui(78, 56, 176),
-        );
-        unsafe { SelectObject(hdc, self.title_font) };
-        let slogan_top = logo_top + s(if compact { 50 } else { 70 });
-        if !compact || layout.open_folder.top - slogan_top >= s(24) {
-            Self::label(
-                hdc,
-                "Build Faster. Think Smarter.",
-                left,
-                slogan_top,
-                self.theme.text,
-                clip,
-            );
-        }
-        unsafe { SelectObject(hdc, self.ui_font) };
-        if panel_height >= s(250) {
-            unsafe { SetTextCharacterExtra(hdc, s(1)) };
-            Self::label(
-                hdc,
-                "A modern, AI-powered IDE for developers.",
-                left,
-                logo_top + s(if compact { 99 } else { 115 }),
-                self.theme.muted,
-                clip,
-            );
-            Self::label(
-                hdc,
-                "Fast to start, focused to work in.",
-                left,
-                logo_top + s(if compact { 117 } else { 138 }),
-                self.theme.muted,
-                clip,
-            );
-            unsafe { SetTextCharacterExtra(hdc, 0) };
-        }
 
-        let primary = layout.open_folder;
-        Self::rounded_fill(hdc, primary, s(7), ui(112, 52, 238));
-        self.welcome_folder_outline(
-            hdc,
-            primary.left + s(29),
-            primary.top + (primary.bottom - primary.top - s(22)) / 2,
-            s(22),
-            self.theme.text,
-        );
-        unsafe { SelectObject(hdc, self.brand_font) };
-        self.label_mid(
-            hdc,
-            "Open Folder",
-            primary.left + s(67),
-            (primary.top + primary.bottom) / 2,
-            self.theme.text,
-            primary,
-        );
-
-        let secondary = layout.new_file;
-        self.panel_card(
-            hdc,
-            secondary,
-            s(7),
-            ui(77, 102, 145),
-            themed(rgb(11, 23, 42)),
-        );
-        if !self.icons.draw_generic(
-            hdc,
-            GenericIcon::File,
-            secondary.left + s(26),
-            secondary.top + (secondary.bottom - secondary.top - s(20)) / 2,
-            s(20),
-        ) {
-            self.draw_vector_file(
-                hdc,
-                std::path::Path::new("untitled"),
-                secondary.left + s(26),
-                secondary.top + (secondary.bottom - secondary.top - s(20)) / 2,
-                s(20),
-            );
-        }
-        self.label_mid(
-            hdc,
-            "New File",
-            secondary.left + s(60),
-            (secondary.top + secondary.bottom) / 2,
-            self.theme.text,
-            secondary,
-        );
-
-        // The right side is deliberately drawn as vectors so it remains sharp
-        // at every DPI and follows the selected theme.
-        if panel_width < s(760) || panel_height < s(180) {
+        let (Some((pill, _)), Some(ms)) = (layout.pill, self.startup_ms) else {
             return;
-        }
-        let art_left = panel.left + panel_width * 55 / 100;
-        let art_top = panel.top + panel_height * 23 / 100;
-        let art_width = (panel_width * 32 / 100).min(s(274));
-        let art_height = (panel_height * 54 / 100).min(s(168));
-        let art_right = art_left + art_width;
-        let art_bottom = art_top + art_height;
-        let code = RECT {
-            left: art_left,
-            top: art_top,
-            right: art_right,
-            bottom: art_bottom,
         };
-        let code_width = code.right - code.left;
-        let code_height = code.bottom - code.top;
+        self.card_outline(hdc, pill, (pill.bottom - pill.top) / 2, self.theme.edge);
+        unsafe { SelectObject(hdc, self.small_font) };
+        let lead = "Started in ";
+        let value = format!("{ms} ms");
+        let dot = s(7);
+        let width = dot + s(7) + self.text_width(hdc, lead) + self.text_width(hdc, &value);
+        let mut x = pill.left + (pill.right - pill.left - width) / 2;
+        let middle = (pill.top + pill.bottom) / 2;
+        Self::rounded_fill(
+            hdc,
+            RECT {
+                left: x,
+                top: middle - dot / 2,
+                right: x + dot,
+                bottom: middle - dot / 2 + dot,
+            },
+            dot,
+            self.theme.green,
+        );
+        x += dot + s(7);
+        self.label_mid(hdc, lead, x, middle, self.theme.muted, pill);
+        x += self.text_width(hdc, lead);
+        self.label_mid(hdc, &value, x, middle, self.theme.text, pill);
+    }
 
-        self.gradient_card(hdc, code, s(9), ui(23, 37, 79), ui(12, 26, 57));
-        self.card_outline(hdc, code, s(9), ui(64, 91, 177));
-        let chrome_height = if compact { 24 } else { 30 };
-        Self::fill(
-            hdc,
-            RECT {
-                left: code.left,
-                top: code.top + s(chrome_height),
-                right: code.right,
-                bottom: code.top + s(chrome_height + 1),
-            },
-            ui(52, 75, 134),
-        );
-        Self::fill(
-            hdc,
-            RECT {
-                left: code.left + s(42),
-                top: code.top + s(chrome_height + 1),
-                right: code.left + s(43),
-                bottom: code.bottom - s(1),
-            },
-            ui(45, 68, 120),
-        );
-        for index in 0..3 {
-            let size = s(if compact { 5 } else { 6 });
-            Self::rounded_fill(
-                hdc,
-                RECT {
-                    left: code.left + s(16 + index * 15),
-                    top: code.top + s(if compact { 10 } else { 13 }),
-                    right: code.left + s(16 + index * 15) + size,
-                    bottom: code.top + s(if compact { 10 } else { 13 }) + size,
-                },
-                size,
-                ui(86, 127, 214),
-            );
+    fn paint_welcome_rows(&self, hdc: HDC, layout: &WelcomeLayout, hot: Option<usize>) {
+        let s = |value: i32| self.scale(value);
+        unsafe {
+            SelectObject(hdc, self.small_font);
+            SetTextCharacterExtra(hdc, s(1));
         }
-        let line_colors = [
-            ui(44, 73, 132),
-            ui(109, 55, 224),
-            ui(42, 139, 221),
-            ui(50, 91, 163),
-        ];
-        let code_rows = if compact { 5 } else { 6 };
-        let row_top = if compact { 34 } else { 47 };
-        let row_gap = if compact { 14 } else { 17 };
-        let row_height = if compact { 5 } else { 6 };
-        for index in 0..code_rows {
-            let y = code.top + s(row_top + index * row_gap);
-            Self::rounded_fill(
-                hdc,
-                RECT {
-                    left: code.left + s(12),
-                    top: y,
-                    right: code.left + s(30),
-                    bottom: y + s(row_height),
-                },
-                s(2),
-                ui(42, 69, 125),
-            );
-            let width = if compact {
-                s(40 + ((index * 17) % 42))
-            } else {
-                s(55 + ((index * 19) % 48))
-            };
-            Self::rounded_fill(
-                hdc,
-                RECT {
-                    left: code.left + s(54),
-                    top: y,
-                    right: code.left + s(54) + width,
-                    bottom: y + s(row_height),
-                },
-                s(3),
-                line_colors[index as usize % line_colors.len()],
-            );
-        }
-        let bolt_x = code.left + code_width * 71 / 100;
-        let bolt_y = code.top + code_height * 26 / 100;
-        let bolt =
-            [(51, 0), (0, 61), (26, 61), (13, 104), (62, 45), (36, 45)].map(|(x, y)| POINT {
-                x: bolt_x + s(x),
-                y: bolt_y + s(y),
-            });
-        self.welcome_lightning_bolt(hdc, &bolt);
-        unsafe { SelectObject(hdc, self.ui_font) };
-        unsafe { SetTextCharacterExtra(hdc, s(2)) };
-        let labels_left = code.right + s(21);
-        for (index, label) in ["CODE", "BUILD", "DEBUG", "CREATE"].iter().enumerate() {
+        for (label, left, top) in &layout.sections {
             Self::label(
                 hdc,
                 label,
-                labels_left,
-                code.top + s(58 + index as i32 * 22),
-                ui(128, 151, 212),
-                clip,
-            );
-        }
-        Self::fill(
-            hdc,
-            RECT {
-                left: labels_left,
-                top: code.top + s(156),
-                right: labels_left + s(22),
-                bottom: code.top + s(157),
-            },
-            ui(74, 137, 224),
-        );
-        if !compact {
-            unsafe { SetTextCharacterExtra(hdc, 0) };
-            let tagline_right = code.right + s(89);
-            let first = "A BRIGHTER";
-            let second = "DEVELOPMENT TOMORROW";
-            Self::label(
-                hdc,
-                first,
-                tagline_right - self.text_width(hdc, first),
-                code.top + s(178),
-                ui(105, 128, 186),
-                clip,
-            );
-            Self::label(
-                hdc,
-                second,
-                tagline_right - self.text_width(hdc, second),
-                code.top + s(197),
-                ui(105, 128, 186),
-                clip,
+                *left,
+                top + s(4),
+                self.theme.muted,
+                RECT {
+                    left: *left,
+                    top: *top,
+                    right: layout.head.right,
+                    bottom: top + s(SECTION_H),
+                },
             );
         }
         unsafe { SetTextCharacterExtra(hdc, 0) };
-    }
 
-    fn paint_welcome_recent(&self, hdc: HDC, layout: &WelcomeLayout) {
-        let s = |value: i32| self.scale(value);
-        let panel = layout.recent_panel;
-        self.panel_card(hdc, panel, s(9), themed(WELCOME_CARD_EDGE), themed(CARD_BG));
-        let clip = RECT {
-            left: panel.left + s(14),
-            top: panel.top,
-            right: panel.right - s(12),
-            bottom: panel.bottom,
-        };
-        unsafe { SelectObject(hdc, self.brand_font) };
-        self.clock_glyph(
-            hdc,
-            panel.left + s(10),
-            panel.top + s(16),
-            s(19),
-            self.theme.blue,
-        );
-        self.label_mid(
-            hdc,
-            "Recent Projects",
-            panel.left + s(42),
-            panel.top + s(26),
-            self.theme.text,
-            clip,
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
-        if panel.right - panel.left >= s(320) {
-            let see_all = "View all  \u{2192}";
-            let see_all_width = self.text_width(hdc, see_all);
-            self.label_mid(
-                hdc,
-                see_all,
-                panel.right - s(23) - see_all_width,
-                panel.top + s(26),
-                self.theme.muted,
-                clip,
-            );
-        }
-        Self::fill(
-            hdc,
-            RECT {
-                left: panel.left + s(10),
-                top: panel.top + s(PANEL_HEADER_H),
-                right: panel.right - s(10),
-                bottom: panel.top + s(PANEL_HEADER_H) + s(1).max(1),
-            },
-            self.theme.edge,
-        );
-        if layout.recent_rows == 0 {
-            Self::label(
-                hdc,
-                "Workspaces you open will show up here.",
-                panel.left + s(18),
-                panel.top + s(60),
-                self.theme.muted,
-                clip,
-            );
-            return;
-        }
-        for (index, path) in self.recent.iter().take(layout.recent_rows).enumerate() {
-            let top = panel.top + s(PANEL_HEADER_H) + index as i32 * s(RECENT_ROW_H);
-            let row = RECT {
-                left: panel.left + s(8),
-                top,
-                right: panel.right - s(8),
-                bottom: top + s(RECENT_ROW_H),
+        for row in &layout.rows {
+            let hovered = hot.is_some_and(|index| index == row.target || Some(index) == row.forget);
+            let rect = row.rect;
+            let middle = (rect.top + rect.bottom) / 2;
+            let inside = RECT {
+                left: rect.left + s(8),
+                right: rect.right - s(8),
+                ..rect
             };
-            if index > 0 {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: panel.left + s(10),
-                        top,
-                        right: panel.right - s(10),
-                        bottom: top + s(1).max(1),
-                    },
-                    self.theme.edge,
-                );
+            if hovered && !matches!(row.kind, RowKind::Link(_)) {
+                Self::rounded_fill(hdc, rect, s(4), self.theme.active_bg);
             }
-            self.welcome_folder_glyph(hdc, row.left + s(20), top + s(13), s(26), ui(79, 142, 242));
-            let text_left = row.left + s(71);
-            let show_age = panel.right - panel.left >= s(340);
-            let row_clip = RECT {
-                left: text_left,
-                top: row.top,
-                right: if show_age {
-                    row.right - s(116)
-                } else {
-                    row.right - s(24)
-                },
-                bottom: row.bottom,
-            };
-            Self::label(
-                hdc,
-                &path.file_name().unwrap_or_default().to_string_lossy(),
-                text_left,
-                top + s(8),
-                self.theme.text,
-                row_clip,
-            );
-            self.label_ellipsis(
-                hdc,
-                &display_path(path),
-                text_left,
-                top + s(27),
-                self.theme.muted,
-                row_clip,
-            );
-            if show_age {
-                let age = recent_age(path);
-                let age_width = self.text_width(hdc, &age);
-                self.label_mid(
-                    hdc,
-                    &age,
-                    row.right - s(59) - age_width,
-                    (row.top + row.bottom) / 2,
-                    self.theme.muted,
-                    row,
-                );
-            }
-            self.chevron(hdc, row.right - s(26), (row.top + row.bottom) / 2, false);
-        }
-    }
-
-    fn paint_welcome_quick(&self, hdc: HDC, layout: &WelcomeLayout) {
-        let s = |value: i32| self.scale(value);
-        let panel = layout.quick_panel;
-        if panel.right <= panel.left || panel.bottom <= panel.top {
-            return;
-        }
-        self.panel_card(hdc, panel, s(9), themed(WELCOME_CARD_EDGE), themed(CARD_BG));
-        let clip = RECT {
-            left: panel.left + s(14),
-            top: panel.top,
-            right: panel.right - s(12),
-            bottom: panel.bottom,
-        };
-        unsafe { SelectObject(hdc, self.brand_font) };
-        self.rail_icon(
-            hdc,
-            5,
-            panel.left + s(21),
-            panel.top + s(17),
-            self.theme.violet,
-        );
-        self.label_mid(
-            hdc,
-            "Quick Actions",
-            panel.left + s(59),
-            panel.top + s(26),
-            self.theme.text,
-            clip,
-        );
-        Self::fill(
-            hdc,
-            RECT {
-                left: panel.left + s(18),
-                top: panel.top + s(PANEL_HEADER_H),
-                right: panel.right - s(18),
-                bottom: panel.top + s(PANEL_HEADER_H) + s(1).max(1),
-            },
-            self.theme.edge,
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
-        for (index, (label, shortcut, _)) in QUICK.iter().take(layout.quick_rows).enumerate() {
-            let top = panel.top + s(PANEL_HEADER_H) + index as i32 * s(QUICK_ROW_H);
-            let middle = top + s(QUICK_ROW_H) / 2;
-            if index > 0 {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: panel.left + s(18),
-                        top,
-                        right: panel.right - s(18),
-                        bottom: top + s(1).max(1),
-                    },
-                    self.theme.edge,
-                );
-            }
-            let show_shortcut = panel.right - panel.left >= s(220);
-            let chip_width = self.text_width(hdc, shortcut) + s(16);
-            let chip = RECT {
-                left: panel.right - s(27) - chip_width,
-                top: middle - s(11),
-                right: panel.right - s(27),
-                bottom: middle + s(11),
-            };
-            if show_shortcut {
-                Self::rounded_fill(hdc, chip, s(5), themed(CHIP_BG));
-                self.label_mid(
-                    hdc,
-                    shortcut,
-                    chip.left + s(8),
-                    middle,
-                    self.theme.muted,
-                    clip,
-                );
-            }
-            match index {
-                0 | 1 => {
-                    if !self.icons.draw_generic(
+            unsafe { SelectObject(hdc, self.ui_font) };
+            match row.kind {
+                RowKind::Start(index) => {
+                    let (label, key, glyph, _) = START[index];
+                    self.icons.draw_glyph(
                         hdc,
-                        GenericIcon::File,
-                        panel.left + s(25),
-                        middle - s(9),
-                        s(18),
-                    ) {
-                        self.draw_vector_file(
+                        glyph,
+                        self.theme.blue,
+                        inside.left,
+                        middle - s(8),
+                        s(16),
+                    );
+                    unsafe { SelectObject(hdc, self.small_font) };
+                    let key_width = self.text_width(hdc, key);
+                    self.label_mid(
+                        hdc,
+                        key,
+                        inside.right - key_width,
+                        middle,
+                        self.theme.muted,
+                        inside,
+                    );
+                    unsafe { SelectObject(hdc, self.ui_font) };
+                    self.label_ellipsis(
+                        hdc,
+                        label,
+                        inside.left + s(26),
+                        middle - self.text_height(hdc) / 2,
+                        self.link_color(hovered),
+                        RECT {
+                            right: inside.right - key_width - s(12),
+                            ..inside
+                        },
+                    );
+                }
+                RowKind::Recent(index) => self.paint_recent_row(hdc, row, inside, index, hovered),
+                RowKind::NoRecent => {
+                    let lead = "No recent folders yet. ";
+                    self.label_mid(hdc, lead, inside.left, middle, self.theme.muted, inside);
+                    let mut x = inside.left + self.text_width(hdc, lead);
+                    let link = "Open a folder";
+                    self.label_mid(hdc, link, x, middle, self.link_color(hovered), inside);
+                    x += self.text_width(hdc, link);
+                    self.label_mid(
+                        hdc,
+                        " and it shows up here.",
+                        x,
+                        middle,
+                        self.theme.muted,
+                        inside,
+                    );
+                }
+                RowKind::Step(index) => self.paint_step_row(hdc, layout, row, index),
+                RowKind::Link(index) => {
+                    let (label, glyph, _, _) = LINKS[index];
+                    let color = self.link_color(hovered);
+                    self.icons
+                        .draw_glyph(hdc, glyph, color, rect.left, middle - s(7), s(14));
+                    self.label_ellipsis(
+                        hdc,
+                        label,
+                        rect.left + s(20),
+                        middle - self.text_height(hdc) / 2,
+                        color,
+                        rect,
+                    );
+                    if hovered {
+                        // Underlined under the mouse, as a link.
+                        let width = self
+                            .text_width(hdc, label)
+                            .min(rect.right - rect.left - s(20));
+                        let base = middle + self.text_height(hdc) / 2 - s(2);
+                        Self::fill(
                             hdc,
-                            std::path::Path::new("untitled"),
-                            panel.left + s(25),
-                            middle - s(9),
-                            s(18),
+                            RECT {
+                                left: rect.left + s(20),
+                                top: base,
+                                right: rect.left + s(20) + width,
+                                bottom: base + s(1).max(1),
+                            },
+                            color,
                         );
                     }
                 }
-                2 => {
-                    self.welcome_folder_glyph(
-                        hdc,
-                        panel.left + s(25),
-                        middle - s(10),
-                        s(18),
-                        ui(139, 174, 225),
-                    );
-                }
-                3 => Self::label(
-                    hdc,
-                    "\u{2318}",
-                    panel.left + s(25),
-                    middle - s(11),
-                    self.theme.muted,
-                    clip,
-                ),
-                4 => self.rail_icon(hdc, 1, panel.left + s(25), middle - s(9), self.theme.muted),
-                _ => self.prompt_glyph(
-                    hdc,
-                    panel.left + s(25),
-                    middle - s(9),
-                    s(18),
-                    self.theme.muted,
-                ),
             }
-            let label_clip = RECT {
-                left: panel.left + s(69),
-                top,
-                right: if show_shortcut {
-                    chip.left - s(8)
-                } else {
-                    panel.right - s(12)
-                },
-                bottom: top + s(QUICK_ROW_H),
-            };
-            self.label_mid(
+        }
+
+        if let Some((left, top)) = layout.foot {
+            unsafe { SelectObject(hdc, self.small_font) };
+            Self::label(
                 hdc,
-                label,
-                panel.left + s(69),
-                middle,
-                self.theme.text,
-                label_clip,
+                "Ctrl+Shift+H brings this page back.",
+                left,
+                top,
+                self.theme.muted,
+                RECT {
+                    left,
+                    top,
+                    right: layout.head.right,
+                    bottom: top + s(FOOT_H),
+                },
             );
         }
     }
 
-    fn paint_welcome_aside(&self, hdc: HDC, layout: &WelcomeLayout) {
+    fn link_color(&self, hovered: bool) -> u32 {
+        if hovered {
+            blend(self.theme.blue, self.theme.text, 0.35)
+        } else {
+            self.theme.blue
+        }
+    }
+
+    // A folder: its icon, its name, the folder it's in (dimmed), and how long
+    // ago it changed; under the mouse, × instead of the age.
+    fn paint_recent_row(&self, hdc: HDC, row: &Row, inside: RECT, index: usize, hovered: bool) {
         let s = |value: i32| self.scale(value);
-        if let Some(panel) = layout.steps_panel {
-            self.panel_card(hdc, panel, s(9), themed(WELCOME_CARD_EDGE), themed(CARD_BG));
-            let clip = RECT {
-                left: panel.left + s(14),
-                top: panel.top,
-                right: panel.right - s(12),
-                bottom: panel.bottom,
-            };
-            unsafe { SelectObject(hdc, self.brand_font) };
-            self.bulb_glyph(
+        let Some(path) = self.recent.get(index) else {
+            return;
+        };
+        let middle = (inside.top + inside.bottom) / 2;
+        if !self
+            .icons
+            .draw_generic(hdc, GenericIcon::Folder, inside.left, middle - s(8), s(16))
+        {
+            self.icons.draw_glyph(
                 hdc,
-                panel.left + s(18),
-                panel.top + s(17),
-                s(18),
-                self.theme.text,
+                DebugGlyph::Folder,
+                self.theme.blue,
+                inside.left,
+                middle - s(8),
+                s(16),
             );
+        }
+        let right = if hovered {
+            row.rect.right - s(32)
+        } else {
+            unsafe { SelectObject(hdc, self.small_font) };
+            let age = recent_age(path);
+            let width = self.text_width(hdc, &age);
             self.label_mid(
                 hdc,
-                "Getting Started",
-                panel.left + s(48),
-                panel.top + s(27),
+                &age,
+                inside.right - width,
+                middle,
+                self.theme.muted,
+                inside,
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+            inside.right - width - s(12)
+        };
+        let name = path.file_name().map_or_else(
+            || display_path(path),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let text_top = middle - self.text_height(hdc) / 2;
+        let clip = RECT { right, ..inside };
+        let name_left = inside.left + s(26);
+        self.label_ellipsis(hdc, &name, name_left, text_top, self.theme.text, clip);
+        let folder_left = name_left + self.text_width(hdc, &name) + s(10);
+        if let Some(parent) = path.parent().filter(|_| folder_left < right) {
+            self.label_ellipsis(
+                hdc,
+                &display_path(parent),
+                folder_left,
+                text_top,
+                self.theme.muted,
+                clip,
+            );
+        }
+        if hovered && let Some(forget) = row.forget {
+            let close = RECT {
+                left: row.rect.right - s(26),
+                top: middle - s(10),
+                right: row.rect.right - s(6),
+                bottom: middle + s(10),
+            };
+            let on_close = matches!(self.hot, Some(Hot::Welcome(index)) if index == forget);
+            if on_close {
+                Self::rounded_fill(hdc, close, s(3), self.theme.select_bg);
+            }
+            self.glyph_in(
+                hdc,
+                DebugGlyph::Close,
+                if on_close {
+                    self.theme.text
+                } else {
+                    self.theme.muted
+                },
+                close,
+                s(14),
+            );
+        }
+    }
+
+    // Get started: an icon tile, the title and what it's for, and its key.
+    // Compact (narrow or short window): icon, title and key on one line.
+    fn paint_step_row(&self, hdc: HDC, layout: &WelcomeLayout, row: &Row, index: usize) {
+        let s = |value: i32| self.scale(value);
+        let (title, about, key, glyph, tint, _) = STEPS[index];
+        let color = match tint {
+            Tint::Violet => self.theme.violet,
+            Tint::Blue => self.theme.blue,
+            Tint::Green => self.theme.green,
+            Tint::Orange => self.theme.orange,
+            Tint::Muted => self.theme.muted,
+        };
+        let pad = s(if layout.compact_steps { 8 } else { 10 });
+        let inside = RECT {
+            left: row.rect.left + pad,
+            right: row.rect.right - pad,
+            ..row.rect
+        };
+        let middle = (inside.top + inside.bottom) / 2;
+        unsafe { SelectObject(hdc, self.small_font) };
+        let key_right = if key.is_empty() {
+            inside.right
+        } else {
+            let width = self.text_width(hdc, key) + s(12);
+            let chip = RECT {
+                left: inside.right - width,
+                top: middle - s(9),
+                right: inside.right,
+                bottom: middle + s(9),
+            };
+            self.panel_card(hdc, chip, s(3), self.theme.edge, self.theme.active_bg);
+            self.label_mid(hdc, key, chip.left + s(6), middle, self.theme.muted, chip);
+            chip.left - s(12)
+        };
+        let text_left = if layout.compact_steps {
+            self.icons
+                .draw_glyph(hdc, glyph, color, inside.left, middle - s(8), s(16));
+            inside.left + s(26)
+        } else {
+            let tile = RECT {
+                left: inside.left,
+                top: middle - s(16),
+                right: inside.left + s(32),
+                bottom: middle + s(16),
+            };
+            self.panel_card(hdc, tile, s(6), self.theme.edge, self.theme.sidebar_bg);
+            self.glyph_in(hdc, glyph, color, tile, s(17));
+            tile.right + s(12)
+        };
+        let clip = RECT {
+            left: text_left,
+            right: key_right,
+            ..inside
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        if layout.compact_steps {
+            self.label_ellipsis(
+                hdc,
+                title,
+                text_left,
+                middle - self.text_height(hdc) / 2,
                 self.theme.text,
                 clip,
             );
-            Self::fill(
-                hdc,
-                RECT {
-                    left: panel.left + s(18),
-                    top: panel.top + s(PANEL_HEADER_H),
-                    right: panel.right - s(18),
-                    bottom: panel.top + s(PANEL_HEADER_H) + s(1).max(1),
-                },
-                self.theme.edge,
-            );
-            let step_height =
-                (panel.bottom - panel.top - s(PANEL_HEADER_H) - s(8)) / STEPS.len() as i32;
-            for (index, (title, subtitle, _)) in STEPS.iter().enumerate() {
-                let top = panel.top + s(PANEL_HEADER_H) + index as i32 * step_height;
-                let middle = top + step_height / 2;
-                let ring = s(30);
-                self.ring_glyph(
-                    hdc,
-                    panel.left + s(18),
-                    middle - ring / 2,
-                    ring,
-                    self.theme.violet,
-                );
-                unsafe { SelectObject(hdc, self.brand_font) };
-                let number = (index + 1).to_string();
-                let number_width = self.text_width(hdc, &number);
-                self.label_mid(
-                    hdc,
-                    &number,
-                    panel.left + s(18) + (ring - number_width) / 2,
-                    middle,
-                    self.theme.text,
-                    clip,
-                );
-                let text_left = panel.left + s(64);
-                let row_clip = RECT {
-                    left: text_left,
-                    top,
-                    right: panel.right - s(30),
-                    bottom: top + step_height,
-                };
-                self.label_ellipsis(
-                    hdc,
-                    title,
-                    text_left,
-                    middle - s(17),
-                    self.theme.text,
-                    row_clip,
-                );
-                unsafe { SelectObject(hdc, self.ui_font) };
-                self.label_ellipsis(
-                    hdc,
-                    subtitle,
-                    text_left,
-                    middle + s(2),
-                    self.theme.muted,
-                    row_clip,
-                );
-                self.chevron(hdc, panel.right - s(20), middle, false);
-                if index + 1 < STEPS.len() {
-                    Self::fill(
-                        hdc,
-                        RECT {
-                            left: panel.left + s(18),
-                            top: top + step_height - s(1).max(1),
-                            right: panel.right - s(18),
-                            bottom: top + step_height,
-                        },
-                        self.theme.edge,
-                    );
-                }
-            }
+            return;
         }
-
-        let community = layout.community;
-        self.gradient_card(hdc, community, s(9), ui(38, 35, 111), ui(25, 29, 75));
-        self.card_outline(hdc, community, s(9), ui(79, 67, 185));
-        let clip = RECT {
-            left: community.left + s(16),
-            top: community.top,
-            right: community.right - s(12),
-            bottom: community.bottom,
-        };
-        self.community_glyph(
-            hdc,
-            community.left + s(24),
-            community.top + s(18),
-            s(28),
-            ui(137, 91, 242),
-        );
-        Self::fill(
-            hdc,
-            RECT {
-                left: community.left + s(82),
-                top: community.top + s(14),
-                right: community.left + s(83),
-                bottom: community.bottom - s(14),
-            },
-            ui(111, 86, 219),
-        );
-        let community_width = community.right - community.left;
-        let narrow = community_width < s(520);
-        let button_width = if narrow { s(138) } else { s(192) };
-        let button = RECT {
-            left: community.right - s(12) - button_width,
-            top: community.top + s(12),
-            right: community.right - s(12),
-            bottom: community.bottom - s(12),
-        };
-        unsafe { SelectObject(hdc, self.brand_font) };
-        self.label_mid(
-            hdc,
-            if narrow {
-                "Community"
-            } else {
-                "Join the Community"
-            },
-            community.left + s(104),
-            (community.top + community.bottom) / 2,
-            self.theme.text,
-            RECT {
-                right: button.left - s(10),
-                ..clip
-            },
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
-        if community_width >= s(820) {
-            self.label_mid(
-                hdc,
-                "Report issues, request features and read the source.",
-                community.left + s(271),
-                (community.top + community.bottom) / 2,
-                ui(186, 200, 230),
-                RECT {
-                    right: button.left - s(12),
-                    ..clip
-                },
-            );
-        }
-        self.panel_card(hdc, button, s(6), ui(91, 75, 222), ui(34, 38, 103));
-        let label = if narrow {
-            "Open  \u{2197}"
-        } else {
-            "Open Community  \u{2197}"
-        };
-        let label_width = self.text_width(hdc, label);
-        self.label_mid(
-            hdc,
-            label,
-            button.left + (button.right - button.left - label_width) / 2,
-            (button.top + button.bottom) / 2,
-            self.theme.text,
-            button,
-        );
+        self.label_ellipsis(hdc, title, text_left, middle - s(18), self.theme.text, clip);
+        unsafe { SelectObject(hdc, self.small_font) };
+        self.label_ellipsis(hdc, about, text_left, middle + s(1), self.theme.muted, clip);
     }
 
     fn paint_welcome_status(&self, hdc: HDC, rect: RECT, layout: &WelcomeLayout) {
         let s = |value: i32| self.scale(value);
-        Self::fill(
-            hdc,
-            RECT {
-                left: 0,
-                top: layout.status_top,
-                right: rect.right,
-                bottom: rect.bottom,
-            },
-            self.theme.status_bg,
-        );
-        unsafe { SelectObject(hdc, self.ui_font) };
-        let middle = (layout.status_top + rect.bottom) / 2;
-        let clip = RECT {
+        let bar = RECT {
             left: 0,
             top: layout.status_top,
             right: rect.right,
             bottom: rect.bottom,
         };
+        Self::fill(hdc, bar, self.theme.status_bg);
+        Self::fill(
+            hdc,
+            RECT {
+                bottom: bar.top + s(1).max(1),
+                ..bar
+            },
+            self.theme.edge,
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let middle = (layout.status_top + rect.bottom) / 2;
         let left_text = match &self.workspace_branch {
             Some(branch) => format!("Ready  \u{2022}  {branch}"),
             None => "Ready".into(),
         };
-        self.label_mid(hdc, &left_text, s(16), middle, self.theme.muted, clip);
-        let hint = "Ctrl+O file  \u{2022}  Ctrl+N new  \u{2022}  Ctrl+Shift+O folder";
-        let width = self.text_width(hdc, hint);
-        if rect.right >= width + s(180) {
-            self.label_mid(
-                hdc,
-                hint,
-                rect.right - s(16) - width,
-                middle,
-                self.theme.muted,
-                clip,
-            );
-        }
+        self.label_mid(hdc, &left_text, s(16), middle, self.theme.muted, bar);
     }
+}
 
-    // --- small vector glyphs, drawn to match the hand-drawn rail icons ---
-
-    pub(super) fn stroke(&self, hdc: HDC, color: u32, draw: impl FnOnce(HDC)) {
-        unsafe {
-            let pen = CreatePen(PS_SOLID, self.scale(2).max(2), color);
-            if pen.is_null() {
-                return;
-            }
-            let previous_pen = SelectObject(hdc, pen);
-            let previous_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            draw(hdc);
-            SelectObject(hdc, previous_brush);
-            SelectObject(hdc, previous_pen);
-            DeleteObject(pen);
-        }
+/// Milliseconds since this process was created (for the "Started in" pill),
+/// or None if Windows doesn't say.
+pub(in crate::windows_app) fn process_age_ms() -> Option<u32> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    let ok = unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    if ok == 0 {
+        return None;
     }
-
-    fn welcome_lightning_bolt(&self, hdc: HDC, bolt: &[POINT; 6]) {
-        let channel = |color: u32, shift: u32| (((color >> shift) & 0xff) as u16) << 8;
-        let colors = [
-            ui(105, 125, 249),
-            ui(180, 69, 235),
-            ui(125, 78, 241),
-            ui(18, 207, 240),
-            ui(43, 182, 247),
-            ui(137, 87, 245),
-        ];
-        let vertices: [TRIVERTEX; 6] = std::array::from_fn(|index| TRIVERTEX {
-            x: bolt[index].x,
-            y: bolt[index].y,
-            Red: channel(colors[index], 0),
-            Green: channel(colors[index], 8),
-            Blue: channel(colors[index], 16),
-            Alpha: 0,
-        });
-        let mesh = [
-            GRADIENT_TRIANGLE {
-                Vertex1: 5,
-                Vertex2: 0,
-                Vertex3: 1,
-            },
-            GRADIENT_TRIANGLE {
-                Vertex1: 5,
-                Vertex2: 1,
-                Vertex3: 2,
-            },
-            GRADIENT_TRIANGLE {
-                Vertex1: 5,
-                Vertex2: 2,
-                Vertex3: 3,
-            },
-            GRADIENT_TRIANGLE {
-                Vertex1: 5,
-                Vertex2: 3,
-                Vertex3: 4,
-            },
-        ];
-        unsafe {
-            GradientFill(
-                hdc,
-                vertices.as_ptr(),
-                vertices.len() as u32,
-                mesh.as_ptr().cast(),
-                mesh.len() as u32,
-                GRADIENT_FILL_TRIANGLE,
-            );
-
-            let outline = CreatePen(PS_SOLID, self.scale(1).max(1), ui(91, 103, 225));
-            if !outline.is_null() {
-                let previous_pen = SelectObject(hdc, outline);
-                let previous_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                Polygon(hdc, bolt.as_ptr(), bolt.len() as i32);
-                SelectObject(hdc, previous_brush);
-                SelectObject(hdc, previous_pen);
-                DeleteObject(outline);
-            }
-        }
-    }
-
-    fn home_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            let points = [
-                POINT { x, y: y + size / 2 },
-                POINT { x: x + size / 2, y },
-                POINT {
-                    x: x + size,
-                    y: y + size / 2,
-                },
-            ];
-            Polyline(hdc, points.as_ptr(), points.len() as i32);
-            Rectangle(hdc, x + size / 6, y + size / 2, x + size * 5 / 6, y + size);
-        });
-    }
-
-    fn prompt_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            MoveToEx(hdc, x + size / 5, y + size / 4, null_mut());
-            LineTo(hdc, x + size / 2, y + size / 2);
-            LineTo(hdc, x + size / 5, y + size * 3 / 4);
-            MoveToEx(hdc, x + size * 9 / 16, y + size * 3 / 4, null_mut());
-            LineTo(hdc, x + size, y + size * 3 / 4);
-        });
-    }
-
-    fn clock_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            Ellipse(hdc, x, y, x + size, y + size);
-            MoveToEx(hdc, x + size / 2, y + size / 4, null_mut());
-            LineTo(hdc, x + size / 2, y + size / 2);
-            LineTo(hdc, x + size * 3 / 4, y + size / 2);
-        });
-    }
-
-    fn ring_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            Ellipse(hdc, x, y, x + size, y + size);
-        });
-    }
-
-    fn bulb_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            Ellipse(hdc, x + size / 5, y, x + size * 4 / 5, y + size * 3 / 5);
-            MoveToEx(hdc, x + size * 2 / 5, y + size * 3 / 4, null_mut());
-            LineTo(hdc, x + size * 3 / 5, y + size * 3 / 4);
-            MoveToEx(hdc, x + size * 2 / 5, y + size, null_mut());
-            LineTo(hdc, x + size * 3 / 5, y + size);
-        });
-    }
-
-    fn welcome_folder_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        let u = |value: i32| value * size / 16;
-        let points = [
-            POINT {
-                x: x + u(1),
-                y: y + u(3),
-            },
-            POINT {
-                x: x + u(6),
-                y: y + u(3),
-            },
-            POINT {
-                x: x + u(8),
-                y: y + u(5),
-            },
-            POINT {
-                x: x + u(15),
-                y: y + u(5),
-            },
-            POINT {
-                x: x + u(15),
-                y: y + u(14),
-            },
-            POINT {
-                x: x + u(1),
-                y: y + u(14),
-            },
-        ];
-        unsafe {
-            let brush = CreateSolidBrush(color);
-            if brush.is_null() {
-                let _ = self
-                    .icons
-                    .draw_generic(hdc, GenericIcon::Folder, x, y, size);
-                return;
-            }
-            let previous_brush = SelectObject(hdc, brush);
-            let previous_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
-            Polygon(hdc, points.as_ptr(), points.len() as i32);
-            SelectObject(hdc, previous_pen);
-            SelectObject(hdc, previous_brush);
-            DeleteObject(brush);
-        }
-    }
-
-    fn welcome_folder_outline(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        let u = |value: i32| value * size / 16;
-        self.stroke(hdc, color, |hdc| unsafe {
-            let points = [
-                POINT {
-                    x: x + u(1),
-                    y: y + u(3),
-                },
-                POINT {
-                    x: x + u(6),
-                    y: y + u(3),
-                },
-                POINT {
-                    x: x + u(8),
-                    y: y + u(5),
-                },
-                POINT {
-                    x: x + u(15),
-                    y: y + u(5),
-                },
-                POINT {
-                    x: x + u(15),
-                    y: y + u(14),
-                },
-                POINT {
-                    x: x + u(1),
-                    y: y + u(14),
-                },
-                POINT {
-                    x: x + u(1),
-                    y: y + u(3),
-                },
-            ];
-            Polyline(hdc, points.as_ptr(), points.len() as i32);
-        });
-    }
-
-    fn community_glyph(&self, hdc: HDC, x: i32, y: i32, size: i32, color: u32) {
-        self.stroke(hdc, color, |hdc| unsafe {
-            let head = size / 4;
-            Ellipse(
-                hdc,
-                x + size / 2 - head / 2,
-                y,
-                x + size / 2 + head / 2,
-                y + head,
-            );
-            Ellipse(
-                hdc,
-                x + size / 10,
-                y + size / 5,
-                x + size / 10 + head,
-                y + size / 5 + head,
-            );
-            Ellipse(
-                hdc,
-                x + size - size / 10 - head,
-                y + size / 5,
-                x + size - size / 10,
-                y + size / 5 + head,
-            );
-            Arc(
-                hdc,
-                x + size / 4,
-                y + size / 3,
-                x + size * 3 / 4,
-                y + size,
-                x + size * 3 / 4,
-                y + size * 3 / 4,
-                x + size / 4,
-                y + size * 3 / 4,
-            );
-            Arc(
-                hdc,
-                x,
-                y + size / 2,
-                x + size / 2,
-                y + size,
-                x + size / 2,
-                y + size * 4 / 5,
-                x,
-                y + size * 4 / 5,
-            );
-            Arc(
-                hdc,
-                x + size / 2,
-                y + size / 2,
-                x + size,
-                y + size,
-                x + size,
-                y + size * 4 / 5,
-                x + size / 2,
-                y + size * 4 / 5,
-            );
-        });
-    }
+    // FILETIME counts 100 ns ticks since 1601; Unix time starts 11,644,473,600 s later.
+    let created = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    let now = (now.as_secs() + 11_644_473_600) * 10_000_000 + u64::from(now.subsec_nanos() / 100);
+    u32::try_from(now.checked_sub(created)? / 10_000).ok()
 }
 
 fn recent_age(path: &std::path::Path) -> String {
@@ -1491,5 +1073,51 @@ impl WelcomeLayout {
             .iter()
             .find(|(rect, _)| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)
             .map(|(_, action)| *action)
+    }
+
+    /// What to redraw when target `index` gains or loses the mouse: a Recent
+    /// row's × lights its whole row.
+    pub(in crate::windows_app) fn hot_rect(&self, index: usize) -> Option<RECT> {
+        let rect = self.targets.get(index)?.0;
+        Some(
+            self.rows
+                .iter()
+                .find(|row| row.forget == Some(index))
+                .map_or(rect, |row| row.rect),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_action_appears_once_on_the_page() {
+        // The rail may share an action with a row (Search, Settings); the
+        // page's rows may not repeat one another.
+        let mut seen: Vec<WelcomeAction> = START.iter().map(|item| item.3).collect();
+        for step in STEPS {
+            assert!(!seen.contains(&step.5), "{:?} is on the page twice", step.5);
+            seen.push(step.5);
+        }
+    }
+
+    #[test]
+    fn learn_links_are_the_help_menus() {
+        let urls: Vec<&str> = LINKS.iter().map(|link| link.2).collect();
+        assert_eq!(
+            urls,
+            [SHORTCUTS_URL, GUIDE_URL, RELEASES_URL, NEW_ISSUE_URL]
+        );
+        assert!(
+            urls.iter()
+                .all(|url| url.starts_with("https://github.com/"))
+        );
+    }
+
+    #[test]
+    fn process_age_is_measured() {
+        assert!(process_age_ms().is_some());
     }
 }
