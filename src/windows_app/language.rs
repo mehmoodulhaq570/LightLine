@@ -689,6 +689,7 @@ impl App {
                         replace_end: request.replace_end,
                         x: request.x,
                         y: request.y,
+                        folder: None,
                     });
                 }
             }
@@ -1250,6 +1251,11 @@ impl App {
     // remember the identifier prefix that an accepted item should overwrite.
     pub(super) fn trigger_completion(&mut self, hwnd: HWND) {
         self.completion = None;
+        // In a relative path in a string, the files there (path_complete.rs),
+        // with or without a language server.
+        if self.suggest_paths(hwnd) {
+            return;
+        }
         let pane = self.focused_pane;
         let pos = self.view().cursor;
         let index = self.tab_for_pane(pane);
@@ -1371,6 +1377,12 @@ impl App {
             }
             _ => (fallback_start, fallback_end),
         };
+        // A folder chosen from path suggestions lists what's inside it next.
+        let folder_chosen = self
+            .completion
+            .as_ref()
+            .is_some_and(|popup| popup.folder.is_some())
+            && item.kind == super::path_complete::FOLDER_KIND;
         self.completion = None;
         self.completion_request = None;
         if item.snippet {
@@ -1380,6 +1392,9 @@ impl App {
         let text = item.insert.replace("\r\n", "\n").replace('\r', "\n");
         self.replace_range(start, end, &text);
         self.keep_cursor_visible(hwnd);
+        if folder_chosen {
+            self.suggest_paths(hwnd);
+        }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
