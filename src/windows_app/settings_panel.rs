@@ -40,6 +40,7 @@ enum Setting {
     AutoIndent,
     AutoClosePairs,
     LinkedTags,
+    PathCompletion,
     BracketMatching,
     IndentGuides,
     BracketColors,
@@ -92,6 +93,7 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::AutoIndent),
     Row::Toggle(Setting::AutoClosePairs),
     Row::Toggle(Setting::LinkedTags),
+    Row::Toggle(Setting::PathCompletion),
     Row::Heading("VISUAL AIDS"),
     Row::Toggle(Setting::BracketMatching),
     Row::Toggle(Setting::BracketColors),
@@ -135,6 +137,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::AutoIndent => "Auto indent",
         Setting::AutoClosePairs => "Close brackets and quotes",
         Setting::LinkedTags => "Rename matching tag",
+        Setting::PathCompletion => "Suggest file paths",
         Setting::BracketMatching => "Highlight matching brackets",
         Setting::IndentGuides => "Indent guides",
         Setting::BracketColors => "Color bracket pairs",
@@ -166,6 +169,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::AutoIndent => "autoIndent",
         Setting::AutoClosePairs => "autoClosePairs",
         Setting::LinkedTags => "linkedTagRename",
+        Setting::PathCompletion => "pathCompletion",
         Setting::BracketMatching => "bracketMatching",
         Setting::IndentGuides => "indentGuides",
         Setting::BracketColors => "bracketPairColorization",
@@ -197,6 +201,7 @@ fn tip(setting: Setting) -> &'static str {
         Setting::AutoIndent => "A new line keeps the indent above  \u{b7}  autoIndent",
         Setting::AutoClosePairs => "Typing ( [ { or a quote adds its pair  \u{b7}  autoClosePairs",
         Setting::LinkedTags => "Editing <div> edits its </div> too  \u{b7}  linkedTagRename",
+        Setting::PathCompletion => "List files after ./ or ../ in a string  \u{b7}  pathCompletion",
         Setting::BracketMatching => {
             "Mark the bracket that pairs with the caret's  \u{b7}  bracketMatching"
         }
@@ -263,6 +268,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::AutoIndent => settings.auto_indent,
         Setting::AutoClosePairs => settings.auto_close_pairs,
         Setting::LinkedTags => settings.linked_tag_rename,
+        Setting::PathCompletion => settings.path_completion,
         Setting::BracketMatching => settings.bracket_matching,
         Setting::IndentGuides => settings.indent_guides,
         Setting::BracketColors => settings.bracket_pair_colors,
@@ -740,6 +746,7 @@ impl App {
             Setting::AutoIndent => &mut settings.auto_indent,
             Setting::AutoClosePairs => &mut settings.auto_close_pairs,
             Setting::LinkedTags => &mut settings.linked_tag_rename,
+            Setting::PathCompletion => &mut settings.path_completion,
             Setting::BracketMatching => &mut settings.bracket_matching,
             Setting::IndentGuides => &mut settings.indent_guides,
             Setting::BracketColors => &mut settings.bracket_pair_colors,
@@ -1211,7 +1218,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 25);
+        assert_eq!(setting_count(), 26);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

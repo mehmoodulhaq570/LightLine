@@ -93,14 +93,47 @@ impl App {
             } else {
                 self.theme.muted
             };
-            Self::label(
-                hdc,
-                completion_glyph(item.kind),
-                x + padding,
-                text_y,
-                glyph_color,
-                outer,
-            );
+            // A path suggestion shows the Explorer's icon for the entry.
+            let icon_path = popup
+                .folder
+                .as_ref()
+                .filter(|_| {
+                    matches!(
+                        item.kind,
+                        super::super::path_complete::FILE_KIND
+                            | super::super::path_complete::FOLDER_KIND
+                    )
+                })
+                .map(|folder| folder.join(&item.label));
+            if let Some(path) = icon_path {
+                let is_dir = item.kind == super::super::path_complete::FOLDER_KIND;
+                let size = self.scale(16);
+                let (icon_x, icon_y) = (x + padding, top + (row_height - size) / 2);
+                let drawn = self.icons.draw_for_path(
+                    hdc,
+                    &path,
+                    is_dir,
+                    false,
+                    self.has_extension("material-icons"),
+                    icon_x,
+                    icon_y,
+                    size,
+                );
+                if !drawn && is_dir {
+                    self.draw_vector_folder(hdc, icon_x, icon_y, size, false);
+                } else if !drawn {
+                    self.draw_vector_file(hdc, &path, icon_x, icon_y, size);
+                }
+            } else {
+                Self::label(
+                    hdc,
+                    completion_glyph(item.kind),
+                    x + padding,
+                    text_y,
+                    glyph_color,
+                    outer,
+                );
+            }
             let text_x = x + padding + self.scale(20);
             let detail = item.detail.as_deref().unwrap_or("");
             let label_right = if detail.is_empty() {

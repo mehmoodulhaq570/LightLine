@@ -1369,6 +1369,8 @@ impl App {
             }
             self.refresh_after_editor_input(hwnd, stays_in_editor, &before);
             self.follow_signature(hwnd, Some(ch));
+            // In a relative path in a string: the files there.
+            self.suggest_paths(hwnd);
         }
     }
 

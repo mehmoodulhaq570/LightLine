@@ -18,6 +18,8 @@ pub struct Settings {
     pub auto_indent: bool,
     /// Typing in a tag's name renames its matching tag too.
     pub linked_tag_rename: bool,
+    /// Typing `./` or `../` in a string lists the files there.
+    pub path_completion: bool,
     pub format_on_save: bool,
     /// False once the user turns Prettier off in the Extensions panel; its
     /// file types are then left to the language server.
@@ -92,6 +94,7 @@ impl Default for Settings {
             auto_close_pairs: true,
             auto_indent: true,
             linked_tag_rename: true,
+            path_completion: true,
             format_on_save: false,
             prettier_enabled: true,
             inlay_hints: true,
@@ -254,6 +257,9 @@ impl Settings {
         }
         if let Some(b) = value.get("linkedTagRename").and_then(|v| v.as_bool()) {
             settings.linked_tag_rename = b;
+        }
+        if let Some(b) = value.get("pathCompletion").and_then(|v| v.as_bool()) {
+            settings.path_completion = b;
         }
         if let Some(b) = value.get("todoHighlight").and_then(|v| v.as_bool()) {
             settings.todo_highlight = b;
@@ -444,6 +450,10 @@ impl Settings {
             serde_json::Value::Bool(self.linked_tag_rename),
         );
         obj.insert(
+            "pathCompletion".into(),
+            serde_json::Value::Bool(self.path_completion),
+        );
+        obj.insert(
             "todoHighlight".into(),
             serde_json::Value::Bool(self.todo_highlight),
         );
@@ -573,6 +583,7 @@ const OWN_KEYS: &[&str] = &[
     "gitBlame",
     "codeLens",
     "linkedTagRename",
+    "pathCompletion",
     "todoHighlight",
     "inlineDiagnostics",
     "localHistory",
@@ -673,6 +684,16 @@ mod tests {
             read(r#"{"inlineDiagnostics": "loud"}"#),
             InlineDiagnostics::ErrorsAndWarnings
         );
+    }
+
+    #[test]
+    fn path_completion_is_on_until_turned_off() {
+        assert!(Settings::default().path_completion);
+        let s = Settings {
+            path_completion: false,
+            ..Settings::default()
+        };
+        assert!(!Settings::parse(&s.to_json()).unwrap().path_completion);
     }
 
     #[test]

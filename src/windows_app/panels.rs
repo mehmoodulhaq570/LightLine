@@ -864,7 +864,8 @@ impl App {
                         self.directory_requests.remove(&path);
                         match result {
                             Ok(entries) => {
-                                self.directory_cache.insert(path, entries);
+                                self.directory_cache.insert(path.clone(), entries);
+                                self.path_listing_arrived(hwnd, &path);
                             }
                             Err(error) => {
                                 self.status = format!("Could not read {}: {error}", path.display());

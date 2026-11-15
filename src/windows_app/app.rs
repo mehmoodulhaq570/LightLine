@@ -1075,6 +1075,9 @@ pub(super) struct App {
     pub(super) request_id: u64,
     pub(super) completion_request: Option<CompletionRequest>,
     pub(super) completion: Option<CompletionPopup>,
+    // A path being typed waits for its folder to be read: document,
+    // change serial, caret and folder (path_complete.rs).
+    pub(super) path_pending: Option<(u64, u64, Pos, PathBuf)>,
     // Rename Symbol: the box asking for the new name, then the request.
     pub(super) rename_box: Option<RenameBox>,
     pub(super) rename_target: Option<RenameRequest>,
@@ -1268,6 +1271,9 @@ pub(super) struct CompletionPopup {
     pub(super) replace_end: Pos,
     pub(super) x: i32,
     pub(super) y: i32,
+    // For file path suggestions (path_complete.rs), the folder listed:
+    // its items are drawn with the Explorer's icons.
+    pub(super) folder: Option<PathBuf>,
 }
 
 // Checks whether a font family is actually installed, rather than just
@@ -1706,6 +1712,7 @@ impl App {
             request_id: 5000,
             completion_request: None,
             completion: None,
+            path_pending: None,
             rename_box: None,
             rename_target: None,
             code_action_request: None,

@@ -241,6 +241,7 @@ To edit the file directly, click the **{ }** button in the panel's header, **Ope
   "autoClosePairs": true,
   "autoIndent": true,
   "linkedTagRename": true,
+  "pathCompletion": true,
   "formatOnSave": false,
   "inlayHints": true,
   "occurrencesHighlight": true,
@@ -279,6 +280,7 @@ To edit the file directly, click the **{ }** button in the panel's header, **Ope
 | `wordWrap` | Wrap long lines in every file (Markdown wraps by default) |
 | `autoClosePairs` | Type closing brackets and quotes for you |
 | `linkedTagRename` | With the caret in a tag's name in HTML, XML, JSX/TSX, Vue or Svelte, both the opening and closing names are outlined, and typing or deleting in one changes the other too; one Ctrl+Z undoes both (on by default). A space or any other character ends the link; self-closing tags and names that already differ are left alone |
+| `pathCompletion` | Typing `./` or `../` in a string lists the files and folders there, with their icons, narrowing as you type; Enter or Tab inserts one, and a folder lists what's inside next (on by default). Ctrl+Space in such a path lists them too, with or without a language server |
 | `bracketMatching`, `indentGuides` | Highlight matching brackets; draw indentation guides (the current block's is brighter) |
 | `bracketPairColorization` | Color nested brackets in turn with three colors (not those in strings or comments) |
 | `showMinimap` | Show the file in miniature at the right of the editor (off by default; it costs some typing speed) |

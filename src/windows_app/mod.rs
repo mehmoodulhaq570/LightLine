@@ -39,6 +39,7 @@ mod inlay;
 mod inline_diagnostics;
 mod linked_tag;
 mod occurrences;
+mod path_complete;
 mod scroll_blit;
 mod snippet;
 mod sticky;
