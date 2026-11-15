@@ -176,7 +176,7 @@ impl App {
         layout_line(
             doc.line(line.min(doc.line_count() - 1)),
             self.wrap_columns(hwnd, pane),
-            self.settings.tab_size,
+            self.tab_width_for(self.tab_for_pane(pane)),
         )
     }
 
@@ -203,8 +203,8 @@ impl App {
     ) -> (usize, usize) {
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
         let columns = self.wrap_columns(hwnd, pane);
-        let count =
-            |line: usize| layout_line(doc.line(line), columns, self.settings.tab_size).count();
+        let tab_width = self.tab_width_for(self.tab_for_pane(pane));
+        let count = |line: usize| layout_line(doc.line(line), columns, tab_width).count();
         let (mut line, mut row) = from;
         line = doc.visible_line_for(line);
         row = row.min(count(line) - 1);
@@ -246,7 +246,8 @@ impl App {
     ) -> Option<(usize, usize, i32)> {
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
         let columns = self.wrap_columns(hwnd, pane);
-        let rows_of = |line: usize| layout_line(doc.line(line), columns, self.settings.tab_size);
+        let tab_width = self.tab_width_for(self.tab_for_pane(pane));
+        let rows_of = |line: usize| layout_line(doc.line(line), columns, tab_width);
         let (top_line, top_row) = self.view_top(hwnd, pane);
         let target = doc.visible_line_for(pos.line.min(doc.line_count() - 1));
         if target < top_line {
@@ -295,8 +296,8 @@ impl App {
     ) -> Option<(usize, usize)> {
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
         let columns = self.wrap_columns(hwnd, pane);
-        let count =
-            |line: usize| layout_line(doc.line(line), columns, self.settings.tab_size).count();
+        let tab_width = self.tab_width_for(self.tab_for_pane(pane));
+        let count = |line: usize| layout_line(doc.line(line), columns, tab_width).count();
         let (mut line, mut row) = self.view_top(hwnd, pane);
         let mut remaining = screen_row;
         loop {

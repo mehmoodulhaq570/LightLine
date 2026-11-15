@@ -1095,6 +1095,9 @@ pub(super) struct App {
     pub(super) occurrences: Occurrences,
     // The tag pair at the caret (linked_tag.rs), and what it was found for.
     pub(super) tag_pair: super::linked_tag::TagPairCache,
+    // The tab width of the pane being drawn, for text_width; None outside
+    // painting a pane (the active file's is used then).
+    pub(super) measure_tab_width: std::cell::Cell<Option<usize>>,
     // The Debug Console tab's lines (debug_console.rs).
     pub(super) debug_console: DebugConsole,
     // A completion's snippet being filled in (snippet.rs).
@@ -1723,6 +1726,7 @@ impl App {
             inlay_request: None,
             occurrences: Occurrences::default(),
             tag_pair: (None, None),
+            measure_tab_width: std::cell::Cell::new(None),
             debug_console: DebugConsole::default(),
             snippet: None,
             sticky_shown: RefCell::new([Vec::new(), Vec::new()]),

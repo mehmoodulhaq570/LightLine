@@ -345,7 +345,7 @@ impl App {
         let tab = &self.tabs[self.tab_for_pane(pane)];
         let doc = &tab.document;
         let columns = (width / layout.column).max(1) as usize;
-        let tab_size = self.settings.tab_size.max(1);
+        let tab_size = self.tab_width_for(self.tab_for_pane(pane));
         let text = mix(background, pixel(self.theme.text), 150);
         let mut colors: Vec<u32> = Vec::new();
         let mut line = doc.line_at_visual_index(layout.start);

@@ -350,7 +350,7 @@ impl App {
             .unwrap_or(self.settings.insert_spaces);
         size.or_else(|| rules.and_then(|rules| rules.tab_size))
             .filter(|_| spaces)
-            .unwrap_or(self.settings.tab_size)
+            .unwrap_or(self.tab_width_for(index))
             .max(1)
     }
 

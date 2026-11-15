@@ -115,7 +115,7 @@ impl App {
                 end,
                 serial: doc.change_serial(),
                 font: self.font as usize,
-                tab_size: self.settings.tab_size,
+                tab_size: self.tab_width_of(doc),
                 x,
                 columns: None,
                 brackets: None,
@@ -128,7 +128,7 @@ impl App {
     // The measured line starts, with those of `doc` that changed dropped.
     // Another file's are checked when it's asked about.
     fn fresh_prefix_widths(&self, doc: &Document) -> std::cell::RefMut<'_, Vec<PrefixWidth>> {
-        let (font, tab_size) = (self.font as usize, self.settings.tab_size);
+        let (font, tab_size) = (self.font as usize, self.tab_width_of(doc));
         let mut kept = self.prefix_widths.borrow_mut();
         kept.retain_mut(|known| {
             known.document != doc.id() || known.still_holds(doc, font, tab_size)
@@ -165,7 +165,7 @@ impl App {
             })
             .map(|known| known.end);
         let byte = known
-            .unwrap_or_else(|| byte_at_column(doc.line(line), columns, self.settings.tab_size));
+            .unwrap_or_else(|| byte_at_column(doc.line(line), columns, self.tab_width_of(doc)));
         // Measured or found, which also keeps it at the front.
         let x = self.line_prefix_width(hdc, doc, line, byte);
         if let Some(entry) =
@@ -285,7 +285,7 @@ impl App {
             let (byte, x) = if row_start == 0 {
                 self.line_byte_at_column(hdc, doc, line, columns)
             } else {
-                let byte = row_start + byte_at_column(row, columns, self.settings.tab_size);
+                let byte = row_start + byte_at_column(row, columns, self.tab_width_of(doc));
                 (byte, self.text_width(hdc, &text[row_start..byte]))
             };
             if x <= scroll_x || columns == 0 {
@@ -410,13 +410,14 @@ impl App {
     /// long line isn't measured.
     fn max_scroll_x(&self, hwnd: HWND, pane: usize) -> i32 {
         let doc = &self.tabs[self.tab_for_pane(pane)].document;
+        let tab_width = self.tab_width_for(self.tab_for_pane(pane));
         let (mut line, _) = self.view_top(hwnd, pane);
         let mut widest = 0usize;
         for _ in 0..self.visible_lines(hwnd) + 1 {
             let columns: usize = doc
                 .line(line)
                 .chars()
-                .map(|ch| char_columns(ch, self.settings.tab_size))
+                .map(|ch| char_columns(ch, tab_width))
                 .sum();
             widest = widest.max(columns);
             let next = doc.next_visible_line(line);

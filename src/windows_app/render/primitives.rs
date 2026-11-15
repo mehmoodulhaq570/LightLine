@@ -2,8 +2,19 @@ use super::super::*;
 
 impl App {
     pub(in crate::windows_app) fn text_width(&self, hdc: HDC, text: &str) -> i32 {
-        let expanded = text.replace('\t', &" ".repeat(self.settings.tab_size));
-        let utf16: Vec<u16> = expanded.encode_utf16().collect();
+        // Code is measured with its file's tab width: the pane being drawn
+        // sets it (`measure_tab_width`), else the active file's.
+        let utf16: Vec<u16> = if text.contains('\t') {
+            let width = self
+                .measure_tab_width
+                .get()
+                .unwrap_or_else(|| self.tab_width_for(self.active));
+            text.replace('\t', &" ".repeat(width))
+                .encode_utf16()
+                .collect()
+        } else {
+            text.encode_utf16().collect()
+        };
         let mut size = SIZE::default();
         unsafe {
             GetTextExtentPoint32W(hdc, utf16.as_ptr(), utf16.len() as i32, &mut size);
@@ -682,6 +693,7 @@ impl App {
             .map(|&(first, last)| (doc.visible_line_for(first), last))
             .collect();
         let columns = self.wrap_columns(hwnd, pane);
+        let tab_width = self.tab_width_for(self.tab_for_pane(pane));
         // Inside the card's left border and clear of the scrollbar strip,
         // neither of which shows the text: what paint's fast path redraws.
         let left = self.pane_left(hwnd, pane) + self.scale(1).max(1);
@@ -691,10 +703,8 @@ impl App {
         let mut top = self.editor_top();
         let mut areas: Vec<RECT> = Vec::new();
         while top < bottom {
-            let rows =
-                super::super::wrap::layout_line(doc.line(line), columns, self.settings.tab_size)
-                    .count()
-                    - first_row;
+            let rows = super::super::wrap::layout_line(doc.line(line), columns, tab_width).count()
+                - first_row;
             let rows_bottom = (top + rows as i32 * self.line_height).min(bottom);
             if lines
                 .iter()

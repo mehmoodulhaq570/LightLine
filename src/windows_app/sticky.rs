@@ -86,7 +86,7 @@ impl App {
         if top == 0 {
             return Vec::new();
         }
-        let tab_size = self.settings.tab_size.max(1);
+        let tab_size = self.tab_width_for(self.tab_for_pane(pane));
         let max = MAX_STICKY.min(self.visible_lines(hwnd) / 3);
         // The pinned lines cover the first rows, so what decides them is the
         // line showing just below them.
@@ -154,7 +154,7 @@ impl App {
             },
             self.theme.edge,
         );
-        let tab_text = " ".repeat(self.settings.tab_size);
+        let tab_text = " ".repeat(self.tab_width_for(self.tab_for_pane(pane)));
         for (slot, &line) in lines.iter().enumerate() {
             let y = top + slot as i32 * self.line_height;
             let number = (line + 1).to_string();
