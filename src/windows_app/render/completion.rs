@@ -40,7 +40,14 @@ impl App {
         let width = self
             .scale(380)
             .min((window.right - popup.x - self.scale(12)).max(self.scale(170)));
-        let height = (end - start) as i32 * row_height + padding * 2;
+        // Path suggestions end with which folder is listed and how many
+        // of its entries match.
+        let footer_height = if popup.folder.is_some() {
+            self.scale(24)
+        } else {
+            0
+        };
+        let height = (end - start) as i32 * row_height + padding * 2 + footer_height;
 
         // Anchor under the caret, flipping above or nudging left when the list
         // would spill past the editor's bottom or right edge.
@@ -97,6 +104,7 @@ impl App {
             let icon_path = popup
                 .folder
                 .as_ref()
+                .map(|list| &list.folder)
                 .filter(|_| {
                     matches!(
                         item.kind,
@@ -141,19 +149,31 @@ impl App {
             } else {
                 (x + width - padding - self.scale(150)).max(text_x + self.scale(60))
             };
-            self.label_ellipsis(
-                hdc,
-                &item.label,
-                text_x,
-                text_y,
-                self.theme.text,
-                RECT {
-                    left: text_x,
-                    top,
-                    right: label_right,
-                    bottom: top + row_height,
-                },
-            );
+            if let Some(list) = &popup.folder {
+                // The letters typed, in the accent colour.
+                self.label_match(
+                    hdc,
+                    &item.label,
+                    (text_x, top + row_height / 2, label_right),
+                    &list.typed,
+                    self.theme.text,
+                    self.theme.blue,
+                );
+            } else {
+                self.label_ellipsis(
+                    hdc,
+                    &item.label,
+                    text_x,
+                    text_y,
+                    self.theme.text,
+                    RECT {
+                        left: text_x,
+                        top,
+                        right: label_right,
+                        bottom: top + row_height,
+                    },
+                );
+            }
             if !detail.is_empty() {
                 self.label_ellipsis(
                     hdc,
@@ -169,6 +189,32 @@ impl App {
                     },
                 );
             }
+        }
+        if let Some(list) = &popup.folder {
+            let top = y + height - padding - footer_height;
+            Self::fill(
+                hdc,
+                RECT {
+                    left: x + 1,
+                    top,
+                    right: x + width - 1,
+                    bottom: top + 1,
+                },
+                self.theme.edge,
+            );
+            self.label_ellipsis(
+                hdc,
+                &list.footer,
+                x + padding + self.scale(4),
+                top + self.scale(4),
+                self.theme.muted,
+                RECT {
+                    left: x + padding,
+                    top,
+                    right: x + width - padding,
+                    bottom: top + footer_height,
+                },
+            );
         }
     }
 }

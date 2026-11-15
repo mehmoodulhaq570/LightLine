@@ -1082,6 +1082,9 @@ pub(super) struct App {
     // A path being typed waits for its folder to be read: document,
     // change serial, caret and folder (path_complete.rs).
     pub(super) path_pending: Option<(u64, u64, Pos, PathBuf)>,
+    // .gitignore rules for folders listed by path suggestions, with the
+    // folder's path from its repository (path_complete.rs).
+    pub(super) path_rules: HashMap<PathBuf, (lightline::gitignore::Rules, String)>,
     // Rename Symbol: the box asking for the new name, then the request.
     pub(super) rename_box: Option<RenameBox>,
     pub(super) rename_target: Option<RenameRequest>,
@@ -1278,9 +1281,9 @@ pub(super) struct CompletionPopup {
     pub(super) replace_end: Pos,
     pub(super) x: i32,
     pub(super) y: i32,
-    // For file path suggestions (path_complete.rs), the folder listed:
-    // its items are drawn with the Explorer's icons.
-    pub(super) folder: Option<PathBuf>,
+    // For file path suggestions (path_complete.rs): the folder listed, for
+    // the Explorer's icons, the letters typed and the footer.
+    pub(super) folder: Option<super::path_complete::PathList>,
 }
 
 // Checks whether a font family is actually installed, rather than just
@@ -1720,6 +1723,7 @@ impl App {
             completion_request: None,
             completion: None,
             path_pending: None,
+            path_rules: HashMap::new(),
             rename_box: None,
             rename_target: None,
             code_action_request: None,
@@ -3384,8 +3388,10 @@ impl App {
                     }
                 }
                 lightline::watcher::WatchEvent::DirectoryChanged(dir) => {
-                    // It may have gained or lost an .editorconfig.
+                    // It may have gained or lost an .editorconfig or a
+                    // .gitignore.
                     self.forget_editorconfig();
+                    self.path_rules.clear();
                     self.directory_cache.remove(&dir);
                     self.directory_requests.remove(&dir);
                     if self.workspace_root.as_ref() == Some(&dir)
@@ -3988,6 +3994,12 @@ impl App {
             });
         }
         self.tabs[index].update_syntax_language();
+        if path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".gitignore"))
+        {
+            self.path_rules.clear();
+        }
         self.check_c_syntax_on_save(path);
         self.reveal_file_in_explorer(path);
         if let Some(parent) = path.parent() {
