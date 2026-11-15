@@ -1,4 +1,6 @@
 use super::super::*;
+use super::blend;
+use crate::windows_app::panels::{QUICK_MODES, QuickLayout};
 
 impl App {
     pub(in crate::windows_app) fn paint_rail(&self, hdc: HDC, editor_bottom: i32) {
@@ -608,223 +610,445 @@ impl App {
         if !self.quick_open {
             return;
         }
-        let width = self.scale(560).min(rect.right - self.scale(30));
-        let left = (rect.right - width) / 2;
-        let top = self.scale(52);
-        let bottom = top + self.scale(70 + 8 * 34);
+        let s = |value: i32| self.scale(value);
+        let rows = self.quick_rows();
+        let layout = self.quick_layout(hdc, rect.right, rows.len());
+        let card = layout.card;
+        // A shadow GDI can draw: a darker band below and to the right.
+        let shade = blend(self.theme.shell_bg, ui(0, 0, 0), 0.6);
         Self::fill(
             hdc,
             RECT {
-                left,
-                top,
-                right: left + width,
-                bottom,
+                left: card.left + s(3),
+                top: card.bottom - s(3),
+                right: card.right + s(3),
+                bottom: card.bottom + s(3),
             },
-            self.theme.status_bg,
+            shade,
         );
         Self::fill(
             hdc,
             RECT {
-                left,
-                top,
-                right: left + width,
-                bottom: top + self.scale(2),
+                left: card.right - s(3),
+                top: card.top + s(4),
+                right: card.right + s(3),
+                bottom: card.bottom,
             },
-            self.theme.violet,
+            shade,
         );
-        let history_title = match self.history_pick {
-            Some(_) => format!("Saved versions of {}", self.history_file_name()),
-            None => String::new(),
-        };
-        Self::label(
+        let body = blend(self.theme.editor_bg, self.theme.active_bg, 0.45);
+        // Square at the top, where it joins the input: the card starts
+        // higher and is clipped; its top edge is the line they share.
+        let state = unsafe { SaveDC(hdc) };
+        unsafe { IntersectClipRect(hdc, card.left, card.top, card.right, card.bottom) };
+        self.panel_card(
             hdc,
-            &format!(
-                "{}  ›  {}{}",
-                if self.language_pick {
-                    "Language of this file"
-                } else if self.history_pick.is_some() {
-                    history_title.as_str()
-                } else {
-                    "Quick Open"
-                },
-                self.quick_query,
-                if self.focused && self.caret_on {
-                    "|"
-                } else {
-                    ""
+            RECT {
+                top: card.top - s(8),
+                ..card
+            },
+            s(6),
+            self.theme.blue,
+            body,
+        );
+        unsafe { RestoreDC(hdc, state) };
+        Self::fill(
+            hdc,
+            RECT {
+                bottom: card.top + s(1).max(1),
+                ..card
+            },
+            self.theme.blue,
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+
+        let needle = self.quick_needle();
+        if rows.is_empty() {
+            let row = layout.rows[0];
+            let message = self.quick_empty_message();
+            self.label_mid(
+                hdc,
+                &message,
+                row.left + s(10),
+                (row.top + row.bottom) / 2,
+                self.theme.muted,
+                row,
+            );
+        }
+        let shown = rows.iter().enumerate().skip(self.quick_first);
+        for (row, (index, item)) in layout.rows.iter().zip(shown) {
+            let middle = (row.top + row.bottom) / 2;
+            if index == self.quick_selected {
+                Self::rounded_fill(hdc, *row, s(4), self.theme.select_bg);
+            }
+            let mut x = row.left + s(10);
+            match &item.icon {
+                QuickIcon::File(path) => {
+                    let size = s(16);
+                    let top = middle - size / 2;
+                    if !self.icons.draw_for_path(
+                        hdc,
+                        path,
+                        false,
+                        false,
+                        self.has_extension("material-icons"),
+                        x,
+                        top,
+                        size,
+                    ) {
+                        self.draw_vector_file(hdc, path, x, top, size);
+                    }
+                    x += s(24);
                 }
-            ),
-            left + self.scale(16),
-            top + self.scale(11),
-            self.theme.text,
-            RECT {
-                left,
-                top,
-                right: left + width,
-                bottom: top + self.scale(43),
-            },
-        );
-        Self::label(
+                QuickIcon::Command => {
+                    let icon = RECT {
+                        left: x,
+                        right: x + s(16),
+                        ..*row
+                    };
+                    self.glyph_in(hdc, DebugGlyph::ChevronRight, self.theme.muted, icon, s(12));
+                    x += s(24);
+                }
+                QuickIcon::None => {}
+            }
+            let keys_left = self.paint_keycaps(hdc, &item.keys, row.right - s(8), middle, body);
+            let right = keys_left - s(8);
+            let end = self.label_match(
+                hdc,
+                &item.name,
+                (x, middle, right),
+                &needle,
+                self.theme.text,
+                self.theme.sky,
+            );
+            if !item.detail.is_empty() && end + s(24) < right {
+                // Highlighted only when the name doesn't hold the match.
+                let detail_needle = if item.name.to_ascii_lowercase().contains(&needle) {
+                    ""
+                } else {
+                    &needle
+                };
+                self.label_match(
+                    hdc,
+                    &item.detail,
+                    (end + s(8), middle, right),
+                    detail_needle,
+                    self.theme.muted,
+                    self.theme.sky,
+                );
+            }
+        }
+        self.paint_quick_footer(hdc, &layout, rows.len(), body);
+    }
+
+    // The footer: a line, the mode buttons (or the picker's name) and the
+    // keys, or where the list is when it scrolls.
+    fn paint_quick_footer(&self, hdc: HDC, layout: &QuickLayout, count: usize, body: u32) {
+        let s = |value: i32| self.scale(value);
+        let footer = layout.footer;
+        Self::fill(
             hdc,
-            if self.language_pick {
-                "Type to filter  ·  Enter chooses  ·  Esc closes"
-            } else if self.history_pick.is_some() {
-                "Type to filter  ·  Enter compares with the file now  ·  Esc closes"
-            } else {
-                "Type to filter  ·  Enter opens  ·  Esc closes"
-            },
-            left + self.scale(16),
-            top + self.scale(39),
-            self.theme.muted,
             RECT {
-                left,
-                top,
-                right: left + width,
-                bottom,
+                left: footer.left + s(1).max(1),
+                top: footer.top,
+                right: footer.right - s(1).max(1),
+                bottom: footer.top + s(1).max(1),
             },
+            self.theme.edge,
         );
-        // QUICK_ROWS rows are shown (not the 8 the box has room for) so the list
-        // never shares its last row with the hint line below it.
-        let items: Vec<String> = if self.language_pick {
+        let middle = (footer.top + footer.bottom) / 2;
+        unsafe { SelectObject(hdc, self.small_font) };
+        let current = self.quick_query.chars().next();
+        let mut used_right = footer.left + s(8);
+        for &(rect, prefix) in &layout.modes {
+            let on = current == Some(prefix);
+            if on {
+                Self::rounded_fill(hdc, rect, s(4), self.theme.active_bg);
+            }
+            let name = QUICK_MODES
+                .iter()
+                .find(|(mode, _)| *mode == prefix)
+                .map_or("", |(_, name)| name);
+            let prefix_text = prefix.to_string();
+            let x = rect.left + s(7);
+            self.label_mid(hdc, &prefix_text, x, middle, self.theme.text, rect);
+            let name_x = x + self.text_width(hdc, &format!("{prefix}  "));
+            let color = if on {
+                self.theme.text
+            } else {
+                self.theme.muted
+            };
+            self.label_mid(hdc, name, name_x, middle, color, rect);
+            used_right = rect.right;
+        }
+        if layout.modes.is_empty() {
+            let title = if self.language_pick {
+                "Language of this file".to_string()
+            } else {
+                format!("Saved versions of {}", self.history_file_name())
+            };
+            let clip = RECT {
+                right: footer.left + (footer.right - footer.left) / 2,
+                ..footer
+            };
+            self.label_ellipsis(
+                hdc,
+                &title,
+                footer.left + s(12),
+                middle - self.text_height(hdc) / 2,
+                self.theme.muted,
+                clip,
+            );
+            used_right = clip.right;
+        }
+        let right = footer.right - s(10);
+        if count > QUICK_ROWS {
+            let last = (self.quick_first + QUICK_ROWS).min(count);
+            let text = format!("{}\u{2013}{} of {count}", self.quick_first + 1, last);
+            let width = self.text_width(hdc, &text);
+            self.label_mid(hdc, &text, right - width, middle, self.theme.muted, footer);
+        } else {
+            let verb = if self.language_pick {
+                "choose"
+            } else if self.history_pick.is_some() {
+                "compare"
+            } else if self.quick_query.starts_with('>') {
+                "run"
+            } else {
+                "open"
+            };
+            let hints: [(&[&str], &str); 2] = [(&["Enter"], verb), (&["Esc"], "close")];
+            // Only when they fit beside the mode buttons.
+            let cap = |key: &str| self.text_width(hdc, key) + s(10) + s(3);
+            let width: i32 = hints
+                .iter()
+                .map(|(keys, word)| {
+                    keys.iter().map(|key| cap(key)).sum::<i32>()
+                        + self.text_width(hdc, word)
+                        + s(12)
+                })
+                .sum();
+            if right - width > used_right + s(8) {
+                let mut x = right;
+                for (keys, word) in hints.iter().rev() {
+                    let word_width = self.text_width(hdc, word);
+                    self.label_mid(hdc, word, x - word_width, middle, self.theme.muted, footer);
+                    x = self.paint_keycaps(hdc, keys, x - word_width - s(4), middle, body) - s(8);
+                }
+            }
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+    }
+
+    /// Keycaps ending at `right`, right to left ("" is a gap between two
+    /// shortcuts); returns their left edge. Leaves the UI font selected
+    /// unless the small font was.
+    fn paint_keycaps(&self, hdc: HDC, keys: &[&str], right: i32, middle: i32, body: u32) -> i32 {
+        if keys.is_empty() {
+            return right;
+        }
+        let s = |value: i32| self.scale(value);
+        let old = unsafe { SelectObject(hdc, self.small_font) };
+        let fill = blend(body, self.theme.text, 0.12);
+        let mut x = right;
+        for key in keys.iter().rev() {
+            if key.is_empty() {
+                x -= s(6);
+                continue;
+            }
+            let width = self.text_width(hdc, key) + s(10);
+            let cap = RECT {
+                left: x - width,
+                top: middle - s(9),
+                right: x,
+                bottom: middle + s(9),
+            };
+            Self::rounded_fill(hdc, cap, s(4), fill);
+            self.label_mid(hdc, key, cap.left + s(5), middle, self.theme.text, cap);
+            x = cap.left - s(3);
+        }
+        unsafe { SelectObject(hdc, old) };
+        x + s(3)
+    }
+
+    // What was typed after the mode's prefix, lowercase, for highlighting.
+    fn quick_needle(&self) -> String {
+        let query = if self.language_pick || self.history_pick.is_some() {
+            self.quick_query.as_str()
+        } else {
+            self.quick_query
+                .strip_prefix(['>', '@', '#', ':'])
+                .unwrap_or(&self.quick_query)
+        };
+        query.trim().to_ascii_lowercase()
+    }
+
+    fn quick_empty_message(&self) -> String {
+        if self.language_pick {
+            "No matching languages".into()
+        } else if self.history_pick.is_some() {
+            "No matching versions".into()
+        } else if self.quick_query.starts_with('@') {
+            self.symbols_empty_message()
+        } else if self.quick_query.starts_with('#') {
+            self.workspace_symbols_message()
+        } else if self.quick_query.starts_with(':') {
+            self.goto_line_message()
+        } else if self.quick_query.starts_with('>') {
+            "No matching commands".into()
+        } else if self.quick_loading {
+            "Loading workspace files...".into()
+        } else if self.workspace_root.is_none() {
+            "Open a workspace first (Ctrl+Shift+O)".into()
+        } else {
+            "No matching files".into()
+        }
+    }
+
+    // Every item in the current mode, as its row shows it.
+    fn quick_rows(&self) -> Vec<QuickRow> {
+        let plain = |name: String| QuickRow {
+            icon: QuickIcon::None,
+            name,
+            detail: String::new(),
+            keys: Vec::new(),
+        };
+        if self.language_pick {
             self.language_picks()
                 .into_iter()
-                .map(|(label, _)| label)
+                .map(|(label, _)| plain(label))
                 .collect()
         } else if self.history_pick.is_some() {
             self.history_picks()
                 .into_iter()
-                .map(|(label, _)| label)
+                .map(|(label, _)| plain(label))
                 .collect()
         } else if self.quick_query.starts_with('>') {
             self.quick_commands()
-                .iter()
-                .map(|(name, _)| format!(">  {name}"))
+                .into_iter()
+                .map(|(name, _)| {
+                    let (name, keys) = split_shortcut(name);
+                    QuickRow {
+                        icon: QuickIcon::Command,
+                        name: name.to_string(),
+                        detail: String::new(),
+                        keys,
+                    }
+                })
                 .collect()
         } else if self.quick_query.starts_with('@') {
             self.quick_symbols()
                 .into_iter()
-                .map(crate::windows_app::symbols::symbol_label)
+                .map(|symbol| plain(crate::windows_app::symbols::symbol_label(symbol)))
                 .collect()
         } else if self.quick_query.starts_with('#') {
             self.quick_workspace_symbols()
                 .iter()
-                .map(|found| self.workspace_symbol_label(found))
+                .map(|found| plain(self.workspace_symbol_label(found)))
                 .collect()
         } else if self.quick_query.starts_with(':') {
-            self.goto_line_items()
+            self.goto_line_items().into_iter().map(plain).collect()
         } else {
+            let root = self.workspace_root.as_deref().unwrap_or(Path::new(""));
             self.quick_matches()
-                .iter()
+                .into_iter()
                 .map(|path| {
-                    path.strip_prefix(self.workspace_root.as_deref().unwrap_or(Path::new("")))
-                        .unwrap_or(path)
-                        .display()
-                        .to_string()
+                    let relative = path.strip_prefix(root).unwrap_or(&path);
+                    let name = relative.file_name().map_or_else(
+                        || relative.display().to_string(),
+                        |name| name.to_string_lossy().into_owned(),
+                    );
+                    let detail = relative
+                        .parent()
+                        .map(|parent| parent.display().to_string())
+                        .unwrap_or_default();
+                    QuickRow {
+                        icon: QuickIcon::File(path.clone()),
+                        name,
+                        detail,
+                        keys: Vec::new(),
+                    }
                 })
                 .collect()
-        };
-        let shown = items
-            .iter()
-            .enumerate()
-            .skip(self.quick_first)
-            .take(QUICK_ROWS);
-        for (row, (index, label)) in shown.enumerate() {
-            let y = top + self.scale(68 + row as i32 * 34);
-            if index == self.quick_selected {
-                Self::fill(
-                    hdc,
-                    RECT {
-                        left: left + self.scale(8),
-                        top: y - self.scale(2),
-                        right: left + width - self.scale(8),
-                        bottom: y + self.scale(30),
-                    },
-                    self.theme.select_bg,
-                );
+        }
+    }
+}
+
+enum QuickIcon {
+    File(PathBuf),
+    Command,
+    None,
+}
+
+/// One Quick Open row: its icon, name, a dimmed detail after the name (a
+/// file's folder) and keycaps at the right.
+struct QuickRow {
+    icon: QuickIcon,
+    name: String,
+    detail: String,
+    keys: Vec<&'static str>,
+}
+
+/// A command's name and the keys in its trailing "(Ctrl+Shift+R)" or
+/// "(Ctrl+G, :)", as keycaps ("" between two shortcuts). Brackets that hold
+/// words, as in "(for debugging)", stay in the name.
+fn split_shortcut(name: &'static str) -> (&'static str, Vec<&'static str>) {
+    let is_key = |key: &str| {
+        matches!(key, "Ctrl" | "Shift" | "Alt")
+            || key.chars().count() == 1
+            || (key.len() > 1 && key.starts_with('F') && key[1..].parse::<u8>().is_ok())
+    };
+    if let Some(open) = name.rfind(" (")
+        && let Some(inner) = name[open + 2..].strip_suffix(')')
+        && inner
+            .split(", ")
+            .all(|shortcut| shortcut.split('+').all(is_key))
+    {
+        let mut keys = Vec::new();
+        for (index, shortcut) in inner.split(", ").enumerate() {
+            if index > 0 {
+                keys.push("");
             }
-            Self::label(
-                hdc,
-                label,
-                left + self.scale(18),
-                y + self.scale(2),
-                self.theme.text,
-                RECT {
-                    left: left + self.scale(18),
-                    top: y,
-                    right: left + width - self.scale(12),
-                    bottom: y + self.scale(29),
-                },
-            );
+            keys.extend(shortcut.split('+'));
         }
-        if items.is_empty() {
-            let symbols_message;
-            Self::label(
-                hdc,
-                if self.language_pick {
-                    "No matching languages"
-                } else if self.history_pick.is_some() {
-                    "No matching versions"
-                } else if self.quick_query.starts_with('@') {
-                    symbols_message = self.symbols_empty_message();
-                    &symbols_message
-                } else if self.quick_query.starts_with('#') {
-                    symbols_message = self.workspace_symbols_message();
-                    &symbols_message
-                } else if self.quick_query.starts_with(':') {
-                    symbols_message = self.goto_line_message();
-                    &symbols_message
-                } else if self.quick_query.starts_with('>') {
-                    "No matching commands"
-                } else if self.quick_loading {
-                    "Loading workspace files..."
-                } else if self.workspace_root.is_none() {
-                    "Open a workspace first (Ctrl+Shift+O)"
-                } else {
-                    "No matching files"
-                },
-                left + self.scale(18),
-                top + self.scale(80),
-                self.theme.muted,
-                RECT {
-                    left,
-                    top,
-                    right: left + width,
-                    bottom,
-                },
-            );
-        }
-        let mut hints = Vec::new();
-        if !self.language_pick
-            && self.history_pick.is_none()
-            && !self.quick_query.starts_with(['>', '@', '#', ':'])
-        {
-            hints.push(
-                "> commands  ·  @ symbols in this file  ·  # in the project  ·  : line".to_string(),
-            );
-        }
-        if items.len() > QUICK_ROWS {
-            let last = (self.quick_first + QUICK_ROWS).min(items.len());
-            hints.push(format!(
-                "{}–{} of {}  ·  scroll for more",
-                self.quick_first + 1,
-                last,
-                items.len()
-            ));
-        }
-        if !hints.is_empty() {
-            Self::label(
-                hdc,
-                &hints.join("  ·  "),
-                left + self.scale(18),
-                bottom - self.scale(28),
-                self.theme.muted,
-                RECT {
-                    left,
-                    top,
-                    right: left + width,
-                    bottom,
-                },
-            );
-        }
+        return (&name[..open], keys);
+    }
+    (name, Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_shortcut;
+
+    #[test]
+    fn shortcuts_become_keycaps() {
+        assert_eq!(
+            split_shortcut("Run Active File (Ctrl+Shift+R)"),
+            ("Run Active File", vec!["Ctrl", "Shift", "R"])
+        );
+        assert_eq!(
+            split_shortcut("Go to Line (Ctrl+G, :)"),
+            ("Go to Line", vec!["Ctrl", "G", "", ":"])
+        );
+        assert_eq!(
+            split_shortcut("Rename Symbol (F2)"),
+            ("Rename Symbol", vec!["F2"])
+        );
+        assert_eq!(
+            split_shortcut("Quick Fix (Ctrl+.)"),
+            ("Quick Fix", vec!["Ctrl", "."])
+        );
+    }
+
+    #[test]
+    fn words_in_brackets_stay_in_the_name() {
+        assert_eq!(
+            split_shortcut("Python: Install debugpy (for debugging)"),
+            ("Python: Install debugpy (for debugging)", vec![])
+        );
+        assert_eq!(
+            split_shortcut("Search in files"),
+            ("Search in files", vec![])
+        );
     }
 }

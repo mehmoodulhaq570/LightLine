@@ -98,6 +98,8 @@ Versions are kept in `%APPDATA%\LightLine\history`, never next to your files: th
 
 Find (`Ctrl+F`) and **Search** (`Ctrl+Shift+F`) have three switches at the right of the text: `Aa` **Match Case** (on to start with), `ab` **Whole Word** and `.*` **Regular Expression**. With `.*` on, the text is a [regular expression](https://docs.rs/regex/latest/regex/#syntax), such as `fn \w+_test` or `^\s*//`, and a replacement can use what it captured: find `(\w+)@(\w+)` and replace with `$2: $1`, or `${name}` for a named group. A pattern matches within a line, never across a line break. While the pattern isn't valid, the find box says **Invalid regex** and nothing is searched or replaced. The switches stay as set until LightLine closes.
 
+Quick Open opens under the search box in the middle of the title bar, and you type in that box. The buttons along its bottom switch between files, **`>` Commands**, **`@` Symbols**, **`#` Workspace** symbols and **`:` Line**; click the lit one again to go back to files. Commands show their shortcut keys on the right.
+
 Quick Open and **Search** (`Ctrl+Shift+F`) leave out what Git ignores: the patterns in each folder's `.gitignore`, the repository's `.git/info/exclude` and your own excludes file (`~/.config/git/ignore`, or `core.excludesFile`), as well as `.git`, `target`, `node_modules`, `.venv` and `__pycache__`. Build output, logs and downloaded packages don't crowd the results. The Explorer still shows every file.
 
 ### Editing and navigation
@@ -223,7 +225,11 @@ Configurations and the selected name persist in `.lightline/run.json`. Keep secr
 
 Click the **gear** at the bottom of the left rail, or press **`Ctrl+,`**, to open **Settings**. Changes apply at once and are saved to `%APPDATA%\LightLine\settings.json`.
 
-To edit the file directly, click **Open settings.json** at the bottom of the panel or run **`>Open Settings (JSON)`**. Anything you leave out keeps its default:
+- **Search settings**: type in the field at the top to show only the settings whose name (or `settings.json` key) holds what you typed. `Esc` clears it.
+- **Changed settings** have a violet bar at their left. Point at one and click the arrow beside its control to put it back to the default.
+- **Point at any setting** to see what it does and its key in `settings.json`.
+
+To edit the file directly, click the **{ }** button in the panel's header, **Open settings.json** at the bottom of the panel, or run **`>Open Settings (JSON)`**. Anything you leave out keeps its default:
 
 ```json
 {

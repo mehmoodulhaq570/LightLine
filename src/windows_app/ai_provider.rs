@@ -63,7 +63,7 @@ const OLLAMA_DOWNLOAD: &str = "https://ollama.com/download";
 
 /// The provider `endpoint` belongs to: one of the listed services, else
 /// Other.
-fn provider_for(endpoint: &str) -> usize {
+pub(super) fn provider_for(endpoint: &str) -> usize {
     let wanted = endpoint.trim().trim_end_matches('/');
     let wanted = wanted.strip_suffix("/v1").unwrap_or(wanted);
     PROVIDERS[..OTHER]

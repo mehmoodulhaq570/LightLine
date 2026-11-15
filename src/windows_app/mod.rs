@@ -75,6 +75,7 @@ use extensions_panel::{ExtensionsButton, ExtensionsHot};
 use git::{GitButton, GitHot};
 use menu_bar::MenuBar;
 use more_menu::{DebugMenu, GitMenu, MoreMenu};
+use settings_panel::SettingsHot;
 use terminal::TerminalHot;
 mod debugger;
 use debugger::{DEBUG_EVENT_MESSAGE, DebugConfig};
