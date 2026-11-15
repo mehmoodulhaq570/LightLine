@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine Welcome Page</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme, sampled from welcome-current.png */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --link: #6ea8ff;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 10px; }
+  p.lead { color: var(--label); max-width: 940px; margin: 0 0 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+  .toolbar button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toolbar .gap { width: 14px; }
+  .toolbar .hint { color: var(--muted); font-size: 13px; }
+  figure { margin: 0 0 22px; }
+  figcaption { margin: 0 0 8px; font-weight: 600; }
+  figcaption span { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .stage { width: 100%; border: 1px solid var(--edge-page); border-radius: 8px; overflow: hidden; position: relative; background: #000; }
+  .stage > img { display: block; width: 100%; height: auto; }
+  .cols { display: flex; flex-wrap: wrap; gap: 28px; }
+  .cols > div { flex: 1 1 420px; }
+  ol, ul { padding-left: 20px; margin: 0; }
+  li { margin: 0 0 10px; }
+  li b { color: #fff; }
+  .dim { color: var(--muted); }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+
+  /* ---------- The mock: logical pixels, scaled 1.25× like the screenshot,
+     then fitted to the page. 1534×818 logical = 1917×1022 on screen. ---------- */
+  .mock { position: absolute; left: 0; top: 0; width: 1534px; height: 818px; transform-origin: 0 0;
+          background: var(--editor); font-size: 13px; color: var(--text); user-select: none; overflow: hidden; }
+  .mock svg { flex: none; display: block; }
+  .mock .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Title bar: unchanged from today (#82 menu bar). */
+  .tb { position: absolute; left: 0; top: 0; right: 0; height: 35px; background: var(--title); border-bottom: 1px solid var(--edge); display: flex; align-items: center; }
+  .tb .brand { display: flex; align-items: center; gap: 7px; padding: 0 12px 0 12px; font-size: 14px; font-weight: 600; }
+  .tb .brand i { font-style: normal; font-size: 11px; font-weight: 600; color: #c4b5fd; background: #3b2a7a; border-radius: 3px; padding: 0 4px; }
+  .tb .menus { display: flex; }
+  .tb .menus span { padding: 3px 9px; color: var(--label); border-radius: 4px; }
+  .tb .search { position: absolute; left: 740px; top: 5px; width: 520px; height: 25px; border: 1px solid #2b4c84; border-radius: 5px; background: #0c1930;
+                display: flex; align-items: center; gap: 7px; padding: 0 4px 0 9px; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+  .tb .search b { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--label); background: #19294c; border-radius: 3px; padding: 0 5px; }
+  .tb .win { position: absolute; right: 0; top: 0; display: flex; }
+  .tb .win span { width: 46px; height: 35px; display: grid; place-items: center; color: #c8d3e6; }
+
+  /* Rail: the editor's rail (48 px, bar on the open view), with Home on top. */
+  .rail { position: absolute; left: 0; top: 35px; bottom: 22px; width: 48px; background: var(--rail); border-right: 1px solid var(--edge); display: flex; flex-direction: column; }
+  .rail .it { width: 48px; height: 48px; display: grid; place-items: center; color: var(--muted); position: relative; }
+  .rail .it:hover { color: var(--text); }
+  .rail .it.on { color: var(--text); }
+  .rail .it.on::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--violet); }
+  .rail .it .ic { width: 22px; height: 22px; stroke-width: 1.4; }
+  .rail .bottom { margin-top: auto; }
+
+  /* Status bar: just the state. No shortcut hints (they're on the page). */
+  .sb { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; background: var(--editor); border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 12px; color: var(--label); }
+  .sb .ic { width: 13px; height: 13px; }
+  .sb span { display: flex; align-items: center; gap: 5px; }
+
+  /* The page itself. One centred column, two halves; nothing decorative. */
+  .content { position: absolute; left: 48px; top: 35px; right: 0; bottom: 22px; overflow: hidden; }
+  .inner { width: 1040px; margin: 0 auto; padding-top: 64px; }
+  .head { display: flex; align-items: center; gap: 16px; margin-bottom: 40px; }
+  .mark { width: 48px; height: 48px; border-radius: 11px; background: linear-gradient(135deg, #7c3aed, #3b82f6); display: grid; place-items: center; }
+  .head h3 { margin: 0; font-size: 30px; font-weight: 600; line-height: 1.1; display: flex; align-items: baseline; gap: 10px; }
+  .head h3 small { font-size: 12px; font-weight: 400; color: var(--muted); border: 1px solid var(--edge); border-radius: 3px; padding: 0 6px; line-height: 18px; }
+  .head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .speed { margin-left: auto; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; border: 1px solid var(--edge); border-radius: 12px; padding: 2px 11px 2px 9px; position: relative; }
+  .speed i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .speed b { color: var(--text); font-weight: 600; }
+  .speed .tip { display: none; position: absolute; right: 0; top: 30px; width: 300px; background: #0c1730; border: 1px solid var(--edge); border-radius: 5px; padding: 7px 10px; color: var(--label); font-size: 12px; z-index: 2; }
+  .speed:hover .tip { display: block; }
+
+  .halves { display: flex; gap: 64px; }
+  .left { flex: 0 0 500px; min-width: 0; }
+  .right { flex: 1; min-width: 0; }
+  .sec { font-size: 11px; letter-spacing: .08em; color: var(--label); height: 22px; display: flex; align-items: center; margin: 0 0 4px; }
+  .block { margin-bottom: 30px; }
+
+  /* Start: links, like VS Code's. */
+  .row { height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 8px; margin: 0 -8px; border-radius: 4px; cursor: pointer; }
+  .row:hover, .row.hov { background: var(--active); }
+  .link { color: var(--link); }
+  .row:hover .link, .row.hov .link { color: #a5c8ff; }
+  .key { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .row .ic { color: var(--link); }
+
+  /* Recent: name, folder dimmed after it, age. */
+  .rec .ic { color: var(--blue); }
+  .rec .nm { white-space: nowrap; }
+  .rec .path { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .rec .age { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .rec .x { display: none; color: var(--muted); width: 18px; height: 18px; place-items: center; border-radius: 3px; }
+  .rec:hover .x, .rec.hov .x { display: grid; }
+  .rec:hover .age, .rec.hov .age { display: none; }
+  .rec .x:hover { background: var(--select); color: var(--text); }
+  .empty { color: var(--muted); padding: 4px 0; }
+  .empty a { color: var(--link); text-decoration: none; }
+
+  /* Get started: one real command each, with what it's for. */
+  .gs { height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 10px; margin: 0 -10px; border-radius: 5px; cursor: pointer; }
+  .gs:hover, .gs.hov { background: var(--active); }
+  .gs .tile { width: 32px; height: 32px; border-radius: 6px; background: #0f1a33; border: 1px solid var(--edge); display: grid; place-items: center; }
+  .gs .tile .ic { width: 17px; height: 17px; }
+  .gs .t { font-size: 13.5px; line-height: 18px; }
+  .gs .d { font-size: 12px; color: var(--muted); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gs .txt { min-width: 0; flex: 1; }
+  .chip { font-size: 11.5px; color: var(--label); background: var(--active); border: 1px solid var(--edge); border-radius: 3px; padding: 0 6px; line-height: 18px; white-space: nowrap; }
+
+  .learn { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  .learn a { color: var(--link); text-decoration: none; display: flex; align-items: center; gap: 6px; height: 24px; }
+  .learn a:hover { color: #a5c8ff; text-decoration: underline; }
+  .learn .ic { width: 14px; height: 14px; }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+  /* Narrow window: the halves stack and Get started loses its descriptions. */
+  .mock.narrow { width: 900px; }
+  .mock.narrow .tb .search { left: 470px; width: 220px; }
+  .mock.narrow .tb .menus { display: none; }
+  .mock.narrow .tb .brand::after { content: "\2630"; margin-left: 10px; color: var(--label); font-weight: 400; }
+  .mock.narrow .inner { width: auto; padding: 40px 40px 0; }
+  .mock.narrow .head { margin-bottom: 26px; }
+  .mock.narrow .halves { flex-direction: column; gap: 0; }
+  .mock.narrow .left { flex: none; }
+  .mock.narrow .block { margin-bottom: 20px; }
+  .mock.narrow .gs { height: 28px; gap: 10px; padding: 0 8px; margin: 0 -8px; }
+  .mock.narrow .gs .tile { width: auto; height: auto; border: 0; background: none; }
+  .mock.narrow .gs .d { display: none; }
+  .mock.narrow .gs .t { font-size: 13px; }
+  .mock.narrow .speed { display: none; }
+  .mock.narrow .rec:nth-child(n+7) { display: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Welcome page: proposal</h1>
+  <p class="lead">Today's Welcome page beside a flatter one that matches the rest of v0.11.0's VS Code-style layout. Both are at the same 125% scale. The proposal keeps every working action, drops the decoration and the duplicates, and fixes three things that don't work. Point at rows to see their hover state; the toolbar switches between states.</p>
+
+  <div class="toolbar" role="group" aria-label="View">
+    <button type="button" data-view="new" aria-pressed="true">Proposal</button>
+    <button type="button" data-view="old" aria-pressed="false">Today</button>
+    <span class="gap"></span>
+    <button type="button" id="t-empty" aria-pressed="false">No recent folders</button>
+    <button type="button" id="t-narrow" aria-pressed="false">Narrow window (900 px)</button>
+    <span class="hint">Hover the speed pill for what it measures.</span>
+  </div>
+
+  <figure id="fig-new">
+    <figcaption>Proposal<span>1534 × 818 logical px at 125%, the size of the screenshot</span></figcaption>
+    <div class="stage" id="stage"><div class="mock" id="mock">
+      <div class="tb">
+        <div class="brand">
+          <svg width="16" height="18" viewBox="0 0 16 18"><path d="M9.5 1 2 10.2h5.2L6.2 17 14 7.6H8.8z" fill="#a78bfa"/></svg>
+          LightLine <i>IDE</i>
+        </div>
+        <div class="menus"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span><span>Help</span></div>
+        <div class="search"><svg class="ic" viewBox="0 0 16 16" style="width:13px;height:13px"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>Search files, symbols, commands...<b>Ctrl P</b></div>
+        <div class="win">
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><path d="M1 6h10" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+          <span><svg width="11" height="11" viewBox="0 0 12 12"><path d="m1.5 1.5 9 9m0-9-9 9" stroke="#c8d3e6" stroke-width="1.1"/></svg></span>
+        </div>
+      </div>
+
+      <div class="rail">
+        <div class="it on" title="Welcome"><svg class="ic" viewBox="0 0 22 22"><path d="M3.5 10 11 3.5l7.5 6.5M5.5 8.5V18h4v-5h3v5h4V8.5"/></svg></div>
+        <div class="it" title="Explorer"><svg class="ic" viewBox="0 0 22 22"><path d="M7 4.5h7l3.5 3.5v10H7z"/><path d="M14 4.5V8h3.5M4.5 7v12.5H14"/></svg></div>
+        <div class="it" title="Search"><svg class="ic" viewBox="0 0 22 22"><circle cx="9.5" cy="9.5" r="5.5"/><path d="m13.5 13.5 5 5"/></svg></div>
+        <div class="it" title="Source Control"><svg class="ic" viewBox="0 0 22 22"><circle cx="7" cy="5.5" r="2"/><circle cx="7" cy="16.5" r="2"/><circle cx="15" cy="9" r="2"/><path d="M7 7.5v7M15 11c0 3-8 2.5-8 3.5"/></svg></div>
+        <div class="it" title="Run &amp; Debug"><svg class="ic" viewBox="0 0 22 22"><path d="M6 4.5v13l11-6.5z"/></svg></div>
+        <div class="it" title="Extensions"><svg class="ic" viewBox="0 0 22 22"><rect x="4" y="4" width="6" height="6"/><rect x="12" y="4" width="6" height="6"/><rect x="4" y="12" width="6" height="6"/><rect x="12" y="12" width="6" height="6"/></svg></div>
+        <div class="it" title="AI Assistant"><svg class="ic" viewBox="0 0 22 22"><path d="M11 3 12.8 9.2 19 11l-6.2 1.8L11 19l-1.8-6.2L3 11l6.2-1.8z"/></svg></div>
+        <div class="it bottom" title="Settings (Ctrl+,)"><svg class="ic" viewBox="0 0 22 22"><circle cx="11" cy="11" r="3"/><path d="M11 2.5v2.5M11 17v2.5M2.5 11H5M17 11h2.5M5 5l1.8 1.8M15.2 15.2 17 17M5 17l1.8-1.8M15.2 6.8 17 5"/></svg></div>
+      </div>
+
+      <div class="content"><div class="inner">
+        <div class="head">
+          <div class="mark"><svg width="24" height="27" viewBox="0 0 16 18"><path d="M9.5 1 2 10.2h5.2L6.2 17 14 7.6H8.8z" fill="#fff"/></svg></div>
+          <div>
+            <h3>LightLine <small>v0.11.0</small></h3>
+            <p>A fast, light code editor. Everything here is one click or one key away.</p>
+          </div>
+          <div class="speed"><i></i>Started in <b>84 ms</b>
+            <div class="tip">From launching LightLine to this page being drawn, measured on every start (one call when the page first paints, nothing after). Shown only here, so a slow start is noticed.</div>
+          </div>
+        </div>
+
+        <div class="halves">
+          <div class="left">
+            <div class="block">
+              <div class="sec">START</div>
+              <div class="row"><svg class="ic" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M8 7v5M5.5 9.5h5"/></svg><span class="link">New File</span><span class="key">Ctrl+N</span></div>
+              <div class="row"><svg class="ic" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M9.5 1.5v3h3"/></svg><span class="link">Open File...</span><span class="key">Ctrl+O</span></div>
+              <div class="row hov"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z"/></svg><span class="link">Open Folder...</span><span class="key">Ctrl+Shift+O</span></div>
+            </div>
+            <div class="block">
+              <div class="sec">RECENT</div>
+              <div id="recent">
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">CustomIDE</span><span class="path">D:\Projects</span><span class="age">11 min ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">scrapper</span><span class="path">C:\Users\mehmo\Downloads</span><span class="age">22 hours ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">lightline-tmp</span><span class="path">D:\Projects</span><span class="age">2 days ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">run-config-ui</span><span class="path">D:\DevTools\lightline\tmp</span><span class="age">5 weeks ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">pyright-demo</span><span class="path">D:\DevTools\samples</span><span class="age">6 weeks ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">go-hello</span><span class="path">D:\DevTools\samples</span><span class="age">7 weeks ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">c-runner</span><span class="path">D:\DevTools\samples</span><span class="age">7 weeks ago</span><span class="x" title="Remove from Recent">×</span></div>
+                <div class="row rec"><svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="currentColor"/></svg><span class="nm">notes</span><span class="path">C:\Users\mehmo\Documents</span><span class="age">2 months ago</span><span class="x" title="Remove from Recent">×</span></div>
+              </div>
+              <div class="empty" id="recent-empty" hidden>No recent folders yet. <a href="#" onclick="return false">Open a folder</a> and it shows up here.</div>
+            </div>
+          </div>
+
+          <div class="right">
+            <div class="block">
+              <div class="sec">GET STARTED</div>
+              <div class="gs"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:#a78bfa"><path d="m4 5 3 3-3 3M8.5 11.5h4"/></svg></div><div class="txt"><div class="t">Command Palette</div><div class="d">Every command, by name</div></div><span class="chip">Ctrl+Shift+P</span></div>
+              <div class="gs hov"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:var(--blue)"><path d="M3.5 1.5h6l3 3v10h-9z"/><circle cx="7.5" cy="9" r="2"/><path d="m9 10.5 1.8 1.8"/></svg></div><div class="txt"><div class="t">Go to File</div><div class="d">Open any file in the folder by typing part of its name</div></div><span class="chip">Ctrl+P</span></div>
+              <div class="gs"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:var(--blue)"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg></div><div class="txt"><div class="t">Search in Files</div><div class="d">Plain text or regex, across the whole folder</div></div><span class="chip">Ctrl+Shift+F</span></div>
+              <div class="gs"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:var(--green)"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="m4.5 6 2 2-2 2M8 10.5h3.5"/></svg></div><div class="txt"><div class="t">Terminal</div><div class="d">PowerShell, Command Prompt, Git Bash or WSL</div></div><span class="chip">Ctrl+`</span></div>
+              <div class="gs"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:var(--amber)"><path d="M8 1.5a6.5 6.5 0 1 0 0 13c1 0 1.3-.8.9-1.6-.5-1 .1-2 1.2-2H12a2.5 2.5 0 0 0 2.5-2.5C14.5 4.5 11.6 1.5 8 1.5z"/><circle cx="5" cy="7" r=".8" fill="currentColor"/><circle cx="8" cy="4.8" r=".8" fill="currentColor"/><circle cx="11" cy="7" r=".8" fill="currentColor"/></svg></div><div class="txt"><div class="t">Color Theme</div><div class="d">Pick a theme, or install Dracula or Catppuccin from Extensions</div></div></div>
+              <div class="gs"><div class="tile"><svg class="ic" viewBox="0 0 16 16" style="color:var(--label)"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></div><div class="txt"><div class="t">Settings</div><div class="d">Font, tab size, word wrap, format on save...</div></div><span class="chip">Ctrl+,</span></div>
+            </div>
+            <div class="block">
+              <div class="sec">LEARN</div>
+              <div class="learn">
+                <a href="#" onclick="return false"><svg class="ic" viewBox="0 0 16 16"><rect x="1.5" y="4" width="13" height="8" rx="1"/><path d="M4 6.5h1M7 6.5h1M10 6.5h1M5 9.5h6"/></svg>Keyboard Shortcuts</a>
+                <a href="#" onclick="return false"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h4.5A1.5 1.5 0 0 1 8 4.5v9A1.5 1.5 0 0 0 6.5 12H2zM14 3H9.5A1.5 1.5 0 0 0 8 4.5v9a1.5 1.5 0 0 1 1.5-1.5H14z"/></svg>User Guide</a>
+                <a href="#" onclick="return false"><svg class="ic" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M6 7.5h4M6 10h4"/></svg>Release Notes</a>
+                <a href="#" onclick="return false"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4.8v4M8 11v.2"/></svg>Report an Issue</a>
+              </div>
+              <div class="foot">Ctrl+Shift+H brings this page back.</div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+
+      <div class="sb">
+        <span>Ready</span>
+        <span><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5v6M11 7.5c0 2.5-6 2-6 3.5"/></svg>main</span>
+      </div>
+    </div></div>
+  </figure>
+
+  <figure id="fig-old" hidden>
+    <figcaption>Today<span>v0.11.0, 1917 × 1022 screen pixels (design/screens/welcome-current.png)</span></figcaption>
+    <div class="stage"><img src="screens/welcome-current.png" alt="Today's Welcome page: a large gradient hero with an illustration, Getting Started steps, Recent Projects, Quick Actions and a Join the Community banner."></div>
+  </figure>
+
+  <h2>What changes, and why</h2>
+  <div class="cols">
+    <div>
+      <ol>
+        <li><b>Flat, like the rest of v0.11.0.</b> The page sits on the editor's own background, with section labels in the side panels' style (11 px capitals) instead of four bordered cards and a gradient hero. The rail is the editor's rail (48 px, a 2 px bar on the open view, no tile), so going from Welcome to a file no longer changes the chrome.</li>
+        <li><b>No decoration.</b> The editor illustration, "CODE BUILD DEBUG CREATE", "A brighter development tomorrow" and "Build Faster. Think Smarter." go. They took half the page and did nothing. "AI-powered" goes too: AI is opt-in, and speed is what LightLine is about.</li>
+        <li><b>Each action once.</b> Today Open Folder appears three times, New File and Search twice, and the status bar repeats the shortcuts a fourth time. Now <b>Start</b> has New File, Open File and Open Folder, and <b>Get started</b> has the six things worth learning first, each with its key.</li>
+        <li><b>More of Recent.</b> Eight folders instead of three, one 28 px row each (name, then its folder dimmed, then its age), instead of 50 px rows with a dead "View all". Point at a row for <b>×</b> to remove it from the list.</li>
+        <li><b>Speed you can see.</b> A small "Started in 84 ms" pill: the time from launch to this page being drawn, measured on every start. It's the one claim LightLine makes about itself, shown where it can be checked.</li>
+        <li><b>Narrow windows.</b> Below about 1,150 px the halves stack, Get started drops its descriptions, and Recent shows five; nothing is cut off. Today Getting Started disappears instead.</li>
+      </ol>
+    </div>
+    <div>
+      <p style="margin-top:0"><b>Fixed along the way</b></p>
+      <ul>
+        <li><b>Command Palette</b> is labelled <kbd>Ctrl+P</kbd> today but opens Go to File. It becomes <kbd>Ctrl+Shift+P</kbd> and opens with <code>&gt;</code>, and Go to File gets its own row.</li>
+        <li><b>View all →</b> next to Recent Projects isn't clickable. It's gone; the list is longer instead, and <b>File → Open Recent</b> is still there.</li>
+        <li><b>Run your first build</b> runs the active file, but the Welcome page has none, so it can only fail. It's replaced by rows that work from here.</li>
+        <li>The status bar's <i>Ctrl+O file • Ctrl+N new • Ctrl+Shift+O folder</i> repeated the page. It keeps <i>Ready</i> and the branch.</li>
+      </ul>
+      <p><b>Kept</b>: the title bar and menus, every rail button, Settings at the bottom of the rail, all six Quick Actions (now in Start and Get started), the Recent click to open, the GitHub links (now under Learn, as in the Help menu), and <kbd>Ctrl+Shift+H</kbd>.</p>
+    </div>
+  </div>
+
+  <h2>Cost</h2>
+  <table>
+    <tr><th>What</th><th>Today</th><th>Proposal</th></tr>
+    <tr><td>Drawn at start (when no file is restored, this is the first paint)</td><td>Gradient hero, illustration (polygons, bars, bolt), 4 bordered cards, banner, 3 recent rows, 6 quick rows, 4 steps</td><td>One background, logo, 3 + 8 + 6 rows, 4 links, one pill. Fewer shapes and no gradients; first-paint cycles to be measured before and after</td></tr>
+    <tr><td>"Started in" pill</td><td></td><td>One <code>GetProcessTimes</code> call the first time the page paints, then a stored number. No timer, nothing while idle</td></tr>
+    <tr><td>Recent list</td><td>Read once at start, up to 5 folders, each checked with <code>is_dir</code></td><td>The same read, up to 10 (8 shown wide, 5 narrow). <b>×</b> rewrites <code>recent-workspaces.txt</code> on click only</td></tr>
+    <tr><td>Hover</td><td>Row highlight</td><td>The same, one row's rectangle invalidated</td></tr>
+  </table>
+
+  <h2>To decide</h2>
+  <ul>
+    <li><b>The speed pill</b>: keep it, or leave it out? It's the only new feature on the page.</li>
+    <li><b>The "IDE" badge</b>: it stays in the title bar (unchanged here); the page itself just says LightLine and the version.</li>
+    <li><b>Clone Git Repository</b>: VS Code has it under Start. LightLine has no clone command yet, so it isn't in this proposal; it would be a separate change.</li>
+  </ul>
+</div>
+
+<script>
+  const mock = document.getElementById('mock');
+  const stage = document.getElementById('stage');
+  function fit() {
+    const w = mock.classList.contains('narrow') ? 900 : 1534;
+    const k = stage.clientWidth / (w * 1.25) * 1.25;   // logical px → page px
+    mock.style.transform = 'scale(' + k + ')';
+    stage.style.height = (818 * k) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+    const v = b.dataset.view;
+    document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    document.getElementById('fig-new').hidden = v !== 'new';
+    document.getElementById('fig-old').hidden = v !== 'old';
+    fit();
+  }));
+  function toggle(id, on) {
+    const b = document.getElementById(id);
+    b.addEventListener('click', () => {
+      const p = b.getAttribute('aria-pressed') !== 'true';
+      b.setAttribute('aria-pressed', String(p));
+      on(p); fit();
+    });
+  }
+  toggle('t-empty', p => { document.getElementById('recent').hidden = p; document.getElementById('recent-empty').hidden = !p; });
+  toggle('t-narrow', p => { mock.classList.toggle('narrow', p); stage.style.maxWidth = p ? (900 * 1.25 / 1917 * 100) + '%' : ''; });
+  // Hover demo rows lose their fixed highlight once the mouse is used.
+  mock.addEventListener('mousemove', () => mock.querySelectorAll('.hov').forEach(e => e.classList.remove('hov')), { once: true });
+  fit();
+  // #narrow, #empty or #narrow,empty open the page in that state.
+  location.hash.slice(1).split(',').forEach(s => { const b = document.getElementById('t-' + s); if (b) b.click(); });
+</script>
+</body>
+</html>

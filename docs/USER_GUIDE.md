@@ -2,6 +2,7 @@
 
 Everything the [README](../README.md) leaves out: every shortcut, every setting, and how to set up languages, the debugger, the AI Assistant and extensions.
 
+- [The Welcome page](#the-welcome-page)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Settings](#settings)
 - [Unsaved-work recovery](#unsaved-work-recovery)
@@ -13,6 +14,18 @@ Everything the [README](../README.md) leaves out: every shortcut, every setting,
 - [Verifying a download](#verifying-a-download)
 
 ---
+
+## The Welcome page
+
+LightLine opens on the Welcome page when no files are restored; `Ctrl+Shift+H` brings it back at any time, and `Esc` leaves it when a folder is open.
+
+- **Start**: New File (`Ctrl+N`), Open File (`Ctrl+O`) and Open Folder (`Ctrl+Shift+O`).
+- **Recent**: the last folders you opened (LightLine remembers ten; eight show in a wide window, five in a narrow one), each with the folder it's in and how long ago it changed. Click one to open it; point at it and click **×** to take it off the list (the folder itself isn't touched). **File → Open Recent** lists the same folders.
+- **Get started**: the Command Palette (`Ctrl+Shift+P`), Go to File (`Ctrl+P`), Search in Files (`Ctrl+Shift+F`), the terminal (`` Ctrl+` ``), Color Theme and Settings (`Ctrl+,`).
+- **Learn**: the keyboard shortcuts, this guide, the release notes and a new issue, opened in your browser (the same links as the **Help** menu).
+- **Started in … ms**: how long this start took, from launching LightLine to its first frame. It's measured once, when the window first draws, and costs nothing after that.
+
+In a narrow window the two halves stack; in a narrow or short one, Get started drops its descriptions, and rows that don't fit are left out.
 
 ## Keyboard shortcuts
 

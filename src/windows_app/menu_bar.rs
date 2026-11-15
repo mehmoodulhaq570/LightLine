@@ -42,11 +42,18 @@ const CHEVRON_ROOM: i32 = 18;
 /// then the menu moves up.
 const WINDOW_MARGIN: i32 = 8;
 
-const VERSION: &str = match option_env!("LIGHTLINE_VERSION") {
+pub(super) const VERSION: &str = match option_env!("LIGHTLINE_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
 const PROJECT: &str = "https://github.com/mehmoodulhaq570/LightLine";
+// Help's links, shared with the Welcome page's Learn section.
+pub(super) const SHORTCUTS_URL: &str =
+    "https://github.com/mehmoodulhaq570/LightLine/blob/main/docs/USER_GUIDE.md#keyboard-shortcuts";
+pub(super) const GUIDE_URL: &str =
+    "https://github.com/mehmoodulhaq570/LightLine/blob/main/docs/USER_GUIDE.md";
+pub(super) const RELEASES_URL: &str = "https://github.com/mehmoodulhaq570/LightLine/releases";
+pub(super) const NEW_ISSUE_URL: &str = "https://github.com/mehmoodulhaq570/LightLine/issues/new";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
@@ -345,20 +352,14 @@ const HELP: &[Entry] = &[
         "Keyboard Shortcuts",
         'K',
         "",
-        Action::Link(
-            "https://github.com/mehmoodulhaq570/LightLine/blob/main/docs/USER_GUIDE.md#keyboard-shortcuts",
-            "the keyboard shortcuts",
-        ),
+        Action::Link(SHORTCUTS_URL, "the keyboard shortcuts"),
         N,
     ),
     Item(
         "User Guide",
         'U',
         "",
-        Action::Link(
-            "https://github.com/mehmoodulhaq570/LightLine/blob/main/docs/USER_GUIDE.md",
-            "the User Guide",
-        ),
+        Action::Link(GUIDE_URL, "the User Guide"),
         N,
     ),
     Separator,
@@ -366,20 +367,14 @@ const HELP: &[Entry] = &[
         "Release Notes",
         'N',
         "",
-        Action::Link(
-            "https://github.com/mehmoodulhaq570/LightLine/releases",
-            "the release notes",
-        ),
+        Action::Link(RELEASES_URL, "the release notes"),
         N,
     ),
     Item(
         "Report an Issue",
         'I',
         "",
-        Action::Link(
-            "https://github.com/mehmoodulhaq570/LightLine/issues/new",
-            "a new issue",
-        ),
+        Action::Link(NEW_ISSUE_URL, "a new issue"),
         N,
     ),
     Separator,

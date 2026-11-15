@@ -827,7 +827,6 @@ pub(super) struct App {
     pub(super) small_font: HFONT,
     pub(super) brand_font: HFONT,
     pub(super) title_font: HFONT,
-    pub(super) hero_font: HFONT,
     pub(super) hero_icon: HICON,
     pub(super) icons: IconSet,
     pub(super) theme: Theme,
@@ -945,6 +944,9 @@ pub(super) struct App {
     pub(super) recovery_armed: std::cell::Cell<bool>,
     pub(super) recovery_key: RefCell<Option<session::RecoveryKey>>,
     pub(super) welcome: bool,
+    // Milliseconds from the process starting to its first paint, shown on
+    // the Welcome page; measured once (see paint).
+    pub(super) startup_ms: Option<u32>,
     pub(super) ai_assistant_visible: bool,
     // The AI Assistant's conversation and message box (see ai_chat.rs).
     pub(super) ai: AiChat,
@@ -1462,14 +1464,10 @@ impl App {
         }
     }
 
-    // Display sizes used by the welcome screen's hero block. They are far
-    // larger than brand_font, which is sized for tab strips and headers.
+    // The Welcome page's "LightLine": far larger than brand_font, which is
+    // sized for tab strips and headers.
     pub(super) fn title_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
         Self::display_font(30, dpi, zoom)
-    }
-
-    pub(super) fn hero_font_for_dpi(dpi: u32, zoom: i32) -> HFONT {
-        Self::display_font(46, dpi, zoom)
     }
 
     fn display_font(points: i32, dpi: u32, zoom: i32) -> HFONT {
@@ -1524,7 +1522,6 @@ impl App {
             small_font: Self::small_font_for_dpi(dpi, zoom),
             brand_font: Self::brand_font_for_dpi(dpi, zoom),
             title_font: Self::title_font_for_dpi(dpi, zoom),
-            hero_font: Self::hero_font_for_dpi(dpi, zoom),
             hero_icon,
             icons: IconSet::new(dpi, zoom),
             theme,
@@ -1597,6 +1594,7 @@ impl App {
             recovery_armed: std::cell::Cell::new(false),
             recovery_key: RefCell::new(None),
             welcome: true,
+            startup_ms: None,
             ai_assistant_visible: false,
             ai: AiChat::new(),
             side_view: SideView::Files,
@@ -2672,10 +2670,9 @@ impl App {
         let small_font = Self::small_font_for_dpi(dpi, zoom);
         let brand_font = Self::brand_font_for_dpi(dpi, zoom);
         let title_font = Self::title_font_for_dpi(dpi, zoom);
-        let hero_font = Self::hero_font_for_dpi(dpi, zoom);
         // All or nothing: a partial swap would leave the app drawing with a
         // mix of old and new metrics, so drop everything and keep the old set.
-        let created = [font, ui_font, small_font, brand_font, title_font, hero_font];
+        let created = [font, ui_font, small_font, brand_font, title_font];
         if created.iter().any(|handle| handle.is_null()) {
             for handle in created {
                 if !handle.is_null() {
@@ -2692,7 +2689,6 @@ impl App {
             DeleteObject(self.small_font);
             DeleteObject(self.brand_font);
             DeleteObject(self.title_font);
-            DeleteObject(self.hero_font);
         }
         self.line_height = Self::measured_line_height(font, dpi, zoom);
         self.char_width = Self::measured_char_width(font, dpi, zoom);
@@ -2703,7 +2699,6 @@ impl App {
         self.small_font = small_font;
         self.brand_font = brand_font;
         self.title_font = title_font;
-        self.hero_font = hero_font;
         self.icons = IconSet::new(dpi, zoom);
         self.dpi = dpi;
         self.zoom = zoom;

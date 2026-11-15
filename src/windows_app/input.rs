@@ -1455,22 +1455,18 @@ impl App {
             WelcomeAction::OpenFolder => self.open_folder(hwnd),
             WelcomeAction::NewFile => self.new_file(hwnd),
             WelcomeAction::Terminal => self.open_terminal(hwnd),
-            WelcomeAction::CommandPalette => self.show_quick_open(hwnd),
-            WelcomeAction::Community => {
-                use windows_sys::Win32::UI::Shell::ShellExecuteW;
-                let operation = wide("open");
-                let url = wide("https://github.com/mehmoodulhaq570/LightLine");
-                unsafe {
-                    ShellExecuteW(
-                        hwnd,
-                        operation.as_ptr(),
-                        url.as_ptr(),
-                        null(),
-                        null(),
-                        SW_SHOWNORMAL,
-                    );
-                }
-                self.status = "Opened the project page in your browser".into();
+            WelcomeAction::GoToFile => self.show_quick_open(hwnd),
+            // As Ctrl+Shift+P: Quick Open in its commands mode.
+            WelcomeAction::CommandPalette => {
+                self.show_quick_open(hwnd);
+                self.quick_query = ">".into();
+                self.refresh(hwnd);
+            }
+            WelcomeAction::ColorTheme => self.run_command(hwnd, 39),
+            WelcomeAction::Link(index) => {
+                let (_, _, address, what) = super::render::WELCOME_LINKS[index];
+                super::ai_provider::open_in_browser(hwnd, address);
+                self.status = format!("Opened {what} in your browser");
                 self.refresh(hwnd);
             }
             WelcomeAction::Recent(index) => {
@@ -1478,6 +1474,16 @@ impl App {
                     self.set_workspace(hwnd, path);
                 }
             }
+            WelcomeAction::ForgetRecent(index) => {
+                if index < self.recent.len() {
+                    let path = self.recent.remove(index);
+                    lightline::workflow::forget_workspace(&path);
+                    // The targets after it moved up a row.
+                    self.hot = None;
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
+            }
+            WelcomeAction::StartTime => {}
             WelcomeAction::Settings => self.open_settings_panel(hwnd),
         }
     }

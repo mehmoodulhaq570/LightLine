@@ -47,6 +47,10 @@ pub fn extensions_dir() -> Option<PathBuf> {
     )
 }
 
+/// How many recent folders are kept (the Welcome page and File > Open
+/// Recent show them).
+pub const RECENT_KEPT: usize = 10;
+
 pub fn recent_workspaces() -> Vec<PathBuf> {
     let Some(path) = recent_path() else {
         return Vec::new();
@@ -56,16 +60,26 @@ pub fn recent_workspaces() -> Vec<PathBuf> {
         .lines()
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
-        .take(5)
+        .take(RECENT_KEPT)
         .collect()
 }
 
 pub fn remember_workspace(root: &Path) {
-    let Some(path) = recent_path() else { return };
     let mut recent = recent_workspaces();
     recent.retain(|other| other != root);
     recent.insert(0, root.to_path_buf());
-    recent.truncate(5);
+    write_recent(&recent);
+}
+
+/// Takes `root` off the recent folders (the Welcome page's ×).
+pub fn forget_workspace(root: &Path) {
+    let mut recent = recent_workspaces();
+    recent.retain(|other| other != root);
+    write_recent(&recent);
+}
+
+fn write_recent(recent: &[PathBuf]) {
+    let Some(path) = recent_path() else { return };
     if let Some(parent) = path.parent()
         && fs::create_dir_all(parent).is_ok()
     {
@@ -73,6 +87,7 @@ pub fn remember_workspace(root: &Path) {
             path,
             recent
                 .iter()
+                .take(RECENT_KEPT)
                 .map(|path| path.to_string_lossy())
                 .collect::<Vec<_>>()
                 .join("\n"),

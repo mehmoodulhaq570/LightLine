@@ -7,7 +7,7 @@
 // title-bar clicks use too, and the Welcome screen's targets are the ones
 // its clicks use.
 
-use super::render::welcome_rail_tip;
+use super::render::welcome_tip;
 use super::*;
 
 /// Debug builds: a live test's mouse move to (LOWORD, HIWORD of lParam);
@@ -190,11 +190,7 @@ impl App {
             }
             Hot::CommandCenter => Some(self.command_center_rect(hwnd)),
             Hot::MenuTitle(_) | Hot::MenuButton => self.menu_title_rect(hwnd, hot),
-            Hot::Welcome(index) => self
-                .welcome_layout(client)
-                .targets
-                .get(index)
-                .map(|(rect, _)| *rect),
+            Hot::Welcome(index) => self.welcome_layout(client).hot_rect(index),
             Hot::Git(git) => {
                 let origin = self.side_origin();
                 self.git_hot_rect(git).map(|rect| RECT {
@@ -249,7 +245,7 @@ impl App {
             Hot::Welcome(index) => {
                 let mut client = RECT::default();
                 unsafe { GetClientRect(hwnd, &mut client) };
-                return welcome_rail_tip(&self.welcome_layout(client).targets, index);
+                return welcome_tip(&self.welcome_layout(client).targets, index);
             }
             Hot::MenuButton => "Menu (Alt)",
             Hot::Git(GitHot::Button(button)) => match button {
@@ -315,12 +311,17 @@ impl App {
         let height = s(28);
         let mut client = RECT::default();
         unsafe { GetClientRect(hwnd, &mut client) };
-        let card = if let Hot::TitleButton(_)
-        | Hot::Git(_)
-        | Hot::Debug(_)
-        | Hot::Extensions(_)
-        | Hot::Terminal(_) = hot
-        {
+        // The Welcome page's own tips (not its rail's) go under the item.
+        let on_page = matches!(hot, Hot::Welcome(_)) && item.left >= s(RAIL);
+        let card = if on_page
+            || matches!(
+                hot,
+                Hot::TitleButton(_)
+                    | Hot::Git(_)
+                    | Hot::Debug(_)
+                    | Hot::Extensions(_)
+                    | Hot::Terminal(_)
+            ) {
             let right = item.right.min(client.right - s(6));
             RECT {
                 left: right - width,
@@ -424,15 +425,6 @@ impl App {
                     },
                 ),
             );
-        }
-    }
-
-    /// An outline around a hovered Welcome target. Drawn after the page.
-    pub(super) fn paint_hot_welcome(&self, hdc: HDC, hwnd: HWND) {
-        if let Some(hot @ Hot::Welcome(_)) = self.hot
-            && let Some(rect) = self.hot_rect(hwnd, hot)
-        {
-            self.card_outline(hdc, rect, self.scale(8), self.theme.sky);
         }
     }
 
