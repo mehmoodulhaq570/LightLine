@@ -11,7 +11,7 @@
 
 use super::render::blend;
 use super::*;
-use lightline::settings::Settings;
+use lightline::settings::{InlineDiagnostics, Settings};
 use lightline::terminal::ShellKind;
 use std::sync::OnceLock;
 
@@ -45,6 +45,7 @@ enum Setting {
     Minimap,
     GitBlame,
     CodeLens,
+    InlineProblems,
     FormatOnSave,
     ParseLimit,
     ColorTheme,
@@ -94,6 +95,7 @@ const ROWS: &[Row] = &[
     Row::Toggle(Setting::Minimap),
     Row::Toggle(Setting::GitBlame),
     Row::Toggle(Setting::CodeLens),
+    Row::Choice(Setting::InlineProblems),
     Row::Heading("FILES"),
     Row::Toggle(Setting::FormatOnSave),
     Row::Choice(Setting::ParseLimit),
@@ -132,6 +134,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::Minimap => "Minimap",
         Setting::GitBlame => "Git blame on the current line",
         Setting::CodeLens => "Run and Debug links",
+        Setting::InlineProblems => "Inline problems",
         Setting::FormatOnSave => "Format on save",
         Setting::ParseLimit => "Syntax colors up to",
         Setting::ColorTheme => "Color theme",
@@ -159,6 +162,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::Minimap => "showMinimap",
         Setting::GitBlame => "gitBlame",
         Setting::CodeLens => "codeLens",
+        Setting::InlineProblems => "inlineDiagnostics",
         Setting::FormatOnSave => "formatOnSave",
         Setting::ParseLimit => "parseLimitKb",
         Setting::ColorTheme => "colorTheme",
@@ -188,6 +192,9 @@ fn tip(setting: Setting) -> &'static str {
         Setting::Minimap => "A small map of the file at the right  \u{b7}  showMinimap",
         Setting::GitBlame => "Who last changed the caret's line  \u{b7}  gitBlame",
         Setting::CodeLens => "Run, Debug and Run test after main and tests  \u{b7}  codeLens",
+        Setting::InlineProblems => {
+            "Write each line's worst problem after it  \u{b7}  inlineDiagnostics"
+        }
         Setting::FormatOnSave => "Format the file after each save  \u{b7}  formatOnSave",
         Setting::ParseLimit => "Larger files open without syntax colors  \u{b7}  parseLimitKb",
         Setting::ColorTheme => "The colors of LightLine  \u{b7}  colorTheme",
@@ -330,6 +337,12 @@ impl App {
                 .clone()
                 .unwrap_or_else(|| "LightLine".into()),
             Setting::TerminalProfile => settings.default_terminal_profile.name().into(),
+            Setting::InlineProblems => match settings.inline_diagnostics {
+                InlineDiagnostics::Off => "Off",
+                InlineDiagnostics::Errors => "Errors",
+                InlineDiagnostics::ErrorsAndWarnings => "Errors, warnings",
+            }
+            .into(),
             // The service's name when it's a listed one, else its address.
             Setting::AiEndpoint => {
                 let provider = ai_provider::provider_for(&settings.ai_endpoint);
@@ -359,6 +372,7 @@ impl App {
             Setting::TerminalProfile => {
                 now.default_terminal_profile != default.default_terminal_profile
             }
+            Setting::InlineProblems => now.inline_diagnostics != default.inline_diagnostics,
             Setting::AiEndpoint | Setting::AiModel => false,
             toggle => setting_on_in(now, toggle) != setting_on_in(default, toggle),
         }
@@ -389,6 +403,10 @@ impl App {
             }
             Setting::TerminalProfile => {
                 self.set_default_terminal_profile(hwnd, default.default_terminal_profile)
+            }
+            Setting::InlineProblems => {
+                self.settings.inline_diagnostics = default.inline_diagnostics;
+                self.save_settings_change(hwnd);
             }
             Setting::AiEndpoint | Setting::AiModel => {}
             toggle => self.toggle_setting(hwnd, toggle),
@@ -674,6 +692,14 @@ impl App {
                 let next_kb = LIMITS[(current + 1) % LIMITS.len()];
                 self.settings.parse_limit_kb = next_kb;
                 lightline::syntax::set_parse_limit_kb(next_kb);
+                self.save_settings_change(hwnd);
+            }
+            Row::Choice(Setting::InlineProblems) => {
+                self.settings.inline_diagnostics = match self.settings.inline_diagnostics {
+                    InlineDiagnostics::ErrorsAndWarnings => InlineDiagnostics::Errors,
+                    InlineDiagnostics::Errors => InlineDiagnostics::Off,
+                    InlineDiagnostics::Off => InlineDiagnostics::ErrorsAndWarnings,
+                };
                 self.save_settings_change(hwnd);
             }
             Row::Choice(Setting::AiEndpoint) => self.show_ai_provider(hwnd, false),
@@ -1160,7 +1186,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 21);
+        assert_eq!(setting_count(), 22);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

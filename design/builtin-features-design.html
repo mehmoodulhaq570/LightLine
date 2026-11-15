@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Built-in Daily Features</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs::default_dark) */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020; --tab: #081122;
+    --active: #111f3b; --line: #0e1f3d; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --sky: #38bdf8; --teal: #2dd4bf;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78; --orange: #f59150;
+    --fn: #dcd282; --num: #f8b482; --attr: #b48ce6; --pink: #ec4899;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 6px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  h2 small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  p { max-width: 900px; }
+  p.lead { color: var(--label); margin: 0 0 18px; }
+  .toggle { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 12px; }
+  .toggle button { font: inherit; font-size: 13px; color: var(--text); background: #111f3b; border: 1px solid var(--edge-page); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  .toggle button[aria-pressed="true"] { background: #1a3065; border-color: var(--blue); }
+  .toggle .hint { color: var(--muted); font-size: 13px; }
+  .toggle .gap { width: 12px; }
+  .cols { display: flex; flex-wrap: wrap; gap: 28px; margin-top: 14px; }
+  .cols > div { flex: 1 1 380px; min-width: 0; }
+  ul { padding-left: 20px; margin: 0; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  h3 { font-size: 14px; margin: 0 0 8px; color: var(--label); text-transform: uppercase; letter-spacing: .04em; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; }
+  .order { counter-reset: n; list-style: none; padding: 0; }
+  .order li { counter-increment: n; padding-left: 34px; position: relative; }
+  .order li::before { content: counter(n); position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 50%; background: #1a3065; color: #fff; font-size: 12px; display: grid; place-items: center; }
+
+  /* ---------- Editor crops: real pixel sizes, scroll sideways inside on a phone ---------- */
+  .stage { border: 1px solid var(--edge-page); border-radius: 8px; overflow-x: auto; background: var(--editor); }
+  .win { min-width: 860px; position: relative; font-size: 13px; }
+  .tabs { height: 35px; background: var(--tab); border-bottom: 1px solid var(--edge); display: flex; }
+  .tabs span { display: flex; align-items: center; gap: 7px; padding: 0 14px; color: var(--muted); border-right: 1px solid var(--edge); font-size: 13px; }
+  .tabs span.on { background: var(--editor); color: var(--text); box-shadow: inset 0 2px 0 var(--violet); }
+  .tabs .dot { width: 8px; height: 8px; border-radius: 2px; }
+  .code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 14px; padding: 8px 0 10px; position: relative; }
+  .ln { height: 22px; display: flex; align-items: center; white-space: pre; position: relative; }
+  .ln .no { width: 56px; text-align: right; color: var(--muted); padding-right: 22px; flex: none; }
+  .ln.cur { background: var(--line); }
+  .ln.cur .no { color: var(--text); }
+  .ln .src { flex: none; }
+  .k { color: var(--blue); } .s { color: var(--green); } .t { color: var(--teal); } .f { color: var(--fn); }
+  .n { color: var(--num); } .c { color: var(--muted); } .m { color: var(--violet); } .a { color: var(--attr); }
+  .err { text-decoration: underline wavy var(--red); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .warn { text-decoration: underline wavy var(--amber); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .caret { display: inline-block; width: 2px; height: 17px; background: var(--blue); vertical-align: -3px; margin: 0 -1px; }
+  .sbar { height: 22px; border-top: 1px solid var(--edge); display: flex; align-items: center; gap: 16px; padding: 0 10px; font-size: 12px; color: var(--label); }
+  .sbar .r { margin-left: auto; display: flex; gap: 16px; }
+  .sbar .e { color: var(--red); } .sbar .w { color: var(--amber); }
+
+  /* 1. Inline diagnostics */
+  .lens { margin-left: 28px; font-family: "Segoe UI", system-ui, sans-serif; font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; max-width: 470px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .lens i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+  .lens.e { color: #d98a92; } .lens.e i { background: var(--red); }
+  .lens.w { color: #cfa76c; } .lens.w i { background: var(--amber); }
+  .lens.cur { color: var(--text); }
+  .lens .more { color: var(--muted); }
+  .lens .txt { overflow: hidden; text-overflow: ellipsis; }
+  .win.tint .ln.de { background: rgba(246, 110, 120, .07); }
+  .win.tint .ln.dw { background: rgba(245, 184, 95, .06); }
+  .win.tint .ln.cur.de { background: rgba(246, 110, 120, .13); }
+  .win.old .lens { display: none; }
+  .tip { position: absolute; left: 238px; top: 196px; width: 430px; background: #0c1930; border: 1px solid #2b4c84; border-radius: 6px; padding: 9px 12px; font-size: 12.5px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .tip b { color: var(--red); font-weight: 600; }
+  .tip .src2 { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+  .win:not(.old) .tip { display: none; }
+
+  /* 2. Linked tag rename */
+  .pair { outline: 1px solid #4a6fb0; border-radius: 2px; background: rgba(82, 151, 255, .14); }
+  .win.old .pair.end { outline: none; background: none; }
+  .tagnote { position: absolute; right: 16px; top: 52px; font-size: 12px; color: var(--muted); background: #0c1930; border: 1px solid var(--edge); border-radius: 5px; padding: 4px 9px; font-family: "Segoe UI", system-ui, sans-serif; }
+
+  /* 3. Path suggestions: the existing completion box */
+  .pop { position: absolute; left: 335px; top: 89px; width: 330px; background: #0c1930; border: 1px solid #2b4c84; border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,.55); padding: 3px 0; font-size: 13px; }
+  .pop .row { height: 24px; display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+  .pop .row.sel { background: var(--select); }
+  .pop .row em { font-style: normal; color: var(--blue); font-weight: 600; }
+  .pop .row .kind { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .pop .fi { width: 15px; height: 15px; flex: none; border-radius: 3px; display: grid; place-items: center; font-size: 9px; font-weight: 700; color: #0b1222; }
+  .pop .foot { border-top: 1px solid var(--edge); margin-top: 3px; padding: 4px 10px 2px; color: var(--muted); font-size: 11.5px; }
+  .win.old .pop { display: none; }
+
+  /* 4. TODO highlights */
+  .tag-todo, .tag-fixme, .tag-hack, .tag-note { font-weight: 700; border-radius: 3px; padding: 0 3px; margin: 0 -3px; }
+  .win:not(.old) .tag-todo { color: var(--sky); background: rgba(56, 189, 248, .13); }
+  .win:not(.old) .tag-fixme { color: var(--red); background: rgba(246, 110, 120, .14); }
+  .win:not(.old) .tag-hack { color: var(--orange); background: rgba(245, 145, 80, .14); }
+  .win:not(.old) .tag-note { color: var(--green); background: rgba(52, 211, 153, .12); }
+  .win.old [class^="tag-"] { font-weight: 400; }
+  .marks { position: absolute; right: 2px; top: 43px; bottom: 30px; width: 12px; border-left: 1px solid var(--edge); }
+  .marks i { position: absolute; left: 3px; width: 7px; height: 3px; border-radius: 1px; }
+  .win.old .marks i { display: none; }
+  .qo { margin: 10px auto 12px; width: 560px; background: #0c1930; border: 1px solid var(--blue); border-radius: 6px; font-size: 13px; overflow: hidden; }
+  .qo .in { height: 30px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--edge); }
+  .qo .row { height: 24px; display: flex; align-items: center; gap: 10px; padding: 0 10px; white-space: nowrap; }
+  .qo .row.sel { background: var(--select); }
+  .qo .row .where { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .win.old .qo { display: none; }
+
+  #f3 .code { min-height: 270px; }
+  #f5 .code { min-height: 236px; }
+  /* 5. EditorConfig */
+  .ecpop { position: absolute; right: 120px; bottom: 30px; width: 300px; background: #0c1930; border: 1px solid #2b4c84; border-radius: 6px; padding: 9px 12px; font-size: 12.5px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .ecpop div { display: flex; justify-content: space-between; gap: 10px; }
+  .ecpop span { color: var(--muted); }
+  .ecpop .h { color: var(--label); margin-bottom: 4px; display: block; }
+  .ecpop .link { color: var(--blue); margin-top: 6px; display: block; }
+  .ec { color: var(--sky); }
+  .win.old .ecpop, .win.old .ec { display: none; }
+  .win:not(.old) .ec-old { display: none; }
+  .win.old .indent-new { display: none; }
+  .win:not(.old) .indent-old { display: none; }
+  .guide { display: inline-block; width: 0; border-left: 1px solid #1d3358; height: 22px; vertical-align: top; }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Built-in Daily Features</h1>
+  <p class="lead">Five features that VS Code users get from extensions on day one, built into LightLine instead. Zed's registry has nothing for them, and Zed extensions can't draw on the screen, so no extension store could provide them. Each one is off until it's needed, reuses data LightLine already has, and has its own setting. Use <b>Today</b> and <b>Proposed</b> on each to compare.</p>
+
+  <!-- ===================== 1 ===================== -->
+  <h2>1. Errors at the end of the line <small>like Error Lens</small></h2>
+  <p>The language server's message is written after the line in the error's colour, so you can read it without hovering or opening Problems. The line the caret is on shows its message brighter. A long message is cut off at the window's edge with <b>…</b>; hovering still shows the whole thing. When a line has more than one problem, the worst is shown, followed by <b>+1</b>.</p>
+  <div class="toggle" data-fig="f1">
+    <button data-state="old" aria-pressed="false">Today</button>
+    <button data-state="new" aria-pressed="true">Proposed</button>
+    <span class="gap"></span>
+    <span class="hint">Style:</span>
+    <button data-tint="0" aria-pressed="true">Message only</button>
+    <button data-tint="1" aria-pressed="false">Message + line tint</button>
+  </div>
+  <div class="stage"><div class="win" id="f1">
+    <div class="tabs"><span class="on"><i class="dot" style="background:var(--orange)"></i>main.rs</span><span><i class="dot" style="background:var(--orange)"></i>config.rs</span></div>
+    <div class="code">
+      <div class="ln"><span class="no">12</span><span class="src"><span class="k">use</span> std::collections::<span class="t">HashMap</span>;</span></div>
+      <div class="ln dw"><span class="no">13</span><span class="src"><span class="k">use</span> std::<span class="warn">fs</span>;</span><span class="lens w"><i></i><span class="txt">unused import: `fs`</span></span></div>
+      <div class="ln"><span class="no">14</span><span class="src"> </span></div>
+      <div class="ln"><span class="no">15</span><span class="src"><span class="k">fn</span> <span class="f">load</span>(path: &amp;<span class="t">str</span>) -&gt; <span class="t">Config</span> {</span></div>
+      <div class="ln"><span class="no">16</span><span class="src">    <span class="k">let</span> text = std::fs::<span class="f">read_to_string</span>(path).<span class="f">unwrap</span>();</span></div>
+      <div class="ln cur de"><span class="no">17</span><span class="src">    <span class="k">let</span> count: <span class="t">u32</span> = <span class="err">text.lines().count()</span>;<span class="caret"></span></span><span class="lens e cur"><i></i><span class="txt">mismatched types: expected `u32`, found `usize`</span> <span class="more">+1</span></span></div>
+      <div class="ln"><span class="no">18</span><span class="src">    <span class="k">let</span> <span class="k">mut</span> map = <span class="t">HashMap</span>::<span class="f">new</span>();</span></div>
+      <div class="ln de"><span class="no">19</span><span class="src">    <span class="k">for</span> line <span class="k">in</span> text.<span class="f">lines</span>() { map.<span class="f">insert</span>(line, <span class="err">lenght</span>); }</span><span class="lens e"><i></i><span class="txt">cannot find value `lenght` in this scope; a local variable with a similar name exists: `length`</span></span></div>
+      <div class="ln"><span class="no">20</span><span class="src">    <span class="t">Config</span> { count, map }</span></div>
+      <div class="ln"><span class="no">21</span><span class="src">}</span></div>
+    </div>
+    <div class="tip"><b>mismatched types</b>: expected `u32`, found `usize`<div class="src2">rust-analyzer · E0308 · hover shows this today</div></div>
+    <div class="sbar"><span class="e">● 2</span><span class="w">▲ 1</span><span class="r"><span>Ln 17, Col 47</span><span>Spaces: 4</span><span>Rust</span></span></div>
+  </div></div>
+  <div class="cols">
+    <div><h3>Details</h3><ul>
+      <li><b>Setting <code>inlineDiagnostics</code></b>: <code>"off"</code>, <code>"errors"</code> or <code>"errorsAndWarnings"</code> (proposed default). Hints and info stay as squiggles only.</li>
+      <li><b>Placement</b>: 28 px after the last character. If the line is wider than the window, nothing is drawn: no message on a line that fills the screen.</li>
+      <li><b>Word wrap</b>: after the last row of the wrapped line.</li>
+      <li><b>Updates</b>: when the language server sends new diagnostics, only the rows whose message changed are redrawn.</li>
+    </ul></div>
+    <div><h3>Speed</h3><ul>
+      <li>At most one short <code>ExtTextOut</code> per visible row that has a problem, cut to the space left. Rows without problems cost nothing extra.</li>
+      <li>While typing on a line with an error, the old message stays until the server answers, so typing doesn't redraw it twice.</li>
+      <li>The line tint is one <code>FillRect</code> per row, already drawn for the current line today.</li>
+    </ul></div>
+  </div>
+
+  <!-- ===================== 2 ===================== -->
+  <h2>2. Rename the matching tag <small>like Auto Rename Tag</small></h2>
+  <p>With the caret in a tag's name, both the opening and closing names get a thin outline. Typing changes both, and one <kbd>Ctrl+Z</kbd> undoes both. Works in HTML, JSX/TSX and Vue/Svelte templates where the grammar is installed.</p>
+  <div class="toggle" data-fig="f2">
+    <button data-state="old" aria-pressed="false">Today</button>
+    <button data-state="new" aria-pressed="true">Proposed</button>
+    <span class="gap"></span><span class="hint">Typing <code>section</code> over <code>div</code>:</span>
+  </div>
+  <div class="stage"><div class="win" id="f2">
+    <div class="tabs"><span class="on"><i class="dot" style="background:var(--orange)"></i>index.html</span></div>
+    <div class="code">
+      <div class="ln"><span class="no">8</span><span class="src"><span class="c">&lt;</span><span class="k">body</span><span class="c">&gt;</span></span></div>
+      <div class="ln cur"><span class="no">9</span><span class="src">  <span class="c">&lt;</span><span class="k pair">sect<span class="caret"></span></span> <span class="a">class</span>=<span class="s">"hero"</span><span class="c">&gt;</span></span></div>
+      <div class="ln"><span class="no">10</span><span class="src">    <span class="c">&lt;</span><span class="k">h1</span><span class="c">&gt;</span>Welcome<span class="c">&lt;/</span><span class="k">h1</span><span class="c">&gt;</span></span></div>
+      <div class="ln"><span class="no">11</span><span class="src">    <span class="c">&lt;</span><span class="k">p</span><span class="c">&gt;</span>Fast, light, native.<span class="c">&lt;/</span><span class="k">p</span><span class="c">&gt;</span></span></div>
+      <div class="ln"><span class="no">12</span><span class="src">  <span class="c">&lt;/</span><span class="k pair end" id="endtag">sect</span><span class="c">&gt;</span></span></div>
+      <div class="ln"><span class="no">13</span><span class="src"><span class="c">&lt;/</span><span class="k">body</span><span class="c">&gt;</span></span></div>
+    </div>
+    <div class="tagnote" id="tagnote">Both names change together</div>
+    <div class="sbar"><span class="e">● 0</span><span class="r"><span>Ln 9, Col 9</span><span>HTML</span></span></div>
+  </div></div>
+  <div class="cols">
+    <div><h3>Details</h3><ul>
+      <li><b>Setting <code>linkedTagRename</code></b>, on by default.</li>
+      <li>The pair comes from the Tree-sitter tree the syntax worker already keeps. No language server needed.</li>
+      <li>Typing a space or <kbd>Esc</kbd> ends the link. Self-closing tags and mismatched pairs are left alone.</li>
+      <li>The closing name is edited through <code>replace_range</code> inside one undo group, so LSP and syntax see both changes.</li>
+    </ul></div>
+    <div><h3>Speed</h3><ul>
+      <li>The pair is found once, when the caret enters a tag name, not on every key.</li>
+      <li>Each key makes one extra small edit, on a row that's usually already on screen.</li>
+    </ul></div>
+  </div>
+
+  <!-- ===================== 3 ===================== -->
+  <h2>3. File path suggestions <small>like Path IntelliSense</small></h2>
+  <p>Typing <code>./</code> or <code>../</code> inside a string opens the usual completion box with the files and folders there, using the Explorer's icons. Choosing a folder adds <code>/</code> and opens the next list.</p>
+  <div class="toggle" data-fig="f3">
+    <button data-state="old" aria-pressed="false">Today</button>
+    <button data-state="new" aria-pressed="true">Proposed</button>
+  </div>
+  <div class="stage"><div class="win" id="f3">
+    <div class="tabs"><span class="on"><i class="dot" style="background:var(--amber)"></i>app.js</span></div>
+    <div class="code">
+      <div class="ln"><span class="no">1</span><span class="src"><span class="k">import</span> { <span class="f">render</span> } <span class="k">from</span> <span class="s">"./ui/render.js"</span>;</span></div>
+      <div class="ln"><span class="no">2</span><span class="src"><span class="k">import</span> { <span class="f">loadConfig</span> } <span class="k">from</span> <span class="s">"./src/con</span><span class="caret"></span><span class="s">"</span>;</span></div>
+      <div class="ln"><span class="no">3</span><span class="src"> </span></div>
+      <div class="ln"><span class="no">4</span><span class="src"><span class="k">const</span> cfg = <span class="f">loadConfig</span>();</span></div>
+    </div>
+    <div class="pop">
+      <div class="row sel"><span class="fi" style="background:var(--amber)">JS</span><span><em>con</em>fig.js</span><span class="kind">file</span></div>
+      <div class="row"><span class="fi" style="background:var(--blue)">TS</span><span><em>con</em>stants.ts</span><span class="kind">file</span></div>
+      <div class="row"><span class="fi" style="background:#c8a64a">▰</span><span><em>con</em>trollers</span><span class="kind">folder</span></div>
+      <div class="row"><span class="fi" style="background:#6b7f9e">{}</span><span><em>con</em>fig.schema.json</span><span class="kind">file</span></div>
+      <div class="foot">src/ · 4 of 23</div>
+    </div>
+  </div></div>
+  <div class="cols">
+    <div><h3>Details</h3><ul>
+      <li><b>Setting <code>pathCompletion</code></b>, on by default.</li>
+      <li>Paths are relative to the file's folder. Folders and files the Explorer hides (<code>.gitignore</code>, <code>node_modules</code>) are hidden here too.</li>
+      <li>Shown alongside language-server suggestions in the same box, with paths first inside a string.</li>
+    </ul></div>
+    <div><h3>Speed</h3><ul>
+      <li>One folder is read, on a worker, only after <code>./</code> or <code>../</code> is typed in a string. Nothing runs for other keys.</li>
+      <li>The listing is kept until the watcher reports a change in that folder, so typing more letters only filters it.</li>
+      <li>Large folders are capped (proposed: 500 entries) so a huge folder can't stall the box.</li>
+    </ul></div>
+  </div>
+
+  <!-- ===================== 4 ===================== -->
+  <h2>4. TODO highlighting <small>like Todo Highlight / Todo Tree</small></h2>
+  <p><code>TODO</code>, <code>FIXME</code>, <code>HACK</code> and <code>NOTE</code> inside comments get their own colour, with a small mark on the scrollbar so you can find them in a long file. <b>Find TODOs in Workspace</b> in the Command Palette lists them all, using the Search in Files you already have.</p>
+  <div class="toggle" data-fig="f4">
+    <button data-state="old" aria-pressed="false">Today</button>
+    <button data-state="new" aria-pressed="true">Proposed</button>
+  </div>
+  <div class="stage"><div class="win" id="f4">
+    <div class="tabs"><span class="on"><i class="dot" style="background:var(--blue)"></i>worker.py</span></div>
+    <div class="code" style="padding-right:18px">
+      <div class="ln"><span class="no">40</span><span class="src"><span class="k">def</span> <span class="f">run</span>(jobs):</span></div>
+      <div class="ln"><span class="no">41</span><span class="src">    <span class="c"># <span class="tag-todo">TODO</span>: run these in parallel once the queue is bounded</span></span></div>
+      <div class="ln"><span class="no">42</span><span class="src">    <span class="k">for</span> job <span class="k">in</span> jobs:</span></div>
+      <div class="ln"><span class="no">43</span><span class="src">        <span class="c"># <span class="tag-fixme">FIXME</span>: crashes when the job list is empty</span></span></div>
+      <div class="ln"><span class="no">44</span><span class="src">        job.<span class="f">start</span>()</span></div>
+      <div class="ln"><span class="no">45</span><span class="src">    <span class="c"># <span class="tag-hack">HACK</span>: wait for slow disks on CI</span></span></div>
+      <div class="ln"><span class="no">46</span><span class="src">    time.<span class="f">sleep</span>(<span class="n">0.2</span>)</span></div>
+      <div class="ln"><span class="no">47</span><span class="src">    <span class="c"># <span class="tag-note">NOTE</span>: results are returned in start order</span></span></div>
+      <div class="ln"><span class="no">48</span><span class="src">    <span class="k">return</span> [job.<span class="f">result</span>() <span class="k">for</span> job <span class="k">in</span> jobs]</span></div>
+      <div class="ln"><span class="no">49</span><span class="src">    <span class="s">"TODO in a string isn't marked"</span></span></div>
+    </div>
+    <div class="marks"><i style="top:18%;background:var(--sky)"></i><i style="top:34%;background:var(--red)"></i><i style="top:51%;background:var(--orange)"></i><i style="top:66%;background:var(--green)"></i><i style="top:88%;background:var(--sky)"></i></div>
+    <div class="qo">
+      <div class="in"><span style="color:var(--muted)">&gt;</span>&nbsp;Find TODOs in Workspace</div>
+      <div class="row sel"><span class="tag-fixme" style="font-weight:700">FIXME</span><span>crashes when the job list is empty</span><span class="where">worker.py:43</span></div>
+      <div class="row"><span class="tag-todo" style="font-weight:700">TODO</span><span>run these in parallel once the queue is bounded</span><span class="where">worker.py:41</span></div>
+      <div class="row"><span class="tag-todo" style="font-weight:700">TODO</span><span>retry on timeout</span><span class="where">net/client.py:118</span></div>
+      <div class="row"><span class="tag-hack" style="font-weight:700">HACK</span><span>wait for slow disks on CI</span><span class="where">worker.py:45</span></div>
+    </div>
+    <div class="sbar"><span class="e">● 0</span><span class="r"><span>Ln 41, Col 7</span><span>Python</span></span></div>
+  </div></div>
+  <div class="cols">
+    <div><h3>Details</h3><ul>
+      <li><b>Setting <code>todoHighlight</code></b>, on by default. The words can be changed with <code>todoKeywords</code> (proposed).</li>
+      <li>Only inside comments, using the comment ranges the syntax worker already finds, so <code>"TODO"</code> in a string or a variable named <code>todo</code> isn't marked.</li>
+      <li>The workspace list runs the existing project search with a fixed pattern, so it obeys <code>.gitignore</code> and is cancelled when you close it. No index is kept.</li>
+    </ul></div>
+    <div><h3>Speed</h3><ul>
+      <li>Matched on comment spans while the syntax worker colours them, off the UI thread. Painting just uses one more colour.</li>
+      <li>Scrollbar marks reuse the existing scrollbar's marks for errors and search hits.</li>
+    </ul></div>
+  </div>
+
+  <!-- ===================== 5 ===================== -->
+  <h2>5. <code>.editorconfig</code> support <small>like EditorConfig for VS Code</small></h2>
+  <p>When a project has an <code>.editorconfig</code> file, the file follows it: indent size, spaces or tabs, line endings, a final newline and trimming trailing spaces on save. The status bar says where the setting came from, and clicking it shows which rules apply.</p>
+  <div class="toggle" data-fig="f5">
+    <button data-state="old" aria-pressed="false">Today</button>
+    <button data-state="new" aria-pressed="true">Proposed</button>
+  </div>
+  <div class="stage"><div class="win" id="f5">
+    <div class="tabs"><span><i class="dot" style="background:#6b7f9e"></i>.editorconfig</span><span class="on"><i class="dot" style="background:var(--amber)"></i>server.js</span></div>
+    <div class="code">
+      <div class="ln"><span class="no">1</span><span class="src"><span class="k">export</span> <span class="k">function</span> <span class="f">start</span>(port) {</span></div>
+      <div class="ln indent-new"><span class="no">2</span><span class="src"><span class="guide"></span>  <span class="k">const</span> app = <span class="f">createApp</span>();</span></div>
+      <div class="ln indent-new cur"><span class="no">3</span><span class="src"><span class="guide"></span>  app.<span class="f">listen</span>(port);<span class="caret"></span></span></div>
+      <div class="ln indent-old"><span class="no">2</span><span class="src"><span class="guide"></span>    <span class="k">const</span> app = <span class="f">createApp</span>();</span></div>
+      <div class="ln indent-old cur"><span class="no">3</span><span class="src"><span class="guide"></span>    app.<span class="f">listen</span>(port);<span class="caret"></span></span></div>
+      <div class="ln"><span class="no">4</span><span class="src">}</span></div>
+    </div>
+    <div class="ecpop">
+      <span class="h">From <b>.editorconfig</b> (<code>[*.js]</code>, <code>[*]</code>)</span>
+      <div><span>indent_style</span>space</div>
+      <div><span>indent_size</span>2</div>
+      <div><span>end_of_line</span>lf</div>
+      <div><span>insert_final_newline</span>true</div>
+      <div><span>trim_trailing_whitespace</span>true</div>
+      <span class="link">Open .editorconfig</span>
+    </div>
+    <div class="sbar"><span class="e">● 0</span><span class="r"><span>Ln 3, Col 19</span><span class="ec">Spaces: 2 · .editorconfig</span><span class="ec-old">Spaces: 4</span><span class="ec">LF</span><span class="ec-old">CRLF</span><span>JavaScript</span></span></div>
+  </div></div>
+  <div class="cols">
+    <div><h3>Details</h3><ul>
+      <li><b>Setting <code>editorConfig</code></b>, on by default. <code>.editorconfig</code> beats <code>tabSize</code> / <code>insertSpaces</code>; a language extension's <code>tab_size</code> comes after both.</li>
+      <li>Supported keys: <code>indent_style</code>, <code>indent_size</code>, <code>tab_width</code>, <code>end_of_line</code>, <code>charset</code> (utf-8 only), <code>insert_final_newline</code>, <code>trim_trailing_whitespace</code>, <code>root</code>.</li>
+      <li>Trimming and the final newline are applied at save time as one undoable edit, never while typing.</li>
+    </ul></div>
+    <div><h3>Speed</h3><ul>
+      <li>Read once when a file opens: walk up the folders to <code>root = true</code>, parse a few small files, cache them per folder.</li>
+      <li>The cache is dropped when the watcher reports that an <code>.editorconfig</code> changed. Nothing is read while typing.</li>
+      <li>Lives in the library crate (portable), next to <code>gitignore.rs</code>.</li>
+    </ul></div>
+  </div>
+
+  <!-- ===================== Summary ===================== -->
+  <h2>All five settings</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Setting</th><th>Values</th><th>Proposed default</th><th>Settings group</th></tr>
+    <tr><td><code>inlineDiagnostics</code></td><td><code>"off"</code> · <code>"errors"</code> · <code>"errorsAndWarnings"</code></td><td><code>"errorsAndWarnings"</code></td><td>Visual aids</td></tr>
+    <tr><td><code>linkedTagRename</code></td><td>true · false</td><td>true</td><td>Editor</td></tr>
+    <tr><td><code>pathCompletion</code></td><td>true · false</td><td>true</td><td>Editor</td></tr>
+    <tr><td><code>todoHighlight</code></td><td>true · false</td><td>true</td><td>Visual aids</td></tr>
+    <tr><td><code>editorConfig</code></td><td>true · false</td><td>true</td><td>Files</td></tr>
+  </table></div>
+
+  <h2>Suggested order</h2>
+  <ol class="order">
+    <li><b>Errors at the end of the line</b>: the most visible, and the data already exists.</li>
+    <li><b><code>.editorconfig</code></b>: small, and fixes wrong indentation in many projects.</li>
+    <li><b>TODO highlighting</b>: small, reuses comments and project search.</li>
+    <li><b>Rename the matching tag</b>: needs care around undo and multi-cursor.</li>
+    <li><b>File path suggestions</b>: needs a new source in the completion box.</li>
+  </ol>
+
+  <h2>Questions for you</h2>
+  <ul>
+    <li>Errors at the end of the line: <b>message only</b>, or <b>message + line tint</b>? On by default?</li>
+    <li>Should every feature be on by default, or should some start off?</li>
+    <li>One change for all five, or one pull request each, in the order above?</li>
+  </ul>
+</main>
+<script>
+  document.querySelectorAll('.toggle').forEach(t => {
+    const win = document.getElementById(t.dataset.fig);
+    t.querySelectorAll('[data-state]').forEach(b => b.addEventListener('click', () => {
+      t.querySelectorAll('[data-state]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      win.classList.toggle('old', b.dataset.state === 'old');
+      if (t.dataset.fig === 'f2') {
+        const old = b.dataset.state === 'old';
+        document.getElementById('endtag').textContent = old ? 'div' : 'sect';
+        document.getElementById('tagnote').textContent = old ? 'Today: the closing tag stays </div>' : 'Both names change together';
+      }
+    }));
+    t.querySelectorAll('[data-tint]').forEach(b => b.addEventListener('click', () => {
+      t.querySelectorAll('[data-tint]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      win.classList.toggle('tint', b.dataset.tint === '1');
+    }));
+  });
+</script>
+</body>
+</html>

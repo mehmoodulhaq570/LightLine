@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Problems Written After the Line**: Each line with an error or warning now shows the problem's message after its code, in the problem's colour with a small dot, like VS Code's Error Lens, so you can read it without hovering or opening Problems. The line the caret is on shows it brighter; **+1** means the line has more problems; a message too long for the window ends in **…**, and nothing is written after a line that already fills the window. **Inline problems** in Settings (Visual aids), or `inlineDiagnostics` in settings.json, chooses errors and warnings (the default), errors only, or off. It uses the problems the language server already sent, so nothing extra runs.
+
 #### Changed
 
 - **A Cleaner Welcome Page**: The Welcome page is flat like the rest of LightLine, on the editor's own background, instead of four bordered cards under a big gradient banner. The illustration and slogans are gone, and each action appears once. **Start** has New File, Open File and Open Folder; **Recent** lists up to eight folders, one line each (its name, the folder it's in, and how long ago it changed), and pointing at one shows **×** to take it off the list; **Get started** has the Command Palette, Go to File, Search in Files, the terminal, Color Theme and Settings, each with its key; **Learn** has the Help menu's links. A small **Started in … ms** shows how long this start took, measured once when the window first draws. The rail is the editor's rail, so going from Welcome to a file no longer changes it. In a narrow window the halves stack instead of hiding Getting Started, and the status bar no longer repeats the shortcuts. LightLine now remembers ten recent folders instead of five. Drawing the page costs about what it did: a full redraw of a 1917×1022 window took 19–28 million CPU cycles of work on the window's thread, against 25–26 million before, and starting on it 109–163 million against 124–155 million (a busy PC, a few runs each).
@@ -18,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Fixed
 
+- **Opening Without Stealing the Focus**: LightLine always made itself the active window as it started, even when it was started in a way that asks it not to (some launchers and scripts). It now only takes the keyboard when it is the window in front.
 - **Welcome Page Rows That Work**: **Command Palette** was labelled `Ctrl+P` and opened Go to File; it now opens the Command Palette, with its real key, `Ctrl+Shift+P`. **View all** next to Recent Projects did nothing, and **Run your first build** could only fail, because the Welcome page has no file to run; both are gone.
 
 ## [v0.11.0] - 2026-11-15
