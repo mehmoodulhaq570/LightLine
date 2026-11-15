@@ -185,6 +185,13 @@ const EDIT: &[Entry] = &[
     Separator,
     Item("Find in Files", 'i', "Ctrl+Shift+F", ctrl_shift(0x46), N),
     Item("Replace in Files", 'a', "", Action::Command(63), N),
+    Item(
+        "Find TODOs in Workspace",
+        'O',
+        "",
+        Action::Command(super::todo_highlight::FIND_TODOS),
+        N,
+    ),
     Separator,
     Item(
         "Toggle Line Comment",
