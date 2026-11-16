@@ -302,6 +302,8 @@ pub fn language_keys(path: Option<&Path>, extension_language: Option<&str>) -> V
         Some("svelte") => &["svelte"],
         Some("astro") => &["astro"],
         Some("sql") => &["sql"],
+        Some("txt" | "text") => &["plain text"],
+        Some("ps1") => &["powershell"],
         _ => &[],
     };
     names.iter().map(|name| name.to_string()).collect()
@@ -564,7 +566,8 @@ mod tests {
         assert_eq!(keys("x.jsx"), ["javascript"]);
         assert_eq!(keys("x.hpp"), ["c++", "cpp"]);
         assert_eq!(keys("run.sh"), ["shell script", "shellscript", "bash"]);
-        assert!(keys("notes.txt").is_empty());
+        assert_eq!(keys("notes.txt"), ["plain text"]);
+        assert!(keys("data.xyz").is_empty());
         assert!(language_keys(None, None).is_empty());
         assert_eq!(
             language_keys(Some(Path::new("a.ex")), Some("Elixir")),

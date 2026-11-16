@@ -70,10 +70,14 @@ fn validate_download(dir: &Path, id: &str) -> Result<(), String> {
         super::snippets::validate(dir)?;
         usable = true;
     }
+    // Its server is started from PATH; nothing in it runs.
+    if super::tools::is_tool_extension(dir) {
+        usable = true;
+    }
     if !usable {
         return Err(
-            "Unsupported extension: only themes, snippets and languages with a Tree-sitter \
-             grammar can be installed"
+            "Unsupported extension: only themes, snippets, language servers and languages with \
+             a Tree-sitter grammar can be installed"
                 .into(),
         );
     }

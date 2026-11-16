@@ -64,19 +64,27 @@ impl App {
         if self.welcome || self.tab().read_only() || self.tab().is_placeholder() {
             return;
         }
-        if self.tab().lsp_language().is_none() {
-            self.status = "Code actions need a language server, and this file type has none".into();
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-            return;
-        }
-        if !self.tab().lsp_opened {
-            self.ensure_lsp(hwnd);
+        // A problem a tool such as a spell checker reported is fixed by
+        // that tool (language_tools.rs); the rest by the file's server.
+        let tool = (kinds == Kinds::Fixes)
+            .then(|| self.tool_problem_at_caret())
+            .flatten();
+        if tool.is_none() {
+            if self.tab().lsp_language().is_none() {
+                self.status =
+                    "Code actions need a language server, and this file type has none".into();
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+                return;
+            }
+            if !self.tab().lsp_opened {
+                self.ensure_lsp(hwnd);
+            }
         }
         let tab = self.tab();
         let (Some(language), Some(path), true) = (
-            tab.lsp_language,
+            tool.or(tab.lsp_language),
             tab.document.path.as_deref(),
-            tab.lsp_opened,
+            tool.is_some() || tab.lsp_opened,
         ) else {
             self.status = "Language server not ready yet".into();
             unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -109,17 +117,23 @@ impl App {
         {
             range = problem.range;
         }
+        // Each server is sent only its own problems.
         let diagnostics: Vec<LspDiagnostic> = tab
             .diagnostics
             .iter()
             .filter(|problem| {
                 problem.range.start.line <= range.end.line
                     && problem.range.end.line >= range.start.line
+                    && problem.origin.is_none_or(|origin| origin == language)
             })
             .cloned()
             .collect();
         let uri = lsp::file_uri(path);
-        let version = tab.lsp_version;
+        let version = if tool.is_some() {
+            tab.tools_version
+        } else {
+            tab.lsp_version
+        };
         let only = match kinds {
             Kinds::Fixes => Vec::new(),
             Kinds::Source => vec!["source".to_owned()],
@@ -127,16 +141,18 @@ impl App {
         };
         self.request_id += 1;
         let id = self.request_id;
-        let sent = self.tab_lsp(self.active).is_some_and(|client| {
-            client.send(LspCommand::CodeActions {
-                id,
-                uri: uri.clone(),
-                version,
-                range,
-                diagnostics,
-                only,
-            })
-        });
+        let sent = self
+            .tab_client(self.active, language)
+            .is_some_and(|client| {
+                client.send(LspCommand::CodeActions {
+                    id,
+                    uri: uri.clone(),
+                    version,
+                    range,
+                    diagnostics,
+                    only,
+                })
+            });
         if sent {
             let caret = self.caret_rect(hwnd);
             self.code_action_request = Some(CodeActionRequest {
@@ -179,7 +195,12 @@ impl App {
         };
         // Offered for the text as it was; not after it changed, or for a
         // file no longer shown.
-        if self.open_tab_for_uri(uri) != Some(self.active) || self.tab().lsp_version != version {
+        let current = if self.tab().lsp_language == Some(language) {
+            self.tab().lsp_version
+        } else {
+            self.tab().tools_version
+        };
+        if self.open_tab_for_uri(uri) != Some(self.active) || current != version {
             self.status.clear();
             return;
         }
@@ -414,11 +435,41 @@ impl App {
             }
         }
         if let Some((command, arguments)) = action.command
-            && let Some(client) = self.tab_lsp(self.active)
+            && let Some(client) = self.tab_client(self.active, language)
         {
             client.send(LspCommand::ExecuteCommand { command, arguments });
         }
         self.status = status;
+    }
+}
+
+impl App {
+    // The tool whose problem is under the caret, or failing that the first
+    // on its line, when it came from a tool the file is open in.
+    fn tool_problem_at_caret(&self) -> Option<LspLanguage> {
+        let tab = self.tab();
+        if tab.tools.is_empty() || self.selection_range().is_some() {
+            return None;
+        }
+        let caret = self.view().cursor;
+        let at = LspPosition {
+            line: caret.line as u32,
+            character: tab.document.utf16_column(caret) as u32,
+        };
+        let problem = tab
+            .diagnostics
+            .iter()
+            .find(|problem| contains(problem.range, at))
+            .or_else(|| {
+                tab.diagnostics
+                    .iter()
+                    .find(|problem| problem.range.start.line == at.line)
+            })?;
+        let origin = problem.origin?;
+        tab.tools
+            .iter()
+            .any(|(tool, _)| *tool == origin)
+            .then_some(origin)
     }
 }
 
