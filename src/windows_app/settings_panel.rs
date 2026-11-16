@@ -1087,7 +1087,10 @@ impl App {
                 w,
                 h,
                 background,
-                Some((blend(self.theme.edge, self.theme.muted, 0.4), scale.max(1.0))),
+                Some((
+                    blend(self.theme.edge, self.theme.muted, 0.4),
+                    scale.max(1.0),
+                )),
             );
         }
         // The knob: a disc 3 px inside the track, at the right when on.
