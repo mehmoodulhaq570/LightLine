@@ -803,6 +803,9 @@ fn extension_kind_and_icon(folder: &Path) -> (ExtensionCategory, Option<Extensio
         });
         return (ExtensionCategory::ColorTheme, swatch);
     }
+    if lightline::extensions::snippets::is_snippet_pack(folder) {
+        return (ExtensionCategory::Snippets, None);
+    }
     (ExtensionCategory::Unknown, None)
 }
 

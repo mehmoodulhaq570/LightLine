@@ -47,6 +47,12 @@ pub(super) enum ExtensionInstallKind {
         names: Vec<String>,
         servers: Vec<String>,
     },
+    // A snippet pack: how many snippets, and the languages its files are
+    // for (None: every language).
+    Snippets {
+        count: usize,
+        languages: Vec<Option<String>>,
+    },
 }
 
 pub(super) enum WorkerMessage {
@@ -106,6 +112,8 @@ pub(super) enum WorkerMessage {
     // A background save (background_save.rs) has finished, by its id; the
     // result is collected from its thread.
     Saved(u64),
+    // The installed snippets for a language (snippet_packs.rs), by its key.
+    Snippets(String, Vec<lightline::extensions::snippets::Snippet>),
 }
 
 // A document's text as of its (id, change_serial); see Tab::recovery_text.
@@ -274,6 +282,7 @@ pub(super) enum ExtensionCategory {
     IconTheme,
     ColorTheme,
     Language,
+    Snippets,
     Unknown,
 }
 
@@ -284,6 +293,7 @@ impl ExtensionCategory {
             ExtensionCategory::IconTheme => "Icon theme",
             ExtensionCategory::ColorTheme => "Color theme",
             ExtensionCategory::Language => "Language",
+            ExtensionCategory::Snippets => "Snippets",
             ExtensionCategory::Unknown => "Zed extension",
         }
     }
@@ -1085,6 +1095,12 @@ pub(super) struct App {
     // .gitignore rules for folders listed by path suggestions, with the
     // folder's path from its repository (path_complete.rs).
     pub(super) path_rules: HashMap<PathBuf, (lightline::gitignore::Rules, String)>,
+    // Installed snippets by language key, read on a worker the first time
+    // a completion list is asked for in that language (snippet_packs.rs).
+    pub(super) snippet_packs: HashMap<String, super::snippet_packs::SnippetPack>,
+    // Ctrl+Space in a file with no language server, waiting for its
+    // language's snippets to be read.
+    pub(super) snippet_wait: Option<super::snippet_packs::SnippetWait>,
     // Rename Symbol: the box asking for the new name, then the request.
     pub(super) rename_box: Option<RenameBox>,
     pub(super) rename_target: Option<RenameRequest>,
@@ -1724,6 +1740,8 @@ impl App {
             completion: None,
             path_pending: None,
             path_rules: HashMap::new(),
+            snippet_packs: HashMap::new(),
+            snippet_wait: None,
             rename_box: None,
             rename_target: None,
             code_action_request: None,
@@ -1902,6 +1920,7 @@ impl App {
                     self.set_color_theme(hwnd, None);
                 }
                 self.reload_extension_languages();
+                self.forget_snippets();
                 self.status = match removed {
                     Ok(()) => format!("{name} removed"),
                     Err(error) => format!("{name} removed, but some files remain: {error}"),
@@ -1943,12 +1962,19 @@ impl App {
                             };
                             return Ok(ExtensionInstallKind::ColorTheme(zed_theme.name));
                         }
+                        if lightline::extensions::snippets::is_snippet_pack(&dir) {
+                            use lightline::extensions::snippets;
+                            return Ok(ExtensionInstallKind::Snippets {
+                                count: snippets::validate(&dir)?,
+                                languages: snippets::pack_languages(&dir),
+                            });
+                        }
                         // Not something LightLine can actually use yet
                         // (needs WASM execution) -- don't leave a dead,
                         // silently-half-installed entry behind.
                         let _ = lightline::extensions::installer::uninstall(&registry_id);
                         Err(
-                            "isn't supported yet (LightLine can use themes and languages with \
+                            "isn't supported yet (LightLine can use themes, snippets and languages with \
                              a Tree-sitter grammar right now)"
                                 .to_string(),
                         )

@@ -42,6 +42,7 @@ mod occurrences;
 mod path_complete;
 mod scroll_blit;
 mod snippet;
+mod snippet_packs;
 mod sticky;
 mod todo_highlight;
 use debug_console::DebugConsole;

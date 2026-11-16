@@ -66,10 +66,14 @@ fn validate_download(dir: &Path, id: &str) -> Result<(), String> {
         super::language::validate(dir)?;
         usable = true;
     }
+    if super::snippets::is_snippet_pack(dir) {
+        super::snippets::validate(dir)?;
+        usable = true;
+    }
     if !usable {
         return Err(
-            "Unsupported extension: only themes and languages with a Tree-sitter grammar can be \
-             installed"
+            "Unsupported extension: only themes, snippets and languages with a Tree-sitter \
+             grammar can be installed"
                 .into(),
         );
     }
@@ -339,6 +343,41 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&head.stdout).trim(),
             resolved.commit
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "hits the real network; run explicitly with --ignored"]
+    fn real_snippet_packs_install_and_offer_their_snippets() {
+        use crate::extensions::snippets;
+        let dir = fixture("snippet-packs");
+        // One file for one language, and one file per language in folders.
+        for id in ["fastapi-snippets", "comment-block-snippets"] {
+            let resolved = crate::extensions::zed_registry::resolve(id).unwrap();
+            let installed = install_in(&dir, id, &resolved.git_url, &resolved.commit).unwrap();
+            assert!(snippets::validate(&installed).unwrap() > 0, "{id}");
+        }
+        assert_eq!(
+            snippets::pack_languages(&dir.join("fastapi-snippets")),
+            [Some("python".to_string())]
+        );
+        assert!(
+            snippets::pack_languages(&dir.join("comment-block-snippets"))
+                .contains(&Some("shell script".to_string()))
+        );
+        let python = snippets::installed_in(&dir, &["python".to_string()]);
+        assert!(
+            python
+                .iter()
+                .any(|s| s.prefixes.iter().any(|p| p == "fastapp"))
+        );
+        assert!(python.iter().any(|s| s.prefixes[0].starts_with("com-")));
+        let lua = snippets::installed_in(&dir, &["lua".to_string()]);
+        assert!(!lua.is_empty());
+        assert!(
+            lua.iter()
+                .all(|s| !s.prefixes.iter().any(|p| p == "fastapp"))
         );
         fs::remove_dir_all(dir).unwrap();
     }
