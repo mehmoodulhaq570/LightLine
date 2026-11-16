@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### Added
+
+- **Snippet Packs from the Zed Registry**: The Extensions panel now installs snippet packs, about 50 of them, such as **python-snippets**, **react-snippets**, **fastapi-snippets**, **rust-snippets** and **comment-block-snippets**; search the registry for "snippets". Type the start of a snippet's prefix and press `Ctrl+Space`: the matching snippets come first in the list, marked **~** with their description, ahead of the language server's suggestions, and in a file with no language server they're listed on their own. `Enter` or `Tab` inserts one, and `Tab` moves through its placeholders. Each pack's snippets are used in the languages it has them for, including languages added by a language extension, and the status bar says how many it added and for which (*Fastapi Snippets installed: 34 snippets for Python*). Installed packs show as **Snippets** under Installed. A language's snippets are read once, in the background, the first time you press `Ctrl+Space` in one of its files, so starting and typing cost what they did.
+
 ## [v0.12.0] - 2026-11-16
 
 Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.12.0-windows-x86_64.zip`, `lightline-v0.12.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
