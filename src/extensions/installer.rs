@@ -367,11 +367,18 @@ mod tests {
                 .contains(&Some("shell script".to_string()))
         );
         let python = snippets::installed_in(&dir, &["python".to_string()]);
-        assert!(python.iter().any(|s| s.prefixes.iter().any(|p| p == "fastapp")));
+        assert!(
+            python
+                .iter()
+                .any(|s| s.prefixes.iter().any(|p| p == "fastapp"))
+        );
         assert!(python.iter().any(|s| s.prefixes[0].starts_with("com-")));
         let lua = snippets::installed_in(&dir, &["lua".to_string()]);
         assert!(!lua.is_empty());
-        assert!(lua.iter().all(|s| !s.prefixes.iter().any(|p| p == "fastapp")));
+        assert!(
+            lua.iter()
+                .all(|s| !s.prefixes.iter().any(|p| p == "fastapp"))
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
