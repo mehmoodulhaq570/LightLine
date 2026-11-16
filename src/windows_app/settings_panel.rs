@@ -1068,53 +1068,42 @@ impl App {
     }
 
     // An on/off switch filling `switch`; off is an outline on `background`.
+    // Drawn anti-aliased at the display's exact scale (GDI's RoundRect gave
+    // stair-stepped, blurred-looking ends at 125%).
     fn paint_switch(&self, hdc: HDC, switch: RECT, on: bool, background: u32) {
-        let s = |value: i32| self.scale(value);
-        let height = switch.bottom - switch.top;
-        let inset = s(1).max(1);
+        let scale = self.scale(1000) as f32 / 1000.0;
+        let (x, y) = (switch.left as f32, switch.top as f32);
+        let (w, h) = (
+            (switch.right - switch.left) as f32,
+            (switch.bottom - switch.top) as f32,
+        );
         if on {
-            Self::rounded_fill(hdc, switch, height, self.theme.sky);
+            super::image_view::smooth_pill(hdc, x, y, w, h, self.theme.sky, None);
         } else {
-            Self::rounded_fill(
+            super::image_view::smooth_pill(
                 hdc,
-                switch,
-                height,
-                blend(self.theme.edge, self.theme.muted, 0.4),
-            );
-            Self::rounded_fill(
-                hdc,
-                RECT {
-                    left: switch.left + inset,
-                    top: switch.top + inset,
-                    right: switch.right - inset,
-                    bottom: switch.bottom - inset,
-                },
-                height - inset * 2,
+                x,
+                y,
+                w,
+                h,
                 background,
+                Some((blend(self.theme.edge, self.theme.muted, 0.4), scale.max(1.0))),
             );
         }
-        let knob = height - s(6);
-        let knob_left = if on {
-            switch.right - s(3) - knob
+        // The knob: a disc 3 px inside the track, at the right when on.
+        let gap = 3.0 * scale;
+        let radius = (h - gap * 2.0) / 2.0;
+        let cx = if on {
+            x + w - gap - radius
         } else {
-            switch.left + s(3)
+            x + gap + radius
         };
-        let knob_top = switch.top + s(3);
-        Self::rounded_fill(
-            hdc,
-            RECT {
-                left: knob_left,
-                top: knob_top,
-                right: knob_left + knob,
-                bottom: knob_top + knob,
-            },
-            knob,
-            if on {
-                self.theme.editor_bg
-            } else {
-                self.theme.muted
-            },
-        );
+        let knob = if on {
+            self.theme.editor_bg
+        } else {
+            self.theme.muted
+        };
+        super::image_view::smooth_radio(hdc, cx, y + h / 2.0, radius, 0.0, knob, knob, None);
     }
 
     // − value + in one box.
