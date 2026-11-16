@@ -87,12 +87,15 @@ pub(super) fn smooth_radio(
         );
         GdipDeleteBrush(brush as *mut GpBrush);
         // The pen is centered on the path: inset it so the ring stays
-        // inside `radius`.
-        let mut pen = null_mut();
-        GdipCreatePen1(argb_of(ring), width, UnitPixel, &mut pen);
-        let r = radius - width / 2.0;
-        GdipDrawEllipse(graphics, pen, cx - r, cy - r, r * 2.0, r * 2.0);
-        GdipDeletePen(pen);
+        // inside `radius`. A width of 0 is a plain disc (GDI+ would draw a
+        // hairline).
+        if width > 0.0 {
+            let mut pen = null_mut();
+            GdipCreatePen1(argb_of(ring), width, UnitPixel, &mut pen);
+            let r = radius - width / 2.0;
+            GdipDrawEllipse(graphics, pen, cx - r, cy - r, r * 2.0, r * 2.0);
+            GdipDeletePen(pen);
+        }
         if let Some((dot_radius, color)) = dot {
             let mut brush = null_mut();
             GdipCreateSolidFill(argb_of(color), &mut brush);
@@ -105,6 +108,58 @@ pub(super) fn smooth_radio(
                 dot_radius * 2.0,
             );
             GdipDeleteBrush(brush as *mut GpBrush);
+        }
+        GdipDeleteGraphics(graphics);
+    }
+}
+
+/// An anti-aliased pill (a rectangle with fully round ends, as a switch's
+/// track) at (`x`, `y`), `w` by `h`, filled with `fill`, with an outline of
+/// (color, width) drawn inside its edge. GDI's RoundRect has stair-stepped
+/// ends at this size, which look blurred on a scaled display.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn smooth_pill(
+    hdc: HDC,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    fill: u32,
+    outline: Option<(u32, f32)>,
+) {
+    ensure_gdiplus();
+    unsafe {
+        let mut graphics = null_mut();
+        if GdipCreateFromHDC(hdc, &mut graphics) != 0 {
+            return;
+        }
+        GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
+        GdipSetPixelOffsetMode(graphics, PixelOffsetModeHalf);
+        let pill = |inset: f32| {
+            let mut path = null_mut();
+            GdipCreatePath(FillModeAlternate, &mut path);
+            let (x, y, w, h) = (x + inset, y + inset, w - inset * 2.0, h - inset * 2.0);
+            let d = h.min(w);
+            GdipAddPathArc(path, x, y, d, d, 90.0, 180.0);
+            GdipAddPathArc(path, x + w - d, y, d, d, 270.0, 180.0);
+            GdipClosePathFigure(path);
+            path
+        };
+        let path = pill(0.0);
+        let mut brush = null_mut();
+        GdipCreateSolidFill(argb_of(fill), &mut brush);
+        GdipFillPath(graphics, brush as *mut GpBrush, path);
+        GdipDeleteBrush(brush as *mut GpBrush);
+        GdipDeletePath(path);
+        if let Some((color, width)) = outline {
+            // The pen is centered on the path: inset it by half its width
+            // so the outline stays inside the pill.
+            let path = pill(width / 2.0);
+            let mut pen = null_mut();
+            GdipCreatePen1(argb_of(color), width, UnitPixel, &mut pen);
+            GdipDrawPath(graphics, pen, path);
+            GdipDeletePen(pen);
+            GdipDeletePath(path);
         }
         GdipDeleteGraphics(graphics);
     }
