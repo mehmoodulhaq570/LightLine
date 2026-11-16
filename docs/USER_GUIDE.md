@@ -383,14 +383,18 @@ Updates download and validate a staged copy before replacing an installed extens
 
 - **Checkers** are extensions whose only part is a language server that checks files of many languages: the spell checkers **typos**, **codebook**, **harper** and **cspell**. A checker runs beside a file's own language server, or on its own in a file that has none, such as `notes.txt` or a Markdown file. Its problems are underlined and listed in Problems with the language server's; errors and warnings are also written after their line, while information (how typos reports misspellings) is only underlined. `Ctrl+.` on one of its problems offers its fixes, such as correcting `recieve` to `receive`. Like a language's server, LightLine starts a checker only when its command is on your PATH and downloads nothing:
 
-  | Extension | Command | Get it with |
-  | --- | --- | --- |
-  | typos | `typos-lsp` | `cargo install typos-lsp`, or a release from github.com/tekumara/typos-lsp |
-  | codebook | `codebook-lsp serve` | `cargo install codebook-lsp` |
-  | harper | `harper-ls --stdio` | `cargo install harper-ls --locked` |
-  | cspell | `cspell-lsp --stdio` | `npm install -g @vlabo/cspell-lsp` |
+  | Extension | Program | LightLine can download it | Or get it yourself |
+  | --- | --- | --- | --- |
+  | typos | `typos-lsp` | Yes, 0.1.58 (about 4 MB) | `typos-lsp.exe` from github.com/tekumara/typos-lsp/releases, or `cargo install typos-lsp` |
+  | codebook | `codebook-lsp serve` | Yes, 0.4.0 (about 9 MB) | `codebook-lsp.exe` from github.com/blopker/codebook/releases, or `cargo install codebook-lsp` |
+  | harper | `harper-ls --stdio` | Yes, 3.2.0 (about 14 MB; x64 only, no ARM64 build is published) | `harper-ls.exe` from github.com/Automattic/harper/releases, or `cargo install harper-ls --locked` |
+  | cspell | `cspell-lsp --stdio` | No: it needs Node.js | `npm install -g @vlabo/cspell-lsp` |
 
-  After installing, the status bar says whether the command was found. If it's missing when a file opens, the status bar says so once; install it and reopen the file. The `languageServers` setting can name the command for any other checker by its server's name. A checker starts the first time a file it checks is shown, never at startup, and each keystroke only sends it the change.
+  **Downloading it for you.** The first time you open a file a checker checks and its program isn't installed, LightLine asks: *Download typos-lsp 0.1.58 now?* Choose **Download** and it fetches that exact release from the program's official GitHub page, checks the file against the SHA-256 LightLine expects (a different file is refused before it's unpacked), and keeps just the `.exe` in `%APPDATA%\LightLine\tools\`. Nothing else on your PC changes, and nothing is downloaded unless you choose Download. The checker then starts in your open files. Uninstalling the extension deletes the program too. **Not Now** shows where to get it instead, and isn't asked again until LightLine restarts.
+
+  **Getting it yourself**, without Cargo: download the zip for your PC (x86_64 or aarch64, `windows-msvc`) from the release page, unzip it, and either put the `.exe` in a folder on your PATH, or tell LightLine where it is in `settings.json`, for example `"languageServers": {"typos": "C:\\tools\\typos-lsp.exe"}`. Then reopen the file. A program on PATH or named there is used before one LightLine downloaded.
+
+  A checker starts the first time a file it checks is shown, never at startup, and each keystroke only sends it the change.
 
 Other kinds of extensions, such as debuggers or slash commands for AI, say they aren't supported yet rather than half-installing.
 

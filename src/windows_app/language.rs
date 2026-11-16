@@ -458,7 +458,7 @@ impl App {
                     root,
                     message,
                 } if self.is_tool_language(language) => {
-                    self.tool_stopped(language, root, message);
+                    self.tool_stopped(hwnd, language, root, message);
                 }
                 LspEvent::Stopped {
                     language,

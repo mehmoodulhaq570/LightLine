@@ -1187,6 +1187,9 @@ impl App {
                 WorkerMessage::Saved(id) => self.background_save_done(hwnd, id),
                 WorkerMessage::Snippets(key, snippets) => self.snippets_read(hwnd, key, snippets),
                 WorkerMessage::ToolsListed => self.tools_listed(hwnd),
+                WorkerMessage::ToolDownloaded(server, result) => {
+                    self.tool_downloaded(hwnd, server, result)
+                }
                 _ => {}
             }
         }

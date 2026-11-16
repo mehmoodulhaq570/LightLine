@@ -63,6 +63,7 @@ LightLine collects no usage data and uses the network only when the user acts. T
 - **Python: Install debugpy**;
 - web images in the Markdown preview, when the user allows them;
 - downloading Pyright, only after asking;
+- downloading a checker's program (typos-lsp, codebook-lsp, harper-ls), only after asking: pinned release and SHA-256 in `extensions/tool_download.rs`, into `%APPDATA%\LightLine\tools\`;
 - the AI Assistant.
 
 AI API keys go in Windows Credential Manager (`credentials.rs`), never in LightLine's files. Don't add network calls or telemetry the user didn't ask for.

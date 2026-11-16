@@ -109,12 +109,19 @@ pub fn is_tool_extension(extension_dir: &Path) -> bool {
 /// How to get a tool's command when it isn't on PATH, for the status bar.
 pub fn install_hint(server: &str) -> Option<&'static str> {
     Some(match server {
-        "typos" => "cargo install typos-lsp, or a release from github.com/tekumara/typos-lsp",
-        "codebook" => "cargo install codebook-lsp, or a release from github.com/blopker/codebook",
-        "harper-ls" => {
-            "cargo install harper-ls --locked, or a release from github.com/Automattic/harper"
+        "typos" => {
+            "get typos-lsp.exe from github.com/tekumara/typos-lsp/releases and put it on PATH, \
+             or run cargo install typos-lsp"
         }
-        "cspell" => "npm install -g @vlabo/cspell-lsp",
+        "codebook" => {
+            "get codebook-lsp.exe from github.com/blopker/codebook/releases and put it on PATH, \
+             or run cargo install codebook-lsp"
+        }
+        "harper-ls" => {
+            "get harper-ls.exe from github.com/Automattic/harper/releases and put it on PATH, \
+             or run cargo install harper-ls --locked"
+        }
+        "cspell" => "install Node.js, then run npm install -g @vlabo/cspell-lsp",
         _ => return None,
     })
 }

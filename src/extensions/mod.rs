@@ -8,6 +8,7 @@ pub mod installer;
 pub mod language;
 pub mod language_servers;
 pub mod snippets;
+pub mod tool_download;
 pub mod tools;
 pub mod zed_manifest;
 pub mod zed_registry;
