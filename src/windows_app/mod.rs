@@ -37,6 +37,7 @@ mod hot;
 mod indent;
 mod inlay;
 mod inline_diagnostics;
+mod language_tools;
 mod linked_tag;
 mod occurrences;
 mod path_complete;

@@ -53,6 +53,9 @@ pub(super) enum ExtensionInstallKind {
         count: usize,
         languages: Vec<Option<String>>,
     },
+    // A tool such as a spell checker: each server's command, whether it's
+    // on PATH, and how many languages it checks.
+    Tools(Vec<super::language_tools::InstalledTool>),
 }
 
 pub(super) enum WorkerMessage {
@@ -114,6 +117,8 @@ pub(super) enum WorkerMessage {
     Saved(u64),
     // The installed snippets for a language (snippet_packs.rs), by its key.
     Snippets(String, Vec<lightline::extensions::snippets::Snippet>),
+    // The installed tool extensions have been listed (language_tools.rs).
+    ToolsListed,
 }
 
 // A document's text as of its (id, change_serial); see Tab::recovery_text.
@@ -283,6 +288,7 @@ pub(super) enum ExtensionCategory {
     ColorTheme,
     Language,
     Snippets,
+    Tool,
     Unknown,
 }
 
@@ -294,6 +300,7 @@ impl ExtensionCategory {
             ExtensionCategory::ColorTheme => "Color theme",
             ExtensionCategory::Language => "Language",
             ExtensionCategory::Snippets => "Snippets",
+            ExtensionCategory::Tool => "Language server",
             ExtensionCategory::Unknown => "Zed extension",
         }
     }
@@ -378,6 +385,12 @@ pub(super) struct Tab {
     pub(super) lsp_language: Option<LspLanguage>,
     // The project root of the server the file was opened with.
     pub(super) lsp_root: Option<PathBuf>,
+    // Tools such as spell checkers the file is open in (language_tools.rs),
+    // by server and root. They all get the same edits, so they share one
+    // version and the change serial they've seen.
+    pub(super) tools: Vec<(LspLanguage, PathBuf)>,
+    pub(super) tools_version: i32,
+    pub(super) tools_serial: u64,
     // Some for a read-only raster image preview; `document` is then an empty,
     // unsaved placeholder that must never actually be written to disk.
     pub(super) image: Option<image_view::ImageAsset>,
@@ -515,6 +528,9 @@ impl Tab {
             lsp_opened: false,
             lsp_language: None,
             lsp_root: None,
+            tools: Vec::new(),
+            tools_version: 1,
+            tools_serial: 0,
             image: None,
             binary_preview: false,
             placeholder: false,
@@ -612,6 +628,9 @@ impl Tab {
             lsp_opened: false,
             lsp_language: None,
             lsp_root: None,
+            tools: Vec::new(),
+            tools_version: 1,
+            tools_serial: 0,
             image: None,
             binary_preview: true,
             placeholder: false,
@@ -1101,6 +1120,12 @@ pub(super) struct App {
     // Ctrl+Space in a file with no language server, waiting for its
     // language's snippets to be read.
     pub(super) snippet_wait: Option<super::snippet_packs::SnippetWait>,
+    // Tool extensions (language_tools.rs): whether they're being listed on
+    // a worker, the tool servers that stopped or couldn't start (not tried
+    // again this session), and the tools whose problem was already said.
+    pub(super) tools_listing: bool,
+    pub(super) tools_failed: HashSet<(LspLanguage, PathBuf)>,
+    pub(super) tools_reported: HashSet<LspLanguage>,
     // Rename Symbol: the box asking for the new name, then the request.
     pub(super) rename_box: Option<RenameBox>,
     pub(super) rename_target: Option<RenameRequest>,
@@ -1742,6 +1767,9 @@ impl App {
             path_rules: HashMap::new(),
             snippet_packs: HashMap::new(),
             snippet_wait: None,
+            tools_listing: false,
+            tools_failed: HashSet::new(),
+            tools_reported: HashSet::new(),
             rename_box: None,
             rename_target: None,
             code_action_request: None,
@@ -1921,6 +1949,7 @@ impl App {
                 }
                 self.reload_extension_languages();
                 self.forget_snippets();
+                self.restart_tools();
                 self.status = match removed {
                     Ok(()) => format!("{name} removed"),
                     Err(error) => format!("{name} removed, but some files remain: {error}"),
@@ -1968,6 +1997,12 @@ impl App {
                                 count: snippets::validate(&dir)?,
                                 languages: snippets::pack_languages(&dir),
                             });
+                        }
+                        let tools = lightline::extensions::tools::tools_of(&dir);
+                        if !tools.is_empty() {
+                            return Ok(ExtensionInstallKind::Tools(
+                                super::language_tools::installed_tools(&tools),
+                            ));
                         }
                         // Not something LightLine can actually use yet
                         // (needs WASM execution) -- don't leave a dead,
@@ -2658,6 +2693,7 @@ impl App {
             watcher.unwatch_file(path);
         }
         self.close_lsp_tab(index);
+        self.close_tools(index);
         self.start_transition(hwnd);
         self.tabs.remove(index);
         if self.tabs.is_empty() {
@@ -3331,6 +3367,7 @@ impl App {
         // sent as changes to it: reopen the file with its new text. A
         // background tab reopens when it is next shown (ensure_lsp).
         self.close_lsp_tab(index);
+        self.close_tools(index);
         self.tabs[index].diagnostics.clear();
         if index == self.active {
             self.ensure_lsp(hwnd);

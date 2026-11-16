@@ -109,8 +109,55 @@ impl Language {
             (Self::TypeScript, "js" | "mjs" | "cjs") => "javascript",
             (Self::TypeScript, "jsx") => "javascriptreact",
             (Self::TypeScript, "tsx") => "typescriptreact",
+            // A tool that checks many languages, such as a spell checker,
+            // is told each file's own language.
+            (Self::Extension(_), _) if self.language_id().is_empty() => {
+                standard_language_id(&extension)
+            }
             _ => self.language_id(),
         }
+    }
+}
+
+/// The LSP language id editors send for a file with `extension` (lower
+/// case), as VS Code names them; `plaintext` when it isn't known.
+pub fn standard_language_id(extension: &str) -> &'static str {
+    match extension {
+        "rs" => "rust",
+        "py" | "pyi" | "pyw" => "python",
+        "js" | "mjs" | "cjs" => "javascript",
+        "jsx" => "javascriptreact",
+        "ts" | "mts" | "cts" => "typescript",
+        "tsx" => "typescriptreact",
+        "go" => "go",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" | "ino" => "cpp",
+        "cs" => "csharp",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "swift" => "swift",
+        "rb" => "ruby",
+        "php" => "php",
+        "lua" => "lua",
+        "dart" => "dart",
+        "md" | "markdown" => "markdown",
+        "json" => "json",
+        "jsonc" => "jsonc",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "scss" => "scss",
+        "vue" => "vue",
+        "svelte" => "svelte",
+        "sh" | "bash" | "zsh" => "shellscript",
+        "ps1" => "powershell",
+        "sql" => "sql",
+        "tex" => "latex",
+        "ex" | "exs" => "elixir",
+        "hs" => "haskell",
+        "zig" => "zig",
+        _ => "plaintext",
     }
 }
 
@@ -134,6 +181,10 @@ pub struct Diagnostic {
     /// As the server sent it (code, source, data), to hand back when asking
     /// for its fixes; Null when it came from elsewhere.
     pub raw: Value,
+    /// The server that reported it, set when it reaches a file: a file's
+    /// list holds its language server's problems and those of tools such
+    /// as a spell checker, each replaced when that server sends new ones.
+    pub origin: Option<Language>,
 }
 
 /// A function, type, field... in a file (textDocument/documentSymbol).
@@ -1973,6 +2024,7 @@ fn parse_diagnostics(message: &Value) -> Option<(String, Option<i32>, Vec<Diagno
                     .min(4) as u8,
                 message: item.get("message")?.as_str()?.to_owned(),
                 raw: item.clone(),
+                origin: None,
             })
         })
         .collect();
@@ -3118,6 +3170,7 @@ mod tests {
             message: "unresolved".into(),
             raw: json!({"range":{"start":{"line":7,"character":2},"end":{"line":7,"character":5}},
                         "message":"unresolved","code":"E0425","data":{"fix":1}}),
+            origin: None,
         };
         let from_compiler = Diagnostic {
             raw: Value::Null,

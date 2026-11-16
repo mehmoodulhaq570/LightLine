@@ -295,6 +295,7 @@ impl App {
         let active = self.active;
         self.tab_mut().update_syntax_language();
         self.close_lsp_tab(active);
+        self.close_tools(active);
         self.tab_mut().diagnostics.clear();
         self.tab_mut().inlay_hints.clear();
         let hwnd = self.hwnd;

@@ -132,6 +132,7 @@ mod tests {
             severity,
             message: message.into(),
             raw: serde_json::Value::Null,
+            origin: None,
         }
     }
 

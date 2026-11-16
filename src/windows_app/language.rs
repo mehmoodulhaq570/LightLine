@@ -2,7 +2,7 @@ use super::app::{CompletionPopup, CompletionRequest, HoverCard, HoverTarget, Nav
 use super::*;
 use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as LspRange};
 
-const LSP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const LSP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub(super) const LSP_EVENT_MESSAGE: u32 = WM_APP + 7;
 
 impl App {
@@ -12,6 +12,9 @@ impl App {
     }
 
     pub(super) fn ensure_lsp(&mut self, hwnd: HWND) {
+        // Tools such as spell checkers, with or without a language server
+        // of the file's own (language_tools.rs).
+        self.ensure_tools(hwnd);
         let Some(language) = self.tab().lsp_language() else {
             return;
         };
@@ -101,7 +104,7 @@ impl App {
             .find(|client| client.language() == language && client.root() == root)
     }
 
-    fn lsp_root(&self, language: LspLanguage, path: &Path) -> PathBuf {
+    pub(super) fn lsp_root(&self, language: LspLanguage, path: &Path) -> PathBuf {
         match language {
             // The Cargo workspace a crate belongs to, so all its crates share
             // one rust-analyzer, which indexes the whole workspace anyway.
@@ -192,12 +195,15 @@ impl App {
                 tab.lsp_opened = false;
                 tab.lsp_language = None;
                 tab.lsp_root = None;
-                tab.diagnostics.clear();
+                // Its tools' problems stay.
+                tab.diagnostics
+                    .retain(|problem| problem.origin.is_some_and(|origin| origin != language));
             }
         }
     }
 
     pub(super) fn sync_lsp_edit(&mut self) {
+        self.sync_tool_edits();
         let tab = self.tab();
         if !tab.lsp_opened || tab.lsp_serial == tab.document.change_serial() {
             return;
@@ -289,6 +295,18 @@ impl App {
             tab.lsp_language = None;
             tab.lsp_root = None;
             tab.diagnostics.clear();
+            // Its tools had it under the old name.
+            let active = self.active;
+            let open = std::mem::take(&mut self.tabs[active].tools);
+            if let Some(path) = old_path {
+                for (language, root) in &open {
+                    if let Some(client) = self.client_for(*language, root) {
+                        client.send(LspCommand::Close {
+                            uri: lsp::file_uri(path),
+                        });
+                    }
+                }
+            }
         }
         self.ensure_lsp(hwnd);
         if self.tab().lsp_opened
@@ -299,6 +317,7 @@ impl App {
                 uri: lsp::file_uri(path),
             });
         }
+        self.tools_saved();
     }
 
     pub(super) fn poll_lsp(&mut self, hwnd: HWND) {
@@ -335,23 +354,51 @@ impl App {
                     version,
                     items,
                 } => {
-                    if let Some(index) = self.tabs.iter().position(|tab| {
-                        tab.lsp_opened
-                            && tab.lsp_language == Some(language)
+                    // From the file's own language server or one of its
+                    // tools (language_tools.rs): each replaces only its own.
+                    let found = self.tabs.iter().position(|tab| {
+                        let own = tab.lsp_opened && tab.lsp_language == Some(language);
+                        let tool = tab.tools.iter().any(|(tool, _)| *tool == language);
+                        (own || tool)
                             && tab
                                 .document
                                 .path
                                 .as_deref()
                                 .is_some_and(|p| lsp::same_file_uri(&lsp::file_uri(p), &uri))
-                    }) && version.is_none_or(|number| number == self.tabs[index].lsp_version)
-                        && self.tabs[index].diagnostics != items
-                    {
-                        let tab = &mut self.tabs[index];
-                        if let Some(lines) = changed_diagnostic_lines(&tab.diagnostics, &items) {
-                            diagnostic_lines.push((index, lines));
+                    });
+                    if let Some(index) = found {
+                        let tab = &self.tabs[index];
+                        let own = tab.lsp_language == Some(language);
+                        let current = if own {
+                            tab.lsp_version
+                        } else {
+                            tab.tools_version
+                        };
+                        if version.is_none_or(|number| number == current) {
+                            let mut list: Vec<LspDiagnostic> = tab
+                                .diagnostics
+                                .iter()
+                                .filter(|problem| problem.origin != Some(language))
+                                .cloned()
+                                .collect();
+                            list.extend(items.into_iter().map(|mut problem| {
+                                problem.origin = Some(language);
+                                problem
+                            }));
+                            if list != tab.diagnostics {
+                                let tab = &mut self.tabs[index];
+                                if let Some(lines) =
+                                    changed_diagnostic_lines(&tab.diagnostics, &list)
+                                {
+                                    diagnostic_lines.push((index, lines));
+                                }
+                                tab.diagnostics = list;
+                                diagnostics_changed = true;
+                            }
                         }
-                        tab.diagnostics = items;
-                        diagnostics_changed = true;
+                        if !own {
+                            continue;
+                        }
                     }
                     // The server has looked at the file: its hints are ready.
                     self.request_inlay_hints();
@@ -405,6 +452,13 @@ impl App {
                             y: target.y,
                         });
                     }
+                }
+                LspEvent::Stopped {
+                    language,
+                    root,
+                    message,
+                } if self.is_tool_language(language) => {
+                    self.tool_stopped(language, root, message);
                 }
                 LspEvent::Stopped {
                     language,
@@ -1490,7 +1544,11 @@ fn changed_diagnostic_lines(
 
 // Moves problems that start after line `edited_end` by `lines_added` (which
 // is negative when lines were removed); those on the edited lines stay.
-fn shift_diagnostics(diagnostics: &mut [LspDiagnostic], edited_end: u32, lines_added: i64) {
+pub(super) fn shift_diagnostics(
+    diagnostics: &mut [LspDiagnostic],
+    edited_end: u32,
+    lines_added: i64,
+) {
     if lines_added == 0 {
         return;
     }
@@ -1671,6 +1729,7 @@ mod tests {
             severity,
             message: String::new(),
             raw: serde_json::Value::Null,
+            origin: None,
         }
     }
 

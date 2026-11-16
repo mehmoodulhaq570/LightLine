@@ -806,6 +806,9 @@ fn extension_kind_and_icon(folder: &Path) -> (ExtensionCategory, Option<Extensio
     if lightline::extensions::snippets::is_snippet_pack(folder) {
         return (ExtensionCategory::Snippets, None);
     }
+    if lightline::extensions::tools::is_tool_extension(folder) {
+        return (ExtensionCategory::Tool, None);
+    }
     (ExtensionCategory::Unknown, None)
 }
 

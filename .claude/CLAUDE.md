@@ -264,7 +264,8 @@ If the library needs a setting globally, push it in at load and on reload throug
 - **What works today:**
   - icon themes (e.g. Material Icon Theme) and color themes (e.g. Dracula, Catppuccin);
   - language extensions: the Tree-sitter grammar is built with the PC's C compiler (`extensions/language.rs`), and declared servers start only from PATH (`language_servers.rs`);
-  - snippet packs (`extensions/snippets.rs`, `windows_app/snippet_packs.rs`): `snippets = "…"` or a list in `extension.toml`, each file named after its language (`python.json`, `shell script.json`; `snippets.json` for all), VS Code's format. They're read on a worker on the first `Ctrl+Space` in that language and offered in the completion list.
+  - snippet packs (`extensions/snippets.rs`, `windows_app/snippet_packs.rs`): `snippets = "…"` or a list in `extension.toml`, each file named after its language (`python.json`, `shell script.json`; `snippets.json` for all), VS Code's format. They're read on a worker on the first `Ctrl+Space` in that language and offered in the completion list;
+  - tools (`extensions/tools.rs`, `windows_app/language_tools.rs`): an extension whose only part is `[language_servers.x]` with `languages = [...]` (typos, codebook, harper, cspell). It runs beside the file's own server, one per (server, root), from PATH (`language_servers::KNOWN`). A tab's tool documents are `Tab::tools` and share `tools_version`/`tools_serial`. Their problems join `Tab::diagnostics` tagged with `LspDiagnostic::origin`, so each server replaces only its own, and `Ctrl+.` on a tool's problem asks that tool.
 
   Anything else is refused with "isn't supported yet". Extensions that need WASM would require an adapter first.
 - **Entries with a `path`** live inside another repository (`html`, `glsl` and `proto` are inside Zed's own). They're refused before anything is downloaded.

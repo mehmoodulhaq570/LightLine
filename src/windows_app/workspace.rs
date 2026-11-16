@@ -121,11 +121,13 @@ impl App {
         self.panel_focus = false;
         self.lsp.clear();
         self.lsp_failed_at.clear();
+        self.tools_failed.clear();
         self.hover_target = None;
         self.hover_card = None;
         for tab in &mut self.tabs {
             tab.lsp_opened = false;
             tab.lsp_language = None;
+            tab.tools.clear();
             tab.diagnostics.clear();
         }
         self.load_directory(&root);

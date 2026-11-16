@@ -37,7 +37,7 @@ pub(super) struct SnippetWait {
 impl App {
     // The names the active file's snippet files may have, and the key its
     // snippets are kept under.
-    fn snippet_keys(&self) -> (Vec<String>, String) {
+    pub(super) fn snippet_keys(&self) -> (Vec<String>, String) {
         let tab = self.tab();
         let extension = tab
             .syntax

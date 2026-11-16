@@ -52,6 +52,11 @@ const KNOWN: &[(&str, &str, &[&str])] = &[
     ("astro-language-server", "astro-ls", &["--stdio"]),
     ("bash-language-server", "bash-language-server", &["start"]),
     ("clojure-lsp", "clojure-lsp", &[]),
+    // Tools that check many languages (extensions/tools.rs).
+    ("codebook", "codebook-lsp", &["serve"]),
+    ("cspell", "cspell-lsp", &["--stdio"]),
+    ("harper-ls", "harper-ls", &["--stdio"]),
+    ("typos", "typos-lsp", &[]),
     ("csharp-ls", "csharp-ls", &[]),
     ("dart", "dart", &["language-server", "--protocol=lsp"]),
     (

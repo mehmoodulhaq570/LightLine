@@ -868,7 +868,10 @@ impl App {
         while let Ok(message) = self.worker_rx.try_recv() {
             // Snippets read for a language show nothing by themselves; a
             // list they open redraws itself (snippet_packs.rs).
-            let quiet = matches!(message, WorkerMessage::Snippets(..));
+            let quiet = matches!(
+                message,
+                WorkerMessage::Snippets(..) | WorkerMessage::ToolsListed
+            );
             received |= !quiet;
             only_gutter &= quiet || matches!(message, WorkerMessage::GutterComputed(..));
             match message {
@@ -1069,6 +1072,17 @@ impl App {
                             self.status =
                                 super::snippet_packs::installed_note(&name, count, &languages);
                         }
+                        Ok(ExtensionInstallKind::Tools(tools)) => {
+                            let name = self
+                                .extensions
+                                .iter()
+                                .find(|ext| ext.id == id)
+                                .map(|ext| ext.name.clone())
+                                .unwrap_or_else(|| registry_id.clone());
+                            self.status = super::language_tools::installed_note(&name, &tools);
+                            // Open files it checks get it now.
+                            self.restart_tools();
+                        }
                         Err(_) => {}
                     }
                     self.scan_installed_extensions();
@@ -1172,6 +1186,7 @@ impl App {
                 }
                 WorkerMessage::Saved(id) => self.background_save_done(hwnd, id),
                 WorkerMessage::Snippets(key, snippets) => self.snippets_read(hwnd, key, snippets),
+                WorkerMessage::ToolsListed => self.tools_listed(hwnd),
                 _ => {}
             }
         }

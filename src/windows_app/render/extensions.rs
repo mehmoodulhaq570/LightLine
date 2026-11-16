@@ -357,6 +357,7 @@ impl App {
             ExtensionCategory::ColorTheme => ui(174, 109, 242),
             ExtensionCategory::Language => self.theme.sky,
             ExtensionCategory::Snippets => self.theme.orange,
+            ExtensionCategory::Tool => self.theme.teal,
             ExtensionCategory::Unknown => self.theme.muted,
         };
 
