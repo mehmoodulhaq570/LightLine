@@ -250,7 +250,9 @@ pub fn find_command(command: &str) -> Option<PathBuf> {
                 .find(|candidate| candidate.is_file())
         });
     }
+    // A checker's program LightLine downloaded when asked to.
     crate::workflow::resolve_command(command)
+        .or_else(|| super::tool_download::installed_command(command))
 }
 
 #[cfg(test)]

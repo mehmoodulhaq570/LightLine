@@ -20,6 +20,7 @@ pub mod markdown_syntax;
 pub mod run_config;
 pub mod runner;
 pub mod settings;
+pub mod sha256;
 pub mod syntax;
 pub mod terminal;
 pub mod text_search;

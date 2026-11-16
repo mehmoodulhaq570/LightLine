@@ -119,6 +119,8 @@ pub(super) enum WorkerMessage {
     Snippets(String, Vec<lightline::extensions::snippets::Snippet>),
     // The installed tool extensions have been listed (language_tools.rs).
     ToolsListed,
+    // A checker's program was downloaded, by server name (language_tools.rs).
+    ToolDownloaded(String, Result<PathBuf, String>),
 }
 
 // A document's text as of its (id, change_serial); see Tab::recovery_text.
@@ -1126,6 +1128,8 @@ pub(super) struct App {
     pub(super) tools_listing: bool,
     pub(super) tools_failed: HashSet<(LspLanguage, PathBuf)>,
     pub(super) tools_reported: HashSet<LspLanguage>,
+    // Checkers whose program is being downloaded, by server name.
+    pub(super) tools_downloading: HashSet<String>,
     // Rename Symbol: the box asking for the new name, then the request.
     pub(super) rename_box: Option<RenameBox>,
     pub(super) rename_target: Option<RenameRequest>,
@@ -1770,6 +1774,7 @@ impl App {
             tools_listing: false,
             tools_failed: HashSet::new(),
             tools_reported: HashSet::new(),
+            tools_downloading: HashSet::new(),
             rename_box: None,
             rename_target: None,
             code_action_request: None,
@@ -1928,6 +1933,13 @@ impl App {
                 // preference flip -- IconSet already handles "no theme
                 // loaded" gracefully, so this is a safe, meaningful action.
                 let name = self.extensions[idx].name.clone();
+                // A checker's program LightLine downloaded goes with it.
+                let servers: Vec<String> = lightline::workflow::extensions_dir()
+                    .map(|dir| lightline::extensions::tools::tools_of(&dir.join(&registry_id)))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|tool| tool.server)
+                    .collect();
                 let removed = lightline::extensions::installer::uninstall(&registry_id);
                 // A failed removal (a file in use) can leave the extension
                 // whole, or with its manifest already gone, which is no
@@ -1950,6 +1962,13 @@ impl App {
                 self.reload_extension_languages();
                 self.forget_snippets();
                 self.restart_tools();
+                if !servers.is_empty() {
+                    // Its server is stopping; the program is deleted once
+                    // it has.
+                    std::thread::spawn(move || {
+                        lightline::extensions::tool_download::remove(&servers)
+                    });
+                }
                 self.status = match removed {
                     Ok(()) => format!("{name} removed"),
                     Err(error) => format!("{name} removed, but some files remain: {error}"),

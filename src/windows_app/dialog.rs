@@ -217,13 +217,21 @@ pub(super) fn show_dialog(
         .unwrap_or(DLG_CANCEL);
     // Debug builds under a live test: the dialog would take the foreground
     // from whoever is using the PC, so it's written to the file named by
-    // LIGHTLINE_TEST_DIALOG and answered with its default button instead.
+    // LIGHTLINE_TEST_DIALOG and answered with its default button instead
+    // (its cancel button when LIGHTLINE_TEST_DIALOG_ANSWER is "cancel").
     #[cfg(debug_assertions)]
     if let Some(log) = std::env::var_os("LIGHTLINE_TEST_DIALOG") {
         use std::io::Write;
+        let cancel = std::env::var("LIGHTLINE_TEST_DIALOG_ANSWER").is_ok_and(|a| a == "cancel");
         let answer = buttons
             .iter()
-            .find(|button| button.is_default)
+            .find(|button| {
+                if cancel {
+                    button.is_cancel
+                } else {
+                    button.is_default
+                }
+            })
             .map_or(fallback, |button| button.id);
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)

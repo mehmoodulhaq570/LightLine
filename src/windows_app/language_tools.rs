@@ -13,6 +13,7 @@
 
 use super::*;
 use lightline::extensions::language_servers;
+use lightline::extensions::tool_download;
 use lightline::extensions::tools::{self, Tool};
 use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as LspRange};
 
@@ -22,6 +23,8 @@ use lightline::lsp::{Command as LspCommand, Position as LspPosition, Range as Ls
 pub(super) struct InstalledTool {
     command: Option<String>,
     found: bool,
+    // LightLine can download its program when asked (tool_download.rs).
+    downloadable: bool,
     hint: Option<&'static str>,
     languages: usize,
 }
@@ -37,6 +40,7 @@ pub(super) fn installed_tools(list: &[Tool]) -> Vec<InstalledTool> {
                     .as_deref()
                     .is_some_and(|command| language_servers::find_command(command).is_some()),
                 command,
+                downloadable: tool_download::release_for(&tool.server).is_some(),
                 hint: tools::install_hint(&tool.server),
                 languages: tool.languages.len(),
             }
@@ -54,9 +58,12 @@ pub(super) fn installed_note(name: &str, list: &[InstalledTool]) -> String {
         (Some(command), true) => {
             format!("{name} installed: it checks files in {languages} with `{command}`")
         }
+        (Some(command), false) if tool.downloadable => format!(
+            "{name} installed. It needs `{command}`: open a file it checks and LightLine offers \
+             to download it"
+        ),
         (Some(command), false) => format!(
-            "{name} installed, but `{command}` isn't on PATH yet, so it can't check files. \
-             Install it ({}), then reopen the file",
+            "{name} installed. It needs `{command}`: {}",
             tool.hint.unwrap_or("see the extension's page")
         ),
         (None, _) => format!(
@@ -73,10 +80,44 @@ pub(super) fn stopped_note(server: &str, message: &str) -> String {
     let command = language_servers::known_command(server).map(|command| command.command);
     match (command, tools::install_hint(server)) {
         (Some(command), Some(hint)) if message.contains("not found on PATH") => {
-            format!("{server} needs `{command}` on PATH to check files: {hint}")
+            format!("{server} needs `{command}` to check files: {hint}")
         }
         _ => message.to_string(),
     }
+}
+
+// Asks before downloading a checker's program, as for Pyright.
+fn ask_to_download(hwnd: HWND, release: &tool_download::Release) -> bool {
+    let message = format!(
+        "{server} checks your files with {command}, which isn't installed.\n\nDownload \
+         {command} {version} now? It's about {mb} MB from {site}. LightLine checks it's the \
+         exact file it expects and puts it in its own folder; nothing else on your PC changes.",
+        server = release.server,
+        command = release.command,
+        version = release.version,
+        mb = release.megabytes,
+        site = release.site,
+    );
+    dialog::show_dialog(
+        hwnd,
+        &format!("Set up {}", release.server),
+        &message,
+        dialog::DialogIcon::Question,
+        &[
+            dialog::DialogButton {
+                label: "Download",
+                id: dialog::DLG_YES,
+                is_default: true,
+                is_cancel: false,
+            },
+            dialog::DialogButton {
+                label: "Not Now",
+                id: dialog::DLG_NO,
+                is_default: false,
+                is_cancel: true,
+            },
+        ],
+    ) == dialog::DLG_YES
 }
 
 // The LSP language a tool's server runs as: registered by the server's
@@ -314,7 +355,13 @@ impl App {
     /// A tool's server stopped or couldn't start: its files lose it and
     /// its problems, it isn't tried again this session, and the first time
     /// the status bar says why.
-    pub(super) fn tool_stopped(&mut self, language: LspLanguage, root: PathBuf, message: String) {
+    pub(super) fn tool_stopped(
+        &mut self,
+        hwnd: HWND,
+        language: LspLanguage,
+        root: PathBuf,
+        message: String,
+    ) {
         self.lsp
             .retain(|client| !(client.language() == language && client.root() == root));
         for tab in &mut self.tabs {
@@ -327,8 +374,71 @@ impl App {
             }
         }
         self.tools_failed.insert((language, root));
-        if self.tools_reported.insert(language) {
-            self.status = stopped_note(language.name(), &message);
+        if !self.tools_reported.insert(language) {
+            return;
+        }
+        let server = language.name();
+        // Its program isn't installed: offer to download it (asked once a
+        // session), as Pyright is.
+        if message.contains("not found on PATH")
+            && let Some(release) = tool_download::release_for(server)
+        {
+            if self.tools_downloading.contains(server) {
+                return;
+            }
+            if ask_to_download(hwnd, &release) {
+                self.download_tool(hwnd, release);
+                return;
+            }
+        }
+        self.status = stopped_note(server, &message);
+    }
+
+    // Downloads `release` on a worker; `tool_downloaded` follows.
+    fn download_tool(&mut self, hwnd: HWND, release: tool_download::Release) {
+        self.tools_downloading.insert(release.server.to_string());
+        self.status = format!(
+            "Downloading {} {} (about {} MB) from {}…",
+            release.command, release.version, release.megabytes, release.site
+        );
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+        let tx = self.worker_tx.clone();
+        std::thread::spawn(move || {
+            let result = tool_download::download(&release);
+            tx.send(WorkerMessage::ToolDownloaded(
+                release.server.to_string(),
+                result,
+            ));
+        });
+    }
+
+    /// A checker's program finished downloading: files it checks get it
+    /// now, or the status bar says why not.
+    pub(super) fn tool_downloaded(
+        &mut self,
+        hwnd: HWND,
+        server: String,
+        result: Result<PathBuf, String>,
+    ) {
+        self.tools_downloading.remove(&server);
+        match result {
+            Ok(_) => {
+                self.tools_failed
+                    .retain(|(language, _)| language.name() != server);
+                self.tools_reported
+                    .retain(|language| language.name() != server);
+                let command = language_servers::known_command(&server)
+                    .map(|command| command.command)
+                    .unwrap_or_else(|| server.clone());
+                self.status = format!("{command} downloaded: {server} is checking files");
+                self.ensure_tools(hwnd);
+            }
+            Err(error) => {
+                let hint = tools::install_hint(&server)
+                    .map(|hint| format!(". You can also {hint}"))
+                    .unwrap_or_default();
+                self.status = format!("Couldn't get {server}'s program: {error}{hint}");
+            }
         }
     }
 
@@ -368,23 +478,28 @@ mod tests {
 
     #[test]
     fn install_note_says_whether_the_command_is_there() {
-        let tool = |command: Option<&str>, found| InstalledTool {
+        let tool = |command: Option<&str>, found, downloadable| InstalledTool {
             command: command.map(str::to_string),
             found,
-            hint: Some("cargo install typos-lsp"),
+            downloadable,
+            hint: Some("run cargo install typos-lsp"),
             languages: 62,
         };
         assert_eq!(
-            installed_note("Typos", &[tool(Some("typos-lsp"), true)]),
+            installed_note("Typos", &[tool(Some("typos-lsp"), true, true)]),
             "Typos installed: it checks files in 62 languages with `typos-lsp`"
         );
-        let missing = installed_note("Typos", &[tool(Some("typos-lsp"), false)]);
-        assert!(
-            missing.starts_with("Typos installed, but `typos-lsp` isn't on PATH yet"),
-            "{missing}"
+        assert_eq!(
+            installed_note("Typos", &[tool(Some("typos-lsp"), false, true)]),
+            "Typos installed. It needs `typos-lsp`: open a file it checks and LightLine offers \
+             to download it"
         );
-        assert!(missing.contains("cargo install typos-lsp"), "{missing}");
-        assert!(installed_note("X", &[tool(None, false)]).contains("languageServers"));
+        // Not one LightLine can download (cspell): how to get it.
+        assert_eq!(
+            installed_note("Typos", &[tool(Some("typos-lsp"), false, false)]),
+            "Typos installed. It needs `typos-lsp`: run cargo install typos-lsp"
+        );
+        assert!(installed_note("X", &[tool(None, false, false)]).contains("languageServers"));
     }
 
     #[test]
@@ -393,8 +508,9 @@ mod tests {
                    Install it, or set its command under \"languageServers\" in settings.json.";
         assert_eq!(
             stopped_note("typos", lsp),
-            "typos needs `typos-lsp` on PATH to check files: cargo install typos-lsp, or a \
-             release from github.com/tekumara/typos-lsp"
+            "typos needs `typos-lsp` to check files: get typos-lsp.exe from \
+             github.com/tekumara/typos-lsp/releases and put it on PATH, or run cargo install \
+             typos-lsp"
         );
         // Anything else is said as the server said it.
         assert_eq!(stopped_note("typos", "it crashed"), "it crashed");
