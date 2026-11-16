@@ -7,5 +7,6 @@ pub mod editing;
 pub mod installer;
 pub mod language;
 pub mod language_servers;
+pub mod snippets;
 pub mod zed_manifest;
 pub mod zed_registry;

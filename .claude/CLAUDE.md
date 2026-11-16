@@ -261,7 +261,12 @@ If the library needs a setting globally, push it in at load and on reload throug
   3. Move it into place, keeping a backup and rolling back on failure.
 
   This needs `git` on PATH. Installs are serialized with an exclusive lock file.
-- **What works today:** data-only extensions, meaning icon themes (e.g. Material Icon Theme) and color themes (e.g. Dracula, Catppuccin). Anything else is refused with "isn't supported yet". Extensions that need WASM would require an adapter first.
+- **What works today:**
+  - icon themes (e.g. Material Icon Theme) and color themes (e.g. Dracula, Catppuccin);
+  - language extensions: the Tree-sitter grammar is built with the PC's C compiler (`extensions/language.rs`), and declared servers start only from PATH (`language_servers.rs`);
+  - snippet packs (`extensions/snippets.rs`, `windows_app/snippet_packs.rs`): `snippets = "…"` or a list in `extension.toml`, each file named after its language (`python.json`, `shell script.json`; `snippets.json` for all), VS Code's format. They're read on a worker on the first `Ctrl+Space` in that language and offered in the completion list.
+
+  Anything else is refused with "isn't supported yet". Extensions that need WASM would require an adapter first.
 - **Entries with a `path`** live inside another repository (`html`, `glsl` and `proto` are inside Zed's own). They're refused before anything is downloaded.
 - **Built-in entries:** Prettier is a curated "extension" that reports whether the Prettier CLI is available; it isn't downloaded. The Featured list is Prettier, Material Icons and Dracula. Searching shows the rest of the registry.
 

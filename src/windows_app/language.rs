@@ -666,6 +666,16 @@ impl App {
                             .unwrap_or("")
                             .to_owned()
                     };
+                    // Installed snippets that match what's typed join the
+                    // list (snippet_packs.rs) when the caret hasn't moved.
+                    let here = self.focused_pane == request.pane
+                        && self.view().cursor == request.replace_end;
+                    let reading = here && self.active_snippets().is_none();
+                    let (snippets, typed) = if here {
+                        self.snippet_items()
+                    } else {
+                        (Vec::new(), false)
+                    };
                     let mut items = items;
                     if !prefix.is_empty() {
                         let needle = prefix.to_lowercase();
@@ -674,12 +684,17 @@ impl App {
                             .filter(|item| item.label.to_lowercase().starts_with(&needle))
                             .cloned()
                             .collect();
-                        if !kept.is_empty() {
+                        if !kept.is_empty() || !snippets.is_empty() {
                             items = kept;
                         }
                     }
+                    super::snippet_packs::merge_snippets(&mut items, snippets, typed);
                     if items.is_empty() {
-                        self.status = "No completions".into();
+                        if reading {
+                            self.wait_for_snippets(false);
+                        } else {
+                            self.status = "No completions".into();
+                        }
                         continue;
                     }
                     self.completion = Some(CompletionPopup {
@@ -691,6 +706,9 @@ impl App {
                         y: request.y,
                         folder: None,
                     });
+                    if reading {
+                        self.wait_for_snippets(true);
+                    }
                 }
             }
         }
@@ -1251,11 +1269,15 @@ impl App {
     // remember the identifier prefix that an accepted item should overwrite.
     pub(super) fn trigger_completion(&mut self, hwnd: HWND) {
         self.completion = None;
+        self.snippet_wait = None;
         // In a relative path in a string, the files there (path_complete.rs),
         // with or without a language server.
         if self.suggest_paths(hwnd) {
             return;
         }
+        // Installed snippets for the file's language join the list; the
+        // first time, they're read while the server works on its answer.
+        let _ = self.active_snippets();
         let pane = self.focused_pane;
         let pos = self.view().cursor;
         let index = self.tab_for_pane(pane);
@@ -1263,8 +1285,12 @@ impl App {
             self.ensure_lsp(hwnd);
         }
         let tab = &self.tabs[index];
-        if !tab.lsp_opened {
-            self.status = "Language server not ready yet".into();
+        let server = tab.lsp_opened && tab.lsp_language.is_some() && tab.document.path.is_some();
+        if !server {
+            // Snippets alone, when there are any.
+            if !self.show_snippets_only(hwnd) && !self.tabs[index].lsp_opened {
+                self.status = "Language server not ready yet".into();
+            }
             return;
         }
         let Some(language) = tab.lsp_language else {

@@ -866,8 +866,11 @@ impl App {
         let mut only_gutter = true;
         let mut replace = None;
         while let Ok(message) = self.worker_rx.try_recv() {
-            received = true;
-            only_gutter &= matches!(message, WorkerMessage::GutterComputed(..));
+            // Snippets read for a language show nothing by themselves; a
+            // list they open redraws itself (snippet_packs.rs).
+            let quiet = matches!(message, WorkerMessage::Snippets(..));
+            received |= !quiet;
+            only_gutter &= quiet || matches!(message, WorkerMessage::GutterComputed(..));
             match message {
                 WorkerMessage::Directory(generation, request, path, result) => {
                     if generation == self.workspace_generation
@@ -1025,6 +1028,10 @@ impl App {
                         };
                         ext.installed = result.is_ok();
                     }
+                    // Any extension may bring snippets.
+                    if result.is_ok() {
+                        self.forget_snippets();
+                    }
                     match result {
                         // IconSet only ever reads the "material-icon-theme"
                         // folder -- reloading for any other icon-theme id
@@ -1051,6 +1058,16 @@ impl App {
                             self.reload_extension_languages();
                             self.refresh(hwnd);
                             unsafe { InvalidateRect(hwnd, null(), 0) };
+                        }
+                        Ok(ExtensionInstallKind::Snippets { count, languages }) => {
+                            let name = self
+                                .extensions
+                                .iter()
+                                .find(|ext| ext.id == id)
+                                .map(|ext| ext.name.clone())
+                                .unwrap_or_else(|| registry_id.clone());
+                            self.status =
+                                super::snippet_packs::installed_note(&name, count, &languages);
                         }
                         Err(_) => {}
                     }
@@ -1154,6 +1171,7 @@ impl App {
                     }
                 }
                 WorkerMessage::Saved(id) => self.background_save_done(hwnd, id),
+                WorkerMessage::Snippets(key, snippets) => self.snippets_read(hwnd, key, snippets),
                 _ => {}
             }
         }
