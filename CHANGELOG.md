@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-11-16
+
+Released as `lightline.exe` (x64), `lightline-arm64.exe`, `lightline-v0.12.0-windows-x86_64.zip`, `lightline-v0.12.0-windows-arm64.zip` and `SHA256SUMS.txt`. Still unsigned: check the file against `SHA256SUMS.txt`, then choose **More info** → **Run anyway** if SmartScreen warns.
+
+Five things other editors need an extension for are now built in: problems written after their line, `.editorconfig`, TODO highlighting, renaming a tag's pair together, and file path suggestions. Each one has a setting to turn it off. The Welcome page, Quick Open and Settings are redone too, and it's as fast as v0.11.0. Measured against the published v0.11.0 exe on the same PC (x64 release builds; 200 keystrokes into a 3,148-line Rust file with rust-analyzer running; runs alternating between the two):
+- **Typing:** 8.2–12.7 million CPU cycles of work on the window's thread per keystroke (median 9.3 million, six runs), against 6.9–11.2 million for v0.11.0 (median 9.6 million, five runs). The PC was busy during some runs, so both ranges are wide, and they overlap.
+- **Start:** a responding window in 0.08–0.10 s (median of five launches, four runs), against 0.08–0.13 s for v0.11.0 (three runs).
+- **Idle:** no wakeups at all in the background, for both. A first set of runs seemed to show 3 wakeups in 20 seconds for v0.12.0 only. That was the unsaved-work snapshot, taken 5 seconds after the last keystroke and checked once 5 seconds later: in those runs the check happened to land inside the 20 seconds being counted. With the count started after it, both had none, in every run.
+
+Two of v0.11.0's runs couldn't be measured: it brought itself to the front as it started, which the test refuses. That's the focus bug fixed below.
+
 #### Added
 
 - **File Path Suggestions**: Typing `./` or `../` inside a string, such as an `import` or `open("…")`, opens the completion list with the files and folders there, folders first and each with the Explorer's icon, leaving out what the project's `.gitignore` ignores and folders such as `node_modules`. It narrows as you type, with the letters you typed highlighted and a last line saying which folder is listed and how many of its entries match; Enter or Tab inserts the name, and choosing a folder adds `/` and lists what's inside it. Ctrl+Space in such a path shows the list too, even with no language server. The folder is read in the background once and kept up to date by the file watcher, so typing more letters only filters it. **Suggest file paths** in Settings (Editor), or `pathCompletion`, turns it off.
