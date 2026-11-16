@@ -362,7 +362,7 @@ Inserted code is indented to fit where it lands, and one **Ctrl+Z** undoes it.
 
 ## Extensions and themes
 
-The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extension registry](https://github.com/zed-industries/extensions) into `%APPDATA%\LightLine\extensions`. Four kinds work today.
+The Extensions panel (`Ctrl+Shift+X`) installs extensions from the [Zed extension registry](https://github.com/zed-industries/extensions) into `%APPDATA%\LightLine\extensions`. Five kinds work today.
 
 The panel lists **Installed** extensions, then **Featured** ones (Prettier, Material Icon Theme, Dracula), then what's **In Use**: the formatter, the file icons and the color theme (click it to change the theme). The **All**, **Themes** and **Formatters** chips filter the lists. Typing in the search box searches the whole Zed registry instead. Each extension has one button: **Install**; a green ✓ once installed, which becomes **Uninstall** when you point at it (**Turn Off** for Prettier). Click a section's title to fold it. The **···** menu has Show Installed, Show Featured, Check for Updates and Open Extensions Folder.
 
@@ -381,7 +381,18 @@ Updates download and validate a staged copy before replacing an installed extens
   - **A place in the language picker**: click the language name in the status bar (or **Run: Choose the File's Language**) to color and edit a file with another name, such as `notes.txt` or a script without an extension, as one of these languages. The choice is remembered for that file; **Auto Detect** goes back to what its name says.
   - **Its language server, when you have it.** Zed extensions download their servers with code LightLine doesn't run, so LightLine starts a server only when its command is already on your PATH. It knows the commands of about 40 servers by the name the extension gives them, including `lua-language-server`, `zls`, `taplo`, `elixir-ls`, `bash-language-server` and `yaml-language-server`. If the command isn't found, the status bar says which one it looked for; nothing is downloaded. The `languageServers` setting names the command for any other server, or for a language whose extension names none. The server then works like the built-in ones: errors as you type, completions, hover, go to definition, rename and the rest, as far as it supports them.
 
-Other kinds of extensions, such as debuggers or extensions that only add a language server, say they aren't supported yet rather than half-installing.
+- **Checkers** are extensions whose only part is a language server that checks files of many languages: the spell checkers **typos**, **codebook**, **harper** and **cspell**. A checker runs beside a file's own language server, or on its own in a file that has none, such as `notes.txt` or a Markdown file. Its problems are underlined and shown after their line and in Problems with the language server's. `Ctrl+.` on one of its problems offers its fixes, such as *Correct to "receive"*. Like a language's server, LightLine starts a checker only when its command is on your PATH and downloads nothing:
+
+  | Extension | Command | Get it with |
+  | --- | --- | --- |
+  | typos | `typos-lsp` | `cargo install typos-lsp`, or a release from github.com/tekumara/typos-lsp |
+  | codebook | `codebook-lsp serve` | `cargo install codebook-lsp` |
+  | harper | `harper-ls --stdio` | `cargo install harper-ls --locked` |
+  | cspell | `cspell-lsp --stdio` | `npm install -g @vlabo/cspell-lsp` |
+
+  After installing, the status bar says whether the command was found. If it's missing when a file opens, the status bar says so once; install it and reopen the file. The `languageServers` setting can name the command for any other checker by its server's name. A checker starts the first time a file it checks is shown, never at startup, and each keystroke only sends it the change.
+
+Other kinds of extensions, such as debuggers or slash commands for AI, say they aren't supported yet rather than half-installing.
 
 ---
 
