@@ -1,17 +1,17 @@
 {
-    "version": "0.11.0",
+    "version": "0.12.0",
     "description": "A fast, lightweight code editor for Windows, written in Rust.",
     "homepage": "https://github.com/mehmoodulhaq570/LightLine",
     "license": "MIT",
     "notes": "LightLine keeps its settings in %APPDATA%\\LightLine. It isn't code-signed yet.",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/mehmoodulhaq570/LightLine/releases/download/v0.11.0/lightline-v0.11.0-windows-x86_64.zip",
-            "hash": "9fad765befb86127ea344b6e3f84112f522f85e9f4d33c63eb6244993baa50ee"
+            "url": "https://github.com/mehmoodulhaq570/LightLine/releases/download/v0.12.0/lightline-v0.12.0-windows-x86_64.zip",
+            "hash": "76819acb7910b36bfdf9fb49b5827c73c5f9635756dd40801e640fc6e5b9afcf"
         },
         "arm64": {
-            "url": "https://github.com/mehmoodulhaq570/LightLine/releases/download/v0.11.0/lightline-v0.11.0-windows-arm64.zip",
-            "hash": "796e213305d48c3974f4c3a47b039db9a0d169e511f26566a8cd6496021b3d99"
+            "url": "https://github.com/mehmoodulhaq570/LightLine/releases/download/v0.12.0/lightline-v0.12.0-windows-arm64.zip",
+            "hash": "81c741fde42c4fd3a5cefa2f0f75275b7a0bd9cc44d4cc9fe8f90c7803e0ade0"
         }
     },
     "bin": "lightline.exe",
