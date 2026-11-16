@@ -66,6 +66,19 @@ pub(super) fn installed_note(name: &str, list: &[InstalledTool]) -> String {
     }
 }
 
+/// The status bar when tool `server` couldn't start or stopped: when its
+/// command is missing, the command and how to get it come first, so they
+/// fit before the status bar cuts the message off.
+pub(super) fn stopped_note(server: &str, message: &str) -> String {
+    let command = language_servers::known_command(server).map(|command| command.command);
+    match (command, tools::install_hint(server)) {
+        (Some(command), Some(hint)) if message.contains("not found on PATH") => {
+            format!("{server} needs `{command}` on PATH to check files: {hint}")
+        }
+        _ => message.to_string(),
+    }
+}
+
 // The LSP language a tool's server runs as: registered by the server's
 // name, with each file's own language id.
 fn tool_language(tool: &Tool) -> LspLanguage {
@@ -315,11 +328,7 @@ impl App {
         }
         self.tools_failed.insert((language, root));
         if self.tools_reported.insert(language) {
-            let hint = tools::install_hint(language.name())
-                .filter(|_| message.contains("not found on PATH"))
-                .map(|hint| format!(" ({hint})"))
-                .unwrap_or_default();
-            self.status = format!("{message}{hint}");
+            self.status = stopped_note(language.name(), &message);
         }
     }
 
@@ -376,5 +385,19 @@ mod tests {
         );
         assert!(missing.contains("cargo install typos-lsp"), "{missing}");
         assert!(installed_note("X", &[tool(None, false)]).contains("languageServers"));
+    }
+
+    #[test]
+    fn a_missing_command_says_how_to_get_it_first() {
+        let lsp = "typos: `typos-lsp` not found on PATH, so its language server isn't running. \
+                   Install it, or set its command under \"languageServers\" in settings.json.";
+        assert_eq!(
+            stopped_note("typos", lsp),
+            "typos needs `typos-lsp` on PATH to check files: cargo install typos-lsp, or a \
+             release from github.com/tekumara/typos-lsp"
+        );
+        // Anything else is said as the server said it.
+        assert_eq!(stopped_note("typos", "it crashed"), "it crashed");
+        assert_eq!(stopped_note("unknown-ls", lsp), lsp);
     }
 }
