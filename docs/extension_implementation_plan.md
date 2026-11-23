@@ -203,6 +203,31 @@ LightLine extension directory
 
 LightLine never maintains its own catalog database — Zed's registry *is* the catalog.
 
+### Phase 3b — LightLine's own list of tested extensions (2026-11)
+
+Zed's registry says nothing about which of its ~1,600 extensions work in
+LightLine, so the panel used to describe every result as "install to see
+whether LightLine supports it yet". `registry/extensions.toml` lists the ones
+tested with LightLine, still without a server or a database of our own:
+
+- Each entry is either `from = "zed"` (installed at the commit Zed's registry
+  pins, so it follows Zed's updates) or `repository` + `commit` (an extension
+  in its own GitHub repository, in Zed's format, pinned in the list), plus
+  Prettier, which is built in.
+- A copy is compiled in (`include_str!`) and read the first time the panel
+  opens. When the panel opens, the latest copy is read from `main` on
+  GitHub, next to Zed's `extensions.toml`, reused for 10 minutes. A list
+  that can't be read or is in a newer `format` leaves the built-in one.
+- Entries this build can't use (an unknown `kind`, a newer `requires`) are
+  skipped, so older releases keep working with newer lists.
+- `cargo test --lib lightline_list` checks the file (CI); the ignored test
+  installs every entry and checks its kind. Contributors propose entries by
+  pull request (`CONTRIBUTING.md`).
+- The panel shows listed entries with a **LightLine** badge, recommends the
+  `recommended` ones, and puts listed search results first. Code:
+  `src/extensions/lightline_list.rs`, `windows_app/extensions_panel.rs`
+  (`merge_extension_list`). Mock-up: `design/extension-list-design.html`.
+
 ### Phase 4 — Generalize the adapter pattern
 
 Each new supported Zed extension *type* gets its own adapter, not a special case

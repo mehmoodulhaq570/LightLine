@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine's Own Extension List</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs::default_dark) */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --sky: #38bdf8; --teal: #2dd4bf;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78; --orange: #f59150;
+    --install: #1272c4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 8px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--label); text-transform: uppercase; letter-spacing: .04em; }
+  p { max-width: 900px; }
+  p.lead { color: var(--label); margin: 0 0 18px; }
+  ul { padding-left: 20px; margin: 0; max-width: 900px; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  pre { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0a142a; border: 1px solid var(--edge-page); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; max-width: 900px; }
+  pre .c { color: var(--muted); } pre .k { color: var(--blue); } pre .s { color: var(--green); } pre .h { color: var(--amber); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; max-width: 960px; }
+  .rec { color: var(--green); font-weight: 600; }
+  .status { display: inline-block; font-size: 12px; color: var(--amber); border: 1px solid #5a4520; background: #1d160a; border-radius: 4px; padding: 0 7px; margin-left: 6px; vertical-align: 3px; }
+
+  /* ---------- Extensions panel crops at real size (sidebar 286 px) ---------- */
+  .frames { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-weight: 600; margin-bottom: 6px; }
+  figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; max-width: 286px; }
+  .panel { width: 286px; height: 640px; overflow: hidden; background: var(--side); border: 1px solid var(--edge-page); border-radius: 8px; font-size: 13px; position: relative; }
+  .ph { height: 35px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; letter-spacing: .05em; color: var(--label); }
+  .ph .ic { margin-left: auto; display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+  .search { margin: 4px 12px 0; height: 28px; border: 1px solid var(--edge); background: var(--field); border-radius: 5px; display: flex; align-items: center; padding: 0 8px; gap: 8px; color: var(--muted); }
+  .search.on { border-color: var(--blue); color: var(--text); }
+  .search .q { flex: 1; }
+  .chips { display: flex; gap: 4px; margin: 6px 12px 0; }
+  .chip { height: 22px; border: 1px solid var(--edge); border-radius: 11px; padding: 0 9px; display: flex; align-items: center; color: var(--muted); font-size: 12px; }
+  .chip.on { border-color: var(--blue); background: var(--select); color: var(--text); }
+  .div { height: 1px; background: var(--edge); margin: 4px 0 3px; }
+  .hd { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; font-size: 11.5px; font-weight: 600; color: #a9b7cd; }
+  .hd .chev { width: 12px; color: var(--muted); font-size: 10px; text-align: center; }
+  .hd .n { background: var(--edge); color: var(--text); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 400; min-width: 18px; text-align: center; }
+  .hd .note { margin-left: auto; color: var(--muted); font-weight: 400; }
+  .note-row { height: 22px; padding-left: 20px; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 10px; }
+  .ext { height: 62px; position: relative; }
+  .ext.hot { background: #0e1a33; }
+  .ext .icon { position: absolute; left: 20px; top: 10px; width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; font-weight: 700; font-size: 15px; color: #0b1222; }
+  .ext .l1 { position: absolute; left: 66px; top: 5px; right: 10px; white-space: nowrap; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+  .ext .l1 b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l1 .v { color: var(--muted); font-size: 11.5px; flex: none; }
+  .ext .l2 { position: absolute; left: 66px; top: 24px; right: 10px; color: #b9c5d8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3 { position: absolute; left: 66px; top: 40px; right: 70px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3.dim { color: #5d6f8d; }
+  .ext .btn { position: absolute; right: 10px; top: 41px; height: 18px; padding: 0 9px; border-radius: 3px; background: var(--install); color: #fff; font-size: 11.5px; display: flex; align-items: center; }
+  .badge { flex: none; font-size: 10.5px; font-weight: 600; color: var(--blue); border: 1px solid #2b4c84; background: #0d1d3b; border-radius: 3px; padding: 0 4px; line-height: 15px; }
+  .new { outline: 1px dashed rgba(52, 211, 153, .55); outline-offset: -1px; }
+  .callout { font-size: 12.5px; color: var(--green); }
+  .callout::before { content: "▢ "; }
+  .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; border-top: 1px solid var(--edge); display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; color: var(--label); background: var(--rail); white-space: nowrap; overflow: hidden; }
+
+  /* flow */
+  .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin: 10px 0 6px; max-width: 960px; }
+  .step { flex: 1 1 200px; border: 1px solid var(--edge-page); border-radius: 8px; padding: 10px 12px; background: #0a142a; font-size: 13px; }
+  .step b { display: block; color: #fff; margin-bottom: 4px; }
+  .step .when { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>LightLine's Own Extension List <span class="status">Approved and built 2026-11-24</span></h1>
+<p class="lead">Part 3 of “Fill the extension gaps without our own marketplace” (<code>.claude/session.md</code>). Drafted 2026-11-24. The panel crops below are drawn at real size (sidebar 286 px, 62 px extension rows) in the default dark theme. Dashed green outlines mark what's new.</p>
+
+<p>A plain TOML file in the LightLine repo lists the extensions <b>we've tested with LightLine</b>, and later ones we write ourselves. The Extensions panel shows them first, with a <span class="badge">LightLine</span> badge, and already knows their name, what kind they are and a real description. Today a registry result only says “install to see whether LightLine supports it yet”. Nothing runs on a server. Anyone can propose an entry with a pull request, and we review it the same way as code.</p>
+
+<h2>What the user sees</h2>
+<div class="frames">
+
+  <figure>
+    <figcaption>Today<span>Three entries are written into the code (<code>FEATURED</code> in <code>extensions_panel.rs</code>). Search results are bare ids from Zed's registry with the same placeholder description.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search"><span>⌕</span><span class="q">Search the Zed registry</span><span>⏷</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Formatters</span></div>
+      <div class="div"></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">1</span></div>
+      <div class="ext"><div class="icon" style="background:#f5b85f">M</div><div class="l1"><b>Material Icon Theme</b><span class="v">1.3.1</span></div><div class="l2">Material Design file &amp; folder icons, consumed fr…</div><div class="l3">Zed Industries (zed-extensions/material… · Icon theme</div></div>
+      <div class="hd"><span class="chev">▾</span>FEATURED <span class="n">2</span></div>
+      <div class="ext"><div class="icon" style="background:#f8b4d9">P</div><div class="l1"><b>Prettier - Code formatter</b><span class="v">v3.4.2</span></div><div class="l2">Code formatter using prettier for JS, TS, HTML, CSS</div><div class="l3">esbenp · Formatter</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula Theme</b><span class="v">Zed Registry</span></div><div class="l2">A dark color theme with vivid, accessible syntax c…</div><div class="l3">Dracula Team · Color theme</div><div class="btn">Install</div></div>
+      <div class="hd"><span class="chev">▾</span>IN USE <span class="n">3</span></div>
+      <div class="note-row" style="color:var(--text)">● Formatting &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span style="color:var(--muted)">Built-in formatter</span></div>
+      <div class="note-row" style="color:var(--text)">● File icons &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span style="color:var(--muted)">Material Icon Theme</span></div>
+      <div class="note-row" style="color:var(--text)">● Color theme &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span style="color:var(--blue)">LightLine Dark</span></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed: panel open<span>FEATURED becomes RECOMMENDED, filled from the list. The chips follow the kinds people actually install. The list ships inside the exe, so this shows straight away, even offline.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search"><span>⌕</span><span class="q">Search extensions</span><span>⏷</span></div>
+      <div class="chips new"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Snippets</span><span class="chip">Checkers</span></div>
+      <div class="div"></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">1</span></div>
+      <div class="ext"><div class="icon" style="background:#f5b85f">M</div><div class="l1"><b>Material Icon Theme</b><span class="v">1.3.1</span><span class="badge">LightLine</span></div><div class="l2">Material Design file and folder icons</div><div class="l3">zed-extensions · Icon theme</div></div>
+      <div class="hd new"><span class="chev">▾</span>RECOMMENDED <span class="n">11</span></div>
+      <div class="ext"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula</b><span class="v">1.1.2</span><span class="badge">LightLine</span></div><div class="l2">A dark theme with vivid, accessible syntax colors</div><div class="l3">Dracula Team · Color theme</div><div class="btn">Install</div></div>
+      <div class="ext hot"><div class="icon" style="background:#cba6f7">C</div><div class="l1"><b>Catppuccin</b><span class="v">0.2.9</span><span class="badge">LightLine</span></div><div class="l2">Soothing pastel themes: Latte, Frappé, Macchiato…</div><div class="l3">catppuccin · Color theme</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#34d399">T</div><div class="l1"><b>typos</b><span class="v">0.1.6</span><span class="badge">LightLine</span></div><div class="l2">Finds spelling mistakes in code and comments</div><div class="l3">tekumara · Checker</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#38bdf8">P</div><div class="l1"><b>Python Snippets</b><span class="v">0.1.0</span><span class="badge">LightLine</span></div><div class="l2">def, class, for, with, try and 40 more for Python</div><div class="l3">zed-extensions · Snippets</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#f8b4d9">P</div><div class="l1"><b>Prettier</b><span class="v">built in</span></div><div class="l2">Formats JS, TS, HTML and CSS with your Prettier</div><div class="l3">esbenp · Formatter</div><div class="btn">Install</div></div>
+      <div class="note-row">6 more: scroll, or search the list and Zed's</div>
+      <div class="hd"><span class="chev">▸</span>IN USE <span class="n">3</span></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed: searching “snip”<span>Matches from our list come first, with their real kind. Zed's other matches follow under their own header, as today.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search on"><span>⌕</span><span class="q">snip<span style="display:inline-block;width:1px;height:15px;background:var(--text);vertical-align:-3px"></span></span><span>✕</span></div>
+      <div class="div" style="margin-top:6px"></div>
+      <div class="hd new"><span class="chev">▾</span>LIGHTLINE LIST <span class="n">3</span><span class="note">tested</span></div>
+      <div class="ext"><div class="icon" style="background:#38bdf8">P</div><div class="l1"><b>Python Snippets</b><span class="v">0.1.0</span><span class="badge">LightLine</span></div><div class="l2">def, class, for, with, try and 40 more for Python</div><div class="l3">zed-extensions · Snippets</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#f59150">R</div><div class="l1"><b>Rust Snippets</b><span class="v">0.0.3</span><span class="badge">LightLine</span></div><div class="l2">fn, impl, match, test modules and derives</div><div class="l3">zed-extensions · Snippets</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#2dd4bf">F</div><div class="l1"><b>FastAPI Snippets</b><span class="v">0.1.1</span><span class="badge">LightLine</span></div><div class="l2">Routes, dependencies and models for FastAPI</div><div class="l3">zed-extensions · Snippets</div><div class="btn">Install</div></div>
+      <div class="hd"><span class="chev">▾</span>ZED REGISTRY <span class="n">51</span><span class="note">not tested</span></div>
+      <div class="ext"><div class="icon" style="background:#7e92b2">R</div><div class="l1"><b>react-snippets</b><span class="v">0.0.4</span></div><div class="l2">Zed extension: install to see whether LightLine s…</div><div class="l3 dim">zed-industries/extensions</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#7e92b2">C</div><div class="l1"><b>comment-block-snippets</b><span class="v">0.1.0</span></div><div class="l2">Zed extension: install to see whether LightLine s…</div><div class="l3 dim">zed-industries/extensions</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#7e92b2">G</div><div class="l1"><b>go-snippets</b><span class="v">0.2.0</span></div><div class="l2">Zed extension: install to see whether LightLine s…</div><div class="l3 dim">zed-industries/extensions</div><div class="btn">Install</div></div>
+    </div>
+  </figure>
+</div>
+<p style="color:var(--muted);font-size:13px">Versions and descriptions in the crops are placeholders. The real ones come from each entry. The badge is one short rounded rectangle plus one <code>ExtTextOut</code>, drawn only on listed rows.</p>
+
+<h2>The file</h2>
+<p>It lives at <code>registry/extensions.toml</code> in the repo. That's not <code>extensions/</code>, which would look like installed extensions next to <code>src/extensions/</code>. There are two kinds of entry:</p>
+<pre><span class="c"># LightLine's own extension list: extensions tested with LightLine.
+# Propose one with a pull request; CONTRIBUTING.md says what's checked.</span>
+<span class="k">format</span> = <span class="s">1</span>
+
+<span class="h">[[extension]]</span>               <span class="c"># 1. A Zed registry entry we've tested.</span>
+<span class="k">id</span> = <span class="s">"catppuccin"</span>
+<span class="k">from</span> = <span class="s">"zed"</span>                 <span class="c">#    Installs Zed's pinned commit, so it updates when Zed's does.</span>
+<span class="k">name</span> = <span class="s">"Catppuccin"</span>
+<span class="k">kind</span> = <span class="s">"color-theme"</span>         <span class="c">#    color-theme | icon-theme | language | snippets | checker</span>
+<span class="k">description</span> = <span class="s">"Soothing pastel themes: Latte, Frappé, Macchiato, Mocha"</span>
+<span class="k">publisher</span> = <span class="s">"catppuccin"</span>
+<span class="k">recommended</span> = <span class="k">true</span>           <span class="c">#    shown under RECOMMENDED; false = only found by search</span>
+
+<span class="h">[[extension]]</span>               <span class="c"># 2. An extension of our own (or vetted), in its own GitHub repo, Zed's format.</span>
+<span class="k">id</span> = <span class="s">"lightline-todo-snippets"</span>
+<span class="k">repository</span> = <span class="s">"https://github.com/&lt;owner&gt;/lightline-todo-snippets.git"</span>
+<span class="k">commit</span> = <span class="s">"92f46057151693648bd3acac1e0c138696f34433"</span>   <span class="c"># 40 hex; updating it = a PR</span>
+<span class="k">version</span> = <span class="s">"1.0.0"</span>
+<span class="k">name</span> = <span class="s">"TODO Snippets"</span>
+<span class="k">kind</span> = <span class="s">"snippets"</span>
+<span class="k">description</span> = <span class="s">"TODO, FIXME and NOTE comments with your name and the date"</span>
+<span class="k">publisher</span> = <span class="s">"LightLine"</span>
+<span class="k">requires</span> = <span class="s">"0.13.0"</span>             <span class="c"># hidden in older LightLine builds</span></pre>
+<ul>
+  <li><b>Same ids as Zed's registry.</b> If an id appears in both, our entry wins: it's the tested one. Our own extensions get ids that Zed doesn't use.</li>
+  <li><b>The installer stays the same.</b> An own entry passes <code>repository</code> and <code>commit</code> straight to <code>installer::install</code>, which skips the GitHub contents API (one fewer request). A <code>from = "zed"</code> entry goes through today's <code>zed_registry::resolve</code>. After the download, the check of what the extension really contains still runs, so a wrong <code>kind</code> in the list can't install something LightLine can't use.</li>
+  <li><b>Prettier and Material Icons move into the file.</b> Prettier keeps its built-in Turn Off behaviour (<code>kind = "formatter"</code>, <code>builtin = true</code>). Then the three hard-coded <code>Extension</code> structs in <code>app.rs</code>, <code>FEATURED</code>, and the <code>material-icons</code> → <code>material-icon-theme</code> alias can all go.</li>
+  <li><b>Unknown fields and kinds are skipped, not errors.</b> So an older build reading a newer list still shows whatever it understands.</li>
+</ul>
+
+<h2>How it gets to the app</h2>
+<div class="flow">
+  <div class="step"><b>1 · Built in</b>The file is compiled in with <code>include_str!</code>, so it doesn't touch the network. <div class="when">Parsed the first time the Extensions panel opens, before its first paint. It's a few KB, read once.</div></div>
+  <div class="step"><b>2 · Fetched with Zed's list</b>Downloaded from <code>raw.githubusercontent.com/…/LightLine/main/registry/extensions.toml</code>. <div class="when">This happens on the same trigger that already fetches Zed's <code>extensions.toml</code> (opening the panel or ⟳), with the same 10-minute reuse. It adds no new trigger.</div></div>
+  <div class="step"><b>3 · Merge</b>The fetched copy replaces the built-in one if it parses and its <code>format</code> is one this build knows. Otherwise the built-in copy stays, silently. <div class="when">Entries are merged into <code>App::extensions</code> by id, the same way as <code>WorkerMessage::ZedRegistryList</code>.</div></div>
+</div>
+<p>Fetching means a new tested entry reaches users without waiting for a release. Building the list in means it works offline and on first open. Privacy is unchanged: the network is used only when the user opens Extensions, as today.</p>
+
+<h2>Keeping it trustworthy</h2>
+<ul>
+  <li><b>A CI test reads the file in the repo</b> (an ordinary <code>cargo test</code>, so CI runs it). It checks:
+    <ul>
+      <li>the file parses;</li>
+      <li>ids are unique;</li>
+      <li>every <code>repository</code> is <code>https://github.com/…</code>;</li>
+      <li>every <code>commit</code> is 40 hex characters;</li>
+      <li>every <code>kind</code> is a known kind;</li>
+      <li>no entry has a <code>path</code> (a folder inside another repository);</li>
+      <li>descriptions fit the 62 px row.</li>
+    </ul>
+    A bad pull request fails CI before anyone has to read it.</li>
+  <li><b>An ignored live test</b> (<code>cargo test --lib lightline_list -- --ignored</code>) installs every entry into a temp folder and checks that each one really is the kind it claims. Run it before merging a list change, and before each release.</li>
+  <li><b>Pinned commits only.</b> An own entry changes only through a PR that changes its <code>commit</code>. A <code>from = "zed"</code> entry follows Zed's pin, which Zed reviews.</li>
+  <li><b>What gets reviewed</b> (goes in <code>CONTRIBUTING.md</code>): works in the latest release; no network or process use beyond what its kind allows (a checker's program comes from <code>tool_download.rs</code>'s pinned list or PATH, never from the extension); a license that allows redistribution; a description written for LightLine, not copied from VS Code.</li>
+</ul>
+
+<h2>Speed</h2>
+<table>
+  <tr><th>Measure</th><th>Effect</th></tr>
+  <tr><td>Startup</td><td>None. Nothing is parsed or fetched until the Extensions panel opens. The <code>include_str!</code> bytes add a few KB to the exe.</td></tr>
+  <tr><td>Idle</td><td>None. No new thread that stays alive, no timer.</td></tr>
+  <tr><td>Opening Extensions</td><td>One more small HTTP GET on the existing worker, run in parallel with Zed's list. The built-in copy is drawn first, so the panel never waits for it.</td></tr>
+  <tr><td>Panel paint</td><td>On listed rows only, one rounded rectangle plus one short <code>ExtTextOut</code> for the badge. Other rows are unchanged.</td></tr>
+  <tr><td>Typing and scrolling</td><td>Not touched.</td></tr>
+</table>
+
+<h2>What to list first</h2>
+<p>A list is only worth showing if it has real entries in it. The first version would have no extensions of our own: only Zed entries we test. That moves today's hard-coded Featured trio into data and fixes the “install to see” problem for the extensions people want most:</p>
+<div class="tablewrap"><table>
+  <tr><th>Kind</th><th>Entries (each one tested before it's listed)</th></tr>
+  <tr><td>Icon theme</td><td>material-icon-theme</td></tr>
+  <tr><td>Color themes</td><td>dracula, catppuccin, plus 2–3 more popular ones that render correctly through <code>color_theme_adapter</code></td></tr>
+  <tr><td>Snippets</td><td>python-snippets, rust-snippets, react-snippets, fastapi-snippets, comment-block-snippets</td></tr>
+  <tr><td>Checkers</td><td>typos, codebook, harper (the three with a pinned download in <code>tool_download.rs</code>)</td></tr>
+  <tr><td>Formatter</td><td>Prettier (built in)</td></tr>
+</table></div>
+<p>Our own extensions come later, each through a PR once it exists. The first candidates are kinds that Zed's registry is thin on, such as snippet packs for LightLine's own languages and themes.</p>
+
+<h2>Work involved</h2>
+<ul>
+  <li><b>Library:</b> new <code>src/extensions/lightline_list.rs</code> (parse, validate, fetch with reuse, merge rules) and its tests; <code>registry/extensions.toml</code>.</li>
+  <li><b>UI:</b>
+    <ul>
+      <li><code>app.rs</code>: <code>Extension</code> gets <code>listed</code> and <code>recommended</code> fields; the hard-coded entries are removed.</li>
+      <li><code>extensions_panel.rs</code>: the RECOMMENDED section, the two search headers, list entries sorted first, the new chips.</li>
+      <li><code>render/extensions.rs</code>: the badge.</li>
+      <li><code>panels.rs</code>: the worker message.</li>
+    </ul></li>
+  <li><b>Docs:</b> <code>USER_GUIDE.md</code> (Extensions), <code>CONTRIBUTING.md</code> (proposing an entry), <code>docs/extension_implementation_plan.md</code>, README feature line, <code>CHANGELOG.md</code>.</li>
+  <li>Done as one PR, then a live check against these crops, as usual.</li>
+</ul>
+
+<h2>Decisions for you</h2>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Options</th><th>Recommendation</th></tr>
+  <tr><td>How the list reaches users</td><td>Built in only · fetched only · <b>built in + fetched</b></td><td class="rec">Built in + fetched. It works offline, and updates don't wait for a release.</td></tr>
+  <tr><td>Zed entries: whose pin?</td><td><b>Follow Zed's pin</b> · pin our own tested commit</td><td class="rec">Follow Zed's pin. Our own pins mean a PR every time a theme updates, which is too much upkeep for one maintainer. Own pins are only for our own extensions.</td></tr>
+  <tr><td>Filter chips</td><td>Keep All · Themes · Formatters · <b>All · Themes · Snippets · Checkers</b></td><td class="rec">The new set. Formatters only ever holds Prettier, and Prettier still shows under All.</td></tr>
+  <tr><td>Section and badge names</td><td><b>RECOMMENDED + “LightLine”</b> · FEATURED + “Tested” · other</td><td class="rec">RECOMMENDED + “LightLine”. The badge says whose list the entry is on, and the search header adds “tested”.</td></tr>
+  <tr><td>Where own extensions live</td><td>A <code>lightline-extensions</code> GitHub organisation · repos under your account</td><td>Decide when the first one is written. It isn't needed for this PR.</td></tr>
+</table></div>
+
+</div>
+</body>
+</html>

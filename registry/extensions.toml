@@ -1,0 +1,158 @@
+# LightLine's own extension list: extensions tested with LightLine.
+#
+# The Extensions panel shows these first, with a "LightLine" badge, and
+# recommends the ones marked `recommended`. A copy is built into LightLine,
+# and the panel also reads this file from GitHub when it opens, so a new
+# entry reaches users without waiting for a release.
+#
+# Propose an entry with a pull request: CONTRIBUTING.md says what's checked.
+# `cargo test --lib lightline_list` checks this file; run
+# `cargo test --lib lightline_list -- --ignored` to install every entry.
+#
+# Each [[extension]] is one of:
+#   from = "zed"           a Zed registry extension, installed at the commit
+#                          Zed's registry pins (it updates when Zed's does)
+#   repository + commit    an extension in its own GitHub repository, in
+#   + version              Zed's format, installed at exactly this commit
+#   builtin = true         part of LightLine itself (Prettier)
+#
+# kind: color-theme, icon-theme, language, snippets, checker or formatter.
+# requires = "0.13.0" hides an entry from older LightLine releases.
+
+format = 1
+
+[[extension]]
+id = "prettier"
+builtin = true
+kind = "formatter"
+name = "Prettier"
+description = "Formats JS, TS, HTML and CSS with your Prettier"
+publisher = "Prettier"
+recommended = true
+
+[[extension]]
+id = "material-icon-theme"
+from = "zed"
+kind = "icon-theme"
+name = "Material Icon Theme"
+description = "Material Design icons for files and folders"
+publisher = "Zed Industries"
+recommended = true
+
+[[extension]]
+id = "dracula"
+from = "zed"
+kind = "color-theme"
+name = "Dracula"
+description = "The official Dracula themes, dark and light"
+publisher = "Dracula"
+recommended = true
+
+[[extension]]
+id = "catppuccin"
+from = "zed"
+kind = "color-theme"
+name = "Catppuccin"
+description = "Soothing pastel themes: Latte, Frappé, Macchiato, Mocha"
+publisher = "Catppuccin"
+recommended = true
+
+[[extension]]
+id = "one-dark-pro"
+from = "zed"
+kind = "color-theme"
+name = "One Dark Pro"
+description = "A port of VS Code's One Dark Pro"
+publisher = "MordFustang21"
+recommended = true
+
+[[extension]]
+id = "tokyo-night"
+from = "zed"
+kind = "color-theme"
+name = "Tokyo Night"
+description = "Tokyo Night, Storm, Moon and Light"
+publisher = "ssaunderss"
+
+[[extension]]
+id = "github-theme"
+from = "zed"
+kind = "color-theme"
+name = "GitHub Theme"
+description = "GitHub's dark, light and high-contrast themes"
+publisher = "Pyae Sone Aung"
+
+[[extension]]
+id = "typos"
+from = "zed"
+kind = "checker"
+name = "typos"
+description = "Finds spelling mistakes in code, with few false alarms"
+publisher = "Baptiste Roseau"
+recommended = true
+
+[[extension]]
+id = "codebook"
+from = "zed"
+kind = "checker"
+name = "Codebook"
+description = "A fast spell checker that understands code"
+publisher = "blopker"
+
+[[extension]]
+id = "harper"
+from = "zed"
+kind = "checker"
+name = "Harper"
+description = "Offline grammar and spelling checker"
+publisher = "Stef Robbe"
+
+[[extension]]
+id = "python-snippets"
+from = "zed"
+kind = "snippets"
+name = "Python Snippets"
+description = "Common Python code: classes, loops, with, try"
+publisher = "Carlos Tosta"
+recommended = true
+
+[[extension]]
+id = "rust-snippets"
+from = "zed"
+kind = "snippets"
+name = "Rust Snippets"
+description = "Common Rust code: functions, impls, matches, tests"
+publisher = "Bobby Mannino"
+
+[[extension]]
+id = "go-snippets"
+from = "zed"
+kind = "snippets"
+name = "Go Snippets"
+description = "Common Go code: functions, loops, errors, tests"
+publisher = "Ayberk Gezer"
+
+[[extension]]
+id = "react-snippets"
+from = "zed"
+kind = "snippets"
+name = "React Snippets"
+description = "React components and hooks for JavaScript"
+publisher = "Tamim Hasan"
+recommended = true
+
+[[extension]]
+id = "fastapi-snippets"
+from = "zed"
+kind = "snippets"
+name = "FastAPI Snippets"
+description = "Endpoints, security and database models for FastAPI"
+publisher = "NarmadaWeb"
+
+[[extension]]
+id = "comment-block-snippets"
+from = "zed"
+kind = "snippets"
+name = "Comment Blocks"
+description = "Boxed comment blocks in 26 languages"
+publisher = "Rami Shalhoub"

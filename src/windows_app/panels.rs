@@ -992,7 +992,10 @@ impl App {
                                 if let Some(ext) =
                                     self.extensions.iter_mut().find(|ext| ext.id == id)
                                 {
-                                    ext.version = version;
+                                    // One the list pins keeps the list's version.
+                                    if ext.repository.is_none() {
+                                        ext.version = version;
+                                    }
                                     continue;
                                 }
                                 self.extensions.push(Extension {
@@ -1000,14 +1003,9 @@ impl App {
                                     name: id,
                                     publisher: "zed-industries/extensions".into(),
                                     version,
-                                    description:
-                                        "Zed extension — install to see whether LightLine \
-                                                   supports it yet (icon and color themes)"
-                                            .into(),
-                                    installed: false,
-                                    installing: false,
-                                    kind: None,
-                                    icon: None,
+                                    description: "Zed extension: install to see whether                                                   LightLine supports it yet"
+                                        .into(),
+                                    ..Extension::default()
                                 });
                             }
                         }
@@ -1017,12 +1015,11 @@ impl App {
                         }
                     }
                 }
+                WorkerMessage::ExtensionList(result) => {
+                    self.apply_extension_list(hwnd, result);
+                }
                 WorkerMessage::ZedExtensionInstalled(id, result) => {
-                    let registry_id = if id == "material-icons" {
-                        "material-icon-theme".to_string()
-                    } else {
-                        id.clone()
-                    };
+                    let registry_id = id.clone();
                     if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
                         ext.installing = false;
                         self.status = match &result {

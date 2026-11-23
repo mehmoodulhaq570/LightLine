@@ -270,7 +270,8 @@ If the library needs a setting globally, push it in at load and on reload throug
 
   Anything else is refused with "isn't supported yet". Extensions that need WASM would require an adapter first.
 - **Entries with a `path`** live inside another repository (`html`, `glsl` and `proto` are inside Zed's own). They're refused before anything is downloaded.
-- **Built-in entries:** Prettier is a curated "extension" that reports whether the Prettier CLI is available; it isn't downloaded. The Featured list is Prettier, Material Icons and Dracula. Searching shows the rest of the registry.
+- **Built-in entries:** Prettier is a curated "extension" that reports whether the Prettier CLI is available; it isn't downloaded.
+- **LightLine's own list** (`registry/extensions.toml`, `extensions/lightline_list.rs`): extensions tested with LightLine, `from = "zed"` (Zed's pin) or `repository` + `commit` (our pin), plus Prettier. Built in with `include_str!` and read the first time the panel opens; the latest copy is fetched from `main` next to Zed's list. Listed entries get the **LightLine** badge, fill **Recommended** (`recommended = true`) and come first in search (`merge_extension_list`). `cargo test --lib lightline_list` checks the file; `-- --ignored` installs every entry. **Changing the list: run both before merging.** An extension's id is its folder name everywhere, including `material-icon-theme` (the old `material-icons` alias is gone).
 
 ---
 

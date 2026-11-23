@@ -122,7 +122,7 @@ impl App {
                     &path,
                     is_dir,
                     false,
-                    self.has_extension("material-icons"),
+                    self.has_extension("material-icon-theme"),
                     icon_x,
                     icon_y,
                     size,

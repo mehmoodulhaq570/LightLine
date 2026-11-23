@@ -531,7 +531,7 @@ impl App {
 
         let icon_left = rect.left + self.scale(ROW_INDENT);
         let size = self.scale(16);
-        let use_theme = self.has_extension("material-icons");
+        let use_theme = self.has_extension("material-icon-theme");
         if !self.icons.draw_for_path(
             hdc,
             &change.path,
