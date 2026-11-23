@@ -982,7 +982,7 @@ impl App {
                             self.theme.violet,
                         );
                     }
-                    let use_theme = self.has_extension("material-icons");
+                    let use_theme = self.has_extension("material-icon-theme");
                     match self.tabs[index].display_path() {
                         Some(path) => {
                             if !self.icons.draw_for_path(
@@ -1417,7 +1417,7 @@ impl App {
                                 &item.entry.path,
                                 item.entry.is_dir,
                                 item.expanded,
-                                self.has_extension("material-icons"),
+                                self.has_extension("material-icon-theme"),
                                 left + self.scale(12),
                                 top + self.scale(2),
                                 self.scale(18),

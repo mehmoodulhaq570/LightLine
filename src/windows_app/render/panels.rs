@@ -691,7 +691,7 @@ impl App {
                         path,
                         false,
                         false,
-                        self.has_extension("material-icons"),
+                        self.has_extension("material-icon-theme"),
                         x,
                         top,
                         size,

@@ -44,7 +44,7 @@ enum MoreAction {
     DebugPython,
     // Extensions.
     ExtensionsShowInstalled,
-    ExtensionsShowFeatured,
+    ExtensionsShowRecommended,
     ExtensionsCheckUpdates,
     ExtensionsOpenFolder,
 }
@@ -105,7 +105,7 @@ impl App {
             Some(MenuAnchor::Extensions(_)) => {
                 return vec![
                     MoreAction::ExtensionsShowInstalled,
-                    MoreAction::ExtensionsShowFeatured,
+                    MoreAction::ExtensionsShowRecommended,
                     MoreAction::ExtensionsCheckUpdates,
                     MoreAction::ExtensionsOpenFolder,
                 ];
@@ -173,7 +173,7 @@ impl App {
             MoreAction::GitUnstageAll => ("Unstage All Changes", ""),
             MoreAction::GitDiscardAll => ("Discard All Changes", ""),
             MoreAction::ExtensionsShowInstalled => ("Show Installed", ""),
-            MoreAction::ExtensionsShowFeatured => ("Show Featured", ""),
+            MoreAction::ExtensionsShowRecommended => ("Show Recommended", ""),
             MoreAction::ExtensionsCheckUpdates => ("Check for Updates", ""),
             MoreAction::ExtensionsOpenFolder => ("Open Extensions Folder", ""),
             MoreAction::DebugStart => ("Start Debugging", "F5"),
@@ -405,8 +405,8 @@ impl App {
             MoreAction::ExtensionsShowInstalled => {
                 self.show_extensions_section(hwnd, ExtensionsSection::Installed)
             }
-            MoreAction::ExtensionsShowFeatured => {
-                self.show_extensions_section(hwnd, ExtensionsSection::Featured)
+            MoreAction::ExtensionsShowRecommended => {
+                self.show_extensions_section(hwnd, ExtensionsSection::Recommended)
             }
             MoreAction::ExtensionsCheckUpdates => self.check_extension_updates(),
             MoreAction::ExtensionsOpenFolder => self.open_extensions_folder(),

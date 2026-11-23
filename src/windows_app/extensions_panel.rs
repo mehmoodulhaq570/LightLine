@@ -36,7 +36,12 @@ pub(super) enum ExtensionsHot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ExtensionsSection {
     Installed,
-    Featured,
+    /// LightLine's list's recommended entries (or, with a chip on, every
+    /// listed entry of that kind).
+    Recommended,
+    /// Search results on LightLine's list.
+    Listed,
+    /// Every other search result: the Zed registry.
     Marketplace,
     InUse,
 }
@@ -45,8 +50,9 @@ impl ExtensionsSection {
     pub(super) fn title(self) -> &'static str {
         match self {
             Self::Installed => "INSTALLED",
-            Self::Featured => "FEATURED",
-            Self::Marketplace => "MARKETPLACE",
+            Self::Recommended => "RECOMMENDED",
+            Self::Listed => "LIGHTLINE LIST",
+            Self::Marketplace => "ZED REGISTRY",
             Self::InUse => "IN USE",
         }
     }
@@ -55,8 +61,9 @@ impl ExtensionsSection {
     pub(super) fn slot(self) -> usize {
         match self {
             Self::Installed => 0,
-            Self::Featured | Self::Marketplace => 1,
+            Self::Recommended | Self::Marketplace => 1,
             Self::InUse => 2,
+            Self::Listed => 3,
         }
     }
 }
@@ -109,9 +116,6 @@ pub(super) enum ExtensionsHit {
 fn contains(rect: &RECT, x: i32, y: i32) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
-
-/// The extensions LightLine knows and recommends.
-const FEATURED: [&str; 3] = ["prettier", "material-icons", "dracula"];
 
 impl App {
     fn searching_extensions(&self) -> bool {
@@ -195,12 +199,13 @@ impl App {
 
     fn extension_matches_filter(&self, ext: &Extension) -> bool {
         match self.extensions_filter {
-            ExtensionsFilter::Featured => true,
+            ExtensionsFilter::All => true,
             ExtensionsFilter::Themes => matches!(
                 ext.category(),
                 ExtensionCategory::IconTheme | ExtensionCategory::ColorTheme
             ),
-            ExtensionsFilter::Formatters => ext.category() == ExtensionCategory::Formatter,
+            ExtensionsFilter::Snippets => ext.category() == ExtensionCategory::Snippets,
+            ExtensionsFilter::Checkers => ext.category() == ExtensionCategory::Tool,
         }
     }
 
@@ -210,21 +215,29 @@ impl App {
         let collapsed =
             |section: ExtensionsSection| self.extension_sections_collapsed[section.slot()];
         if self.searching_extensions() {
-            let matches: Vec<usize> = self
+            // LightLine's list first, in its order, then the rest.
+            let (listed, matches): (Vec<usize>, Vec<usize>) = self
                 .extensions
                 .iter()
                 .enumerate()
                 .filter(|(_, ext)| self.extension_matches_query(ext))
                 .map(|(index, _)| index)
-                .collect();
-            let note = match matches.len() {
-                1 => "1 result".to_owned(),
-                count => format!("{count} results"),
-            };
+                .partition(|&index| self.extensions[index].listed.is_some());
+            let listed = self.in_list_order(listed);
+            if !listed.is_empty() {
+                rows.push(ExtensionRow::Header {
+                    section: ExtensionsSection::Listed,
+                    count: listed.len(),
+                    note: "tested".into(),
+                });
+                if !collapsed(ExtensionsSection::Listed) {
+                    rows.extend(listed.into_iter().map(ExtensionRow::Extension));
+                }
+            }
             rows.push(ExtensionRow::Header {
                 section: ExtensionsSection::Marketplace,
                 count: matches.len(),
-                note,
+                note: "not tested".into(),
             });
             if !collapsed(ExtensionsSection::Marketplace) {
                 if self.zed_registry_loading {
@@ -240,19 +253,20 @@ impl App {
                 rows.extend(matches.into_iter().map(ExtensionRow::Extension));
                 rows.push(ExtensionRow::Note(String::new()));
                 rows.push(ExtensionRow::Note(
-                    "LightLine installs color and icon themes,".into(),
+                    "LightLine installs themes, snippets,".into(),
                 ));
                 rows.push(ExtensionRow::Note(
-                    "and languages with a Tree-sitter grammar.".into(),
+                    "checkers and Tree-sitter languages.".into(),
                 ));
             }
             return rows;
         }
 
         let note = match self.extensions_filter {
-            ExtensionsFilter::Featured => String::new(),
+            ExtensionsFilter::All => String::new(),
             ExtensionsFilter::Themes => "Themes".to_owned(),
-            ExtensionsFilter::Formatters => "Formatters".to_owned(),
+            ExtensionsFilter::Snippets => "Snippets".to_owned(),
+            ExtensionsFilter::Checkers => "Checkers".to_owned(),
         };
         let installed: Vec<usize> = self
             .extensions
@@ -273,26 +287,34 @@ impl App {
             rows.extend(installed.into_iter().map(ExtensionRow::Extension));
         }
 
-        let featured: Vec<usize> = FEATURED
+        // All: the list's recommendations. A chip: everything on the list
+        // of that kind.
+        let all = self.extensions_filter == ExtensionsFilter::All;
+        let recommended: Vec<usize> = self
+            .extensions
             .iter()
-            .filter_map(|id| self.extensions.iter().position(|ext| ext.id == *id))
-            .filter(|&index| {
-                let ext = &self.extensions[index];
-                !ext.installed && self.extension_matches_filter(ext)
+            .enumerate()
+            .filter(|(_, ext)| {
+                ext.listed.is_some()
+                    && !ext.installed
+                    && (ext.recommended || !all)
+                    && self.extension_matches_filter(ext)
             })
+            .map(|(index, _)| index)
             .collect();
+        let recommended = self.in_list_order(recommended);
         rows.push(ExtensionRow::Header {
-            section: ExtensionsSection::Featured,
-            count: featured.len(),
+            section: ExtensionsSection::Recommended,
+            count: recommended.len(),
             note,
         });
-        if !collapsed(ExtensionsSection::Featured) {
-            if featured.is_empty() {
+        if !collapsed(ExtensionsSection::Recommended) {
+            if recommended.is_empty() {
                 rows.push(ExtensionRow::Note(
                     "All of them are installed. Search for more.".into(),
                 ));
             }
-            rows.extend(featured.into_iter().map(ExtensionRow::Extension));
+            rows.extend(recommended.into_iter().map(ExtensionRow::Extension));
         }
 
         rows.push(ExtensionRow::Header {
@@ -304,6 +326,12 @@ impl App {
             rows.extend((0..3).map(ExtensionRow::InUse));
         }
         rows
+    }
+
+    /// `indices` sorted by their place in LightLine's list.
+    fn in_list_order(&self, mut indices: Vec<usize>) -> Vec<usize> {
+        indices.sort_by_key(|&index| self.extensions[index].listed);
+        indices
     }
 
     /// Search matches, as `filtered_extensions` decided them.
@@ -323,7 +351,7 @@ impl App {
                 ("Formatting", "Prettier".into())
             }
             0 => ("Formatting", "Built-in formatter".into()),
-            1 if self.has_extension("material-icons") => {
+            1 if self.has_extension("material-icon-theme") => {
                 ("File icons", "Material Icon Theme".into())
             }
             1 => ("File icons", "Built-in icons".into()),
@@ -605,7 +633,8 @@ impl App {
                     .iter()
                     .position(|(filter, _, _)| *filter == self.extensions_filter)
                     .unwrap_or(0);
-                self.extensions_filter = ExtensionsFilter::PILLS[(index + 1) % 3].0;
+                self.extensions_filter =
+                    ExtensionsFilter::PILLS[(index + 1) % ExtensionsFilter::PILLS.len()].0;
                 self.extensions_first = 0;
             }
             ExtensionsButton::Chip(index) => {
@@ -628,15 +657,15 @@ impl App {
         }
     }
 
-    /// The ··· menu's Show Installed / Show Featured: clears the search and
-    /// filter and opens one section with the other shut.
+    /// The ··· menu's Show Installed / Show Recommended: clears the search
+    /// and filter and opens one section with the other shut.
     pub(super) fn show_extensions_section(&mut self, hwnd: HWND, section: ExtensionsSection) {
         self.extensions_query.clear();
-        self.extensions_filter = ExtensionsFilter::Featured;
+        self.extensions_filter = ExtensionsFilter::All;
         self.extensions_first = 0;
         self.extension_sections_collapsed = match section {
-            ExtensionsSection::Installed => [false, true, false],
-            _ => [true, false, false],
+            ExtensionsSection::Installed => [false, true, false, false],
+            _ => [true, false, false, false],
         };
         self.forget_extensions_hot_row(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -671,30 +700,28 @@ impl App {
     /// Takes in a scan: installed extensions get their kind and icon, ones
     /// not listed yet are added, and ones no longer on disk are uninstalled.
     pub(super) fn apply_extension_scan(&mut self, hwnd: HWND, scanned: Vec<ScannedExtension>) {
-        // The curated entries keep LightLine's ids for their folders.
-        let internal = |folder: &str| match folder {
-            "material-icon-theme" => "material-icons".to_owned(),
-            other => other.to_owned(),
-        };
-        let found: Vec<String> = scanned.iter().map(|ext| internal(&ext.id)).collect();
+        let found: Vec<&str> = scanned.iter().map(|ext| ext.id.as_str()).collect();
         for ext in &mut self.extensions {
             // Prettier isn't a folder; it's found on PATH instead.
-            if ext.id != "prettier" && ext.installed && !ext.installing && !found.contains(&ext.id)
+            if ext.id != "prettier"
+                && ext.installed
+                && !ext.installing
+                && !found.contains(&ext.id.as_str())
             {
                 ext.installed = false;
                 ext.icon = None;
             }
         }
         for item in scanned {
-            let id = internal(&item.id);
-            if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
+            if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == item.id) {
                 ext.installed = true;
                 ext.kind = Some(item.kind);
                 ext.icon = item.icon;
-                // A registry entry's placeholder text gives way to its own.
-                if !matches!(id.as_str(), "material-icons" | "dracula") {
+                ext.version = item.version;
+                // A registry entry's placeholder text gives way to its own;
+                // LightLine's list keeps the words it wrote for LightLine.
+                if ext.listed.is_none() {
                     ext.name = item.name;
-                    ext.version = item.version;
                     if let Some(description) = item.description {
                         ext.description = description;
                     }
@@ -702,19 +729,107 @@ impl App {
                 continue;
             }
             self.extensions.push(Extension {
-                id,
+                id: item.id,
                 name: item.name,
                 publisher: "Zed registry".into(),
                 version: item.version,
                 description: item.description.unwrap_or_default(),
                 installed: true,
-                installing: false,
                 kind: Some(item.kind),
                 icon: item.icon,
+                ..Extension::default()
             });
         }
         self.forget_extensions_hot_row(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Reads in the extension list built into LightLine, once, the first
+    /// time the Extensions panel opens: a few KB of TOML, so RECOMMENDED is
+    /// there on the panel's first paint, even offline. The latest list from
+    /// the repository replaces it when it arrives (`apply_extension_list`).
+    pub(super) fn read_extension_list(&mut self) {
+        if self.extension_list_read {
+            return;
+        }
+        self.extension_list_read = true;
+        use lightline::extensions::lightline_list;
+        if let Ok(entries) = lightline_list::parse(lightline_list::BUILT_IN) {
+            merge_extension_list(&mut self.extensions, entries);
+        }
+    }
+
+    /// The latest list from the repository. If it couldn't be read, the
+    /// built-in one stays, without a word: nothing the user did failed.
+    pub(super) fn apply_extension_list(
+        &mut self,
+        hwnd: HWND,
+        result: Result<Vec<lightline::extensions::lightline_list::Entry>, String>,
+    ) {
+        let Ok(entries) = result else {
+            return;
+        };
+        merge_extension_list(&mut self.extensions, entries);
+        self.forget_extensions_hot_row(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+}
+
+/// Puts LightLine's extension list into `extensions`: listed entries get
+/// their place in the list, their words, their kind and (for one in its own
+/// repository) its pin. Entries are matched by id, so a Zed registry entry
+/// and the list's entry for it are one row. A list that drops an entry
+/// takes away its badge, not the extension.
+fn merge_extension_list(
+    extensions: &mut Vec<Extension>,
+    entries: Vec<lightline::extensions::lightline_list::Entry>,
+) {
+    use lightline::extensions::lightline_list::{Kind, Source};
+    for ext in extensions.iter_mut() {
+        ext.listed = None;
+        ext.recommended = false;
+        ext.repository = None;
+    }
+    for (place, entry) in entries.into_iter().enumerate() {
+        let kind = match entry.kind {
+            Kind::ColorTheme => ExtensionCategory::ColorTheme,
+            Kind::IconTheme => ExtensionCategory::IconTheme,
+            Kind::Language => ExtensionCategory::Language,
+            Kind::Snippets => ExtensionCategory::Snippets,
+            Kind::Checker => ExtensionCategory::Tool,
+            Kind::Formatter => ExtensionCategory::Formatter,
+        };
+        let index = match extensions.iter().position(|ext| ext.id == entry.id) {
+            Some(index) => index,
+            None => {
+                extensions.push(Extension {
+                    id: entry.id.clone(),
+                    ..Extension::default()
+                });
+                extensions.len() - 1
+            }
+        };
+        let ext = &mut extensions[index];
+        ext.name = entry.name;
+        ext.description = entry.description;
+        ext.publisher = entry.publisher;
+        ext.listed = Some(place);
+        ext.recommended = entry.recommended;
+        // What an installed extension turned out to be outranks the list.
+        if ext.kind.is_none() {
+            ext.kind = Some(kind);
+        }
+        if let Source::Repository {
+            url,
+            commit,
+            version,
+        } = entry.source
+        {
+            if !ext.installed {
+                ext.version = version;
+            }
+            ext.repository = Some((url, commit));
+        }
     }
 }
 
@@ -851,7 +966,93 @@ pub(super) fn monogram(id: &str) -> (String, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::monogram;
+    use super::{Extension, ExtensionCategory, merge_extension_list, monogram};
+    use lightline::extensions::lightline_list;
+
+    #[test]
+    fn the_list_joins_the_extensions_already_known_by_id() {
+        let mut extensions = vec![
+            Extension {
+                id: "material-icon-theme".into(),
+                installed: true,
+                kind: Some(ExtensionCategory::IconTheme),
+                version: "1.3.2".into(),
+                ..Extension::default()
+            },
+            Extension {
+                id: "tokyo-night".into(),
+                version: "0.10.0".into(),
+                ..Extension::default()
+            },
+        ];
+        let entries = lightline_list::parse(
+            r#"
+            format = 1
+            [[extension]]
+            id = "tokyo-night"
+            from = "zed"
+            kind = "color-theme"
+            name = "Tokyo Night"
+            description = "Night"
+            publisher = "someone"
+            recommended = true
+            [[extension]]
+            id = "material-icon-theme"
+            from = "zed"
+            kind = "icon-theme"
+            name = "Material Icon Theme"
+            [[extension]]
+            id = "own"
+            repository = "https://github.com/someone/own.git"
+            commit = "92f46057151693648bd3acac1e0c138696f34433"
+            version = "2.0.0"
+            kind = "snippets"
+            name = "Own"
+            "#,
+        )
+        .unwrap();
+        merge_extension_list(&mut extensions, entries.clone());
+        assert_eq!(extensions.len(), 3);
+        let tokyo = &extensions[1];
+        assert_eq!(
+            (tokyo.listed, tokyo.recommended, tokyo.name.as_str()),
+            (Some(0), true, "Tokyo Night")
+        );
+        // Known up front: no "install to see whether LightLine supports it".
+        assert_eq!(tokyo.category(), ExtensionCategory::ColorTheme);
+        assert_eq!(tokyo.version, "0.10.0");
+        assert!(extensions[0].installed && extensions[0].listed == Some(1));
+        let own = &extensions[2];
+        assert_eq!(own.version, "2.0.0");
+        assert_eq!(
+            own.repository,
+            Some((
+                "https://github.com/someone/own.git".into(),
+                "92f46057151693648bd3acac1e0c138696f34433".into()
+            ))
+        );
+
+        // A later list without Tokyo Night takes its badge away, not it.
+        merge_extension_list(&mut extensions, entries[1..].to_vec());
+        assert_eq!(extensions.len(), 3);
+        assert_eq!(
+            (extensions[1].listed, extensions[1].recommended),
+            (None, false)
+        );
+        assert_eq!(extensions[2].listed, Some(1));
+    }
+
+    #[test]
+    fn the_built_in_list_covers_what_the_panel_used_to_hard_code() {
+        let mut extensions = Vec::new();
+        let entries = lightline_list::parse(lightline_list::BUILT_IN).unwrap();
+        merge_extension_list(&mut extensions, entries);
+        for id in ["prettier", "material-icon-theme", "dracula"] {
+            let ext = extensions.iter().find(|ext| ext.id == id).unwrap();
+            assert!(ext.recommended, "{id}");
+            assert_ne!(ext.category(), ExtensionCategory::Unknown, "{id}");
+        }
+    }
 
     #[test]
     fn monograms_use_the_words_initials() {

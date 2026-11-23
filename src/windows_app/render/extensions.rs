@@ -133,7 +133,7 @@ impl App {
         if query.is_empty() {
             self.label_ellipsis(
                 hdc,
-                "Search the Zed registry",
+                "Search extensions",
                 text_left,
                 top,
                 self.theme.muted,
@@ -170,7 +170,7 @@ impl App {
             );
         }
         // The funnel is lit while a filter other than All is on.
-        let filtered = query.is_empty() && self.extensions_filter != ExtensionsFilter::Featured;
+        let filtered = query.is_empty() && self.extensions_filter != ExtensionsFilter::All;
         let color = if filtered {
             self.theme.blue
         } else if hot {
@@ -369,10 +369,32 @@ impl App {
             ..rect
         };
         let title = ext.name.split(" - ").next().unwrap_or(&ext.name);
+        // An extension on LightLine's list ends line 1 with its badge, which
+        // keeps its room; the version gives way first when the name is long.
+        let badge = ext.listed.map(|_| {
+            unsafe { SelectObject(hdc, self.small_font) };
+            self.text_width(hdc, "LightLine") + s(8)
+        });
+        let version_width = if ext.version.is_empty() {
+            0
+        } else {
+            unsafe { SelectObject(hdc, self.small_font) };
+            self.text_width(hdc, &ext.version)
+        };
         unsafe { SelectObject(hdc, self.ui_font) };
-        let title_width = self
-            .text_width(hdc, title)
-            .min(limit.right - text_left - s(40));
+        let room = limit.right - text_left;
+        let natural = self.text_width(hdc, title);
+        let (title_width, show_version) = match badge {
+            None => (natural.min(room - s(40)), true),
+            Some(badge) => {
+                let with_version = room - badge - s(6) - version_width - s(6);
+                if natural <= with_version || with_version >= room * 6 / 10 {
+                    (natural.min(with_version), true)
+                } else {
+                    (natural.min(room - badge - s(6)), false)
+                }
+            }
+        };
         self.label_ellipsis(
             hdc,
             title,
@@ -386,14 +408,42 @@ impl App {
         );
         unsafe { SelectObject(hdc, self.small_font) };
         let small_top = |n: i32| line(n) + s(1);
-        self.label_ellipsis(
-            hdc,
-            &ext.version,
-            text_left + title_width + s(6),
-            small_top(0) + s(1),
-            self.theme.muted,
-            limit,
-        );
+        let mut x = text_left + title_width + s(6);
+        if show_version && !ext.version.is_empty() {
+            self.label_ellipsis(
+                hdc,
+                &ext.version,
+                x,
+                small_top(0) + s(1),
+                self.theme.muted,
+                limit,
+            );
+            x += version_width + s(6);
+        }
+        if let Some(width) = badge {
+            let badge = RECT {
+                left: x,
+                top: small_top(0) + s(1),
+                right: (x + width).min(limit.right),
+                bottom: small_top(0) + s(17),
+            };
+            let back = self.theme.sidebar_bg;
+            self.panel_card(
+                hdc,
+                badge,
+                s(3),
+                blend(back, self.theme.blue, 0.45),
+                blend(back, self.theme.blue, 0.12),
+            );
+            self.label_mid(
+                hdc,
+                "LightLine",
+                badge.left + s(4),
+                (badge.top + badge.bottom) / 2,
+                self.theme.blue,
+                badge,
+            );
+        }
         // Line 2: the description.
         let description = if kind == ExtensionCategory::Unknown {
             "Install to see whether LightLine supports it yet"
@@ -512,7 +562,7 @@ impl App {
                 return;
             }
             // Its own folder once installed; a plain folder before.
-            "material-icons" if !matches!(ext.icon, Some(ExtensionIcon::Svg(_))) => {
+            "material-icon-theme" if !matches!(ext.icon, Some(ExtensionIcon::Svg(_))) => {
                 self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
                 let size = s(22);
                 let x = (icon.left + icon.right - size) / 2;
@@ -545,7 +595,7 @@ impl App {
             Some(ExtensionIcon::Language(suffix)) => {
                 self.panel_card(hdc, icon, s(6), self.theme.edge, self.theme.sidebar_bg);
                 let sample = std::path::PathBuf::from(format!("file.{suffix}"));
-                let use_theme = self.has_extension("material-icons");
+                let use_theme = self.has_extension("material-icon-theme");
                 if !self
                     .icons
                     .draw_for_path(hdc, &sample, false, false, use_theme, x, y, size)

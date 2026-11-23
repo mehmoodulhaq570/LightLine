@@ -27,6 +27,7 @@ All types of contributions are encouraged and valued. See the [Table of Contents
     - [Your First Code Contribution](#your-first-code-contribution)
       - [Local Setup](#local-setup)
     - [Improving The Documentation](#improving-the-documentation)
+    - [Proposing an Extension for LightLine's List](#proposing-an-extension-for-lightlines-list)
   - [Styleguides](#styleguides)
     - [Code Formatting](#code-formatting)
     - [Commit Messages](#commit-messages)
@@ -156,6 +157,48 @@ We welcome updates to:
 * Inline Rustdoc comments across the codebase
 * **Architecture Updates:** If your Pull Request introduces new core modules, major folders, or external dependencies, please ensure you update the Mermaid diagram and directory tree in `ARCHITECTURE.md` to reflect these changes.
 
+
+### Proposing an Extension for LightLine's List
+
+[`registry/extensions.toml`](registry/extensions.toml) lists the extensions tested with LightLine. The Extensions panel shows them first, with a **LightLine** badge and the description written there, and recommends some of them. The panel reads the file from `main` when it opens, so a merged entry reaches users without a release.
+
+To propose one, add an `[[extension]]` to the file in a pull request:
+
+```toml
+[[extension]]
+id = "tokyo-night"        # the Zed registry's id, or a new one for your own
+from = "zed"              # a Zed registry extension, at the commit Zed pins
+kind = "color-theme"      # color-theme, icon-theme, language, snippets or checker
+name = "Tokyo Night"
+description = "Tokyo Night, Storm, Moon and Light"   # 60 characters at most
+publisher = "ssaunderss"
+recommended = false       # true shows it under Recommended
+```
+
+An extension that isn't in the Zed registry lives in its own public GitHub repository in [Zed's extension format](https://zed.dev/docs/extensions/developing-extensions). It replaces `from = "zed"` with:
+
+```toml
+repository = "https://github.com/you/your-extension.git"
+commit = "<the full 40-character commit to install>"
+version = "1.0.0"
+```
+
+Updating it means another pull request that changes `commit` and `version`. `requires = "0.13.0"` hides an entry from LightLine releases older than the one it needs.
+
+Before opening the pull request, run:
+
+```powershell
+cargo test --lib lightline_list                 # checks the file (CI runs this)
+cargo test --lib lightline_list -- --ignored    # installs every entry and checks its kind
+```
+
+What the review checks:
+
+* **It works in the latest LightLine release.** You installed it from the panel and used it: the theme looks right, the snippets complete, the checker reports problems.
+* **The kind is right.** The second test above installs it and checks.
+* **It does only what its kind needs.** An extension never downloads or starts programs itself. A checker's program comes from the user's PATH, or from a release pinned in `src/extensions/tool_download.rs`.
+* **Its license allows it to be redistributed.**
+* **The description is written for LightLine**, plainly, and not copied from a VS Code listing.
 
 ## Styleguides
 

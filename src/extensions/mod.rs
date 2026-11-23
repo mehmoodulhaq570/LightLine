@@ -7,6 +7,7 @@ pub mod editing;
 pub mod installer;
 pub mod language;
 pub mod language_servers;
+pub mod lightline_list;
 pub mod snippets;
 pub mod tool_download;
 pub mod tools;

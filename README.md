@@ -37,7 +37,7 @@ LightLine is a code editor that feels like VS Code but starts fast and stays lig
 - **Terminal**: PowerShell, Command Prompt, Git Bash or WSL, as in VS Code: one Terminal tab with a list of your shells at its side, a profile menu, and a maximize button. oh-my-posh and Starship prompts draw properly, with their arrows and, from a Nerd Font, their icons.
 - **Markdown preview**: see your README rendered beside the file as you type.
 - **AI Assistant (optional)**: ask about your code using a model on your own PC through [Ollama](https://ollama.com), or bring your own API key for OpenAI, OpenRouter, Groq or another OpenAI-compatible service. **AI: Choose Provider** sets it up in one card: pick the service, paste the key, and it checks the connection and lists the models. Off until you turn it on.
-- **Extensions, themes and icons**: see installed and featured extensions together, filter to themes or formatters, search the Zed registry, install or uninstall in one click, and see the formatter, file icon theme and color theme in use. Color themes can be changed from there. Language extensions add more languages, built with the C compiler on your PC: their colors, comments (`Ctrl+/`), brackets and indentation, a place in the language picker, and their language server when it's on your PATH. Snippet packs (python-snippets, react-snippets and about 50 more) add their snippets to `Ctrl+Space`, and spell checkers such as typos, codebook and harper check your files beside the language server when their command is on your PATH.
+- **Extensions, themes and icons**: see installed and recommended extensions together, filter to themes, snippets or checkers, search LightLine's own list of tested extensions and the whole Zed registry, install or uninstall in one click, and see the formatter, file icon theme and color theme in use. Color themes can be changed from there. Language extensions add more languages, built with the C compiler on your PC: their colors, comments (`Ctrl+/`), brackets and indentation, a place in the language picker, and their language server when it's on your PATH. Snippet packs (python-snippets, react-snippets and about 50 more) add their snippets to `Ctrl+Space`, and spell checkers such as typos, codebook and harper check your files beside the language server when their command is on your PATH.
 - **Picks up where you left off**: your folder, tabs and cursor positions come back when you reopen it.
 
 ## Get started
@@ -103,7 +103,7 @@ The panel uses LightLine's own controls, theme and fonts, with keyboard navigati
 
 LightLine collects no usage data and sends nothing on its own. It uses the network only when you:
 
-- search for or install extensions;
+- open the Extensions panel, which reads the Zed registry's list and LightLine's list of tested extensions, or install extensions;
 - push, pull or fetch with Git;
 - run **Python: Install debugpy**;
 - allow web images in a Markdown preview;
