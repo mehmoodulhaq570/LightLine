@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Chat Panel Redesign</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs::default_dark) */
+    --editor: #070e1d; --side: #081020; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --violet: #8b5cf6; --green: #34d399;
+    --amber: #f5b85f; --red: #f66e78; --sky: #38bdf8;
+    --mono: "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 8px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--label); text-transform: uppercase; letter-spacing: .04em; }
+  p { max-width: 920px; }
+  p.lead { color: var(--label); margin: 0 0 18px; }
+  ul { padding-left: 20px; margin: 0; max-width: 920px; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  code { font-family: var(--mono); font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--edge-page); border-radius: 4px; padding: 0 5px; background: #0c1730; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; max-width: 980px; }
+  .rec { color: var(--green); font-weight: 600; }
+  .bad { color: var(--red); font-weight: 600; }
+  .shot { max-width: 100%; border: 1px solid var(--edge-page); border-radius: 8px; display: block; }
+  .frames { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 12px; align-items: flex-start; }
+  figure { margin: 0; max-width: 100%; }
+  figcaption { font-weight: 600; margin-bottom: 6px; }
+  figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; max-width: 420px; }
+  svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* ---------- the panel, at logical size: 420 px wide like ai_width() ---------- */
+  .panel { width: 420px; max-width: 100%; background: var(--editor); border: 1px solid var(--edge-page); border-radius: 8px; font-size: 13.5px; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .panel.tall { min-height: 640px; }
+  .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(var(--violet), var(--violet)) center / 2px 100% no-repeat; opacity: .55; }
+  /* 35 px header, same as Explorer's */
+  .ph { height: 35px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--edge); flex: none; }
+  .ph .t { font-size: 11.5px; letter-spacing: .06em; color: var(--label); font-weight: 600; }
+  .ph .chatname { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ph .ic { margin-left: auto; color: var(--muted); display: flex; gap: 2px; }
+  .ph .ic span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px; }
+  .ph .ic span.on { background: #13224a; color: var(--text); }
+
+  .chat { padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .q { align-self: flex-end; max-width: 85%; background: #13224a; border-radius: 10px 10px 3px 10px; padding: 7px 11px; }
+  .q .chips { justify-content: flex-end; }
+  .who { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: -6px; }
+  .who svg { color: var(--violet); }
+  .a { color: #d4dcea; }
+  .a p { margin: 0 0 6px; }
+  .a ul { padding-left: 18px; }
+  .a li { margin: 0 0 4px; }
+  .a code { font-size: 12px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid #2b4c84; background: #0d1d3b; color: #b9c9e6; border-radius: 12px; padding: 0 8px 0 6px; height: 22px; white-space: nowrap; }
+  .chip .fi { width: 13px; height: 13px; border-radius: 3px; display: grid; place-items: center; font-size: 8px; font-weight: 700; color: #0b1222; background: #f97316; }
+  .chip .x { color: var(--muted); margin-left: 2px; }
+  .chip.auto { border-style: dashed; }
+  .chip.off { opacity: .45; text-decoration: line-through; }
+
+  /* steps: one collapsible group, in the order they happened */
+  .steps { border-left: 2px solid var(--edge); padding: 1px 0 1px 10px; display: flex; flex-direction: column; gap: 3px; }
+  .steps .sum { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #b9c9e6; }
+  .steps .sum .n { color: var(--muted); }
+  .step { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+  .step b { color: #c9d6ee; font-weight: 500; }
+  .step a { color: var(--blue); text-decoration: none; }
+  .step .r { margin-left: auto; font-size: 11.5px; }
+  .step.run { color: #c9d6ee; font-style: italic; }
+
+  .ask { border: 1px solid #2b4c84; background: #0b1730; border-radius: 8px; padding: 10px 12px; }
+  .ask .t { font-weight: 600; margin-bottom: 3px; display: flex; gap: 7px; align-items: center; }
+  .ask .d { color: var(--muted); font-size: 12.5px; margin-bottom: 9px; }
+  .btns { display: flex; gap: 6px; flex-wrap: nowrap; }
+  .btn { font-size: 12.5px; border: 1px solid var(--edge); background: #101c36; border-radius: 4px; padding: 2px 10px; white-space: nowrap; }
+  .btn.p { background: #6d4ae0; border-color: #6d4ae0; color: #fff; }
+  .btn.g { background: #127a52; border-color: #127a52; color: #fff; }
+
+  .code { border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; background: #050b17; }
+  .code .bar { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--edge); }
+  .code .bar .ic { margin-left: auto; display: flex; gap: 2px; }
+  .code .bar .ic span { height: 22px; padding: 0 6px; display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; }
+  .code .bar .ic span:hover { background: #13224a; color: var(--text); }
+  .code pre { margin: 0; padding: 7px 10px 7px 10px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre; overflow: hidden; }
+  .code .cont { display: block; position: relative; }
+  .code .cont::before { content: "↪"; position: absolute; left: 0; color: #4a5f88; }
+  .kw { color: #c792ea; } .ty { color: #5eead4; } .fn { color: #fde68a; } .nm { color: #f9a8d4; }
+
+  .changes { border: 1px solid #2b4c84; background: #0b1730; border-radius: 8px; overflow: hidden; }
+  .changes .h { display: flex; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--edge); font-weight: 600; }
+  .changes .h span { margin-left: auto; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .crow { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: 12.5px; }
+  .crow .fi { width: 13px; height: 13px; border-radius: 3px; background: #f97316; }
+  .crow .p { color: var(--muted); }
+  .crow .plus { color: var(--green); margin-left: auto; }
+  .crow .minus { color: var(--red); }
+  .changes .f { display: flex; gap: 6px; padding: 7px 12px; border-top: 1px solid var(--edge); }
+
+  .foot { display: flex; align-items: center; gap: 2px; color: var(--muted); font-size: 12px; margin-top: -4px; }
+  .foot span.b { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 4px; }
+  .foot .meta { margin-left: 6px; }
+
+  /* composer */
+  .comp { margin: 0 12px 12px; border: 1px solid #6d4ae0; border-radius: 8px; padding: 7px 8px 6px 10px; flex: none; background: #08112a; }
+  .comp .chips { margin: 0 0 6px; }
+  .comp .txt { min-height: 21px; color: var(--muted); }
+  .comp .txt.typed { color: var(--text); }
+  .caret { display: inline-block; width: 1px; height: 15px; background: var(--text); vertical-align: -3px; }
+  .comp .row { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .comp .row .tb { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border-radius: 4px; }
+  .comp .row .tb:hover, .comp .row .tb.on { background: #13224a; color: var(--text); }
+  .comp .send { margin-left: auto; width: 28px; height: 26px; border-radius: 5px; background: #6d4ae0; color: #fff; display: grid; place-items: center; }
+  .comp .send.stop { background: #26365a; }
+  .comp .send.idle { background: #1a2440; color: var(--muted); }
+
+  /* empty state */
+  .empty { padding: 26px 18px 8px; flex: 1; }
+  .empty .big { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
+  .empty .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+  .sugg { display: flex; flex-direction: column; gap: 6px; }
+  .sugg div { border: 1px solid var(--edge); border-radius: 6px; padding: 6px 10px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .sugg div kbd { margin-left: auto; color: var(--muted); }
+  .promise { color: var(--muted); font-size: 12px; margin-top: 16px; display: flex; gap: 6px; align-items: center; }
+
+  /* history list */
+  .hist { position: absolute; left: 8px; right: 8px; top: 38px; background: #0c1930; border: 1px solid #2b4c84; border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,.55); padding: 6px 0; }
+  .hist .s { padding: 4px 12px; border-bottom: 1px solid var(--edge); margin-bottom: 4px; color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+  .hist .g { padding: 4px 12px 2px; font-size: 11px; letter-spacing: .05em; color: var(--muted); }
+  .hist .r { padding: 4px 12px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .hist .r.hot { background: var(--select); }
+  .hist .r span { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .dim { opacity: .35; }
+
+  .model { position: absolute; left: 50px; bottom: 122px; width: 250px; background: #0c1930; border: 1px solid #2b4c84; border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,.55); padding: 5px 0; font-size: 13px; }
+  .model .r { padding: 4px 12px; display: flex; gap: 8px; align-items: center; }
+  .model .r.hot { background: var(--select); }
+  .model .r span { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .model .sep { border-top: 1px solid var(--edge); margin: 4px 0; }
+  .model .g { padding: 2px 12px; font-size: 11px; letter-spacing: .05em; color: var(--muted); }
+</style>
+</head>
+<body>
+<!-- icon defs -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="spark" viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z"/></symbol>
+    <symbol id="hist" viewBox="0 0 16 16"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6M8 5v3.2l2 1.3"/></symbol>
+    <symbol id="plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+    <symbol id="x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+    <symbol id="search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/></symbol>
+    <symbol id="file" viewBox="0 0 16 16"><path d="M4 1.8h5l3 3v9.4H4z M9 1.8v3h3"/></symbol>
+    <symbol id="list" viewBox="0 0 16 16"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.5M2.5 8h.5M2.5 12h.5"/></symbol>
+    <symbol id="copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></symbol>
+    <symbol id="insert" viewBox="0 0 16 16"><path d="M8 2v8M5 7l3 3 3-3M3 13.5h10"/></symbol>
+    <symbol id="retry" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></symbol>
+    <symbol id="at" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.6"/><path d="M10.6 8v1.2a1.9 1.9 0 0 0 3.8 0V8A6.4 6.4 0 1 0 11 13.6"/></symbol>
+    <symbol id="folder" viewBox="0 0 16 16"><path d="M1.8 4.2h4.4l1.4 1.5h6.6v7.5H1.8z"/></symbol>
+    <symbol id="send" viewBox="0 0 16 16"><path d="M2.5 8h10M8.5 3.5L13 8l-4.5 4.5"/></symbol>
+    <symbol id="stop" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1" fill="currentColor"/></symbol>
+    <symbol id="down" viewBox="0 0 16 16"><path d="M4.5 6.5L8 10l3.5-3.5"/></symbol>
+    <symbol id="right" viewBox="0 0 16 16"><path d="M6.5 4.5L10 8l-3.5 3.5"/></symbol>
+    <symbol id="lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+    <symbol id="check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+    <symbol id="bug" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="8" rx="3"/><path d="M8 5V3M3 8h2M11 8h2M3.5 12l1.8-1M12.5 12l-1.8-1M6 3.5L5 2.5M10 3.5l1-1"/></symbol>
+    <symbol id="flask" viewBox="0 0 16 16"><path d="M6 2h4M6.5 2v4.5L3 13h10L9.5 6.5V2"/></symbol>
+    <symbol id="book" viewBox="0 0 16 16"><path d="M3 2.5h7.5a2 2 0 0 1 2 2v9H5a2 2 0 0 1-2-2zM3 11.5a2 2 0 0 1 2-2h7.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+<h1>AI Chat Panel Redesign</h1>
+<p class="lead">How the AI Assistant panel looks and reads, without changing what it can do. This is based on a live run with Claude Opus 5.5 on 2026-11-24, where search, read, proposed edits, Review and Apply All all worked. The mocks are at logical size: a 420 px panel, LightLine's dark theme and 13.5 px UI text.</p>
+
+<h2>What's wrong today</h2>
+<div class="frames">
+  <figure>
+    <figcaption>Today, after a real answer<span>Screenshot from the live run (1400 × 900 at 125%). The steps, the code block, and the changes card for the same answer.</span></figcaption>
+    <img class="shot" src="screens/ai-chat-before.png" alt="The current AI Assistant panel after an answer" width="700">
+  </figure>
+</div>
+<div class="tablewrap" style="margin-top:16px"><table>
+  <tr><th>#</th><th>Problem</th><th>Why it matters</th></tr>
+  <tr><td>1</td><td class="bad">Out of order</td><td>The model wrote "Let me find mean()." <i>before</i> searching, but all step lines are drawn above all text, because an answer keeps its steps and its text in separate fields (<code>ChatEntry.steps</code> and <code>ChatEntry.text</code>). In a longer answer (text, three reads, more text, an edit), what you see doesn't match what happened.</td></tr>
+  <tr><td>2</td><td class="bad">Two ways to apply one change</td><td>The code block has <b>Apply / Insert / Copy</b> and the changes card has <b>Review / Apply All</b>, for the same edit. The block's Apply only knows the selection the question started from, not the file the model meant.</td></tr>
+  <tr><td>3</td><td>Code is cut off</td><td>Long lines run off the right edge with no wrap and no hint that more is there.</td></tr>
+  <tr><td>4</td><td>Heavy chrome</td><td>A ~70 px header with a brand-font title and a pill showing the model's raw id (<code>claude-opus-5-5</code>), repeated over every answer. Every other panel header is 35 px.</td></tr>
+  <tr><td>5</td><td>Fixed width</td><td>About 420 px, and it can't be resized. With the Explorer open, the review diff had about 490 px left, and only one tab fit in the tab strip.</td></tr>
+  <tr><td>6</td><td>The open file isn't offered</td><td>Claude had to search for <code>mean()</code> although <code>stats.rs</code> was the tab you were looking at.</td></tr>
+  <tr><td>7</td><td>Small things</td><td>On the permission card, "Don't Allow" wraps to its own line. Step lines are low-contrast, with no icons and no sign of which step is running. "Copy answer" floats as plain text. Chats are lost when you start a new one.</td></tr>
+</table></div>
+
+<h2>1 · An answer in progress</h2>
+<p>An answer becomes a list of <b>parts in the order they arrived</b>: text, a group of steps, the permission card, more text, the changes card. The step currently running is the last line of its group, in italics, with no spinner. The line changes when the result comes in, so waiting on the network costs no frames.</p>
+<div class="frames">
+  <figure>
+    <figcaption>Asking first<span>The text the model wrote before asking stays above the card. The three buttons fit on one row.</span></figcaption>
+    <div class="panel">
+      <div class="ph"><span class="t">CHAT</span><span class="chatname">· mean() on an empty slice</span><span class="ic"><span><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="chat">
+        <div class="q">What does mean() return for an empty slice? Answer briefly with a small code fix.
+          <div class="chips"><span class="chip"><span class="fi">R</span>stats.rs</span></div></div>
+        <div class="who"><svg class="i"><use href="#spark"/></svg>Claude Opus 5.5</div>
+        <div class="a"><p>Let me find <code>mean()</code>.</p></div>
+        <div class="ask">
+          <div class="t"><svg class="i" style="color:var(--violet)"><use href="#folder"/></svg>Let Claude look through ws?</div>
+          <div class="d">It wants to search and read files. What it reads is sent to Anthropic. It can't change anything, and every step is listed here.</div>
+          <div class="btns"><span class="btn p">Allow in This Chat</span><span class="btn">Just Once</span><span class="btn">Don't Allow</span></div>
+        </div>
+      </div>
+      <div class="comp">
+        <div class="txt">Ask a follow-up… <span style="opacity:.7">(@ for files)</span></div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb">Claude Opus 5.5<svg class="i" style="width:12px"><use href="#down"/></svg></span><span class="send stop"><svg class="i"><use href="#stop"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Working<span>Steps are one group with icons. Each read is a link to that file and line. The running step reads like a sentence.</span></figcaption>
+    <div class="panel">
+      <div class="ph"><span class="t">CHAT</span><span class="chatname">· mean() on an empty slice</span><span class="ic"><span><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="chat">
+        <div class="q">What does mean() return for an empty slice? Answer briefly with a small code fix.
+          <div class="chips"><span class="chip"><span class="fi">R</span>stats.rs</span></div></div>
+        <div class="who"><svg class="i"><use href="#spark"/></svg>Claude Opus 5.5</div>
+        <div class="a"><p>Let me find <code>mean()</code>.</p></div>
+        <div class="steps">
+          <div class="step"><svg class="i"><use href="#search"/></svg>Searched <b>“fn mean”</b><span class="r">1 match</span></div>
+          <div class="step"><svg class="i"><use href="#file"/></svg>Read <a>src/stats.rs</a><span class="r">lines 1–10</span></div>
+          <div class="step run"><svg class="i"><use href="#search"/></svg>Searching “mean(” …</div>
+        </div>
+      </div>
+      <div class="comp">
+        <div class="txt">Ask a follow-up… <span style="opacity:.7">(@ for files)</span></div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb">Claude Opus 5.5<svg class="i" style="width:12px"><use href="#down"/></svg></span><span class="send stop"><svg class="i"><use href="#stop"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+</div>
+
+<h2>2 · A finished answer</h2>
+<p>When the answer is done, its steps fold into one line ("Looked at 3 places"). Click it to see them again. Code blocks <b>wrap</b> long lines, marking each continuation with ↪ and an indent. The block's buttons become small icons: <b>Insert at cursor</b> and <b>Copy</b>. <b>Apply</b> appears on a block only when the answer has <i>no</i> changes card, so there's one way to apply a change. Under the answer are Copy and <b>Retry</b>, plus how long it took.</p>
+<div class="frames">
+  <figure>
+    <figcaption>Done, with proposed changes<span>The same answer as the screenshot above, in the order it happened.</span></figcaption>
+    <div class="panel">
+      <div class="ph"><span class="t">CHAT</span><span class="chatname">· mean() on an empty slice</span><span class="ic"><span><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="chat">
+        <div class="who"><svg class="i"><use href="#spark"/></svg>Claude Opus 5.5</div>
+        <div class="a"><p>Let me find <code>mean()</code>.</p></div>
+        <div class="steps"><div class="sum"><svg class="i" style="width:12px"><use href="#right"/></svg>Looked at 3 places <span class="n">· 2 searches, 1 file</span></div></div>
+        <div class="a">
+          <p>Today it divides by zero: <code>0 as f64 / 0 as f64</code> is <code>NaN</code>, so it returns <code>NaN</code> and doesn't panic.</p>
+          <ul>
+            <li><code>src/stats.rs</code>: <code>mean()</code> now returns <code>Option&lt;f64&gt;</code>, giving <code>None</code> for an empty slice. It sums into an <code>i64</code> so large inputs can't overflow.</li>
+            <li><code>src/main.rs</code>: the <code>println!</code> uses <code>{:?}</code>.</li>
+          </ul>
+        </div>
+        <div class="code">
+          <div class="bar">rust<span class="ic"><span><svg class="i"><use href="#insert"/></svg></span><span><svg class="i"><use href="#copy"/></svg></span></span></div>
+<pre><span class="kw">pub fn</span> <span class="fn">mean</span>(values: &amp;[<span class="ty">i32</span>]) -&gt; <span class="ty">Option</span>&lt;<span class="ty">f64</span>&gt; {
+    <span class="kw">if</span> values.<span class="fn">is_empty</span>() {
+        <span class="kw">return</span> <span class="ty">None</span>;
+    }
+    <span class="kw">let</span> sum: <span class="ty">i64</span> = values.<span class="fn">iter</span>().<span class="fn">map</span>(|&amp;v| v <span class="kw">as</span>
+<span class="cont">    <span class="ty">i64</span>).<span class="fn">sum</span>();</span>    <span class="ty">Some</span>(sum <span class="kw">as</span> <span class="ty">f64</span> / values.<span class="fn">len</span>() <span class="kw">as</span> <span class="ty">f64</span>)
+}</pre>
+        </div>
+        <div class="changes">
+          <div class="h">Proposed changes<span>2 files · nothing changed yet</span></div>
+          <div class="crow"><span class="fi"></span>stats.rs <span class="p">src</span><span class="plus">+6</span><span class="minus">−3</span></div>
+          <div class="crow"><span class="fi"></span>main.rs <span class="p">src</span><span class="plus">+1</span><span class="minus">−1</span></div>
+          <div class="f"><span class="btn p">Review</span><span class="btn g">Apply All</span><span class="btn">Discard</span></div>
+        </div>
+        <div class="foot"><span class="b"><svg class="i"><use href="#copy"/></svg></span><span class="b"><svg class="i"><use href="#retry"/></svg></span><span class="meta">3 steps · 14 s</span></div>
+      </div>
+      <div class="comp">
+        <div class="chips"><span class="chip auto"><span class="fi">R</span>stats.rs<span class="x">×</span></span></div>
+        <div class="txt">Ask a follow-up… <span style="opacity:.7">(@ for files)</span></div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb">Claude Opus 5.5<svg class="i" style="width:12px"><use href="#down"/></svg></span><span class="send idle"><svg class="i"><use href="#send"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>The composer<span>The open file is offered as a dashed chip (sent when you ask; × removes it for this question). A selection replaces it with its range. The model and @ move to the composer's bottom row, VS Code style. The box grows to 8 lines, and <kbd>Shift+Enter</kbd> adds a line.</span></figcaption>
+    <div class="panel">
+      <div class="ph"><span class="t">CHAT</span><span class="chatname">· mean() on an empty slice</span><span class="ic"><span><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="chat dim" style="min-height:230px">
+        <div class="foot"><span class="b"><svg class="i"><use href="#copy"/></svg></span><span class="b"><svg class="i"><use href="#retry"/></svg></span><span class="meta">3 steps · 14 s</span></div>
+      </div>
+      <div class="model">
+        <div class="g">ANTHROPIC</div>
+        <div class="r hot"><svg class="i"><use href="#check"/></svg>Claude Opus 5.5<span>best</span></div>
+        <div class="r"><span style="width:15px"></span>Claude Sonnet 5.5<span>faster</span></div>
+        <div class="r"><span style="width:15px"></span>Claude Haiku 5.5<span>fastest</span></div>
+        <div class="sep"></div>
+        <div class="r"><span style="width:15px"></span>Change provider…</div>
+      </div>
+      <div class="comp">
+        <div class="chips"><span class="chip"><span class="fi">R</span>stats.rs · lines 2–5<span class="x">×</span></span><span class="chip"><span class="fi">R</span>main.rs<span class="x">×</span></span></div>
+        <div class="txt typed">Now add a test for the empty case and<br>one for a single value<span class="caret"></span></div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb on">Claude Opus 5.5<svg class="i" style="width:12px"><use href="#down"/></svg></span><span class="send"><svg class="i"><use href="#send"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+</div>
+
+<h2>3 · Starting a chat, and earlier chats</h2>
+<p>The empty panel offers what people do most instead of three promise lines. One line keeps the privacy promise. The clock icon in the header lists <b>earlier chats in this workspace</b>, newest first, kept on this PC only.</p>
+<div class="frames">
+  <figure>
+    <figcaption>Empty<span>The actions use the current selection or file, exactly like today's Explain / Fix / Tests commands.</span></figcaption>
+    <div class="panel tall">
+      <div class="ph"><span class="t">CHAT</span><span class="ic"><span><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="empty">
+        <svg class="i" style="width:26px;height:26px;color:var(--violet)"><use href="#spark"/></svg>
+        <div class="big">Ask about your code</div>
+        <p class="sub">Answers come from Claude Opus 5.5 via api.anthropic.com. Your question and the files shown as chips are sent there.</p>
+        <div class="sugg">
+          <div><svg class="i"><use href="#book"/></svg>Explain this file</div>
+          <div><svg class="i"><use href="#bug"/></svg>Fix problems in the selection</div>
+          <div><svg class="i"><use href="#flask"/></svg>Write tests for the selection</div>
+        </div>
+        <div class="promise"><svg class="i"><use href="#lock"/></svg>Nothing is sent until you ask, and nothing runs in the background.</div>
+      </div>
+      <div class="comp">
+        <div class="chips"><span class="chip auto"><span class="fi">R</span>stats.rs<span class="x">×</span></span></div>
+        <div class="txt">Ask about your code… <span style="opacity:.7">(@ for files)</span></div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb">Claude Opus 5.5<svg class="i" style="width:12px"><use href="#down"/></svg></span><span class="send idle"><svg class="i"><use href="#send"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Earlier chats<span>Typing filters by title. Each title is the first question, cut short. Enter opens one, and Delete removes it.</span></figcaption>
+    <div class="panel tall">
+      <div class="ph"><span class="t">CHAT</span><span class="ic"><span class="on"><svg class="i"><use href="#hist"/></svg></span><span><svg class="i"><use href="#plus"/></svg></span><span><svg class="i"><use href="#x"/></svg></span></span></div>
+      <div class="hist">
+        <div class="s"><svg class="i"><use href="#search"/></svg>Search chats</div>
+        <div class="g">TODAY</div>
+        <div class="r hot">mean() on an empty slice<span>14:02</span></div>
+        <div class="r">Why does max() return Option?<span>11:40</span></div>
+        <div class="g">YESTERDAY</div>
+        <div class="r">Split stats into its own crate<span>Mon</span></div>
+        <div class="r">Explain this code<span>Mon</span></div>
+        <div class="g">EARLIER</div>
+        <div class="r">Write tests for parse_args<span>Nov 18</span></div>
+      </div>
+      <div class="empty dim"></div>
+      <div class="comp dim">
+        <div class="txt">Ask about your code…</div>
+        <div class="row"><span class="tb"><svg class="i"><use href="#at"/></svg></span><span class="tb">Claude Opus 5.5</span><span class="send idle"><svg class="i"><use href="#send"/></svg></span></div>
+      </div>
+    </div>
+  </figure>
+</div>
+
+<h2>4 · A panel you can resize</h2>
+<p>Drag the panel's left edge, like the Explorer's. The width is remembered in <code>session.json</code>, between 300 px and half the window. It's 420 px by default, as today. The edge shows a 2 px accent line while hovered or dragged (the violet line on the mocks' left edge).</p>
+
+<h2>Everything that changes</h2>
+<div class="tablewrap"><table>
+  <tr><th>Area</th><th>Today</th><th>Proposed</th></tr>
+  <tr><td>Header</td><td>~70 px, brand title, model pill</td><td>35 px <b>CHAT</b> · chat title, with icons for earlier chats, new chat and close</td></tr>
+  <tr><td>Model</td><td>Raw id in the header and over every answer</td><td>Friendly name (<i>Claude Opus 5.5</i>) in the composer. A small label over answers, so a mid-chat switch still shows. Unknown models show their id.</td></tr>
+  <tr><td>Order</td><td>All steps, then all text</td><td>Parts in the order they arrived</td></tr>
+  <tr><td>Steps</td><td>Plain lines, no running state</td><td>Icons, file links, an italic running line, folded into one line when done</td></tr>
+  <tr><td>Your question</td><td>Full-width bordered box</td><td>Right-aligned bubble, at most 85% wide, no border</td></tr>
+  <tr><td>Code blocks</td><td>Clipped; Apply / Insert / Copy text buttons</td><td>Wrapped with ↪; Insert and Copy icons; Apply only when there's no changes card</td></tr>
+  <tr><td>After an answer</td><td>"Copy answer" text</td><td>Copy · Retry icons, steps and time taken</td></tr>
+  <tr><td>Permission card</td><td>Buttons on two rows</td><td>One row, shorter labels</td></tr>
+  <tr><td>Composer</td><td>One line, send button</td><td>Open-file chip, grows to 8 lines, @ and model in a bottom row</td></tr>
+  <tr><td>Empty panel</td><td>Intro and three promises</td><td>Three actions, one privacy line</td></tr>
+  <tr><td>Earlier chats</td><td>Lost on New Chat</td><td>Kept per workspace on this PC, listed from the header</td></tr>
+  <tr><td>Width</td><td>Fixed ~420 px</td><td>Drag to resize, remembered</td></tr>
+</table></div>
+
+<h2>Speed</h2>
+<ul>
+  <li><b>No new timers or spinners.</b> The running step is static text that changes when a result arrives. Streaming text repaints only the panel, as today.</li>
+  <li><b>Laying out an answer stays proportional to what changed.</b> Wrapped code lines are measured once per block and width, and kept until the text or width changes, so new tokens don't re-measure earlier blocks.</li>
+  <li><b>Earlier chats are read only when you open the list</b>, on a worker, and each chat only when you open it. Nothing is read at startup. A chat is written when its answer finishes, by the same background writer pattern as <code>session.json</code>.</li>
+  <li><b>Resizing</b> repaints the window while you drag, like the Explorer's splitter, and nothing after.</li>
+  <li>The new icons are <code>DebugGlyph</code> SVGs in the shared atlas, with no new fonts or HICONs.</li>
+</ul>
+
+<h2>Decisions for you</h2>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Options</th><th>Recommendation</th></tr>
+  <tr><td>The open file</td><td><b>Offered as a chip, sent unless removed</b> · offered, sent only when clicked · never</td><td class="rec">Sent unless removed. That's what people expect from Copilot and Cursor, and the chip shows exactly what goes out, so "nothing is sent you can't see" still holds. Capped like @ attachments (400 lines / 24 KB). A setting (<code>aiIncludeOpenFile</code>) turns it off.</td></tr>
+  <tr><td>Earlier chats</td><td><b>Kept, per workspace, on this PC</b> · not kept</td><td class="rec">Kept: the last 50 per workspace in <code>%APPDATA%\LightLine\chats\</code>, with a setting to turn it off and a "Delete all chats" command. Chats can contain code, so they're never synced or uploaded.</td></tr>
+  <tr><td>Where the model is picked</td><td><b>Composer's bottom row</b> · header (today)</td><td class="rec">Composer. It's where you look when you ask, and it frees the header.</td></tr>
+  <tr><td>Steps after an answer</td><td><b>Folded into one line</b> · always shown</td><td class="rec">Folded. The answer matters more than its trail; one click shows it.</td></tr>
+  <tr><td>Long code lines</td><td><b>Wrap</b> · scroll sideways</td><td class="rec">Wrap. Sideways scrolling inside a scrolling panel is awkward with a wheel and costs a second hit-test layer.</td></tr>
+  <tr><td>How it ships</td><td><b>Three PRs</b> · one PR</td><td class="rec">Three PRs. (1) Order fix, header, steps, code blocks, answer footer, permission card. (2) Composer, open-file chip, model picker, empty panel, resizing. (3) Earlier chats. The order fix ships first because it's a real bug.</td></tr>
+</table></div>
+
+<h2>Work involved</h2>
+<ul>
+  <li><b>Part 1:</b>
+    <ul>
+      <li><code>ai_chat.rs</code>: an answer's content becomes a list of parts (text, steps, card, changes), appended as stream events arrive. The history sent to the model is unchanged.</li>
+      <li><code>render/ai_assistant.rs</code>: the 35 px header, part-by-part layout, folded steps, code wrapping with a per-block cache, icon toolbars, the footer.</li>
+      <li>A friendly-name table for known model ids in <code>ai.rs</code> (portable, unit-tested).</li>
+    </ul></li>
+  <li><b>Part 2:</b> the composer (chips row, multi-line growth, bottom row), the open-file chip through the existing attachment path, the model menu moved down, the empty panel, the splitter and its width in <code>session.json</code>, and the <code>aiIncludeOpenFile</code> setting (five places in <code>settings.rs</code>).</li>
+  <li><b>Part 3:</b> a portable <code>chat_store.rs</code> in the library (save, list and load chats; atomic writes; 50 per workspace), the history list, the <code>aiKeepChats</code> setting, and <b>AI: Delete All Chats</b>.</li>
+  <li><b>Checks:</b> each part is driven live against the local stand-in model <i>and</i> real Claude, with 0 stale px. Typing in the editor with the panel open is measured against v0.12.0.</li>
+  <li><b>Docs:</b> <code>USER_GUIDE.md</code> (AI Assistant and settings), README, privacy section (where chats are kept), <code>CHANGELOG.md</code>.</li>
+</ul>
+
+</div>
+</body>
+</html>

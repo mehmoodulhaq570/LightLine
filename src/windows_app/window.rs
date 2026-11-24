@@ -207,6 +207,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.minimap_timer(hwnd);
             0
         }
+        WM_TIMER if wparam == ai_composer::AI_COPIED_TIMER => {
+            app.ai_copied_done(hwnd);
+            0
+        }
         WM_TIMER if wparam == INLAY_TIMER => {
             unsafe { KillTimer(hwnd, INLAY_TIMER) };
             app.request_inlay_hints();

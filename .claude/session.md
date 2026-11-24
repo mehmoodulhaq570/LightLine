@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-14 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-14)" at the end: it has the current state and the planned next steps.**
+Updated: 2026-11-15 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-15)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -436,26 +436,208 @@ Each followed the same loop the maintainer asked for: an HTML mock-up in `design
 - Shared pattern for all three: a `*Hot` enum inside `Hot`, rows outside `GetClipBox` skipped, hover repaints only the row, header buttons drawn by each panel (`paint_side_panel` no longer draws any). The maintainer must **not** be listed as a co-author: squash-merge with explicit `--subject/--body` (see memory `no-self-coauthor`).
 - Verified on merged `main`: fmt, Clippy `-D warnings`, `cargo test` (273 lib, 125 bin, 9 integration), CI x64+ARM64; live checks (this session's scratchpad `ce68f4ec…`): `scc_live.py` 31 checks, `dbg_live.py` 19 (real debugpy), `ext_live.py` 14, idle 0 wakeups with each panel open (`*_idle*.py`).
 
-## Where things stand (2026-11-14)
+## Extension icons and the terminal panel, merged as #87 and #88 (2026-11-14)
+
+- **#87 `881fe18` extension icons** (`design/extension-icons-design.html`): Zed extensions have no icon field, so `extensions_panel.rs` scans installed extensions on a worker (`scan_installed` → `WorkerMessage::ExtensionsScanned` → `apply_extension_scan`) the first time the panel opens and after each install, and keeps `kind` + `icon: Option<ExtensionIcon>` on `Extension`: `Swatch` (color theme: editor bg + keyword/string/function bars), `Svg` (icon theme's own folder), `Language` (file icon for its first suffix). Everything else is a monogram (`monogram()`: initials, "theme"/"themes"/"zed" skipped, 8 hues by FNV). Prettier (offset bars), Dracula (swatch) and Material (folder) in the same style, at the maintainer's request. New `ExtensionCategory::Language`; earlier installs now show under Installed and the Themes filter finds them.
+- **#88 `40017e9` terminal panel** (`design/terminal-design.html`): one TERMINAL tab; PROBLEMS badge; `TerminalHeaderLayout` (tabs from text widths in the small font, toolbar + ▾ 🗑 | ^ ✕ from the right), `TerminalHot` for hover/tips; shell list from 2 shells (`shell_list_rect`, `shell_row_rect`, 168 px wide; `terminal_size_for` narrows the shells while `run_size_for` keeps Output full width; resized on spawn/close); `close_terminal_at`; `toggle_terminal_maximized` (`terminal_restore_height`); Output "● Running x" (`run_label`) + ■ Stop; exited note + Enter closes (`active_shell_exit`, `shell_exit_text`); `TERMINAL_PAD` 20. Powerline U+E0B0–E0B7 drawn with GDI shapes (`paint_powerline`); other private-use glyphs in a Nerd Font (`terminal_symbol_font`, made lazily; `installed_nerd_font` via EnumFontFamiliesExW; reset on font change and settings reload). New setting **`terminalSymbolFont`** (the terminal text keeps the editor font; a separate terminal font would need its own cell metrics). Profile menu restyled in theme colors and right-aligned under ▾. Not done: double-click rename (the window doesn't take double-clicks), split terminals.
+- **`take_keyboard(hwnd)`** (app.rs) replaces `SetFocus(hwnd)` in 14 places: it only acts while LightLine is the foreground window. `SetFocus` on an inactive window activates it, so starting a program in Output (e.g. the Push button's `git push`) could pull the user out of another app; it's what tripped the test guard.
+- Verified on merged `main` (`40017e9`): fmt, Clippy, `cargo test` (273 lib, 128 bin, 9 integration), CI x64+ARM64; live `term_live.py` 12, `scc_live.py` 31, `dbg_live.py` 19, `ext_live.py` 14, `icons_live.py` 3; idle 0 with two shells open (`term_idle.py`).
+
+## Where things stand (2026-11-14, evening)
 
 ### State
 
-- `main` = `origin/main` = `e2b4886`. Unreleased has #81–#86 (long-line typing, menu bar, flat layout, the three panels); not released. v0.10.0 is the latest release.
+- `main` = `origin/main` = `40017e9`. Unreleased has #81–#88: long-line typing, menu bar, flat layout, Source Control, Run and Debug, Extensions, extension icons, terminal panel. Not released; v0.10.0 is the latest release.
 - Open issues unchanged: #66, #67 (close around 2026-11-21 if no reply), #13 (SignPath), #35 (wontfix).
 
 ### Waiting on the maintainer
 
-1. **Two mock-ups, approved to be shown, not yet built** (uncommitted in `design/`):
-   - `design/extension-icons-design.html`: Zed extensions have no icon field (checked `extension.toml` and `extensions.toml`), so: installed color themes get a swatch (theme bg + three "code" bars in its colors), installed icon themes their own folder icon, languages their file icon; uninstalled ones a monogram from the id (initials, "theme"/"themes"/"zed" skipped, one of 8 hues by FNV hash of the id). No network. Compute swatches/icons once at install/startup and keep them on `Extension`.
-   - `design/terminal-design.html` (screenshots `design/screens/terminal-current*.png`, the prompt's user name masked): one TERMINAL tab instead of a tab per shell; a shell list at the side from two shells (icon per shell kind, 🗑 on hover, double-click rename); toolbar + ▾ 🗑 | ^ ✕ (maximize is new); profile menu in the themed menu; powerline arrows U+E0B0–E0B7 drawn as cell-sized shapes, other private-use glyphs from an installed Nerd Font (this PC has Adwaita Mono Nerd Font), new `terminalFontFamily` setting; exited shells say so in the terminal and the list; Output shows "● Running x" + Stop.
-   - Open questions asked: split terminals later?; maximize remembers the old height?; one change or two?
-2. **LLDB install, deferred** until the maintainer says the connection is good (memory `pending-lldb-install`): only `LLVM-23.1.5-win64.msi` contains lldb-dap (the tarballs don't); ~17 MB partial download kept in `C:\Users\mehmo\Tools\llvm-download\`; extract with `msiexec /a` (no admin); likely needs `python311.dll`. Then live-test Rust debugging.
-3. **Release v0.11.0** whenever the maintainer wants (the Unreleased section is ready).
+1. **Release v0.11.0** when wanted (the Unreleased section is ready).
+2. **LLDB install, deferred** until the connection is good (memory `pending-lldb-install`): only `LLVM-23.1.5-win64.msi` has lldb-dap; about 17 MB partial in `C:\Users\mehmo\Tools\llvm-download\`; extract with `msiexec /a` (no admin); probably needs `python311.dll`. Then live-test Rust debugging.
+3. Possible follow-ups: double-click to rename a shell (needs `CS_DBLCLKS` / WM_LBUTTONDBLCLK), split terminals.
 
 ### Live-test harness (important)
 
-- **A hidden test window took the maintainer's typing once (2026-11-14).** `measure_driver.py` (session `56ff248a…` scratchpad) now adds `WS_EX_NOACTIVATE` in `hide()` and `still_hidden()` fails if LightLine is the foreground window; every driver's `guard()` checks it before each input and capture. Keep it that way.
+- **A hidden test window took the maintainer's typing once (2026-11-14).** `measure_driver.py` (session `56ff248a…` scratchpad) now: adds `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` in `hide()` (no activation, no taskbar button or Alt+Tab entry); after launch hands the foreground back and confirms it (to the previous window, else the topmost ordinary window that isn't ours: `user_window()`), refusing to test if LightLine keeps it; `still_hidden()` fails if LightLine is the foreground window, and every driver's `guard()` checks it before each input and capture (`menu_live.py`'s guard reports where). Causes found: a new process keeping the foreground when the previous test instance had just closed, and LightLine's own `SetFocus` (now `take_keyboard`). Keep all of it.
 - debugpy is in the per-user site-packages under the real APPDATA; with an isolated APPDATA set `PYTHONPATH=%APPDATA%\Python\Python314\site-packages` and put `C:\Python314` first on PATH (`dbg_live.py` does).
 - The repaint check (WM_APP+97) can report ~700–1500 px in the status bar message area when it lands in the 50 ms between a status message expiring (5 s, decided at paint time) and `STATUS_TIMER`'s repaint (5.05 s). A check race, not a missed invalidation; `scc_live.py` steps take ~5 s and hit it about 1 run in 2.
 - Use `rmtree` with an `onexc` chmod handler for test folders (Git object files are read-only).
 - Build folder: `C:\Users\mehmo\lightline-build\flat` (debug build of current main). D: has about 3 GB free.
+
+## v0.11.0 released (2026-11-15)
+
+- PR #89 (notes) squash-merged as `1e7c163`; Release run 43681383593 passed (both builds, publish); Scoop commit `c241674` pulled. `main` = `origin/main` = `c241674`. Published `lightline.exe` hash checked against `SHA256SUMS.txt`.
+- Speed check vs published v0.10.0 (release build on C: in `C:\Users\mehmo\lightline-build\flat`, four completed alternating runs each): typing 7.3–14.0 M UI cycles/key vs 8.5–15.9 M; start medians 0.079–0.148 s vs 0.070–0.188 s; idle 0 wakeups/s in three runs, 0.35/s (0.06 M cycles/s) in one busy run, vs 0 in all four. Worth re-checking idle on the next measurement round.
+- The first two rounds were refused by the driver's guard ("LightLine kept the foreground after launch"); the guard worked, rounds 3–6 ran. Comparison script: `compare.sh` in session `99fb549d…` scratchpad.
+- Unreleased is empty. Open issues unchanged (#66, #67 close around 2026-11-21 if no reply; #13; #35).
+
+## Welcome page redesign, merged as #90 (2026-11-15)
+
+- `7291d31`: flat Welcome page from the approved `design/welcome-design.html` (Start, Recent with × to forget, Get started, Learn, "Started in N ms" pill via `GetProcessTimes` at first paint in `App::startup_ms`). Recent keeps 10 (`workflow::RECENT_KEPT`, `forget_workspace`). Help URLs are shared consts in `menu_bar.rs`. Fixed: Command Palette label/action, dead View all, Run your first build. Unreleased → Changed/Fixed.
+- Live: `welcome_live.py` (session `99fb549d…` scratchpad; hover via WM_APP+98, not WM_MOUSEMOVE) 16/16 + empty case, 0 stale pixels, on the branch and again on merged main.
+- **Live-test launches often refused (2026-11-15)**: "LightLine kept the foreground after launch". ~~Cause: `ShowWindow(hwnd, SW_SHOW)` ignores STARTUPINFO~~ **Disproved the same day**: launched with STARTUPINFO `SW_SHOWMINNOACTIVE`, the unchanged build came up minimized and left the foreground alone, same as a `SW_SHOWDEFAULT` + `take_keyboard` build (2 runs each, `launch_check.py` in session `9e8b0d0c…` scratchpad). Windows already applies STARTUPINFO to the first `ShowWindow(SW_SHOW)`. Change reverted; the refusals' real cause is still unknown (probably the foreground lock when the driver hands focus back while the maintainer types).
+- README image refreshed (#91, `37da19e`): release build of main labelled v0.12.0, demo folders created and deleted by `readme_shot.py` (session `99fb549d…` scratchpad). **The release build in `C:\Users\mehmo\lightline-build\flat\release` was built with `LIGHTLINE_VERSION=0.12.0`, from main before #92: rebuild it without that before comparing.**
+- New process in the maintainer's own use at 11:19: `D:\Projects\CustomIDE\target\release\lightline.exe` (not a test instance; left alone).
+
+## Quick Open and Settings, merged as #92 (2026-11-15)
+
+- `471e853` (from `design/settings-quickopen-design.html`): search box centred in the title bar, Quick Open opens under it and sizes to its rows; file icon + name + dimmed folder, typed letters highlighted, command shortcuts as keys; mode hints at the bottom are buttons; the box's caret redraws only the box. Settings: search field (matches `settings.json` keys too) with a count, Editor split into Editor / Visual aids / Files, violet bar + reset arrow on changed settings, hover help with the key, drop-downs, joined − 15 + steppers, shorter labels, AI server shown by service name, **{ }** opens settings.json. Unreleased → Changed.
+
+## Where things stand (2026-11-15)
+
+- `main` = `origin/main` = `471e853`. Unreleased has #90, #91 (README only), #92: ready for v0.12.0 when the maintainer wants it.
+- Merged local branches deleted (tips checked equal to their PR heads); none left on origin.
+- Open issues: #66, #67 (no reply since the maintainer's 2026-11-07 comments; close around 2026-11-21), #13, #35.
+- Still waiting: LLDB install (memory `pending-lldb-install`); follow-ups double-click shell rename, split terminals.
+- Zed registry checked 2026-11-15: 1,590 entries, roughly 560 color themes, 30 icon themes, 70 MCP/slash commands, 54 snippet packs, the rest languages and LSP-wrapped tools (codebook, cspell, harper, typos, todo-highlight, editorconfig, live-server, kulala-http, rainbow-csv…). Prettier, ESLint, Vim mode and Git are built into Zed, so they aren't in the registry. LightLine installs only themes and Tree-sitter language extensions (`installer.rs::validate_download`), and starts servers only from PATH.
+
+## Plan: fill the extension gaps without our own marketplace (proposed 2026-11-15, not approved yet)
+
+The maintainer asked whether to build a LightLine extension marketplace, because the Zed registry lacks everyday extensions. The registry check is in "Where things stand (2026-11-15)" above. Recommendation given (the maintainer asked for it in depth, and to keep it here):
+
+**No hosted marketplace.** A server, reviewing submissions and security is too much for one maintainer, and `docs/extension_implementation_plan.md` already rejected it. Instead, three parts:
+
+### 1. Build the most-used features into LightLine (mock-up: `design/builtin-features-design.html`)
+
+The VS Code extensions people install first. Zed has none (Zed extensions can't draw UI), so no store could provide them. Each is a lazy, opt-in setting reusing data we already have:
+
+| Feature | Like | Data it reuses | Proposed setting (default) |
+| --- | --- | --- | --- |
+| Errors at the end of the line: worst diagnostic after the line, brighter on the caret's line, cut with … at the window edge, `+N` for more; nothing if the line fills the screen; optional faint line tint | Error Lens | LSP diagnostics already drawn as squiggles / Problems | `inlineDiagnostics` "off" / "errors" / "errorsAndWarnings" ("errorsAndWarnings") — Visual aids |
+| Rename the matching tag: both names outlined, typing edits both via `replace_range` in one undo group; space/Esc ends; HTML, JSX/TSX, Vue/Svelte | Auto Rename Tag | Tree-sitter tree from the syntax worker; pair found once when the caret enters a tag | `linkedTagRename` (true) — Editor |
+| File path suggestions after `./` `../` in a string, in the existing completion box with Explorer icons; folder adds `/` and reopens | Path IntelliSense | One folder read on a worker, kept until the watcher reports a change; capped ~500 entries; hides what the Explorer hides | `pathCompletion` (true) — Editor |
+| TODO / FIXME / HACK / NOTE coloured inside comments only, scrollbar marks; Command Palette "Find TODOs in Workspace" runs existing project search (no index) | Todo Highlight / Todo Tree | Comment spans from the syntax worker; scrollbar marks | `todoHighlight` (true), maybe `todoKeywords` — Visual aids |
+| `.editorconfig`: indent style/size, tab_width, end_of_line, utf-8 charset, final newline, trim trailing whitespace (at save, one undo), `root`; status bar "Spaces: 2 · .editorconfig", click shows the rules | EditorConfig | Read when a file opens, cached per folder, dropped on watcher change; library crate next to `gitignore.rs`; beats `tabSize`/`insertSpaces`, extension `tab_size` after | `editorConfig` (true) — Files |
+
+Speed rules for all of them: at most one extra short `ExtTextOut` per visible row that has something to show; nothing extra on rows without it; no work while typing beyond what the feature needs; measure typing cost before shipping. Suggested order: inline errors → `.editorconfig` → TODOs → tag rename → path suggestions. Open questions put to the maintainer: inline errors message-only or with line tint, defaults on or off, one PR or one per feature.
+
+### 2. Accept more Zed extension types (`installer.rs::validate_download` today allows themes + Tree-sitter languages only)
+
+- **Snippet packs (54 in the registry):** plain JSON, no code; load at install into the existing snippet engine for that language. Small.
+- **Tools that are language servers** (`codebook`, `cspell`, `harper`, `typos`, `todo-highlight-language-server`, `editorconfig`…): in Zed their WASM downloads a normal exe. Install the extension, read which tool it needs, start it from PATH like rust-analyzer (extend `language_servers.rs` KNOWN table); if missing, say "Install X to use this" with a link instead of refusing. Medium.
+- **Later, big:** run Zed's WASM extensions (roadmap stage 5) with strict capabilities so a bad extension can't stall typing. Unlocks most of the registry.
+
+### 3. Our own extension list, with no server
+
+One file in the LightLine repo (e.g. `extensions/lightline.toml`) listing extensions we write or vet, each in its own GitHub repo in Zed's format, so the existing installer (pinned commit, staging, rollback) works unchanged. The Extensions panel reads both lists; ours get a "LightLine" badge. Others can propose entries by pull request. Prettier's curated entry already works this way. Limit: it can only hold types LightLine supports (themes, languages, then snippets and tools from part 2); UI features like GitLens need part 1 or a much bigger UI extension API.
+
+Overall order: inline errors → snippet packs → tool extensions from PATH → the other built-in features → our own list → WASM.
+
+## Built-in feature 1: problems after the line, PR #93 (2026-11-15)
+
+- The maintainer approved `design/builtin-features-design.html` ("make it") without answering the three questions, so the proposed defaults were used: message only (no line tint), all features on by default, one PR per feature in the suggested order. **Next: `.editorconfig`, then TODO highlighting, tag rename, path suggestions.**
+- Branch `feat/inline-diagnostics`, two commits: `2e50b7c` focus fix, `3c68b9f` feature. New `windows_app/inline_diagnostics.rs` (`line_problem`, `first_line`, `App::paint_line_problem`), hooked in `render/code_pane.rs` after the Run links and before blame, on a line's last row when not `cut`. Setting `inline_diagnostics: InlineDiagnostics` in `settings.rs` (Off / Errors / ErrorsAndWarnings, key `inlineDiagnostics`); Settings row "Inline problems" (Choice, cycles on click). The dot is skipped when scrolled left of the code (it showed in the gutter in the first live run).
+- **The real cause of "LightLine kept the foreground after launch"**: `window.rs` startup `SetFocus(hwnd)` (missed when the other 14 became `take_keyboard`). Now `take_keyboard`. main was refused 11×, the branch 0× in 11 launches.
+- Live: `inline_live.py` (this session's scratchpad `9e8b0d0c…`) 12/12 with real Pyright (copied into each profile); speed `inline_speed.py`: release, 60 keys at the end of a line with a message, on 7.37–8.33 M/key, off 7.48–8.18, main 7.65/7.75.
+- **Merged as #93 (`dd17266`)**, CI green x64+ARM64; live `inline_live.py` 12/12 again on merged main. `C:\Users\mehmo\lightline-build\flat\release` was rebuilt (last from main `471e853`, no `LIGHTLINE_VERSION`), so the v0.12.0 label note above no longer applies. Unreleased now also has Added "Problems Written After the Line" and Fixed "Opening Without Stealing the Focus".
+
+## Built-in feature 2: .editorconfig, PR #94 (2026-11-15)
+
+- Branch `feat/editorconfig`. Library `src/editorconfig.rs` (`parse`, `glob_matches`, `resolve`, `rules_for`; `Rules` with `shown`, `source`, `files`). UI `windows_app/editor_config.rs`: `editorconfig_for(index)` (cached on `Tab::editorconfig` by path; watches every file read), `editorconfig_indent`, `forget_editorconfig` (watcher: an .editorconfig FileChanged, any DirectoryChanged), `apply_editorconfig_on_save` (called in `save_in` before `format_before_save`; trim + final newline in one group, caret kept; `Document::set_line_ending`), `show_editorconfig_rules` (native popup menu). `indent_style()` and `guide_unit()`: .editorconfig → extension rules → settings. Status bar middle line now `StatusMiddle` (render/editor.rs) with a clickable indent part.
+- Setting `editorConfig` (default true), Settings → Files "Use .editorconfig".
+- Not done: tab characters still drawn `tabSize` wide; `end_of_line = cr` and non-UTF-8 charsets ignored; the rules menu wasn't clicked live (native menu would show on the desktop).
+- Live `editorconfig_live.py` (scratchpad `9e8b0d0c…`) 6/6.
+- **Merged as #94 (`85ba885`)**, CI green x64+ARM64; `editorconfig_live.py` 6/6 again on merged main. Next: TODO highlighting.
+
+## Built-in feature 3: TODO highlighting, PR #95 (2026-11-15)
+
+- Branch `feat/todo-highlight`. `windows_app/todo_highlight.rs`: `todo_marks(source, spans)` (whole upper-case words in Comment spans), `todo_color`/`todo_tint` (sky, error, orange, green), `find_todos` (palette id 71 `FIND_TODOS`, Edit menu "Find TODOs in Workspace" mnemonic O; project search with `TODO_PATTERN` as regex + match case). Drawn in `code_pane.rs` after the spans, tint skipped under a selection. Setting `todoHighlight` (default true), Visual aids "Highlight TODOs".
+- Not done: scrollbar marks (no mark layer exists; whole-file scans after edits would cost typing). `todoKeywords` not added. The workspace search also lists markers inside strings (it's a text search).
+- Live `todo_live.py` (scratchpad `9e8b0d0c…`) 6/6.
+- **Merged as #95 (`757e7bf`)**, CI green x64+ARM64; `todo_live.py` 6/6 again on merged main. Next: rename the matching tag, then path suggestions.
+
+## Built-in feature 4: rename the matching tag, merged as #96 (`4b6b0ea`, 2026-11-15)
+
+- `windows_app/linked_tag.rs`: `tag_pair_at(doc, pos)` from the text (nesting by name, quoted attributes skipped, self-closing and void elements excluded, MAX_LINES 2000), `links_tags(path)` (html htm xhtml xml svg vue svelte astro jsx tsx js mjs php), `type_in_linked_tag` (from `character()`, after `multi_cursor_char`), `delete_in_linked_tag` (Backspace/Delete in input.rs), `linked_edit` (one undo group, later edit first, caret kept), `check_tag_pair` (end of `refresh_after_editor_input` and in window.rs's loop next to `track_caret`; cached in `App::tag_pair` by doc id, serial, caret, selecting, setting; redraws only rows whose outline changed), `tag_outline` for `code_pane.rs` (1 px frame, blend(bg, blue, 0.65)). Setting `linkedTagRename`, Editor "Rename matching tag".
+- **Live drivers send keys with SendMessage, which skips the message loop**: anything hooked only there (track_caret, check_tag_pair before the fix) never runs in live tests. Hook into the handlers too.
+- `tag_live.py` 9/9 on the branch and on merged main. The first merge attempt failed with a TLS timeout and the script carried on; check `gh pr view N --json state` before deleting the branch.
+- ~~Pre-existing bug found~~ **Not a bug (checked 2026-11-15)**: the active guide is redrawn by `check_brackets`, a message-loop hook; the driver's SendMessage keys skip the loop, so the check can miss it (75 px in 2 of 3 runs). Posting the last key through the loop gives 0 px every time. Original note: after an undo changes a line's indentation, moving the caret can leave the active indent guide dim — repaint check 75 px at x=548 rows y=197–271 in `tag_repro.py` / `tag_repro_off.py` (same with `linkedTagRename: false`). Look at how the active guide (`active_guide`, bracket_colors.rs) invalidates on caret moves after an edit.
+
+## Built-in feature 5: file path suggestions, PR #97 (2026-11-15)
+
+- Branch `feat/path-suggestions`. `windows_app/path_complete.rs`: `path_context`, `resolve_dir`, `path_items` (FILE_KIND 17 / FOLDER_KIND 19, max 500), `suggest_paths` (end of `character()`, start of `trigger_completion`, after a folder is accepted in `accept_completion`), `path_listing_arrived` (from `poll_workers` on `WorkerMessage::Directory`; `App::path_pending` = doc id, serial, caret, folder). `CompletionPopup::folder` makes render/completion.rs draw Explorer icons. Setting `pathCompletion`, Editor "Suggest file paths".
+- Not done: typed-letter highlight and the "src/ · 4 of 23" footer from the mock-up; gitignored files are listed (the Explorer lists them too).
+- Live `path_live.py` (scratchpad `9e8b0d0c…`) 9/9. **Driver note**: after `win.shot()` the caret blinks (530 ms), so `win.wait(quiet)` with quiet ≥ 0.53 s never settles; sleep, then `wait()` with the default 0.25.
+- With this, all five features of `design/builtin-features-design.html` are built (scrollbar TODO marks left out, see #95).
+- **Merged as #97 (`4cef2b4`)**, CI green x64+ARM64. On merged main all five live tests pass again: path 9/9, tag 9/9, todo 6/6, editorconfig 6/6, inline problems (Pyright) 12/12.
+
+## Finishing the five features (2026-11-15, evening)
+
+- The "active indent guide" mismatch was **not a bug** (driver artifact, see #96 notes). Branch deleted, nothing changed.
+- **#98 merged (`c482cb1`)**: tabs drawn with the file's `.editorconfig` `tab_width`: `App::tab_width_for(tab)` / `tab_width_of(doc)` in editor_config.rs, used by wrap, hscroll, minimap, sticky, guides, code_pane; `text_width` expands tabs only when the text has one, with `App::measure_tab_width` (set per pane in `paint_code_pane`, cleared by the `MeasureTabWidth` guard) else the active file's. Release typing in a tab-indented Go file: 7.06–9.59 M/key vs main 3.7–8.31 (same within noise). `tabwidth_live.py` 7/7, `tab_speed.py` for the comparison.
+- **#99 (open, rebased onto #98)**: TODO scrollbar marks (`TodoLines` on `Tab::todo_lines`, `TODO_TIMER` 28, one-shot 300 ms, keyed on change serial + `Syntax::colored`), Find TODOs only in comments (`text_search::in_comment`, `workflow::search_workspace_where`). `todo_live.py` 8/8.
+- **#100 (open)**: path suggestions skip `.gitignore`d entries (`App::path_rules`, cleared on DirectoryChanged and on saving a .gitignore) and the search's skip list; `PathList` on `CompletionPopup::folder` (typed letters highlighted with `label_match`, footer "./src/ · 4 of 5"). `path_live.py` 9/9 with ignored entries.
+- Still not done on purpose: `.editorconfig` `end_of_line = cr` and non-UTF-8 `charset` (LightLine's documents only hold UTF-8 with LF/CRLF).
+- **#99 merged (`de55e14`)** after a rebase onto #98 (CHANGELOG conflict only); **#100 merged (`efe8010`)** after a clean rebase. CI green on each.
+- Final check on merged main (`efe8010`), debug build: inline problems 12/12, editorconfig 6/6, todo 8/8, tags 9/9, paths 9/9, tab width 7/7 (some runs 1475 px at x 167–458, y 621–634: the status bar message expiring, the known check race, not a drawing bug).
+- `C:\Users\mehmo\lightline-build\perf` and `\cmp` deleted. Unreleased now holds #90–#100: ready for v0.12.0 when the maintainer wants it.
+
+## v0.12.0 released; snippet packs, PR #102 (2026-11-16)
+
+- **v0.12.0 released**: notes PR #101 squash-merged as `c6ff568`; Release run 43837838399 passed (x64, ARM64, publish); Scoop commit `056a1cd` (zip hashes match `SHA256SUMS.txt`). Published `lightline.exe` hash checked; a hidden-window smoke run of it: start 0.07 s, 9.4 M UI cycles/key, 0 idle wakeups.
+- Speed check vs published v0.11.0 (release build of `efe8010`, alternating): typing 8.2–12.7 M (median 9.3, 6 runs) vs 6.9–11.2 M (9.6, 5 runs); start medians 0.08–0.10 s vs 0.08–0.13 s; idle 0 for both.
+- **Idle-measurement lesson**: the first round showed 0.15 wakeups/s for v0.12.0 only. A release build logging every window message (`LIGHTLINE_MSG_LOG`, temporary, reverted) showed it was `RECOVERY_TIMER` (7): during typing it ticks every 5 s; after the last snapshot one more tick checks that nothing changed. Whether that tick lands in the driver's 20 s idle window depends on how typing lines up with the ticks. `measure_driver.py` (this session's scratchpad `ba5da27c…`) now takes `LL_IDLE_WAIT` (default 8); use **12** so the count starts after both ticks. v0.11.0 refuses some launches (it takes the foreground; fixed in #93).
+- **Snippet packs, PR #102** (branch `feat/snippet-packs`): `src/extensions/snippets.rs` (`snippet_files`, `validate`, `parse` with comments/trailing commas, `language_keys`, `installed_for`, `matching`), installer accepts packs, `windows_app/snippet_packs.rs` (`active_snippets` reads on a worker → `WorkerMessage::Snippets`, quiet in poll_workers; `snippet_items`; `show_snippets_only`; `wait_for_snippets(merge)`; `forget_snippets` on install/uninstall), merged into the LSP list in `language.rs` (snippets first when something was typed). `ExtensionCategory::Snippets` (orange). Live: `snippets_live.py` (scratchpad `ba5da27c…`, packs cloned at pinned commits into `packs/`) 10/10; ignored test `real_snippet_packs_install_and_offer_their_snippets` passes.
+- **Merged as #102 (`dd0559b`)**, CI green x64+ARM64 (the first push failed `cargo fmt --check` on the live test; GitHub then missed the fix push's CI trigger, so the PR was closed and reopened; the first merge call hit a 502 and a stuck "merge in progress"; retried after 5 min). `snippets_live.py` 10/10 again on merged main. Branches deleted. Downloaded/copied exes in `C:\Users\mehmo\lightline-build` deleted (only `flat` is left).
+- Next in the plan: tool extensions started from PATH (codebook, cspell, harper, typos…), then our own extension list.
+
+## Switches #103, checker extensions #104 (2026-11-16)
+
+- **#103 (`b3d588e`)**: Settings on/off switches were GDI RoundRects (stair-stepped, looked blurred at 125%; maintainer's screenshot). Now `image_view::smooth_pill` (GDI+ anti-aliased pill, inset outline) + `smooth_radio` knob (skips its ring at width 0). Checked with `switch_shot.py` + `crop.py` (8× crops) before/after and on merged main; 0 stale px. Other `rounded_fill` shapes weren't changed.
+- **#104 (`e864a0c`)**: checker ("tool") extensions: typos, codebook, harper, cspell. `extensions/tools.rs` (a server with `languages` and no `languages/` folder; listed on a worker), KNOWN commands `typos-lsp`, `codebook-lsp serve`, `harper-ls --stdio`, `cspell-lsp --stdio`; `windows_app/language_tools.rs` (`ensure_tools` from `ensure_lsp`, `sync_tool_edits` from `sync_lsp_edit`, `close_tools`, `tools_saved`, `tool_stopped`, `restart_tools`, `stopped_note`); `Tab::tools`/`tools_version`/`tools_serial`; `LspDiagnostic::origin` tags each problem's server, the Diagnostics event replaces only that origin's; code actions send each server its own problems and `Ctrl+.` on a tool's problem asks the tool (`tool_problem_at_caret`). Tools register as extension languages with an empty language id → `lsp::standard_language_id` per file. `language_keys` now maps `.txt` → `plain text`, `.ps1` → `powershell`.
+- typos-lsp reports misspellings as **information** (severity 3): underlined and in Problems, not written after the line nor counted in the status bar.
+- Live: `tools_live.py` (scratchpad `ba5da27c…`; typos extension cloned at the pinned commit into `tool-packs/`; the official typos-lsp v0.1.58 release was downloaded to `C:\Users\mehmo\lightline-build\typos-lsp` for the test and **deleted afterwards**; the maintainer approved running it). 9/9 on the branch and on merged main. The test workspace must be a git repo or the "not inside a Git repository" notice overwrites the checker's startup message.
+- Two early runs of the missing-command case hit the driver's foreground guard while the maintainer's own LightLine (`target\release`) was open; 5 later runs passed and `fg_probe.py` saw no activation. Watch for it.
+- Speed (release, 3,148-line Rust, rust-analyzer, 3 alternating runs, `tools_speed.sh`; measure_driver takes `LL_EXTENSION=<ext folder>`): UI cycles/key v0.12.0 7.3–9.7 M, no checker 6.7–7.0 M, typos running 7.3–7.5 M; start ~0.07 s; idle 0.
+- Next in the plan: part 3, our own extension list (a file in the repo, no server). Unreleased now holds #102–#104.
+
+## Checker download offer, merged as #105 (`04d688c`, 2026-11-16)
+
+- The maintainer asked how people without Cargo get typos-lsp; chose both a clearer hint and a Pyright-style download offer.
+- `src/extensions/tool_download.rs`: pinned releases with SHA-256 from GitHub's asset digests (typos-lsp 0.1.58 x64+arm64, codebook-lsp 0.4.0 x64+arm64, harper-ls 3.2.0 x64 only); `download` (ureq, 120 s, 64 MB cap, hash checked before unpacking, Windows `tar -xf` in the kill-on-close job, only the `.exe` kept in `%APPDATA%\LightLine\tools\<command>-<version>\`), `installed_command` (used by `language_servers::find_command` after PATH), `remove` (retried ~5 s while the server stops; called on uninstall). `src/sha256.rs`: dependency-free, FIPS 180 vectors. **To bump a checker: change its version, URLs and hashes** (`gh api repos/<repo>/releases/tags/<tag> --jq '.assets[] | .name + " " + .digest'`).
+- `language_tools.rs`: `tool_stopped(hwnd, …)` asks once a session (`ask_to_download`), `download_tool` → `WorkerMessage::ToolDownloaded` → `tool_downloaded` (clears the failure, restarts the tool). Hints lead with "get X.exe from …/releases and put it on PATH, or run cargo install …".
+- Debug dialog hook: `LIGHTLINE_TEST_DIALOG_ANSWER=cancel` answers with the cancel button.
+- **Incident**: a broken edit to `tools_live.py` ran the `.txt` case with no typos-lsp and without the dialog hook; a real "Download typos-lsp?" dialog showed on the maintainer's screen until the driver's check closed the instance. `tools_live.py` now sets `LIGHTLINE_TEST_DIALOG` for every case, at import.
+- **CI runs Rust 1.98.0, this PC 1.97.1**: CI's Clippy flagged `chunks_exact` with a constant size (use `as_chunks`), which local Clippy didn't.
+- Live on merged main: `tools_live.py` 15/15 (download, txt, Python, Not Now). The foreground guard tripped once more mid-run (before the retry passed); cause still unknown.
+- Unreleased now holds #102–#105.
+
+## Part 3: LightLine's own extension list, merged as #106 (`9d3d5bf`, 2026-11-24)
+
+- Design `design/extension-list-design.html`, approved with all recommendations (built in + fetched; Zed entries follow Zed's pin; chips All/Themes/Snippets/Checkers; RECOMMENDED + "LightLine" badge).
+- `registry/extensions.toml` (`[[extension]]`, `format = 1`): 16 entries, 8 recommended. `src/extensions/lightline_list.rs`: `parse` (lenient: skips unknown kinds and newer `requires`; dev builds have no `LIGHTLINE_VERSION` and show all), `problems` (strict, CI test), `fetch` (raw.githubusercontent `main`, 10-min reuse, 1 MB cap). Ignored test installs every entry and checks its kind (all 16 passed, ~90 s).
+- UI: `Extension` gained `listed`/`recommended`/`repository` and `Default`; `merge_extension_list` in `extensions_panel.rs`; built-in list read in `read_extension_list` (called from `ensure_zed_registry_loaded`), fetched list via `WorkerMessage::ExtensionList` (failure = silent). Startup keeps only Prettier + Material (installed check). `material-icons` alias removed: id is `material-icon-theme` everywhere. Tool category label is now "Checker".
+- Live (new driver `drive.py` + `ext_live.py` in this session's scratchpad; old `menu_live.py` was gone): panel, Snippets chip, search "snip", install Dracula: 5/5, 0 stale px, on the branch and on merged main. `python -I` hides Pillow (user site), run the own driver without `-I`. Installed extensions leave read-only git files: clean profiles with an `onexc` chmod.
+- Next in the plan: our own extensions (decide where they live), then WASM.
+
+## Every listed extension tested live; Prettier fixed, merged as #107 (`63e8527`, 2026-11-24)
+
+- `list_live.py` (scratchpad): each of the 16 list entries installed from the panel in a fresh hidden instance, then used. Themes: editor background = the theme's; icons: Explorer changes; checkers: download offered (hook answers Download), "Recieve" flagged and fixed by Ctrl+.; snippets: prefix + Ctrl+Space + Enter inserts. 15/16 passed first time (Go/Comment Blocks failures were the script rejecting hyphenated prefixes).
+- Prettier was broken (also in v0.12.0): open files' `\?\D:\...` path as `--stdin-filepath` makes Prettier hang until LightLine's 10 s timeout. `formatter::tool_path` now gives every external formatter the plain path. Regression test `real_prettier_formats_a_file_opened_by_its_verbatim_path_if_installed`.
+- Rechecked on merged main: Prettier through the panel formats, 3/3.
+
+## Prettier reliability #108 (`cf25c70`) and Claude provider #109 (`70b2d77`), 2026-11-24
+
+- #108: the panel looks for Prettier when it first opens (worker, files only) so it shows installed/in use after a restart; a discarded format (text changed meanwhile) now says so in the status bar; fixed the Zed placeholder string #106 broke (lost line continuation).
+- Prettier stress (`prettier_stress.py`, scratchpad): 40/40 in a row typed in the editor, 30/30 with the file rewritten on disk, 13 file types, 13 awkward folder names, format-on-save 5/5, project Prettier + .prettierrc, 4,000-line file 2.7 s. One earlier run failed after a "File changed on disk" prompt (test wrote the file while a formatted result was unsaved); a later persistent miss of outside changes did not reproduce (direct Overwrite test and 40 reload checks at 0.05-2 s gaps all passed). Watch for it.
+- #109: Claude through Anthropic's Messages API in `ai.rs` (`Server.claude`, `claude_request_body`, `parse_claude_event`): x-api-key + anthropic-version 2026-10-21, ANTHROPIC_API_KEY, /v1/messages, effort medium/low, `fallbacks: "default"` + beta on the models that have it, /v1/models?limit=1000, default claude-opus-5-5. Real API returns 401 for a fake key (request shape accepted). **Not tried with a real key** (none on this PC).
+- Bash tool mangles backslashes in heredocs: use the Edit tool or chr(92) (memory note).
+
+## AI: files, project access, proposed edits — #110 (`e401e21`), #111 (`73ef5e8`), #112 (`df94e82`), 2026-11-24
+
+- Design `design/ai-project-access-design.html`, approved with all recommendations; built as three PRs.
+- #110 attach: `windows_app/ai_attach.rs` (@ list from `quick_files` via `load_quick_files`, chips, 400 lines/24 KB per file, 96 KB in all, 256 KB read cap, binary refused, secrets ask with Don't Send default); Explorer "Add to AI Chat", editor menu "Add file to AI chat".
+- #111 project access: `src/ai_tools.rs` (search, list_files, read_file, problems; readable = `workspace_files` minus secrets), `ai::chat_with_tools` (OpenAI tool_calls + Claude tool_use with thinking blocks sent back, eager_input_streaming, INVALID_JSON, 25 steps then tool_choice none, retry without tools when refused), `windows_app/ai_project.rs` (permission card: the worker waits on a channel; step lines; Read opens the file); setting `aiProjectAccess` ask/always/off, also in Settings.
+- #112 proposed edits: `propose_edit` / `propose_new_file` in ai_tools (overlay per question, `apply_edits`), `windows_app/ai_edits.rs` (changes card, diff-view proposal mode via `ai_review`, shared `compare_header` with Local History, apply via replace_range one undo group, keyboard back to the editor).
+- Live drivers in this session's scratchpad: `ai_attach_live.py`, `ai_tools_live.py`, `ai_edits_live.py`, `history_live.py` (local stand-in OpenAI-style server that plays a tool-calling model). All pass on merged main. The repaint check sometimes reports 1052 px at x 168-357, y 881-894: a status message expiring at the instant of the check (not the panel).
+- **Not tried with a real tool-calling model** (no Ollama, no Claude key on this PC).
+
+## Real Claude tested; chat panel redesign part 1 on branch `ai-chat-redesign-1` (2026-11-24, not committed)
+
+- The maintainer saved a real Claude key (Credential Manager, `LightLine AI API key: api.anthropic.com`). Live on main with claude-opus-5-5: streaming, permission card, search/read steps, propose_edit in 2 files, Review, Apply All (unsaved): all work, 0 stale px.
+- Design `design/ai-chat-design.html` (before screenshot `design/screens/ai-chat-before.png`), approved with all recommendations: open-file chip sent unless removed, earlier chats kept (50 per workspace, setting to turn off), model picker in the composer, steps folded when done, code wraps, three PRs.
+- Part 1 (this branch): answers are ordered parts (`answer_parts` in render/ai_assistant.rs; `AiStep.at` = text length when the step came); one `ai_answer` walker measures and paints; 35 px header (`AI_HEADER`); steps with icons, result on the right, running line (`AiEvent::Running`, `ai_tools::running_label`), folded groups (`ChatEntry.open_groups`, `folded_steps_label`); code wraps in chat snippets only (`Layouter.wrap_code`, `code_breaks`, continuation past the line's indent); code toolbar icons (new `DebugGlyph::Copy`/`Insert`), Apply only without a changes card, `AiAction::Replace` removed; footer Copy/Retry/"N steps · T s" (`ai_retry`, `ai_start` split out of `ai_ask`); `ai::model_label` (Claude ids to product names); question bubble right-aligned.
+- Live with real Claude on the branch: order correct (text before card), fold/unfold, wrap, Retry, 0 stale px everywhere. Driver: scratchpad `live_session.py` (commands file; `wheel` added). fmt, clippy, all tests pass.
+- Next: part 2 (composer, open-file chip, model picker in composer, empty panel, resizable width in session.json, `aiIncludeOpenFile`), then part 3 (chat history, `chat_store.rs`, `aiKeepChats`).
+- D: is nearly full (~1.4 GB free after `cargo clean --release`).
+- Added on the same branch after feedback: chat answers use their own font sizes (`CHAT_FONT_SIZES` in markdown_view.rs: body 14, code 13, headings 18/16/15/14) and 2 px line gaps (`wrap_code` also means "chat"); the question box has a real caret (`windows_app/ai_composer.rs`: `AiChat.caret`, arrows/Ctrl words, Home/End, Up/Down by wrapped line, Delete, click via `composer_rows`; `@` works on the text before the caret); Copy icons show a green tick for 1.5 s (`AI_COPIED_TIMER` = 29, one-shot). All checked live with real Claude, 0 stale px.

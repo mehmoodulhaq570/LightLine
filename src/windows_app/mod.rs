@@ -1,5 +1,6 @@
 mod ai_attach;
 mod ai_chat;
+mod ai_composer;
 mod ai_edits;
 mod ai_project;
 mod ai_provider;
@@ -190,7 +191,7 @@ const RAIL_MENU_ROW: i32 = 0;
 const RAIL_FIRST_ROW: i32 = RAIL_MENU_ROW + RAIL_ROW;
 const RAIL_ROW: i32 = 48;
 // Height of the AI Assistant panel's header (title and close button).
-const AI_HEADER: i32 = 52;
+const AI_HEADER: i32 = 35;
 // The 1 px line between the side panel, editor and terminal; they meet flat,
 // with square corners.
 const CARD_GAP: i32 = 1;

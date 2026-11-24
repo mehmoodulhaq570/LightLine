@@ -130,6 +130,9 @@ pub(super) enum DebugGlyph {
     Notes,
     // Settings: open settings.json.
     Braces,
+    // The AI Assistant: copy an answer or code, and put code at the cursor.
+    Copy,
+    Insert,
 }
 
 impl DebugGlyph {
@@ -261,6 +264,16 @@ impl DebugGlyph {
             DebugGlyph::Notes => format!(
                 r#"<path {ui} d="M13.5 3.5H7.3a1.8 1.8 0 0 0-1.8 1.8v13.4a1.8 1.8 0 0 0 1.8 1.8h9.4a1.8 1.8 0 0 0 1.8-1.8V8.5z"/><path {ui} d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>"#
             ),
+            // Two overlapping sheets.
+            DebugGlyph::Copy => format!(
+                r#"<rect {ui} x="8.5" y="8.5" width="12" height="12" rx="2"/><path {ui} d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>"#
+            ),
+            // An arrow down onto a line: put it where the cursor is.
+            DebugGlyph::Insert => {
+                format!(
+                    r#"<path {ui} d="M12 3.5v11"/><path {ui} d="M7.5 10 12 14.5l4.5-4.5"/><path {ui} d="M5 19.5h14"/>"#
+                )
+            }
             // { }, for settings.json.
             DebugGlyph::Braces => format!(
                 r#"<path {ui} d="M8.5 4C6.5 4 5.7 4.8 5.7 6.6v2.6c0 1.3-.7 2.1-2 2.8 1.3.7 2 1.5 2 2.8v2.6c0 1.8.8 2.6 2.8 2.6M15.5 4c2 0 2.8.8 2.8 2.6v2.6c0 1.3.7 2.1 2 2.8-1.3.7-2 1.5-2 2.8v2.6c0 1.8-.8 2.6-2.8 2.6"/>"#
@@ -810,6 +823,8 @@ mod icon_tests {
             DebugGlyph::Book,
             DebugGlyph::Notes,
             DebugGlyph::Braces,
+            DebugGlyph::Copy,
+            DebugGlyph::Insert,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");

@@ -24,7 +24,7 @@ pub(super) const MAX_CONTEXT_LINES: usize = 400;
 const MAX_CONTEXT_BYTES: usize = 24 * 1024;
 // Earlier messages sent along for context, newest first, up to this size.
 const MAX_HISTORY_BYTES: usize = 48 * 1024;
-const MAX_INPUT_BYTES: usize = 16 * 1024;
+pub(super) const MAX_INPUT_BYTES: usize = 16 * 1024;
 // Lines around an error sent with "Explain" and "Fix" (the fix replaces
 // exactly these lines, so it gets fewer).
 const ERROR_CONTEXT_EXPLAIN: usize = 10;
@@ -41,6 +41,8 @@ enum AiEvent {
     Models(Result<Vec<String>, String>),
     Text(u64, String),
     Done(u64, Result<(), String>),
+    /// A tool call starting: what it's doing (ai_project.rs).
+    Running(u64, super::ai_project::StepKind, String),
     /// A tool call the model made, done (ai_project.rs).
     Step(u64, super::ai_project::AiStep),
     /// The model wants to look through the project: the worker waits for
@@ -135,10 +137,22 @@ pub(super) struct ChatEntry {
     pub(super) context: Option<String>,
     /// The files sent with a question, as chips.
     pub(super) chips: Vec<super::ai_attach::Chip>,
-    /// An answer's look through the project: one line per tool call.
+    /// An answer's look through the project: one line per tool call, each
+    /// placed where it came in the text.
     pub(super) steps: Vec<super::ai_project::AiStep>,
-    /// The permission card shows in this answer.
+    /// The permission card shows in this answer (after its text so far:
+    /// nothing more arrives while it waits).
     pub(super) asking: bool,
+    /// The tool call running now, e.g. "Reading src/main.rs".
+    pub(super) running: Option<(super::ai_project::StepKind, String)>,
+    /// The model that answered.
+    pub(super) model: String,
+    /// Groups of steps (by their first step) opened again after the answer
+    /// folded them.
+    pub(super) open_groups: Vec<usize>,
+    /// When the answer was asked for, and how long it took.
+    started: Option<Instant>,
+    pub(super) took: Option<Duration>,
     /// A muted line under the answer.
     pub(super) note: Option<String>,
     /// Changes the model proposed in this answer.
@@ -148,7 +162,8 @@ pub(super) struct ChatEntry {
     pub(super) error: Option<String>,
     /// Bumped whenever `text` changes, so the answer is laid out again.
     pub(super) revision: u64,
-    pub(super) view: MarkdownSnippet,
+    /// The answer's text between its steps, each laid out on its own.
+    pub(super) views: RefCell<Vec<MarkdownSnippet>>,
 }
 
 impl ChatEntry {
@@ -161,12 +176,17 @@ impl ChatEntry {
             chips: Vec::new(),
             steps: Vec::new(),
             asking: false,
+            running: None,
+            model: String::new(),
+            open_groups: Vec::new(),
+            started: None,
+            took: None,
             note: None,
             proposals: Vec::new(),
             target: None,
             error: None,
             revision: 0,
-            view: MarkdownSnippet::default(),
+            views: RefCell::default(),
         }
     }
 }
@@ -185,10 +205,10 @@ pub(super) enum AiAction {
     Copy(String),
     /// Put the code at the editor's cursor.
     Insert(String),
-    /// Put the code in place of what answer `usize`'s question was about.
-    Replace(String, usize),
     /// Smart apply code into active editor with undo support.
     Apply(String, usize),
+    /// Ask the last question again.
+    Retry,
 }
 
 /// Where the panel's buttons were painted, for mouse clicks.
@@ -216,6 +236,9 @@ pub(super) struct AiHits {
     pub(super) permission: Vec<(RECT, super::ai_project::Permission)>,
     /// "Read" lines, with the file and line each opens.
     pub(super) steps: Vec<(RECT, PathBuf, usize)>,
+    /// A finished answer's folded steps: the line, its entry and the
+    /// group's first step.
+    pub(super) step_groups: Vec<(RECT, usize, usize)>,
     /// The changes card: a file's row (entry, file) and its buttons.
     pub(super) proposal_rows: Vec<(RECT, usize, usize)>,
     pub(super) proposal_buttons: Vec<(RECT, usize, ProposalButton)>,
@@ -223,8 +246,18 @@ pub(super) struct AiHits {
 
 pub(super) struct AiChat {
     pub(super) entries: Vec<ChatEntry>,
-    /// The message being typed.
+    /// The message being typed, and where in it the caret is (a byte
+    /// offset; ai_composer.rs).
     pub(super) input: String,
+    pub(super) caret: usize,
+    /// The message box as last painted: its wrapped lines (byte ranges)
+    /// and the rows drawn, for Up/Down, Home/End and clicks.
+    pub(super) composer_lines: RefCell<Vec<(usize, usize)>>,
+    pub(super) composer_rows: RefCell<Vec<super::ai_composer::ComposerRow>>,
+    /// The first wrapped line shown when the text is taller than the box.
+    pub(super) composer_first: Cell<usize>,
+    /// Text just copied with a Copy icon, which shows a tick meanwhile.
+    pub(super) copied: Option<String>,
     /// Files to send with the next question (ai_attach.rs).
     pub(super) attachments: Vec<super::ai_attach::Attachment>,
     /// The @ list's chosen row, and whether Esc closed it until the next
@@ -272,6 +305,11 @@ impl AiChat {
         Self {
             entries: Vec::new(),
             input: String::new(),
+            caret: 0,
+            composer_lines: RefCell::default(),
+            composer_rows: RefCell::default(),
+            composer_first: Cell::new(0),
+            copied: None,
             attachments: Vec::new(),
             mention_selected: 0,
             mention_dismissed: false,
@@ -567,11 +605,20 @@ impl App {
                         entry.revision += 1;
                     }
                 }
-                AiEvent::Step(id, step) => {
+                AiEvent::Running(id, kind, label) => {
+                    if self.ai_current(id)
+                        && let Some(entry) = self.ai.entries.last_mut()
+                    {
+                        entry.running = Some((kind, label));
+                    }
+                }
+                AiEvent::Step(id, mut step) => {
                     if self.ai_current(id)
                         && let Some(entry) = self.ai.entries.last_mut()
                     {
                         entry.asking = false;
+                        entry.running = None;
+                        step.at = entry.text.len();
                         entry.steps.push(step);
                     }
                 }
@@ -606,6 +653,8 @@ impl App {
                         self.ai.permission = None;
                         if let Some(entry) = self.ai.entries.last_mut() {
                             entry.asking = false;
+                            entry.running = None;
+                            entry.took = entry.started.map(|started| started.elapsed());
                         }
                         if let (Err(mut error), Some(entry)) = (result, self.ai.entries.last_mut())
                         {
@@ -773,8 +822,7 @@ impl App {
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
-        self.ai.input.clear();
-        self.ai_input_changed();
+        self.ai_clear_input();
         self.ai_ask(hwnd, question.clone(), question, context, files);
     }
 
@@ -948,6 +996,42 @@ impl App {
             ));
         }
 
+        let mut question = ChatEntry::new(Role::User, shown, prompt);
+        if let Some(context) = context {
+            question.context = Some(context.label);
+            question.target = context.target;
+        }
+        question.chips = files.into_iter().map(|file| file.chip).collect();
+        self.ai_start(hwnd, model, question);
+    }
+
+    /// Asks the last question again: its answer goes, and a new one comes.
+    pub(super) fn ai_retry(&mut self, hwnd: HWND) {
+        let Some(model) = self.settings.ai_model.clone() else {
+            return;
+        };
+        let count = self.ai.entries.len();
+        if self.ai.busy()
+            || count < 2
+            || self.ai.entries[count - 1].role != Role::Assistant
+            || self.ai.entries[count - 2].role != Role::User
+        {
+            return;
+        }
+        if self.ai_review.is_some() {
+            self.close_diff();
+        }
+        self.ai.entries.pop();
+        let Some(question) = self.ai.entries.pop() else {
+            return;
+        };
+        self.ai_start(hwnd, model, question);
+    }
+
+    // Sends `question` (its prompt already holds any code) with the
+    // conversation so far, and starts receiving its answer.
+    fn ai_start(&mut self, hwnd: HWND, model: String, question: ChatEntry) {
+        let prompt = question.prompt.clone();
         // Earlier messages give the model the conversation so far.
         let mut history = Vec::new();
         let mut budget = MAX_HISTORY_BYTES;
@@ -972,20 +1056,13 @@ impl App {
             messages.push(Message::new(Role::System, access.instructions));
         }
         messages.extend(history);
-        messages.push(Message::new(Role::User, prompt.clone()));
+        messages.push(Message::new(Role::User, prompt));
 
-        let mut question = ChatEntry::new(Role::User, shown, prompt);
-        if let Some(context) = context {
-            question.context = Some(context.label);
-            question.target = context.target;
-        }
-        question.chips = files.into_iter().map(|file| file.chip).collect();
         self.ai.entries.push(question);
-        self.ai.entries.push(ChatEntry::new(
-            Role::Assistant,
-            String::new(),
-            String::new(),
-        ));
+        let mut answer = ChatEntry::new(Role::Assistant, String::new(), String::new());
+        answer.started = Some(Instant::now());
+        answer.model = model.clone();
+        self.ai.entries.push(answer);
         self.ai.follow.set(true);
 
         self.ai.next_request += 1;
@@ -1044,8 +1121,12 @@ impl App {
                             };
                             allowed = Some(answer != Permission::Deny);
                         }
+                        let kind = super::ai_project::StepKind::of(&call.name);
                         let step = if allowed == Some(true) {
                             let input = call.input.clone().unwrap_or_default();
+                            let label = lightline::ai_tools::running_label(&call.name, &input);
+                            let _ = tx.send(AiEvent::Running(id, kind, label));
+                            wake();
                             let outcome = access.project.run(&call.name, &input, &cancel);
                             if let Some(proposal) = outcome.proposal.clone() {
                                 let _ = tx.send(AiEvent::Proposal(id, *proposal));
@@ -1053,7 +1134,9 @@ impl App {
                             let step = AiStep {
                                 summary: outcome.summary,
                                 error: outcome.is_error,
+                                kind,
                                 opened: outcome.opened,
+                                at: 0,
                             };
                             (
                                 step,
@@ -1067,7 +1150,9 @@ impl App {
                                 AiStep {
                                     summary: "Not allowed to look through the project".into(),
                                     error: true,
+                                    kind,
                                     opened: None,
+                                    at: 0,
                                 },
                                 ai::ToolReply {
                                     content: "The user didn't allow looking through the project \
@@ -1114,6 +1199,8 @@ impl App {
             if let Some(entry) = self.ai.entries.last_mut() {
                 entry.error = Some("Stopped".into());
                 entry.asking = false;
+                entry.running = None;
+                entry.took = entry.started.map(|started| started.elapsed());
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1283,6 +1370,16 @@ impl App {
             self.ai_answer_permission(hwnd, *answer);
         } else if let Some((_, path, line)) = hits.steps.iter().find(|(rect, ..)| inside(rect)) {
             self.ai_open_step(hwnd, path.clone(), *line);
+        } else if let Some((_, entry, first)) =
+            hits.step_groups.iter().find(|(rect, ..)| inside(rect))
+        {
+            if let Some(entry) = self.ai.entries.get_mut(*entry) {
+                if let Some(at) = entry.open_groups.iter().position(|open| open == first) {
+                    entry.open_groups.remove(at);
+                } else {
+                    entry.open_groups.push(*first);
+                }
+            }
         } else if let Some((_, path)) = hits.mentions.iter().find(|(rect, _)| inside(rect)) {
             self.ai_accept_mention(hwnd, Some(path.clone()));
             self.focus_ai_input();
@@ -1310,23 +1407,14 @@ impl App {
             self.focus_ai_input();
         } else if hits.composer.as_ref().is_some_and(inside) {
             self.focus_ai_input();
+            self.ai_click_caret(hwnd, x, y);
         } else if let Some((_, action)) = hits.actions.iter().find(|(rect, _)| inside(rect)) {
             match action {
-                AiAction::Copy(text) => {
-                    self.status = match clipboard::copy(hwnd, text) {
-                        Ok(()) => "Copied".into(),
-                        Err(error) => format!("Couldn't copy: {error}"),
-                    };
-                }
+                AiAction::Copy(text) => self.ai_copy(hwnd, text),
                 AiAction::Insert(code) => {
                     if self.ai_can_insert() {
                         let cursor = self.view().cursor;
                         self.ai_apply_code(hwnd, code, self.active, cursor, cursor);
-                    }
-                }
-                AiAction::Replace(code, answer) => {
-                    if let Some((tab, start, end)) = self.ai_replace_target(*answer) {
-                        self.ai_apply_code(hwnd, code, tab, start, end);
                     }
                 }
                 AiAction::Apply(code, answer) => {
@@ -1339,6 +1427,7 @@ impl App {
                         self.ai_apply_code(hwnd, code, self.active, cursor, cursor);
                     }
                 }
+                AiAction::Retry => self.ai_retry(hwnd),
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -1408,6 +1497,9 @@ impl App {
         if let Some(handled) = self.ai_mention_key(hwnd, key, ctrl) {
             return handled;
         }
+        if let Some(handled) = self.ai_caret_key(hwnd, key, ctrl) {
+            return handled;
+        }
         match key {
             k if k == VK_RETURN as u32 && !ctrl => {
                 if shift {
@@ -1424,20 +1516,6 @@ impl App {
                     self.ai.focused = false;
                     unsafe { InvalidateRect(hwnd, null(), 0) };
                 }
-                true
-            }
-            k if k == VK_BACK as u32 => {
-                if self.ai.input.is_empty() && !self.ai.attachments.is_empty() {
-                    // Backspace in an empty box takes off the last file.
-                    self.ai.attachments.pop();
-                } else if ctrl {
-                    let kept = self.ai.input.trim_end().rfind(char::is_whitespace);
-                    self.ai.input.truncate(kept.map_or(0, |index| index + 1));
-                } else {
-                    self.ai.input.pop();
-                }
-                self.ai_input_changed();
-                unsafe { InvalidateRect(hwnd, null(), 0) };
                 true
             }
             0x56 if ctrl => {
@@ -1493,10 +1571,7 @@ impl App {
     }
 
     fn ai_type(&mut self, hwnd: HWND, text: &str) {
-        if self.ai.input.len() + text.len() <= MAX_INPUT_BYTES {
-            self.ai.input.push_str(text);
-            self.ai_input_changed();
-        }
+        self.ai_insert(text);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 }
