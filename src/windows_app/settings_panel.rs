@@ -60,6 +60,7 @@ enum Setting {
     AiEndpoint,
     AiModel,
     AiProjectAccess,
+    AiOpenFile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +121,7 @@ const ROWS: &[Row] = &[
     Row::Choice(Setting::AiEndpoint),
     Row::Info(Setting::AiModel),
     Row::Choice(Setting::AiProjectAccess),
+    Row::Toggle(Setting::AiOpenFile),
     Row::OpenJson,
 ];
 
@@ -159,6 +161,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::AiEndpoint => "Server",
         Setting::AiModel => "Model",
         Setting::AiProjectAccess => "Project access",
+        Setting::AiOpenFile => "Include the open file",
     }
 }
 
@@ -192,6 +195,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::AiEndpoint => "aiEndpoint",
         Setting::AiModel => "aiModel",
         Setting::AiProjectAccess => "aiProjectAccess",
+        Setting::AiOpenFile => "aiIncludeOpenFile",
     }
 }
 
@@ -236,6 +240,9 @@ fn tip(setting: Setting) -> &'static str {
         Setting::AiModel => "Chosen in the AI Assistant panel  \u{b7}  aiModel",
         Setting::AiProjectAccess => {
             "Whether the AI may search and read the project  \u{b7}  aiProjectAccess"
+        }
+        Setting::AiOpenFile => {
+            "The file you're in goes with a question unless removed  \u{b7}  aiIncludeOpenFile"
         }
     }
 }
@@ -286,6 +293,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::FormatOnSave => settings.format_on_save,
         Setting::EditorConfig => settings.editor_config,
         Setting::MarkdownImages => settings.markdown_load_remote_images,
+        Setting::AiOpenFile => settings.ai_include_open_file,
         Setting::Animations => settings.animations,
         Setting::SmoothScrolling => settings.smooth_scrolling,
         _ => false,
@@ -783,6 +791,7 @@ impl App {
             Setting::FormatOnSave => &mut settings.format_on_save,
             Setting::EditorConfig => &mut settings.editor_config,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
+            Setting::AiOpenFile => &mut settings.ai_include_open_file,
             Setting::Animations => &mut settings.animations,
             Setting::SmoothScrolling => &mut settings.smooth_scrolling,
             _ => return,
@@ -1236,7 +1245,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 27);
+        assert_eq!(setting_count(), 28);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }

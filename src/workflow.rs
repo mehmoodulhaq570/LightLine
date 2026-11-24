@@ -120,6 +120,8 @@ pub struct Session {
     pub root: Option<PathBuf>,
     pub active: usize,
     pub tabs: Vec<SessionTab>,
+    /// The AI Assistant panel's width, in 96-dpi pixels, once dragged.
+    pub ai_width: Option<u32>,
 }
 
 fn session_path() -> Option<PathBuf> {
@@ -217,7 +219,16 @@ fn session_from_value(value: &Value) -> Session {
                 .collect()
         })
         .unwrap_or_default();
-    Session { root, active, tabs }
+    let ai_width = value
+        .get("aiWidth")
+        .and_then(Value::as_u64)
+        .map(|width| width.min(4000) as u32);
+    Session {
+        root,
+        active,
+        tabs,
+        ai_width,
+    }
 }
 
 type SessionCompletion = std::sync::mpsc::Sender<Result<(), String>>;
@@ -294,6 +305,7 @@ fn session_to_value(session: &Session) -> Value {
             "stamp": tab.stamp,
             "views": tab.views.iter().map(session_view_to_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "aiWidth": session.ai_width,
     })
 }
 
@@ -2068,6 +2080,7 @@ mod tests {
                     views: [view.clone(), view],
                 },
             ],
+            ai_width: Some(512),
         };
         let path = root.join("session.json");
         save_session_at(&path, &session).unwrap();

@@ -192,6 +192,10 @@ const RAIL_FIRST_ROW: i32 = RAIL_MENU_ROW + RAIL_ROW;
 const RAIL_ROW: i32 = 48;
 // Height of the AI Assistant panel's header (title and close button).
 const AI_HEADER: i32 = 35;
+// The AI Assistant panel's width until it's dragged, and the least it can be
+// dragged to (96-dpi pixels).
+const AI_WIDTH: i32 = 420;
+const AI_MIN_WIDTH: i32 = 300;
 // The 1 px line between the side panel, editor and terminal; they meet flat,
 // with square corners.
 const CARD_GAP: i32 = 1;

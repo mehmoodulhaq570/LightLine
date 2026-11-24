@@ -969,6 +969,10 @@ pub(super) struct App {
     // Windows' "Show animations", read at start and when it changes.
     pub(super) system_animations: bool,
     pub(super) sidebar_dragging: bool,
+    /// The AI Assistant panel's width once its edge was dragged (96-dpi
+    /// pixels; kept in session.json), and whether it's being dragged.
+    pub(super) ai_user_width: Option<i32>,
+    pub(super) ai_dragging: bool,
     pub(super) terminal_height: i32,
     pub(super) terminal_resizing: bool,
     // Cell coordinates (column, row), not pixels. Selecting text is allowed
@@ -1661,6 +1665,8 @@ impl App {
             scroll_glide: None,
             system_animations: super::motion::system_animations(),
             sidebar_dragging: false,
+            ai_user_width: None,
+            ai_dragging: false,
             terminal_height: 210,
             terminal_resizing: false,
             terminal_selecting: false,
@@ -2174,8 +2180,9 @@ impl App {
         if !self.ai_assistant_visible {
             return 0;
         }
+        // 420 px unless dragged; at most half the room, at least 260 px.
         let preferred = self
-            .scale(420)
+            .scale(self.ai_user_width.unwrap_or(AI_WIDTH))
             .min((rect.right - self.editor_left()) / 2)
             .max(self.scale(260));
         // Only the room the editor can spare, so in a narrow window the
@@ -2227,6 +2234,27 @@ impl App {
         let offset = (x - self.editor_left()).clamp(minimum, width - minimum);
         self.split_ratio = offset as f64 / width as f64;
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Dragging the AI Assistant panel's left edge to `x`.
+    pub(super) fn resize_ai_panel(&mut self, hwnd: HWND, x: i32) {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect) };
+        let right = rect.right - self.chrome_gap();
+        let half = self.unscale((rect.right - self.editor_left()) / 2);
+        let width = self
+            .unscale((right - x).max(0))
+            .clamp(AI_MIN_WIDTH, half.max(AI_MIN_WIDTH));
+        self.ai_user_width = Some(width);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Whether `x` is on the AI Assistant panel's left edge, where it's
+    /// dragged.
+    pub(super) fn on_ai_edge(&self, hwnd: HWND, x: i32) -> bool {
+        self.ai_assistant_visible
+            && !self.welcome
+            && (x - (self.editor_right(hwnd) + self.chrome_gap() / 2)).abs() <= self.scale(4)
     }
 
     pub(super) fn resize_sidebar(&mut self, hwnd: HWND, x: i32) {
