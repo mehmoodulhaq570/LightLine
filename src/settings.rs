@@ -67,6 +67,8 @@ pub struct Settings {
     /// `aiIncludeOpenFile`: the AI Assistant offers the open file as a chip
     /// that goes with a question unless it's removed.
     pub ai_include_open_file: bool,
+    /// `aiKeepChats`: the AI Assistant keeps earlier chats on this PC.
+    pub ai_keep_chats: bool,
     /// The installed color-theme variant in use, by name (e.g. "Dracula");
     /// None is LightLine's own theme.
     pub color_theme: Option<String>,
@@ -123,6 +125,7 @@ impl Default for Settings {
             markdown_load_remote_images: false,
             ai_project_access: AiProjectAccess::Ask,
             ai_include_open_file: true,
+            ai_keep_chats: true,
             color_theme: None,
             ai_endpoint: crate::ai::DEFAULT_ENDPOINT.to_string(),
             ai_model: None,
@@ -327,6 +330,9 @@ impl Settings {
         if let Some(include) = value.get("aiIncludeOpenFile").and_then(|v| v.as_bool()) {
             settings.ai_include_open_file = include;
         }
+        if let Some(keep) = value.get("aiKeepChats").and_then(|v| v.as_bool()) {
+            settings.ai_keep_chats = keep;
+        }
         if let Some(access) = value
             .get("aiProjectAccess")
             .and_then(|v| v.as_str())
@@ -528,6 +534,10 @@ impl Settings {
             serde_json::Value::Bool(self.ai_include_open_file),
         );
         obj.insert(
+            "aiKeepChats".into(),
+            serde_json::Value::Bool(self.ai_keep_chats),
+        );
+        obj.insert(
             "terminalDefaultProfile".into(),
             serde_json::Value::String(self.default_terminal_profile.name().to_string()),
         );
@@ -653,6 +663,7 @@ const OWN_KEYS: &[&str] = &[
     "markdownLoadRemoteImages",
     "aiProjectAccess",
     "aiIncludeOpenFile",
+    "aiKeepChats",
     "terminalDefaultProfile",
     "terminalSymbolFont",
     "languageServers",
@@ -924,6 +935,17 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert!(loaded.markdown_load_remote_images);
+    }
+
+    #[test]
+    fn ai_keep_chats_round_trips() {
+        assert!(Settings::default().ai_keep_chats);
+        let s = Settings {
+            ai_keep_chats: false,
+            ..Settings::default()
+        };
+        let loaded = Settings::parse(&s.to_json()).unwrap();
+        assert!(!loaded.ai_keep_chats);
     }
 
     #[test]

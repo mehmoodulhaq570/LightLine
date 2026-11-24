@@ -2,6 +2,7 @@ mod ai_attach;
 mod ai_chat;
 mod ai_composer;
 mod ai_edits;
+mod ai_history;
 mod ai_project;
 mod ai_provider;
 mod app;

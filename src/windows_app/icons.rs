@@ -133,6 +133,8 @@ pub(super) enum DebugGlyph {
     // The AI Assistant: copy an answer or code, and put code at the cursor.
     Copy,
     Insert,
+    // Earlier chats: a clock with an arrow going back.
+    History,
 }
 
 impl DebugGlyph {
@@ -267,6 +269,9 @@ impl DebugGlyph {
             // Two overlapping sheets.
             DebugGlyph::Copy => format!(
                 r#"<rect {ui} x="8.5" y="8.5" width="12" height="12" rx="2"/><path {ui} d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>"#
+            ),
+            DebugGlyph::History => format!(
+                r#"<path {ui} d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path {ui} d="M4.3 4v4.3h4.3"/><path {ui} d="M12 8v4.3l3 1.9"/>"#
             ),
             // An arrow down onto a line: put it where the cursor is.
             DebugGlyph::Insert => {
@@ -825,6 +830,7 @@ mod icon_tests {
             DebugGlyph::Braces,
             DebugGlyph::Copy,
             DebugGlyph::Insert,
+            DebugGlyph::History,
         ];
         for glyph in glyphs {
             let svg = glyph.svg("#aac8fa");

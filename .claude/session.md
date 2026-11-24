@@ -648,3 +648,10 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 - Header: CHAT · first question. Empty panel: Explain this file (`AiTask::ExplainFile`, whole file), Fix problems in the selection, Write tests for the selection, one privacy line.
 - Resizable: drag the left edge (`on_ai_edge`, `ai_dragging`, `resize_ai_panel`, 300 px to half the room right of the sidebar), width in session.json `aiWidth` (`App.ai_user_width`, also in RecoveryKey). Model menu: ANTHROPIC heading and product names for remote providers.
 - Live with real Claude: open file sent and answered from, chips, menu, @, resize; 0 stale px. Next: part 3 (earlier chats).
+- Part 2 is PR #114 (base `ai-chat-redesign-1`). It includes a mid-way commit `41f688e` "Refactor code structure…" made under the maintainer's name (an editor auto-commit?) holding part 2 WIP; squash-merge makes it one.
+
+## Part 3 on branch `ai-chat-redesign-3` (stacked on part 2), 2026-11-24
+
+- `src/chat_store.rs` (portable): `%APPDATA%\LightLine\chats\<fnv64 of lowercased root | no-folder>\`, `index.json` (id/title/updated) + `<id>.json` per chat (ids are digits only), 50 per workspace, 2 MB per chat (oldest pairs dropped), atomic writes, one writer at a time (static Mutex). `list`/`load`/`save`/`delete`/`delete_all`, 6 tests.
+- `windows_app/ai_history.rs`: `ai_keep_chat` on a successful Done (thread; `AiChat.chat_id` set on first save), clock in the header (`DebugGlyph::History`) toggles the list (`history_open`, read on a thread via `AiEvent::Chats`), filter by typing, Up/Down/Enter/Delete/Esc, click opens (`AiEvent::ChatLoaded`, `ChatEntry::from_stored`), ✕ on the chosen row. Palette 72 AI: Show Earlier Chats, 73 AI: Delete All Chats (asks). Setting `aiKeepChats` (Settings count 29). `local_history::local_minutes`/`civil_from_days` are pub(super) for `chat_when`.
+- Live with real Claude: two chats kept as files, list, reopen, follow-up saved into the same chat (moved to top), filter, delete; 0 stale px.

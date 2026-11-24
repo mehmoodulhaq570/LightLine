@@ -224,7 +224,7 @@ fn when_saved(saved_ms: u64, now_ms: u64) -> String {
 
 // Minutes since 1970 in local time (Windows applies the time zone and
 // daylight saving).
-fn local_minutes(ms: u64) -> i64 {
+pub(super) fn local_minutes(ms: u64) -> i64 {
     // FILETIME counts 100 ns steps from 1601.
     let ticks = ms * 10_000 + 116_444_736_000_000_000;
     let utc = FILETIME {
@@ -244,7 +244,7 @@ fn local_minutes(ms: u64) -> i64 {
 }
 
 // Days since 1970-01-01 to (year, month, day); Howard Hinnant's algorithm.
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(super) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

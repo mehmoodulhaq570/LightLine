@@ -37,7 +37,7 @@ const SYSTEM_PROMPT: &str = "You are the coding assistant in LightLine, a code \
 editor. Answer concisely and accurately. Use Markdown, and put code in fenced \
 code blocks tagged with the language.";
 
-enum AiEvent {
+pub(super) enum AiEvent {
     Models(Result<Vec<String>, String>),
     Text(u64, String),
     Done(u64, Result<(), String>),
@@ -56,6 +56,10 @@ enum AiEvent {
     Proposal(u64, lightline::ai_tools::FileProposal),
     /// The provider card's check: its generation and the models found.
     Provider(u64, Result<Vec<String>, String>),
+    /// Earlier chats, listed (ai_history.rs).
+    Chats(Vec<lightline::chat_store::ChatSummary>),
+    /// An earlier chat, read; None when it couldn't be.
+    ChatLoaded(Option<lightline::chat_store::StoredChat>),
 }
 
 /// The chip for what goes with the next question besides attached files.
@@ -186,6 +190,88 @@ pub(super) struct ChatEntry {
 }
 
 impl ChatEntry {
+    /// The entry as a kept chat stores it (ai_history.rs).
+    pub(super) fn to_stored(&self) -> lightline::chat_store::StoredEntry {
+        use lightline::chat_store::{StoredChip, StoredEntry, StoredStep};
+        StoredEntry {
+            role: if self.role == Role::User {
+                "user"
+            } else {
+                "assistant"
+            }
+            .into(),
+            text: self.text.clone(),
+            prompt: self.prompt.clone(),
+            context: self.context.clone(),
+            chips: self
+                .chips
+                .iter()
+                .map(|chip| StoredChip {
+                    path: chip.path.clone(),
+                    label: chip.label.clone(),
+                    warn: chip.warn,
+                })
+                .collect(),
+            steps: self
+                .steps
+                .iter()
+                .map(|step| StoredStep {
+                    summary: step.summary.clone(),
+                    kind: step.kind.key().into(),
+                    error: step.error,
+                    at: step.at,
+                    opened: step.opened.clone(),
+                })
+                .collect(),
+            model: self.model.clone(),
+            error: self.error.clone(),
+            took_ms: self.took.map(|took| took.as_millis() as u64),
+        }
+    }
+
+    /// A kept chat's entry, as the panel shows it. Its text is shown as it
+    /// was; proposed changes aren't kept.
+    pub(super) fn from_stored(stored: &lightline::chat_store::StoredEntry) -> Self {
+        use super::ai_project::{AiStep, StepKind};
+        let role = if stored.role == "user" {
+            Role::User
+        } else {
+            Role::Assistant
+        };
+        let mut entry = Self::new(role, stored.text.clone(), stored.prompt.clone());
+        entry.context = stored.context.clone();
+        entry.chips = stored
+            .chips
+            .iter()
+            .map(|chip| super::ai_attach::Chip {
+                path: chip.path.clone(),
+                label: chip.label.clone(),
+                warn: chip.warn,
+            })
+            .collect();
+        let length = entry.text.len();
+        entry.steps = stored
+            .steps
+            .iter()
+            .map(|step| AiStep {
+                summary: step.summary.clone(),
+                error: step.error,
+                kind: StepKind::from_key(&step.kind),
+                opened: step.opened.clone(),
+                // A step can't come after the text's end, nor inside a
+                // character.
+                at: (0..=step.at.min(length))
+                    .rev()
+                    .find(|at| entry.text.is_char_boundary(*at))
+                    .unwrap_or(0),
+            })
+            .collect();
+        entry.model = stored.model.clone();
+        entry.error = stored.error.clone();
+        entry.took = stored.took_ms.map(Duration::from_millis);
+        entry
+    }
+
     fn new(role: Role, text: String, prompt: String) -> Self {
         Self {
             role,
@@ -259,6 +345,12 @@ pub(super) struct AiHits {
     pub(super) at_button: Option<RECT>,
     /// The empty panel's actions.
     pub(super) suggestions: Vec<(RECT, AiTask)>,
+    /// The header's clock (earlier chats), the list's card, its rows (by
+    /// position in the filtered list) and the ✕ on the chosen row.
+    pub(super) history_button: Option<RECT>,
+    pub(super) history_card: Option<RECT>,
+    pub(super) history_rows: Vec<(RECT, usize)>,
+    pub(super) history_delete: Option<(RECT, usize)>,
     /// "Read" lines, with the file and line each opens.
     pub(super) steps: Vec<(RECT, PathBuf, usize)>,
     /// A finished answer's folded steps: the line, its entry and the
@@ -293,6 +385,16 @@ pub(super) struct AiChat {
     /// document's path (None: an untitled one), and whether it was the
     /// selection.
     pub(super) context_skipped: Option<(Option<PathBuf>, bool)>,
+    /// The kept chat this one is (ai_history.rs): its id, once it's saved
+    /// or reopened.
+    pub(super) chat_id: Option<String>,
+    /// The list of earlier chats: open, its rows (newest first), what's
+    /// typed to filter them and the chosen row.
+    pub(super) history_open: bool,
+    pub(super) history: Vec<lightline::chat_store::ChatSummary>,
+    pub(super) history_loading: bool,
+    pub(super) history_query: String,
+    pub(super) history_selected: usize,
     /// "Allow for This Chat" was chosen; a new chat asks again.
     pub(super) chat_allowed: bool,
     /// The question waiting on the permission card, and where its answer goes.
@@ -324,7 +426,7 @@ pub(super) struct AiChat {
     next_request: u64,
     pub(super) fonts: SnippetFonts,
     pub(super) hits: RefCell<AiHits>,
-    tx: Sender<AiEvent>,
+    pub(super) tx: Sender<AiEvent>,
     rx: Receiver<AiEvent>,
 }
 
@@ -343,6 +445,12 @@ impl AiChat {
             mention_selected: 0,
             mention_dismissed: false,
             chat_allowed: false,
+            chat_id: None,
+            history_open: false,
+            history: Vec::new(),
+            history_loading: false,
+            history_query: String::new(),
+            history_selected: 0,
             context_skipped: None,
             permission: None,
             tools_refused: Default::default(),
@@ -545,7 +653,7 @@ impl App {
             && !self.welcome
             && !self.quick_open
             && self.ai_ready()
-            && (self.ai.focused || self.ai.model_menu_open)
+            && (self.ai.focused || self.ai.model_menu_open || self.ai.history_open)
     }
 
     /// Where the key for the endpoint comes from; None without one.
@@ -627,6 +735,8 @@ impl App {
                 AiEvent::Provider(generation, result) => {
                     self.provider_checked(hwnd, generation, result)
                 }
+                AiEvent::Chats(chats) => self.ai_chats_listed(chats),
+                AiEvent::ChatLoaded(chat) => self.ai_chat_loaded(hwnd, chat),
                 AiEvent::Text(id, text) => {
                     if self.ai_current(id)
                         && let Some(entry) = self.ai.entries.last_mut()
@@ -686,12 +796,16 @@ impl App {
                             entry.running = None;
                             entry.took = entry.started.map(|started| started.elapsed());
                         }
+                        let finished = result.is_ok();
                         if let (Err(mut error), Some(entry)) = (result, self.ai.entries.last_mut())
                         {
                             if error.contains("API key") {
                                 error.push_str(" Change it with AI: Choose Provider\u{2026}");
                             }
                             entry.error = Some(error);
+                        }
+                        if finished {
+                            self.ai_keep_chat();
                         }
                     }
                 }
@@ -1306,6 +1420,8 @@ impl App {
 
     pub(super) fn ai_new_chat(&mut self, hwnd: HWND) {
         self.ai_stop(hwnd);
+        self.ai.chat_id = None;
+        self.ai.history_open = false;
         if self.ai_review.is_some() {
             self.close_diff();
         }
@@ -1408,6 +1524,14 @@ impl App {
             return;
         }
         let hits = self.ai.hits.borrow().clone();
+        if self.ai.history_open {
+            self.ai_history_click(hwnd, &hits, x, y);
+            return;
+        }
+        if hits.history_button.as_ref().is_some_and(inside) {
+            self.ai_toggle_history(hwnd);
+            return;
+        }
         if self.ai.model_menu_open {
             if hits.model_search.as_ref().is_some_and(inside) {
                 self.ai.focused = false;
@@ -1573,6 +1697,9 @@ impl App {
     /// document behind it are kept here; app-wide shortcuts (Ctrl+P, Ctrl+S,
     /// F5...) still work.
     pub(super) fn ai_key(&mut self, hwnd: HWND, key: u32, ctrl: bool, shift: bool) -> bool {
+        if self.ai.history_open {
+            return self.ai_history_key(hwnd, key, ctrl);
+        }
         if self.ai.model_menu_open {
             return match key {
                 k if k == VK_ESCAPE as u32 => {
@@ -1666,7 +1793,9 @@ impl App {
             char::from_u32(unit as u32)
         };
         if let Some(ch) = ch {
-            if self.ai.model_menu_open {
+            if self.ai.history_open {
+                self.ai_history_char(hwnd, ch);
+            } else if self.ai.model_menu_open {
                 if self.ai.model_query.len() < 128 {
                     self.ai.model_query.push(ch);
                     self.ai.model_menu_first = 0;

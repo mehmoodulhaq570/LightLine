@@ -211,6 +211,233 @@ impl App {
         if self.ai.model_menu_open {
             self.paint_ai_model_picker(hdc, rect, header_bottom, composer.top);
         }
+        if self.ai.history_open {
+            self.paint_ai_history(hdc, rect, header_bottom);
+        }
+    }
+
+    // The list of earlier chats under the header: a filter line, then the
+    // chats newest first in groups (TODAY, YESTERDAY, EARLIER), each with
+    // its time; the chosen one has a ✕ that deletes it.
+    fn paint_ai_history(&self, hdc: HDC, panel: RECT, header_bottom: i32) {
+        use super::super::ai_history::{HISTORY_ROWS, chat_when};
+        let s = |value: i32| self.scale(value);
+        let matches = self.ai_history_matches();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis() as u64);
+        let selected = self
+            .ai
+            .history_selected
+            .min(matches.len().saturating_sub(1));
+        // The rows shown keep the chosen one in view.
+        let first = (selected + 1).saturating_sub(HISTORY_ROWS);
+        let shown: Vec<(usize, usize)> = matches
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(first)
+            .take(HISTORY_ROWS)
+            .collect();
+        let rows: Vec<(usize, usize, &'static str, String)> = shown
+            .iter()
+            .map(|&(row, index)| {
+                let (group, when) = chat_when(self.ai.history[index].updated, now);
+                (row, index, group, when)
+            })
+            .collect();
+        let row_height = s(28);
+        let group_height = s(22);
+        let mut groups = 0;
+        let mut previous = None;
+        for (_, _, group, _) in &rows {
+            if previous != Some(*group) {
+                groups += 1;
+                previous = Some(*group);
+            }
+        }
+        let body = if rows.is_empty() {
+            s(40)
+        } else {
+            rows.len() as i32 * row_height + groups * group_height + s(6)
+        };
+        let card = RECT {
+            left: panel.left + s(8),
+            top: header_bottom + s(4),
+            right: panel.right - s(8),
+            bottom: (header_bottom + s(4) + s(38) + body).min(panel.bottom - s(12)),
+        };
+        Self::rounded_fill(
+            hdc,
+            RECT {
+                left: card.left + s(3),
+                top: card.top + s(4),
+                right: card.right + s(3),
+                bottom: card.bottom + s(4),
+            },
+            s(8),
+            blend(self.theme.sidebar_bg, ui(0, 0, 0), 0.5),
+        );
+        self.panel_card(
+            hdc,
+            card,
+            s(8),
+            blend(self.theme.sidebar_bg, self.theme.blue, 0.4),
+            self.theme.editor_bg,
+        );
+        let mut hits = self.ai.hits.borrow_mut();
+        hits.history_card = Some(card);
+        drop(hits);
+
+        // The filter.
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let search = RECT {
+            left: card.left + s(10),
+            top: card.top + s(4),
+            right: card.right - s(10),
+            bottom: card.top + s(34),
+        };
+        let mid = (search.top + search.bottom) / 2;
+        self.glyph_in(
+            hdc,
+            DebugGlyph::Search,
+            self.theme.muted,
+            RECT {
+                right: search.left + s(18),
+                ..search
+            },
+            s(14),
+        );
+        let (text, color) = if self.ai.history_query.is_empty() {
+            ("Search chats".to_string(), self.theme.muted)
+        } else {
+            (format!("{}|", self.ai.history_query), self.theme.text)
+        };
+        self.label_mid(hdc, &text, search.left + s(26), mid, color, search);
+        Self::fill(
+            hdc,
+            RECT {
+                left: card.left + s(1),
+                top: search.bottom,
+                right: card.right - s(1),
+                bottom: search.bottom + s(1).max(1),
+            },
+            self.theme.edge,
+        );
+
+        let inner = RECT {
+            left: card.left + s(1),
+            top: search.bottom + s(4),
+            right: card.right - s(1),
+            bottom: card.bottom - s(2),
+        };
+        if rows.is_empty() {
+            let note = if !self.settings.ai_keep_chats {
+                "Keeping chats is off (Keep earlier chats in Settings)"
+            } else if self.ai.history_loading {
+                "Reading\u{2026}"
+            } else if self.ai.history.is_empty() {
+                "No earlier chats in this folder yet"
+            } else {
+                "No chat has that in its title"
+            };
+            unsafe { SelectObject(hdc, self.small_font) };
+            self.label_ellipsis(
+                hdc,
+                note,
+                inner.left + s(12),
+                inner.top + s(8),
+                self.theme.muted,
+                inner,
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+            return;
+        }
+        let mut y = inner.top;
+        let mut previous = None;
+        let mut row_hits = Vec::new();
+        let mut delete = None;
+        for (row, index, group, when) in rows {
+            if previous != Some(group) {
+                if y + group_height > inner.bottom {
+                    break;
+                }
+                unsafe { SelectObject(hdc, self.small_font) };
+                self.label_mid(
+                    hdc,
+                    group,
+                    inner.left + s(12),
+                    y + group_height / 2,
+                    self.theme.muted,
+                    inner,
+                );
+                unsafe { SelectObject(hdc, self.ui_font) };
+                y += group_height;
+                previous = Some(group);
+            }
+            if y + row_height > inner.bottom {
+                break;
+            }
+            let rect = RECT {
+                left: inner.left,
+                top: y,
+                right: inner.right,
+                bottom: y + row_height,
+            };
+            let chosen = row == selected;
+            if chosen {
+                Self::fill(
+                    hdc,
+                    rect,
+                    blend(self.theme.editor_bg, self.theme.blue, 0.22),
+                );
+            }
+            let chat = &self.ai.history[index];
+            unsafe { SelectObject(hdc, self.small_font) };
+            let when_width = self.text_width(hdc, &when);
+            let mut right = rect.right - s(12) - when_width;
+            self.label_mid(
+                hdc,
+                &when,
+                right,
+                (rect.top + rect.bottom) / 2,
+                self.theme.muted,
+                rect,
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+            if chosen {
+                let close = RECT {
+                    left: right - s(28),
+                    top: rect.top + s(2),
+                    right: right - s(4),
+                    bottom: rect.bottom - s(2),
+                };
+                self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, close, s(12));
+                delete = Some((close, row));
+                right = close.left;
+            }
+            let current = self.ai.chat_id.as_deref() == Some(chat.id.as_str());
+            self.label_ellipsis(
+                hdc,
+                &chat.title,
+                rect.left + s(12),
+                (rect.top + rect.bottom) / 2 - self.text_height(hdc) / 2,
+                if current {
+                    blend(self.theme.blue, self.theme.text, 0.4)
+                } else {
+                    self.theme.text
+                },
+                RECT {
+                    right: right - s(6),
+                    ..rect
+                },
+            );
+            row_hits.push((rect, row));
+            y += row_height;
+        }
+        let mut hits = self.ai.hits.borrow_mut();
+        hits.history_rows = row_hits;
+        hits.history_delete = delete;
     }
 
     // The message box's height: its chips, `shown` lines of text and the
@@ -286,7 +513,33 @@ impl App {
             };
             self.glyph_in(hdc, DebugGlyph::Plus, self.theme.muted, new_chat, s(16));
             self.ai.hits.borrow_mut().new_chat = Some(new_chat);
-            right = new_chat.left;
+            // Earlier chats.
+            let history = RECT {
+                left: new_chat.left - s(26),
+                right: new_chat.left - s(2),
+                ..close
+            };
+            if self.ai.history_open {
+                Self::rounded_fill(
+                    hdc,
+                    history,
+                    s(4),
+                    blend(self.theme.sidebar_bg, self.theme.text, 0.1),
+                );
+            }
+            self.glyph_in(
+                hdc,
+                DebugGlyph::History,
+                if self.ai.history_open {
+                    self.theme.text
+                } else {
+                    self.theme.muted
+                },
+                history,
+                s(16),
+            );
+            self.ai.hits.borrow_mut().history_button = Some(history);
+            right = history.left;
         }
         // The chat's first question names it.
         if let Some(first) = self
