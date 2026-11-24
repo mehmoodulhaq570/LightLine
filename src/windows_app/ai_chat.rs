@@ -441,10 +441,10 @@ impl App {
             Ok(false) => format!("No API key was saved for {host}."),
             Err(error) => format!("Couldn't remove the API key for {host}: {error}"),
         };
-        if std::env::var_os(ai::KEY_VARIABLE).is_some() && !ai::is_local(&endpoint) {
+        let variable = ai::key_variable(&endpoint);
+        if std::env::var_os(variable).is_some() && !ai::is_local(&endpoint) {
             self.status.push_str(&format!(
-                " {} is still set, so that key is used instead.",
-                ai::KEY_VARIABLE
+                " {variable} is still set, so that key is used instead."
             ));
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };

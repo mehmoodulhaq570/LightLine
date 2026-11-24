@@ -25,7 +25,7 @@ pub(super) struct Provider {
     key_page: Option<&'static str>,
 }
 
-pub(super) const PROVIDERS: [Provider; 5] = [
+pub(super) const PROVIDERS: [Provider; 6] = [
     Provider {
         name: "Ollama",
         endpoint: ai::DEFAULT_ENDPOINT,
@@ -37,6 +37,12 @@ pub(super) const PROVIDERS: [Provider; 5] = [
         endpoint: "https://api.openai.com",
         note: "Cloud \u{00b7} needs an API key",
         key_page: Some("https://platform.openai.com/api-keys"),
+    },
+    Provider {
+        name: "Claude",
+        endpoint: "https://api.anthropic.com",
+        note: "Cloud \u{00b7} Anthropic \u{00b7} needs an API key",
+        key_page: Some("https://platform.claude.com/settings/keys"),
     },
     Provider {
         name: "OpenRouter",
@@ -1092,13 +1098,16 @@ impl App {
             field_label("API key", key);
             let dots = "\u{2022}".repeat(card.key.chars().count().min(64));
             let placeholder = match card.key_source {
-                Some(KeySource::Saved) => "Saved key in use \u{00b7} paste a new one to replace it",
-                Some(KeySource::Environment) => {
-                    "Using OPENAI_API_KEY \u{00b7} paste a key to save one instead"
+                Some(KeySource::Saved) => {
+                    "Saved key in use \u{00b7} paste a new one to replace it".to_string()
                 }
-                None => "Paste your API key (Ctrl+V)",
+                Some(KeySource::Environment) => format!(
+                    "Using {} \u{00b7} paste a key to save one instead",
+                    ai::key_variable(&card.endpoint())
+                ),
+                None => "Paste your API key (Ctrl+V)".to_string(),
             };
-            self.provider_field(hdc, key, &dots, placeholder, card.focus == Focus::Key);
+            self.provider_field(hdc, key, &dots, &placeholder, card.focus == Focus::Key);
         }
         if let Some(note) = layout.key_note {
             let text = format!("Kept in Windows Credential Manager and sent only to {host}.");
@@ -1412,8 +1421,10 @@ mod tests {
         assert_eq!(provider_for("http://localhost:11434"), 0);
         assert_eq!(provider_for("https://api.openai.com/"), 1);
         assert_eq!(provider_for("https://api.openai.com/v1"), 1);
-        assert_eq!(provider_for("https://openrouter.ai/api"), 2);
-        assert_eq!(provider_for("https://api.groq.com/openai/v1"), 3);
+        assert_eq!(provider_for("https://api.anthropic.com"), 2);
+        assert_eq!(provider_for("https://api.anthropic.com/v1/"), 2);
+        assert_eq!(provider_for("https://openrouter.ai/api"), 3);
+        assert_eq!(provider_for("https://api.groq.com/openai/v1"), 4);
         assert_eq!(provider_for("http://localhost:1234/v1"), OTHER);
         assert_eq!(provider_for(""), OTHER);
     }

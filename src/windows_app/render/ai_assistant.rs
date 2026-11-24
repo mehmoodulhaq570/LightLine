@@ -827,7 +827,10 @@ impl App {
                     "Its API key is saved in Windows Credential Manager.".to_string()
                 }
                 Some(ai::KeySource::Environment) => {
-                    format!("Its API key comes from {}.", ai::KEY_VARIABLE)
+                    format!(
+                        "Its API key comes from {}.",
+                        ai::key_variable(&self.settings.ai_endpoint)
+                    )
                 }
                 None => "It needs an API key: Set API Key above.".to_string(),
             };
