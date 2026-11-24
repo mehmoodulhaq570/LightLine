@@ -23,13 +23,68 @@ pub(super) enum Permission {
     Deny,
 }
 
-/// One tool call, as a line above the answer.
+/// What a step did, for its icon and the folded line's count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StepKind {
+    Search,
+    Read,
+    List,
+    Problems,
+    Change,
+    Other,
+}
+
+impl StepKind {
+    pub(super) fn of(tool: &str) -> Self {
+        match tool {
+            "search" => StepKind::Search,
+            "read_file" => StepKind::Read,
+            "list_files" => StepKind::List,
+            "problems" => StepKind::Problems,
+            "propose_edit" | "propose_new_file" => StepKind::Change,
+            _ => StepKind::Other,
+        }
+    }
+}
+
+/// One tool call, as a line in the answer.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct AiStep {
     pub(super) summary: String,
     pub(super) error: bool,
+    pub(super) kind: StepKind,
     /// For a read: the file and line clicking the line opens.
     pub(super) opened: Option<(PathBuf, usize)>,
+    /// Where in the answer's text it came: the text's length then.
+    pub(super) at: usize,
+}
+
+/// "Looked at 3 places · 2 searches, 1 file": the line a finished answer's
+/// steps fold into.
+pub(super) fn folded_steps_label(steps: &[AiStep]) -> (String, String) {
+    let count = |kind: StepKind| steps.iter().filter(|step| step.kind == kind).count();
+    let plural = |count: usize, one: &str, many: &str| {
+        format!("{count} {}", if count == 1 { one } else { many })
+    };
+    let mut parts = Vec::new();
+    for (kind, one, many) in [
+        (StepKind::Search, "search", "searches"),
+        (StepKind::Read, "file", "files"),
+        (StepKind::List, "folder", "folders"),
+        (StepKind::Problems, "problems check", "problems checks"),
+        (StepKind::Change, "change", "changes"),
+    ] {
+        let count = count(kind);
+        if count > 0 {
+            parts.push(plural(count, one, many));
+        }
+    }
+    let title = if steps.len() == 1 {
+        "Looked at 1 place".to_string()
+    } else {
+        format!("Looked at {} places", steps.len())
+    };
+    (title, parts.join(", "))
 }
 
 /// What a question with project access starts with.
@@ -148,5 +203,37 @@ impl App {
         self.move_cursor(Pos { line, byte: 0 }, false);
         self.keep_cursor_visible(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(kind: StepKind) -> AiStep {
+        AiStep {
+            summary: String::new(),
+            error: false,
+            kind,
+            opened: None,
+            at: 0,
+        }
+    }
+
+    #[test]
+    fn folded_steps_count_what_they_did() {
+        let steps = [
+            step(StepKind::Search),
+            step(StepKind::Read),
+            step(StepKind::Search),
+        ];
+        assert_eq!(
+            folded_steps_label(&steps),
+            ("Looked at 3 places".into(), "2 searches, 1 file".into())
+        );
+        assert_eq!(
+            folded_steps_label(&[step(StepKind::Change)]),
+            ("Looked at 1 place".into(), "1 change".into())
+        );
     }
 }

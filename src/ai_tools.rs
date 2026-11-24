@@ -309,6 +309,32 @@ fn wildcard(pattern: &str, name: &str) -> bool {
     pattern[p..].iter().all(|&c| c == '*')
 }
 
+/// What a tool call is doing while it runs: "Searching “mean(”",
+/// "Reading src/main.rs".
+pub fn running_label(name: &str, input: &Value) -> String {
+    let path = input_str(input, "path").map(|path| path.trim().replace('\\', "/"));
+    match name {
+        "search" => match input_str(input, "query") {
+            Some(query) => format!("Searching \u{201c}{query}\u{201d}"),
+            None => "Searching".into(),
+        },
+        "list_files" => match path {
+            Some(path) => format!("Listing {path}"),
+            None => "Listing the project's files".into(),
+        },
+        "read_file" => match path {
+            Some(path) => format!("Reading {path}"),
+            None => "Reading a file".into(),
+        },
+        "problems" => "Checking problems".into(),
+        "propose_edit" | "propose_new_file" => match path {
+            Some(path) => format!("Writing a change to {path}"),
+            None => "Writing a change".into(),
+        },
+        other => format!("Running {other}"),
+    }
+}
+
 fn input_str<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
     input
         .get(field)
@@ -820,6 +846,25 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_steps_say_what_they_do() {
+        let input = serde_json::json!({"query": "mean(", "path": "src\\stats.rs"});
+        assert_eq!(
+            running_label("search", &input),
+            "Searching \u{201c}mean(\u{201d}"
+        );
+        assert_eq!(running_label("read_file", &input), "Reading src/stats.rs");
+        assert_eq!(
+            running_label("list_files", &serde_json::json!({})),
+            "Listing the project's files"
+        );
+        assert_eq!(
+            running_label("propose_edit", &input),
+            "Writing a change to src/stats.rs"
+        );
+        assert_eq!(running_label("problems", &input), "Checking problems");
+    }
 
     struct Folder(PathBuf);
 

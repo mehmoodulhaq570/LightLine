@@ -105,6 +105,10 @@ const FONT_SPECS: [(Font, i32, i32, bool, bool); 9] = [
     (Font::H4, 16, 700, false, false),
 ];
 
+// The same fonts in the AI chat, sized to the panel's 14 px text: body as
+// the UI font, code a pixel smaller, and headings that stay modest.
+const CHAT_FONT_SIZES: [i32; 9] = [14, 14, 14, 14, 13, 18, 16, 15, 14];
+
 struct Fonts {
     scale: (u32, i32),
     handles: [HFONT; 9],
@@ -112,7 +116,9 @@ struct Fonts {
 }
 
 impl Fonts {
-    fn new(dpi: u32, zoom: i32) -> Self {
+    // `chat`: the chat's smaller sizes (CHAT_FONT_SIZES) rather than the
+    // preview's.
+    fn new(dpi: u32, zoom: i32, chat: bool) -> Self {
         let mut handles: [HFONT; 9] = [null_mut(); 9];
         let mut heights = [0; 9];
         let code_family = wide(App::code_font_family());
@@ -120,6 +126,7 @@ impl Fonts {
         unsafe {
             let screen = GetDC(null_mut());
             for (index, (_, size, weight, italic, mono)) in FONT_SPECS.iter().enumerate() {
+                let size = if chat { &CHAT_FONT_SIZES[index] } else { size };
                 let family = if *mono { &code_family } else { &ui_family };
                 handles[index] = CreateFontW(
                     -scaled(*size, dpi, zoom),
@@ -286,6 +293,58 @@ fn pieces(text: &str) -> Vec<&str> {
     out
 }
 
+// How far a code line's continuation rows are indented, in columns: two
+// past the line's own indent (a tab is four), at most half the box.
+fn code_continuation_indent(line: &str, columns: usize) -> usize {
+    let lead: usize = line
+        .chars()
+        .take_while(|ch| *ch == ' ' || *ch == '\t')
+        .map(|ch| if ch == '\t' { 4 } else { 1 })
+        .sum();
+    (lead + 2).min(columns / 2)
+}
+
+// Where a code line breaks to fit `columns` characters (a tab is four):
+// the byte offset each row starts at. Rows after the first have `indent`
+// columns fewer; a break prefers the space before a word.
+fn code_breaks(line: &str, columns: usize, indent: usize) -> Vec<usize> {
+    let columns_of =
+        |text: &str| -> usize { text.chars().map(|ch| if ch == '\t' { 4 } else { 1 }).sum() };
+    let later_room = columns.saturating_sub(indent).max(4);
+    let mut breaks = vec![0];
+    let mut width = 0;
+    let mut last_space = None;
+    for (index, ch) in line.char_indices() {
+        let room = if breaks.len() == 1 {
+            columns
+        } else {
+            later_room
+        };
+        let step = if ch == '\t' { 4 } else { 1 };
+        if width + step > room && index > *breaks.last().unwrap_or(&0) {
+            // The word carried down must fit the next row with this
+            // character; otherwise the row is cut here.
+            let start = match last_space {
+                Some(space)
+                    if space > *breaks.last().unwrap_or(&0)
+                        && columns_of(&line[space..index]) + step <= later_room =>
+                {
+                    space
+                }
+                _ => index,
+            };
+            breaks.push(start);
+            width = columns_of(&line[start..index]);
+            last_space = None;
+        }
+        width += step;
+        if ch == ' ' {
+            last_space = Some(index + 1);
+        }
+    }
+    breaks
+}
+
 fn font_for(base: Font, style: Style) -> Font {
     if style.code {
         return Font::Code;
@@ -330,6 +389,9 @@ struct Layouter<'a> {
     // Extra space at the top of each code block for a toolbar (the chat's);
     // 0 in the preview.
     code_header: i32,
+    // The chat's narrow panel: long code lines wrap instead of being cut at
+    // the box's edge, and lines of text sit closer than in the preview.
+    wrap_code: bool,
 }
 
 impl Layouter<'_> {
@@ -442,7 +504,8 @@ impl Layouter<'_> {
                 strike: run.strike,
             });
         }
-        self.y += height + self.s(5);
+        // The chat sets its lines closer than the preview does.
+        self.y += height + self.s(if self.wrap_code { 2 } else { 5 });
     }
 
     fn place(&mut self, line: &mut Vec<Run>, x: &mut i32, text: String, width: i32, run: &Run) {
@@ -858,7 +921,23 @@ impl Layouter<'_> {
                 let header = self.code_header;
                 let line_height = self.fonts.height(Font::Code) + self.s(3);
                 let lines: Vec<&str> = text.split('\n').collect();
-                let height = header + lines.len() as i32 * line_height + 2 * pad;
+                // Where each line breaks: byte offsets, one row per piece.
+                // Continuation rows are indented past the line's indent.
+                let char_width = (self.measure(Font::Code, "0000000000") / 10).max(1);
+                let columns = ((inner - 2 * pad) / char_width).max(8) as usize;
+                let rows: Vec<(Vec<usize>, usize)> = lines
+                    .iter()
+                    .map(|line| {
+                        if self.wrap_code {
+                            let indent = code_continuation_indent(line, columns);
+                            (code_breaks(line, columns, indent), indent)
+                        } else {
+                            (vec![0], 0)
+                        }
+                    })
+                    .collect();
+                let row_count: usize = rows.iter().map(|(breaks, _)| breaks.len()).sum();
+                let height = header + row_count as i32 * line_height + 2 * pad;
                 let box_top = self.y;
                 self.fill(left, box_top, left + inner, box_top + height, Tone::CodeBg);
                 self.code_blocks.push(CodeBlock {
@@ -872,14 +951,49 @@ impl Layouter<'_> {
                     text: text.clone(),
                 });
                 let colors = lightline::syntax::highlight_snippet(language, text);
+                let mut row = 0;
                 for (index, line) in lines.iter().enumerate() {
                     let spans = colors
                         .as_ref()
                         .and_then(|lines| lines.get(index))
                         .map_or(&[][..], Vec::as_slice);
-                    let y = box_top + header + pad + index as i32 * line_height;
-                    // Long lines are cut at the box edge, not wrapped.
-                    self.code_line(line, spans, left + pad, y, left + inner - pad);
+                    let (breaks, continuation) = &rows[index];
+                    for (piece, &start) in breaks.iter().enumerate() {
+                        let end = breaks.get(piece + 1).copied().unwrap_or(line.len());
+                        let y = box_top + header + pad + row * line_height;
+                        let indent = if piece == 0 {
+                            0
+                        } else {
+                            *continuation as i32 * char_width
+                        };
+                        if piece > 0 {
+                            // A small hook just before the row: it goes on
+                            // from the one above.
+                            let x = left + pad + indent - 2 * char_width + char_width / 2;
+                            let mid = y + line_height / 2;
+                            let thin = self.s(1).max(1);
+                            self.fill(x, mid - line_height / 2, x + thin, mid + thin, Tone::Edge);
+                            self.fill(x, mid, x + char_width, mid + thin, Tone::Edge);
+                        }
+                        let shifted: Vec<lightline::syntax::Span> = spans
+                            .iter()
+                            .filter(|span| span.end > start && span.start < end)
+                            .map(|span| lightline::syntax::Span {
+                                start: span.start.max(start) - start,
+                                end: span.end.min(end) - start,
+                                color: span.color,
+                            })
+                            .collect();
+                        // Without wrapping, long lines are cut at the edge.
+                        self.code_line(
+                            &line[start..end],
+                            &shifted,
+                            left + pad + indent,
+                            y,
+                            left + inner - pad,
+                        );
+                        row += 1;
+                    }
                 }
                 self.y = box_top + height + self.s(14);
             }
@@ -1258,7 +1372,7 @@ impl App {
             .as_ref()
             .is_none_or(|fonts| fonts.scale != (self.dpi, self.zoom))
         {
-            state.fonts = Some(Fonts::new(self.dpi, self.zoom));
+            state.fonts = Some(Fonts::new(self.dpi, self.zoom, false));
             state.layout = None;
             // SVGs were rasterized for the old scale.
             state.images.clear();
@@ -1293,6 +1407,7 @@ impl App {
                 anchors: Vec::new(),
                 code_blocks: Vec::new(),
                 code_header: 0,
+                wrap_code: false,
             };
             for (index, block) in blocks.iter().enumerate() {
                 layouter.block(block, index == 0, width);
@@ -1725,7 +1840,7 @@ impl App {
             .as_ref()
             .is_none_or(|current| current.scale != (self.dpi, self.zoom))
         {
-            *fonts.0.borrow_mut() = Some(Fonts::new(self.dpi, self.zoom));
+            *fonts.0.borrow_mut() = Some(Fonts::new(self.dpi, self.zoom, true));
         }
         fonts.0.borrow()
     }
@@ -1772,6 +1887,7 @@ impl App {
                 code_blocks: Vec::new(),
                 // Room for the chat's toolbar (language, Insert, Copy...).
                 code_header: self.scale(SNIPPET_CODE_HEADER),
+                wrap_code: true,
             };
             for (index, block) in state.blocks.iter().enumerate() {
                 layouter.block(block, index == 0, width);
@@ -1830,6 +1946,33 @@ impl MarkdownSnippet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_code_lines_break_before_a_word() {
+        assert_eq!(code_breaks("short", 20, 2), vec![0]);
+        assert_eq!(code_breaks("", 20, 2), vec![0]);
+        // 10 columns: "let sum = " fits, then "values" starts the next row,
+        // which has 8 (two go to its indent).
+        assert_eq!(
+            code_breaks("let sum = values.iter()", 10, 2),
+            vec![0, 10, 18]
+        );
+        // A word too long to carry down is cut where the row is full.
+        assert_eq!(code_breaks("a bcdefghijk", 10, 2), vec![0, 10]);
+        // No space to break at: the row is cut where it's full.
+        assert_eq!(code_breaks("abcdefghijkl", 8, 2), vec![0, 8]);
+        // A tab counts as four columns.
+        assert_eq!(code_breaks("\t\tabcd", 8, 2), vec![0, 2]);
+    }
+
+    #[test]
+    fn wrapped_code_continues_past_the_line_s_indent() {
+        assert_eq!(code_continuation_indent("    let x", 40), 6);
+        assert_eq!(code_continuation_indent("let x", 40), 2);
+        assert_eq!(code_continuation_indent("\t\t\tx", 20), 10);
+        // A deeper indent leaves continuation rows less room.
+        assert_eq!(code_breaks("    abc defgh", 10, 6), vec![0, 8, 12]);
+    }
 
     #[test]
     fn words_keep_their_spaces_and_hard_breaks_stand_alone() {

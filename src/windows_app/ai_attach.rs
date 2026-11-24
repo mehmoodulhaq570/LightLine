@@ -164,7 +164,7 @@ impl App {
         if self.ai.mention_dismissed || !self.ai.focused {
             return None;
         }
-        mention_token(&self.ai.input)
+        mention_token(&self.ai.input[..self.ai.caret.min(self.ai.input.len())])
     }
 
     /// Project files matching the @ word, best first (see `mention_rank`).
@@ -277,9 +277,11 @@ impl App {
         }) else {
             return;
         };
-        if let Some(token) = mention_token(&self.ai.input) {
-            let keep = self.ai.input.len() - token.len() - 1;
-            self.ai.input.truncate(keep);
+        let caret = self.ai.caret.min(self.ai.input.len());
+        if let Some(token) = mention_token(&self.ai.input[..caret]) {
+            let start = caret - token.len() - 1;
+            self.ai.input.replace_range(start..caret, "");
+            self.ai.caret = start;
         }
         self.ai.mention_selected = 0;
         self.ai_attach(hwnd, path);
@@ -318,7 +320,7 @@ impl App {
     pub(super) fn ai_input_changed(&mut self) {
         self.ai.mention_dismissed = false;
         self.ai.mention_selected = 0;
-        if mention_token(&self.ai.input).is_some()
+        if mention_token(&self.ai.input[..self.ai.caret.min(self.ai.input.len())]).is_some()
             && self.quick_files.is_empty()
             && !self.quick_loading
         {

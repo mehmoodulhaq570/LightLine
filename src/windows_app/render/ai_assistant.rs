@@ -2,8 +2,8 @@ use super::super::ai_chat::{
     AiAction, ChatEntry, ProposalButton, SUGGESTED_MODEL, model_menu_models,
 };
 use super::super::ai_edits::ProposalStatus;
-use super::super::ai_project::Permission;
-use super::super::markdown_view::SNIPPET_CODE_HEADER;
+use super::super::ai_project::{Permission, StepKind};
+use super::super::markdown_view::{MarkdownSnippet, SNIPPET_CODE_HEADER};
 use super::super::*;
 use super::blend;
 use lightline::ai::{self, Role};
@@ -53,6 +53,73 @@ fn chip_specs(chips: &[super::super::ai_attach::Chip]) -> Vec<ChipSpec> {
         .collect()
 }
 
+// A piece of an answer, in the order it arrived: text (a byte range of the
+// visible answer) or a run of steps (a range of `ChatEntry::steps`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnswerPart {
+    Text(usize, usize),
+    Steps(usize, usize),
+}
+
+// Splits `answer` at its steps. `at` is where each step came in the whole
+// text, which starts `skip` bytes before `answer` (a hidden <think> block).
+// Text that's only blank between two steps joins them into one run.
+fn answer_parts(answer: &str, skip: usize, at: &[usize]) -> Vec<AnswerPart> {
+    let mut parts = Vec::new();
+    let mut position = 0;
+    for (index, &at) in at.iter().enumerate() {
+        let at = at.saturating_sub(skip).clamp(position, answer.len());
+        if at > position && answer.is_char_boundary(at) {
+            if !answer[position..at].trim().is_empty() {
+                parts.push(AnswerPart::Text(position, at));
+            }
+            position = at;
+        }
+        match parts.last_mut() {
+            Some(AnswerPart::Steps(_, end)) => *end = index + 1,
+            _ => parts.push(AnswerPart::Steps(index, index + 1)),
+        }
+    }
+    if position < answer.len() && !answer[position..].trim().is_empty() {
+        parts.push(AnswerPart::Text(position, answer.len()));
+    }
+    parts
+}
+
+// "3 steps · 14 s" under a finished answer.
+fn answer_meta(steps: usize, took: Option<Duration>) -> String {
+    let mut parts = Vec::new();
+    match steps {
+        0 => {}
+        1 => parts.push("1 step".to_string()),
+        count => parts.push(format!("{count} steps")),
+    }
+    if let Some(took) = took {
+        let seconds = took.as_secs();
+        parts.push(if seconds < 60 {
+            format!("{} s", seconds.max(1))
+        } else {
+            format!("{} min {} s", seconds / 60, seconds % 60)
+        });
+    }
+    parts.join(" \u{00b7} ")
+}
+
+// A step's icon.
+fn step_glyph(kind: StepKind, error: bool) -> DebugGlyph {
+    if error {
+        return DebugGlyph::Warning;
+    }
+    match kind {
+        StepKind::Search => DebugGlyph::Search,
+        StepKind::Read => DebugGlyph::OpenFile,
+        StepKind::List => DebugGlyph::Folder,
+        StepKind::Problems => DebugGlyph::Warning,
+        StepKind::Change => DebugGlyph::Notes,
+        StepKind::Other => DebugGlyph::More,
+    }
+}
+
 impl App {
     pub(in crate::windows_app) fn paint_ai_assistant(&self, hdc: HDC, rect: RECT) {
         let s = |value: i32| self.scale(value);
@@ -93,7 +160,7 @@ impl App {
         }
 
         let text_width = (content.right - content.left - s(64)).max(s(40));
-        let lines = self.wrap_text(hdc, &self.ai.input, text_width);
+        let lines = self.wrap_ranges(hdc, &self.ai.input, text_width);
         let shown = lines.len().clamp(1, COMPOSER_LINES);
         let composer = RECT {
             top: content.bottom - (shown as i32 * line_height + s(28)).max(s(50)),
@@ -146,12 +213,7 @@ impl App {
                 ..content
             },
         );
-        self.paint_ai_composer(
-            hdc,
-            composer,
-            &lines[lines.len() - shown.min(lines.len())..],
-            true,
-        );
+        self.paint_ai_composer(hdc, composer, &lines, true);
         if self.ai_mention_query().is_some() {
             self.paint_ai_mentions(hdc, composer, conversation_bottom, header_bottom);
         }
@@ -160,88 +222,74 @@ impl App {
         }
     }
 
+    // A 35 px header like the side panels': CHAT, the model (its picker),
+    // New Chat and Close.
     fn paint_ai_header(&self, hdc: HDC, rect: RECT, header_bottom: i32) {
         let s = |value: i32| self.scale(value);
-        unsafe { SelectObject(hdc, self.brand_font) };
-        self.sparkle_glyph(
-            hdc,
-            rect.left + s(18),
-            rect.top + s(15),
-            s(20),
-            ui(148, 102, 255),
-        );
-        let title = "AI Assistant";
-        Self::label(
-            hdc,
-            title,
-            rect.left + s(48),
-            rect.top + s(16),
-            self.theme.text,
-            rect,
-        );
-        let title_right = rect.left + s(48) + self.text_width(hdc, title);
-        // Close; its hit target is in ai_click.
         unsafe { SelectObject(hdc, self.ui_font) };
-        Self::label(
-            hdc,
-            "\u{00d7}",
-            rect.right - s(25),
-            rect.top + s(16),
-            self.theme.muted,
-            rect,
-        );
+        let mid = (rect.top + header_bottom) / 2;
+        let title = "CHAT";
+        self.label_mid(hdc, title, rect.left + s(16), mid, self.theme.muted, rect);
+        let title_right = rect.left + s(16) + self.text_width(hdc, title);
+        // Close; its hit target is in ai_click.
+        let close = RECT {
+            left: rect.right - s(32),
+            top: mid - s(12),
+            right: rect.right - s(8),
+            bottom: mid + s(12),
+        };
+        self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, close, s(16));
         if let Some(model) = self.settings.ai_model.as_deref() {
             let new_chat = RECT {
-                left: rect.right - s(60),
-                top: rect.top + s(12),
-                right: rect.right - s(36),
-                bottom: rect.top + s(40),
+                left: close.left - s(26),
+                right: close.left - s(2),
+                ..close
             };
-            unsafe { SelectObject(hdc, self.brand_font) };
-            self.label_mid(
-                hdc,
-                "+",
-                new_chat.left + s(7),
-                (new_chat.top + new_chat.bottom) / 2,
-                self.theme.muted,
-                new_chat,
-            );
-            unsafe { SelectObject(hdc, self.ui_font) };
+            self.glyph_in(hdc, DebugGlyph::Plus, self.theme.muted, new_chat, s(16));
             self.ai.hits.borrow_mut().new_chat = Some(new_chat);
 
-            let chip_left = title_right + s(12);
+            let label = ai::model_label(model);
+            let chip_left = title_right + s(10);
             let chip_right =
-                (chip_left + self.text_width(hdc, model) + s(34)).min(new_chat.left - s(8));
+                (chip_left + self.text_width(hdc, &label) + s(30)).min(new_chat.left - s(8));
             if chip_right - chip_left >= s(56) {
                 let chip = RECT {
                     left: chip_left,
-                    top: rect.top + s(13),
+                    top: mid - s(11),
                     right: chip_right,
-                    bottom: rect.top + s(39),
+                    bottom: mid + s(11),
                 };
-                self.panel_card(hdc, chip, s(7), ui(66, 47, 126), ui(42, 28, 86));
+                let fill = if self.ai.model_menu_open {
+                    blend(self.theme.sidebar_bg, self.theme.violet, 0.3)
+                } else {
+                    blend(self.theme.sidebar_bg, self.theme.violet, 0.14)
+                };
+                Self::rounded_fill(hdc, chip, s(4), fill);
                 self.label_ellipsis(
                     hdc,
-                    model,
-                    chip.left + s(10),
-                    chip.top + s(4),
-                    ui(211, 195, 255),
+                    &label,
+                    chip.left + s(8),
+                    mid - self.text_height(hdc) / 2,
+                    blend(self.theme.violet, self.theme.text, 0.6),
                     RECT {
                         right: chip.right - s(20),
                         ..chip
                     },
                 );
-                Self::label(
+                self.glyph_in(
                     hdc,
                     if self.ai.model_menu_open {
-                        "\u{25b4}"
+                        DebugGlyph::ChevronUp
                     } else {
-                        "\u{25be}"
+                        DebugGlyph::ChevronDown
                     },
-                    chip.right - s(16),
-                    chip.top + s(4),
-                    ui(195, 165, 255),
-                    chip,
+                    self.theme.muted,
+                    RECT {
+                        left: chip.right - s(20),
+                        right: chip.right - s(4),
+                        ..chip
+                    },
+                    s(12),
                 );
                 self.ai.hits.borrow_mut().model = Some(chip);
             }
@@ -987,9 +1035,7 @@ impl App {
         let heights: Vec<i32> = entries
             .iter()
             .enumerate()
-            .map(|(index, entry)| {
-                self.ai_entry_height(hdc, entry, index + 1 == entries.len(), width)
-            })
+            .map(|(index, entry)| self.ai_entry_height(hdc, index, entry, width))
             .collect();
         let total = heights.iter().sum::<i32>() + gap * (entries.len() as i32 - 1);
         let max_scroll = (total - (area.bottom - area.top)).max(0);
@@ -1027,58 +1073,570 @@ impl App {
         last && self.ai.busy()
     }
 
-    fn ai_entry_height(&self, hdc: HDC, entry: &ChatEntry, last: bool, width: i32) -> i32 {
+    fn ai_entry_height(&self, hdc: HDC, index: usize, entry: &ChatEntry, width: i32) -> i32 {
+        let bounds = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: 0,
+        };
+        if entry.role == Role::User {
+            self.ai_question(hdc, entry, bounds, bounds, false)
+        } else {
+            self.ai_answer(hdc, index, entry, bounds, bounds, false)
+        }
+    }
+
+    // Paints entry `index` of the conversation within `bounds`.
+    fn paint_ai_entry(&self, hdc: HDC, index: usize, entry: &ChatEntry, bounds: RECT, clip: RECT) {
+        if entry.role == Role::User {
+            self.ai_question(hdc, entry, bounds, clip, true);
+        } else {
+            self.ai_answer(hdc, index, entry, bounds, clip, true);
+        }
+    }
+
+    // A question: a bubble on the right, at most 85% of the panel wide,
+    // with the code and files sent along. Painted when `paint`; returns
+    // its height either way.
+    fn ai_question(
+        &self,
+        hdc: HDC,
+        entry: &ChatEntry,
+        bounds: RECT,
+        clip: RECT,
+        paint: bool,
+    ) -> i32 {
         let s = |value: i32| self.scale(value);
         unsafe { SelectObject(hdc, self.ui_font) };
         let line_height = self.text_height(hdc) + s(4);
-        if entry.role == Role::User {
-            let lines = self.wrap_text(hdc, &entry.text, width - s(24)).len() as i32;
-            let context = if entry.context.is_some() {
-                line_height + s(2)
-            } else {
-                0
-            };
-            let chips = if entry.chips.is_empty() {
-                0
-            } else {
-                let specs = chip_specs(&entry.chips);
-                s(6) + self.ai_chip_spans(hdc, &specs, width - s(24), false).1
-            };
-            return s(20) + lines * line_height + context + chips;
+        let pad = s(11);
+        let widest = (bounds.right - bounds.left) * 85 / 100;
+        let lines = self.wrap_text(hdc, &entry.text, widest - 2 * pad);
+        let text_width = lines
+            .iter()
+            .map(|line| self.text_width(hdc, line))
+            .max()
+            .unwrap_or(0);
+        let wide = entry.context.is_some() || !entry.chips.is_empty();
+        let bubble_width = if wide {
+            widest
+        } else {
+            (text_width + 2 * pad).min(widest)
+        };
+        let inner_width = bubble_width - 2 * pad;
+        let context = if entry.context.is_some() {
+            line_height + s(2)
+        } else {
+            0
+        };
+        let specs = chip_specs(&entry.chips);
+        let chips = if specs.is_empty() {
+            None
+        } else {
+            Some(self.ai_chip_spans(hdc, &specs, inner_width, false))
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let chips_height = chips.as_ref().map_or(0, |(_, height)| s(6) + height);
+        let height = s(16) + lines.len() as i32 * line_height + context + chips_height;
+        if !paint || bounds.top + height <= clip.top || bounds.top >= clip.bottom {
+            return height;
         }
-        let mut height = s(26) + self.ai_project_steps_height(hdc, entry, width);
-        let (answer, thinking) = ai::visible_answer(&entry.text);
-        if !answer.is_empty() {
-            height += self.snippet_height(
+        let bubble = RECT {
+            left: bounds.right - bubble_width,
+            top: bounds.top,
+            right: bounds.right,
+            bottom: bounds.top + height,
+        };
+        Self::rounded_fill(
+            hdc,
+            bubble,
+            s(9),
+            blend(self.theme.sidebar_bg, self.theme.blue, 0.16),
+        );
+        let inner = RECT {
+            left: bubble.left + pad,
+            right: bubble.right - pad,
+            ..clip
+        };
+        let mut y = bubble.top + s(8);
+        for line in &lines {
+            Self::label(hdc, line, inner.left, y, self.theme.text, inner);
+            y += line_height;
+        }
+        if let Some(context) = &entry.context {
+            self.label_ellipsis(
                 hdc,
-                &entry.view,
-                &self.ai.fonts,
-                (answer, entry.revision),
-                width,
+                &format!("Includes {context}"),
+                inner.left,
+                y + s(2),
+                self.theme.muted,
+                inner,
             );
-        } else if (thinking || self.ai_receiving(last)) && !entry.asking {
-            height += line_height;
+            y += line_height + s(2);
         }
-        if let Some(error) = &entry.error {
+        if let Some((spans, _)) = chips {
+            let top = y + s(6);
+            for (chip, span) in specs.iter().zip(&spans) {
+                let rect = RECT {
+                    left: inner.left + span.left,
+                    top: top + span.top,
+                    right: inner.left + span.right,
+                    bottom: top + span.bottom,
+                };
+                self.paint_ai_chip(hdc, rect, chip, false);
+            }
             unsafe { SelectObject(hdc, self.ui_font) };
-            height += s(6) + self.wrap_text(hdc, error, width).len() as i32 * line_height;
-        }
-        if let Some(note) = &entry.note {
-            unsafe { SelectObject(hdc, self.ui_font) };
-            height += s(6) + self.wrap_text(hdc, note, width).len() as i32 * line_height;
-        }
-        if !entry.proposals.is_empty() {
-            height += s(10) + self.ai_changes_height(entry);
-        }
-        if !answer.is_empty() && !self.ai_receiving(last) {
-            height += s(28);
         }
         height
     }
 
+    // Answer `index`, in the order it came: who answered, then its text,
+    // steps and permission card as they arrived, then any error, the
+    // changes card, and a row of buttons once it's done. Measuring and
+    // painting share this, so they can't disagree. Returns its height.
+    fn ai_answer(
+        &self,
+        hdc: HDC,
+        index: usize,
+        entry: &ChatEntry,
+        bounds: RECT,
+        clip: RECT,
+        paint: bool,
+    ) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let last = index + 1 == self.ai.entries.len();
+        let receiving = self.ai_receiving(last);
+        let width = bounds.right - bounds.left;
+        let shown = |top: i32, bottom: i32| paint && bottom > clip.top && top < clip.bottom;
+        let text_clip = RECT {
+            left: bounds.left,
+            right: bounds.right,
+            ..clip
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let line_height = self.text_height(hdc) + s(4);
+        let mut y = bounds.top;
+
+        // Who answered, by name.
+        if shown(y, y + s(22)) {
+            self.sparkle_glyph(hdc, bounds.left, y + s(4), s(12), self.theme.violet);
+            unsafe { SelectObject(hdc, self.small_font) };
+            let name = if entry.model.is_empty() {
+                "Assistant".to_string()
+            } else {
+                ai::model_label(&entry.model)
+            };
+            self.label_ellipsis(
+                hdc,
+                &name,
+                bounds.left + s(19),
+                y + s(2),
+                self.theme.muted,
+                text_clip,
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
+        }
+        y += s(24);
+
+        let (answer, thinking) = ai::visible_answer(&entry.text);
+        let skip = if answer.is_empty() {
+            entry.text.len()
+        } else {
+            answer.as_ptr() as usize - entry.text.as_ptr() as usize
+        };
+        let at: Vec<usize> = entry.steps.iter().map(|step| step.at).collect();
+        let parts = answer_parts(answer, skip, &at);
+        let texts = parts
+            .iter()
+            .filter(|part| matches!(part, AnswerPart::Text(..)))
+            .count();
+        if entry.views.borrow().len() < texts {
+            entry
+                .views
+                .borrow_mut()
+                .resize_with(texts, Default::default);
+        }
+        let views = entry.views.borrow();
+        let mut next_view = 0;
+        for part in &parts {
+            match *part {
+                AnswerPart::Text(start, end) => {
+                    // Text that's still growing is laid out again as it
+                    // grows; text with steps after it never changes.
+                    let revision = if end == answer.len() {
+                        entry.revision
+                    } else {
+                        (1 << 63) | end as u64
+                    };
+                    let view = &views[next_view];
+                    next_view += 1;
+                    let height = self.snippet_height(
+                        hdc,
+                        view,
+                        &self.ai.fonts,
+                        (&answer[start..end], revision),
+                        width,
+                    );
+                    if shown(y, y + height) {
+                        self.paint_snippet(hdc, view, &self.ai.fonts, (bounds.left, y), clip);
+                        if !receiving {
+                            self.paint_ai_code_toolbars(
+                                hdc,
+                                index,
+                                entry,
+                                view,
+                                (bounds.left, y),
+                                clip,
+                            );
+                        }
+                    }
+                    y += height;
+                }
+                AnswerPart::Steps(first, end) => {
+                    y = self.ai_steps(
+                        hdc,
+                        (index, entry),
+                        first..end,
+                        receiving,
+                        bounds,
+                        y,
+                        clip,
+                        paint,
+                    );
+                }
+            }
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+
+        // What's happening now: a step running, or the model thinking
+        // before it writes or after a step.
+        if receiving && !entry.asking {
+            let row = s(22);
+            if let Some((kind, label)) = &entry.running {
+                if shown(y, y + row) {
+                    let rect = RECT {
+                        left: bounds.left,
+                        top: y,
+                        right: bounds.right,
+                        bottom: y + row,
+                    };
+                    self.paint_ai_step_row(
+                        hdc,
+                        rect,
+                        step_glyph(*kind, false),
+                        (&format!("{label}\u{2026}"), ""),
+                        self.theme.text,
+                        self.theme.edge,
+                        clip,
+                    );
+                }
+                y += row + s(6);
+            } else if thinking || matches!(parts.last(), None | Some(AnswerPart::Steps(..))) {
+                if shown(y, y + line_height) {
+                    Self::label(
+                        hdc,
+                        "Thinking\u{2026}",
+                        bounds.left,
+                        y,
+                        self.theme.muted,
+                        text_clip,
+                    );
+                }
+                y += line_height;
+            }
+        }
+        if entry.asking {
+            y = self.ai_permission_card(hdc, bounds, y, clip, paint);
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        for (text, color) in [
+            (
+                entry.error.as_deref(),
+                if entry.error.as_deref() == Some("Stopped") {
+                    self.theme.muted
+                } else {
+                    self.theme.error
+                },
+            ),
+            (entry.note.as_deref(), self.theme.muted),
+        ] {
+            let Some(text) = text else {
+                continue;
+            };
+            y += s(6);
+            for line in self.wrap_text(hdc, text, width) {
+                if shown(y, y + line_height) {
+                    Self::label(hdc, &line, bounds.left, y, color, text_clip);
+                }
+                y += line_height;
+            }
+        }
+        if !entry.proposals.is_empty() {
+            y += s(10);
+            if paint {
+                self.paint_ai_changes(hdc, index, entry, bounds, y, clip);
+                unsafe { SelectObject(hdc, self.ui_font) };
+            }
+            y += self.ai_changes_height(entry);
+        }
+
+        // Once it's done: Copy, Retry (the last answer), the steps and time.
+        if !receiving && (!answer.is_empty() || !entry.steps.is_empty()) {
+            y += s(6);
+            let row = s(24);
+            if shown(y, y + row) {
+                let mut x = bounds.left - s(4);
+                let mut buttons = Vec::new();
+                if !answer.is_empty() {
+                    buttons.push((DebugGlyph::Copy, AiAction::Copy(answer.to_string())));
+                }
+                if last {
+                    buttons.push((DebugGlyph::Refresh, AiAction::Retry));
+                }
+                for (glyph, action) in buttons {
+                    let button = RECT {
+                        left: x,
+                        top: y,
+                        right: x + s(24),
+                        bottom: y + row,
+                    };
+                    let (glyph, color) = self.ai_copy_glyph(glyph, &action);
+                    self.glyph_in(hdc, glyph, color, button, s(14));
+                    self.ai.hits.borrow_mut().actions.push((button, action));
+                    x = button.right + s(2);
+                }
+                let meta = answer_meta(entry.steps.len(), entry.took);
+                if !meta.is_empty() {
+                    unsafe { SelectObject(hdc, self.small_font) };
+                    self.label_mid(
+                        hdc,
+                        &meta,
+                        x + s(6),
+                        y + row / 2,
+                        self.theme.muted,
+                        text_clip,
+                    );
+                    unsafe { SelectObject(hdc, self.ui_font) };
+                }
+            }
+            y += row;
+        }
+        y - bounds.top
+    }
+
+    // A group of steps from `y`; returns where what follows starts. While
+    // the answer arrives each step is a line; once it's done, two or more
+    // fold into one line that opens them again.
+    #[allow(clippy::too_many_arguments)]
+    fn ai_steps(
+        &self,
+        hdc: HDC,
+        (index, entry): (usize, &ChatEntry),
+        steps: std::ops::Range<usize>,
+        receiving: bool,
+        bounds: RECT,
+        mut y: i32,
+        clip: RECT,
+        paint: bool,
+    ) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let shown = |top: i32, bottom: i32| paint && bottom > clip.top && top < clip.bottom;
+        let row = s(22);
+        let first = steps.start;
+        let group = &entry.steps[steps];
+        let foldable = !receiving && group.len() >= 2;
+        let open = !foldable || entry.open_groups.contains(&first);
+        y += s(2);
+        if foldable {
+            let rect = RECT {
+                left: bounds.left,
+                top: y,
+                right: bounds.right,
+                bottom: y + row,
+            };
+            if shown(rect.top, rect.bottom) {
+                let (title, detail) = super::super::ai_project::folded_steps_label(group);
+                self.glyph_in(
+                    hdc,
+                    if open {
+                        DebugGlyph::ChevronDown
+                    } else {
+                        DebugGlyph::ChevronRight
+                    },
+                    self.theme.muted,
+                    RECT {
+                        left: rect.left - s(2),
+                        right: rect.left + s(16),
+                        ..rect
+                    },
+                    s(14),
+                );
+                unsafe { SelectObject(hdc, self.small_font) };
+                let text_clip = RECT {
+                    left: rect.left,
+                    right: rect.right,
+                    ..clip
+                };
+                let mid = (rect.top + rect.bottom) / 2;
+                let title_left = rect.left + s(20);
+                self.label_mid(
+                    hdc,
+                    &title,
+                    title_left,
+                    mid,
+                    blend(self.theme.muted, self.theme.text, 0.6),
+                    text_clip,
+                );
+                if !detail.is_empty() {
+                    let detail_left = title_left + self.text_width(hdc, &title);
+                    self.label_mid(
+                        hdc,
+                        &format!(" \u{00b7} {detail}"),
+                        detail_left,
+                        mid,
+                        self.theme.muted,
+                        text_clip,
+                    );
+                }
+                unsafe { SelectObject(hdc, self.ui_font) };
+                self.ai
+                    .hits
+                    .borrow_mut()
+                    .step_groups
+                    .push((rect, index, first));
+            }
+            y += row;
+        }
+        if open {
+            for step in group {
+                let rect = RECT {
+                    left: bounds.left,
+                    top: y,
+                    right: bounds.right,
+                    bottom: y + row,
+                };
+                if shown(rect.top, rect.bottom) {
+                    let (main, detail) = step
+                        .summary
+                        .split_once(" \u{00b7} ")
+                        .unwrap_or((step.summary.as_str(), ""));
+                    let (color, bar) = if step.error {
+                        (
+                            blend(self.theme.warning, self.theme.text, 0.3),
+                            self.theme.warning,
+                        )
+                    } else if step.opened.is_some() {
+                        (
+                            blend(self.theme.blue, self.theme.text, 0.35),
+                            self.theme.edge,
+                        )
+                    } else {
+                        (
+                            blend(self.theme.muted, self.theme.text, 0.45),
+                            self.theme.edge,
+                        )
+                    };
+                    self.paint_ai_step_row(
+                        hdc,
+                        rect,
+                        step_glyph(step.kind, step.error),
+                        (main, detail),
+                        color,
+                        bar,
+                        clip,
+                    );
+                    if let Some((path, line)) = &step.opened {
+                        self.ai
+                            .hits
+                            .borrow_mut()
+                            .steps
+                            .push((rect, path.clone(), *line));
+                    }
+                }
+                y += row;
+            }
+        }
+        y + s(8)
+    }
+
+    // One step's line: a bar on the left, the step's icon, what it did and,
+    // on the right, what came of it.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_ai_step_row(
+        &self,
+        hdc: HDC,
+        rect: RECT,
+        glyph: DebugGlyph,
+        (main, detail): (&str, &str),
+        color: u32,
+        bar: u32,
+        clip: RECT,
+    ) {
+        let s = |value: i32| self.scale(value);
+        Self::fill(
+            hdc,
+            RECT {
+                left: rect.left,
+                top: rect.top + s(2),
+                right: rect.left + s(2),
+                bottom: rect.bottom - s(2),
+            },
+            bar,
+        );
+        self.glyph_in(
+            hdc,
+            glyph,
+            self.theme.muted,
+            RECT {
+                left: rect.left + s(8),
+                right: rect.left + s(24),
+                ..rect
+            },
+            s(14),
+        );
+        unsafe { SelectObject(hdc, self.small_font) };
+        let mid = (rect.top + rect.bottom) / 2;
+        let mut right = rect.right;
+        if !detail.is_empty() {
+            let detail_width = self.text_width(hdc, detail);
+            // The result only shows when the step's text has room too.
+            if detail_width < (rect.right - rect.left) / 3 {
+                right = rect.right - detail_width;
+                self.label_mid(
+                    hdc,
+                    detail,
+                    right,
+                    mid,
+                    self.theme.muted,
+                    RECT {
+                        left: rect.left,
+                        right: rect.right,
+                        ..clip
+                    },
+                );
+                right -= s(10);
+            }
+        }
+        let text_height = self.text_height(hdc);
+        self.label_ellipsis(
+            hdc,
+            main,
+            rect.left + s(30),
+            mid - text_height / 2,
+            color,
+            RECT {
+                left: rect.left,
+                right,
+                ..clip
+            },
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+    }
+
     // The permission card for a panel `width` wide: its title, its text's
     // lines, its buttons (placed from the card's inner left and the top of
-    // the button area, wrapping when they don't fit) and its height.
+    // the button area, wrapping only when they don't fit) and its height.
     fn ai_permission_layout(&self, hdc: HDC, width: i32) -> PermissionLayout {
         let s = |value: i32| self.scale(value);
         let (title, text) = self.ai_permission_text();
@@ -1091,8 +1649,8 @@ impl App {
         let (mut x, mut y) = (0, 0);
         let mut buttons = Vec::new();
         for (label, answer, primary) in [
-            ("Allow for This Chat", Permission::ForChat, true),
-            ("Just This Once", Permission::Once, false),
+            ("Allow in This Chat", Permission::ForChat, true),
+            ("Just Once", Permission::Once, false),
             ("Don't Allow", Permission::Deny, false),
         ] {
             let w = self.text_width(hdc, label) + s(20);
@@ -1122,6 +1680,82 @@ impl App {
             buttons,
             height,
         }
+    }
+
+    // The permission card from `top`; returns where what follows starts.
+    fn ai_permission_card(&self, hdc: HDC, bounds: RECT, top: i32, clip: RECT, paint: bool) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let width = bounds.right - bounds.left;
+        let PermissionLayout {
+            title,
+            lines,
+            buttons,
+            height,
+        } = self.ai_permission_layout(hdc, width);
+        let card = RECT {
+            left: bounds.left,
+            top: top + s(2),
+            right: bounds.right,
+            bottom: top + s(2) + height,
+        };
+        if !paint || card.bottom <= clip.top || card.top >= clip.bottom {
+            return card.bottom + s(10);
+        }
+        self.panel_card(
+            hdc,
+            card,
+            s(8),
+            blend(self.theme.sidebar_bg, self.theme.blue, 0.4),
+            blend(self.theme.sidebar_bg, self.theme.blue, 0.06),
+        );
+        let inner_left = card.left + s(12);
+        let mut ty = card.top + s(10);
+        let text_clip = RECT {
+            left: card.left,
+            right: card.right - s(12),
+            ..clip
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        Self::label(hdc, &title, inner_left, ty, self.theme.text, text_clip);
+        ty += self.text_height(hdc) + s(4);
+        unsafe { SelectObject(hdc, self.small_font) };
+        let small = self.text_height(hdc) + s(3);
+        for line in &lines {
+            Self::label(hdc, line, inner_left, ty, self.theme.muted, text_clip);
+            ty += small;
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let button_top = ty + s(10);
+        let mut hits = Vec::new();
+        for (place, label, answer, primary) in buttons {
+            let button = RECT {
+                left: inner_left + place.left,
+                top: button_top + place.top,
+                right: inner_left + place.right,
+                bottom: button_top + place.bottom,
+            };
+            if primary {
+                Self::rounded_fill(hdc, button, s(4), self.theme.violet);
+            } else {
+                self.panel_card(hdc, button, s(4), self.theme.edge, self.theme.editor_bg);
+            }
+            let color = if primary {
+                ui(255, 255, 255)
+            } else {
+                self.theme.text
+            };
+            self.label_mid(
+                hdc,
+                label,
+                button.left + s(10),
+                (button.top + button.bottom) / 2,
+                color,
+                button,
+            );
+            hits.push((button, answer));
+        }
+        self.ai.hits.borrow_mut().permission = hits;
+        card.bottom + s(10)
     }
 
     // The changes card: a 32 px header, a 26 px row per file, and a 42 px
@@ -1366,328 +2000,26 @@ impl App {
         card.bottom
     }
 
-    // An answer's steps (one 22 px line each) and permission card.
-    fn ai_project_steps_height(&self, hdc: HDC, entry: &ChatEntry, width: i32) -> i32 {
-        let s = |value: i32| self.scale(value);
-        let mut height = entry.steps.len() as i32 * s(22);
-        if !entry.steps.is_empty() {
-            height += s(8);
-        }
-        if entry.asking {
-            height += self.ai_permission_layout(hdc, width).height + s(10);
-        }
-        height
-    }
-
-    // Paints an answer's steps and permission card from `top`; returns
-    // where the answer's text starts.
-    fn paint_ai_project_steps(
-        &self,
-        hdc: HDC,
-        entry: &ChatEntry,
-        bounds: RECT,
-        top: i32,
-        clip: RECT,
-    ) -> i32 {
-        let s = |value: i32| self.scale(value);
-        let mut y = top;
-        let row = s(22);
-        unsafe { SelectObject(hdc, self.small_font) };
-        let text_height = self.text_height(hdc);
-        for step in &entry.steps {
-            let rect = RECT {
-                left: bounds.left,
-                top: y,
-                right: bounds.right,
-                bottom: y + row,
-            };
-            Self::fill(
-                hdc,
-                RECT {
-                    left: rect.left,
-                    top: rect.top + s(3),
-                    right: rect.left + s(2),
-                    bottom: rect.bottom - s(3),
-                },
-                if step.error {
-                    self.theme.warning
-                } else {
-                    self.theme.edge
-                },
-            );
-            let color = if step.error {
-                blend(self.theme.warning, self.theme.text, 0.3)
-            } else if step.opened.is_some() {
-                blend(self.theme.blue, self.theme.text, 0.35)
-            } else {
-                self.theme.muted
-            };
-            self.label_ellipsis(
-                hdc,
-                &step.summary,
-                rect.left + s(11),
-                (rect.top + rect.bottom - text_height) / 2,
-                color,
-                RECT {
-                    left: rect.left,
-                    right: rect.right,
-                    ..clip
-                },
-            );
-            if let Some((path, line)) = &step.opened
-                && rect.bottom > clip.top
-                && rect.top < clip.bottom
-            {
-                self.ai
-                    .hits
-                    .borrow_mut()
-                    .steps
-                    .push((rect, path.clone(), *line));
-            }
-            y += row;
-        }
-        if !entry.steps.is_empty() {
-            y += s(8);
-        }
-        unsafe { SelectObject(hdc, self.ui_font) };
-        if entry.asking {
-            let width = bounds.right - bounds.left;
-            let PermissionLayout {
-                title,
-                lines,
-                buttons,
-                height,
-            } = self.ai_permission_layout(hdc, width);
-            let card = RECT {
-                left: bounds.left,
-                top: y,
-                right: bounds.right,
-                bottom: y + height,
-            };
-            self.panel_card(
-                hdc,
-                card,
-                s(8),
-                blend(self.theme.sidebar_bg, self.theme.blue, 0.4),
-                blend(self.theme.sidebar_bg, self.theme.blue, 0.06),
-            );
-            let inner_left = card.left + s(12);
-            let mut ty = card.top + s(10);
-            let text_clip = RECT {
-                left: card.left,
-                right: card.right - s(12),
-                ..clip
-            };
-            Self::label(hdc, &title, inner_left, ty, self.theme.text, text_clip);
-            ty += self.text_height(hdc) + s(4);
-            unsafe { SelectObject(hdc, self.small_font) };
-            let small = self.text_height(hdc) + s(3);
-            for line in &lines {
-                Self::label(hdc, line, inner_left, ty, self.theme.muted, text_clip);
-                ty += small;
-            }
-            unsafe { SelectObject(hdc, self.ui_font) };
-            let button_top = ty + s(10);
-            let mut hits = Vec::new();
-            for (place, label, answer, primary) in buttons {
-                let button = RECT {
-                    left: inner_left + place.left,
-                    top: button_top + place.top,
-                    right: inner_left + place.right,
-                    bottom: button_top + place.bottom,
-                };
-                if primary {
-                    Self::rounded_fill(hdc, button, s(4), self.theme.violet);
-                } else {
-                    self.panel_card(hdc, button, s(4), self.theme.edge, self.theme.editor_bg);
-                }
-                let color = if primary {
-                    ui(255, 255, 255)
-                } else {
-                    self.theme.text
-                };
-                self.label_mid(
-                    hdc,
-                    label,
-                    button.left + s(10),
-                    (button.top + button.bottom) / 2,
-                    color,
-                    button,
-                );
-                hits.push((button, answer));
-            }
-            self.ai.hits.borrow_mut().permission = hits;
-            y = card.bottom + s(10);
-        }
-        y
-    }
-
-    // Paints entry `index` of the conversation within `bounds`.
-    fn paint_ai_entry(&self, hdc: HDC, index: usize, entry: &ChatEntry, bounds: RECT, clip: RECT) {
-        let s = |value: i32| self.scale(value);
-        let last = index + 1 == self.ai.entries.len();
-        unsafe { SelectObject(hdc, self.ui_font) };
-        let line_height = self.text_height(hdc) + s(4);
-        if entry.role == Role::User {
-            self.panel_card(hdc, bounds, s(9), ui(42, 77, 133), ui(17, 35, 68));
-            let inner = RECT {
-                left: bounds.left + s(12),
-                right: bounds.right - s(12),
-                ..clip
-            };
-            let mut y = bounds.top + s(10);
-            for line in self.wrap_text(hdc, &entry.text, inner.right - inner.left) {
-                Self::label(hdc, &line, inner.left, y, self.theme.text, inner);
-                y += line_height;
-            }
-            if let Some(context) = &entry.context {
-                self.label_ellipsis(
-                    hdc,
-                    &format!("Includes {context}"),
-                    inner.left,
-                    y + s(2),
-                    self.theme.muted,
-                    inner,
-                );
-                y += line_height + s(2);
-            }
-            if !entry.chips.is_empty() {
-                let specs = chip_specs(&entry.chips);
-                let (spans, _) = self.ai_chip_spans(hdc, &specs, inner.right - inner.left, false);
-                let top = y + s(6);
-                for (chip, span) in specs.iter().zip(&spans) {
-                    let rect = RECT {
-                        left: inner.left + span.left,
-                        top: top + span.top,
-                        right: inner.left + span.right,
-                        bottom: top + span.bottom,
-                    };
-                    self.paint_ai_chip(hdc, rect, chip, false);
-                }
-                unsafe { SelectObject(hdc, self.ui_font) };
-            }
-            return;
-        }
-
-        self.sparkle_glyph(
-            hdc,
-            bounds.left,
-            bounds.top + s(3),
-            s(14),
-            ui(148, 102, 255),
-        );
-        self.label_ellipsis(
-            hdc,
-            self.settings.ai_model.as_deref().unwrap_or("Assistant"),
-            bounds.left + s(22),
-            bounds.top,
-            self.theme.muted,
-            RECT {
-                left: bounds.left,
-                right: bounds.right,
-                ..clip
-            },
-        );
-        let mut y = bounds.top + s(26);
-        y = self.paint_ai_project_steps(hdc, entry, bounds, y, clip);
-        let (answer, thinking) = ai::visible_answer(&entry.text);
-        let visible = |rect: &RECT| rect.bottom > clip.top && rect.top < clip.bottom;
-        if !answer.is_empty() {
-            let height = self.snippet_height(
-                hdc,
-                &entry.view,
-                &self.ai.fonts,
-                (answer, entry.revision),
-                bounds.right - bounds.left,
-            );
-            self.paint_snippet(hdc, &entry.view, &self.ai.fonts, (bounds.left, y), clip);
-            if !self.ai_receiving(last) {
-                self.paint_ai_code_toolbars(hdc, index, entry, (bounds.left, y), clip);
-            }
-            y += height;
-        } else if (thinking || self.ai_receiving(last)) && !entry.asking {
-            Self::label(
-                hdc,
-                "Thinking\u{2026}",
-                bounds.left,
-                y,
-                self.theme.muted,
-                clip,
-            );
-            y += line_height;
-        }
-        unsafe { SelectObject(hdc, self.ui_font) };
-        if let Some(error) = &entry.error {
-            let color = if error == "Stopped" {
-                self.theme.muted
-            } else {
-                self.theme.error
-            };
-            y = self.paint_wrapped(
-                hdc,
-                error,
-                RECT {
-                    left: bounds.left,
-                    right: bounds.right,
-                    ..clip
-                },
-                y + s(6),
-                line_height,
-                color,
-            );
-        }
-        if let Some(note) = &entry.note {
-            y = self.paint_wrapped(
-                hdc,
-                note,
-                RECT {
-                    left: bounds.left,
-                    right: bounds.right,
-                    ..clip
-                },
-                y + s(6),
-                line_height,
-                self.theme.muted,
-            );
-        }
-        if !entry.proposals.is_empty() {
-            y = self.paint_ai_changes(hdc, index, entry, bounds, y + s(10), clip);
-        }
-        if !answer.is_empty() && !self.ai_receiving(last) {
-            let label = "Copy answer";
-            let button = RECT {
-                left: bounds.left,
-                top: y + s(6),
-                right: bounds.left + self.text_width(hdc, label) + s(4),
-                bottom: y + s(6) + line_height,
-            };
-            if visible(&button) {
-                Self::label(hdc, label, button.left, button.top, self.theme.muted, clip);
-                self.ai
-                    .hits
-                    .borrow_mut()
-                    .actions
-                    .push((button, AiAction::Copy(answer.to_string())));
-            }
-        }
-    }
-
-    // The strip at the top of each code block in answer `index`: its
-    // language, and buttons that put the code into the editor (Insert at the
-    // cursor, Replace what the question was about) or copy it.
+    // The strip at the top of each code block in one piece of answer
+    // `index`: its language, icons that put the code at the cursor or copy
+    // it, and Apply, which puts it in place of what the question was about
+    // (or the selection). Apply only shows when the answer has no changes
+    // card, so there's one way to apply a change.
     fn paint_ai_code_toolbars(
         &self,
         hdc: HDC,
         index: usize,
         entry: &ChatEntry,
+        view: &MarkdownSnippet,
         (left, top): (i32, i32),
         clip: RECT,
     ) {
         let s = |value: i32| self.scale(value);
         unsafe { SelectObject(hdc, self.ui_font) };
         let can_insert = self.ai_can_insert();
-        let can_replace = self.ai_replace_target(index).is_some();
-        for block in entry.view.code_blocks() {
+        let can_apply =
+            entry.proposals.is_empty() && (can_insert || self.ai_replace_target(index).is_some());
+        for block in view.code_blocks() {
             let strip = RECT {
                 left: left + block.rect.left,
                 top: top + block.rect.top,
@@ -1705,51 +2037,62 @@ impl App {
                 },
                 self.theme.edge,
             );
-            let mut right = strip.right - s(6);
-            let mut buttons = vec![("Copy", AiAction::Copy(block.text.clone()))];
-            if can_replace {
-                buttons.push(("Replace", AiAction::Replace(block.text.clone(), index)));
-            }
+            let mut right = strip.right - s(4);
+            let mid = (strip.top + strip.bottom) / 2;
+            let mut icons = vec![(DebugGlyph::Copy, AiAction::Copy(block.text.clone()))];
             if can_insert {
-                buttons.push(("Insert", AiAction::Insert(block.text.clone())));
+                icons.push((DebugGlyph::Insert, AiAction::Insert(block.text.clone())));
             }
-            if can_replace || can_insert {
-                buttons.push(("Apply", AiAction::Apply(block.text.clone(), index)));
-            }
-            for (label, action) in buttons {
+            for (glyph, action) in icons {
                 let button = RECT {
-                    left: right - self.text_width(hdc, label) - s(16),
-                    top: strip.top + s(4),
+                    left: right - s(24),
+                    top: mid - s(11),
                     right,
-                    bottom: strip.bottom - s(5),
+                    bottom: mid + s(11),
                 };
                 if button.left < strip.left + s(8) {
                     break;
                 }
-                Self::rounded_fill(hdc, button, s(4), self.theme.sidebar_bg);
-                self.label_mid(
-                    hdc,
-                    label,
-                    button.left + s(8),
-                    (button.top + button.bottom) / 2,
-                    self.theme.text,
-                    button,
-                );
+                let (glyph, color) = self.ai_copy_glyph(glyph, &action);
+                self.glyph_in(hdc, glyph, color, button, s(14));
                 self.ai.hits.borrow_mut().actions.push((button, action));
-                right = button.left - s(6);
+                right = button.left - s(2);
+            }
+            if can_apply {
+                let label = "Apply";
+                unsafe { SelectObject(hdc, self.small_font) };
+                let button = RECT {
+                    left: right - self.text_width(hdc, label) - s(16),
+                    top: mid - s(11),
+                    right,
+                    bottom: mid + s(11),
+                };
+                if button.left >= strip.left + s(8) {
+                    Self::rounded_fill(hdc, button, s(4), self.theme.sidebar_bg);
+                    self.label_mid(hdc, label, button.left + s(8), mid, self.theme.text, button);
+                    self.ai
+                        .hits
+                        .borrow_mut()
+                        .actions
+                        .push((button, AiAction::Apply(block.text.clone(), index)));
+                    right = button.left - s(6);
+                }
+                unsafe { SelectObject(hdc, self.ui_font) };
             }
             if !block.language.is_empty() {
+                unsafe { SelectObject(hdc, self.small_font) };
                 self.label_mid(
                     hdc,
                     &block.language,
                     strip.left + s(12),
-                    (strip.top + strip.bottom) / 2 - s(1),
+                    mid,
                     self.theme.muted,
                     RECT {
                         right: right - s(4),
                         ..strip
                     },
                 );
+                unsafe { SelectObject(hdc, self.ui_font) };
             }
         }
     }
@@ -1757,7 +2100,9 @@ impl App {
     // The message box: `lines` of typed text (already wrapped), and the Send
     // button, which is Stop while an answer arrives. Disabled until a model
     // is chosen.
-    fn paint_ai_composer(&self, hdc: HDC, input: RECT, lines: &[String], enabled: bool) {
+    // `lines`: the typed text wrapped (byte ranges of it); as many as fit
+    // are shown, keeping the caret's line in view.
+    fn paint_ai_composer(&self, hdc: HDC, input: RECT, lines: &[(usize, usize)], enabled: bool) {
         let s = |value: i32| self.scale(value);
         if input.bottom - input.top < s(30) {
             return;
@@ -1797,18 +2142,51 @@ impl App {
                 self.theme.muted,
                 text,
             );
-        } else {
-            let mut y = text.top;
-            for line in lines {
-                Self::label(hdc, line, text.left, y, self.theme.text, text);
-                y += line_height;
-            }
         }
+        // The lines shown: the caret's line stays in view.
+        let caret = self.ai.caret.min(self.ai.input.len());
+        let caret_line = super::super::ai_composer::caret_line(lines, caret);
+        let fit = (((text.bottom - text.top) / line_height.max(1)) as usize).max(1);
+        let first = self
+            .ai
+            .composer_first
+            .get()
+            .min(caret_line)
+            .max((caret_line + 1).saturating_sub(fit))
+            .min(lines.len().saturating_sub(fit));
+        self.ai.composer_first.set(first);
+        let mut rows = Vec::new();
+        for (index, &(start, end)) in lines.iter().enumerate().skip(first).take(fit) {
+            let y = text.top + (index - first) as i32 * line_height;
+            if !self.ai.input.is_empty() {
+                Self::label(
+                    hdc,
+                    &self.ai.input[start..end],
+                    text.left,
+                    y,
+                    self.theme.text,
+                    text,
+                );
+            }
+            rows.push(super::super::ai_composer::ComposerRow {
+                rect: RECT {
+                    left: text.left,
+                    top: y,
+                    right: text.right,
+                    bottom: y + line_height,
+                },
+                start,
+                end,
+            });
+        }
+        *self.ai.composer_lines.borrow_mut() = lines.to_vec();
+        *self.ai.composer_rows.borrow_mut() = rows;
         if focused {
-            let (x, y) = match lines.last() {
-                Some(line) if !self.ai.input.is_empty() => (
-                    text.left + self.text_width(hdc, line),
-                    text.top + (lines.len() as i32 - 1) * line_height,
+            let (x, y) = match lines.get(caret_line) {
+                Some(&(start, end)) if caret_line >= first && caret_line < first + fit => (
+                    text.left
+                        + self.text_width(hdc, &self.ai.input[start..caret.clamp(start, end)]),
+                    text.top + (caret_line - first) as i32 * line_height,
                 ),
                 _ => (text.left, text.top),
             };
@@ -2152,6 +2530,54 @@ impl App {
         y
     }
 
+    // An icon button's glyph and colour: a green tick for a Copy whose text
+    // was just copied.
+    fn ai_copy_glyph(&self, glyph: DebugGlyph, action: &AiAction) -> (DebugGlyph, u32) {
+        match action {
+            AiAction::Copy(text) if self.ai.copied.as_deref() == Some(text.as_str()) => {
+                (DebugGlyph::Check, self.theme.green)
+            }
+            _ => (glyph, self.theme.muted),
+        }
+    }
+
+    // Like `wrap_text`, but each line is a byte range of `text`: the space
+    // at a wrap belongs to neither line, a line break ends one.
+    fn wrap_ranges(&self, hdc: HDC, text: &str, width: i32) -> Vec<(usize, usize)> {
+        let mut lines = Vec::new();
+        let mut base = 0;
+        for paragraph in text.split('\n') {
+            let (mut start, mut end) = (base, base);
+            let mut started = false;
+            let mut word_start = base;
+            for word in paragraph.split(' ') {
+                let (from, to) = (word_start, word_start + word.len());
+                word_start = to + 1;
+                let candidate = if started { start } else { from };
+                if self.text_width(hdc, &text[candidate..to]) <= width {
+                    (start, end, started) = (candidate, to, true);
+                    continue;
+                }
+                if started {
+                    lines.push((start, end));
+                }
+                // A word longer than the line is split between characters.
+                let mut piece = from;
+                for (index, ch) in word.char_indices() {
+                    let (at, next) = (from + index, from + index + ch.len_utf8());
+                    if at > piece && self.text_width(hdc, &text[piece..next]) > width {
+                        lines.push((piece, at));
+                        piece = at;
+                    }
+                }
+                (start, end, started) = (piece, to, true);
+            }
+            lines.push((start, end));
+            base += paragraph.len() + 1;
+        }
+        lines
+    }
+
     // `text` wrapped to `width` pixels in the font selected into `hdc`:
     // at spaces where possible, inside a word only when it can't fit on a
     // line of its own. Line breaks in the text are kept.
@@ -2232,5 +2658,52 @@ impl App {
             DeleteObject(brush);
             DeleteObject(pen);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_is_shown_in_the_order_it_came() {
+        // "Let me look." then two searches, then the answer.
+        let answer = "Let me look.\n\nIt returns NaN.";
+        let parts = answer_parts(answer, 0, &[12, 12]);
+        assert_eq!(
+            parts,
+            vec![
+                AnswerPart::Text(0, 12),
+                AnswerPart::Steps(0, 2),
+                AnswerPart::Text(12, answer.len()),
+            ]
+        );
+        // Steps before any text come first; blank text between steps
+        // doesn't split them.
+        let answer = "\n\nDone.";
+        assert_eq!(
+            answer_parts(answer, 0, &[0, 2]),
+            vec![AnswerPart::Steps(0, 2), AnswerPart::Text(2, answer.len())]
+        );
+        // A hidden <think> block before the answer moves every step back.
+        assert_eq!(
+            answer_parts("Done.", 20, &[20]),
+            vec![AnswerPart::Steps(0, 1), AnswerPart::Text(0, 5)]
+        );
+        assert_eq!(answer_parts("", 0, &[]), vec![]);
+    }
+
+    #[test]
+    fn a_finished_answer_says_its_steps_and_time() {
+        assert_eq!(
+            answer_meta(3, Some(Duration::from_millis(14_200))),
+            "3 steps \u{00b7} 14 s"
+        );
+        assert_eq!(
+            answer_meta(1, Some(Duration::from_millis(300))),
+            "1 step \u{00b7} 1 s"
+        );
+        assert_eq!(answer_meta(0, Some(Duration::from_secs(75))), "1 min 15 s");
+        assert_eq!(answer_meta(0, None), "");
     }
 }

@@ -384,6 +384,39 @@ pub fn chat_models(models: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// How the panel names `model`: Claude's ids read as their product names
+/// ("claude-opus-5-5" is "Claude Opus 5.5", and a dated snapshot leaves its
+/// date out); any other id is shown as it is.
+pub fn model_label(model: &str) -> String {
+    let Some(rest) = model.strip_prefix("claude-") else {
+        return model.to_string();
+    };
+    let parts: Vec<&str> = rest.split('-').collect();
+    let Some(family) = parts
+        .first()
+        .filter(|family| !family.is_empty() && family.chars().all(|ch| ch.is_ascii_alphabetic()))
+    else {
+        return model.to_string();
+    };
+    // The version: one or two short numbers; a long one is a date.
+    let numbers: Vec<&str> = parts[1..]
+        .iter()
+        .take_while(|part| {
+            !part.is_empty() && part.len() <= 2 && part.chars().all(|ch| ch.is_ascii_digit())
+        })
+        .copied()
+        .collect();
+    let dated = parts[1 + numbers.len()..]
+        .iter()
+        .all(|part| part.len() == 8 && part.chars().all(|ch| ch.is_ascii_digit()));
+    if numbers.is_empty() || numbers.len() > 2 || !dated {
+        return model.to_string();
+    }
+    let mut name = family.to_string();
+    name[..1].make_ascii_uppercase();
+    format!("Claude {name} {}", numbers.join("."))
+}
+
 /// Whether Ollama runs `model` on its own servers rather than on this PC:
 /// its "cloud" models, such as "gpt-oss:120b-cloud" or "nemotron-3:cloud".
 pub fn is_cloud_model(model: &str) -> bool {
@@ -1231,6 +1264,28 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[test]
+    fn claude_models_are_named_as_products() {
+        assert_eq!(model_label("claude-opus-5-5"), "Claude Opus 5.5");
+        assert_eq!(model_label("claude-haiku-5-5"), "Claude Haiku 5.5");
+        assert_eq!(
+            model_label("claude-sonnet-4-5-20250929"),
+            "Claude Sonnet 4.5"
+        );
+        assert_eq!(model_label("claude-opus-4-20250514"), "Claude Opus 4");
+        // Anything else stays as its id.
+        assert_eq!(model_label("qwen2.5-coder:7b"), "qwen2.5-coder:7b");
+        assert_eq!(
+            model_label("claude-3-5-sonnet-latest"),
+            "claude-3-5-sonnet-latest"
+        );
+        assert_eq!(
+            model_label("claude-opus-5-5-preview"),
+            "claude-opus-5-5-preview"
+        );
+        assert_eq!(model_label("claude-"), "claude-");
+    }
 
     #[test]
     fn urls_accept_the_endpoint_with_or_without_v1() {
