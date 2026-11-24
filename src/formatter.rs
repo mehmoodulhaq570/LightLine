@@ -152,6 +152,21 @@ fn run_formatter(mut command: Command, source: &str) -> Result<String, FormatErr
     Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
+/// `path` as a formatter should see it. Open files carry canonicalize()'s
+/// `\\?\D:\...` form, which some tools can't handle: given it as
+/// `--stdin-filepath`, Prettier never answers. `\\?\UNC\server\share`
+/// becomes `\\server\share`; any other path is unchanged.
+fn tool_path(path: &Path) -> std::path::PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}").into();
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(plain) => plain.into(),
+        None => path.to_path_buf(),
+    }
+}
+
 /// A command for a tool on PATH, by full path so launchers npm installs as
 /// `.cmd` files are found. A missing tool keeps its bare name, whose
 /// spawn failure then reports `NotAvailable`.
@@ -221,7 +236,7 @@ impl Formatter for PrettierFormatter {
             Some(prettier) => Command::new(prettier),
             None => tool_command("prettier"),
         };
-        command.arg("--stdin-filepath").arg(path);
+        command.arg("--stdin-filepath").arg(tool_path(path));
         command
     }
 
@@ -254,7 +269,7 @@ impl Formatter for RustfmtFormatter {
             .args(["--emit", "stdout", "--edition"])
             .arg(rust_edition(path));
         if let Some(folder) = path.parent().filter(|folder| folder.is_dir()) {
-            command.current_dir(folder);
+            command.current_dir(tool_path(folder));
         }
         command
     }
@@ -321,7 +336,7 @@ impl Formatter for PythonFormatter {
         let mut command = tool_command("ruff");
         command
             .args(["format", "--stdin-filename"])
-            .arg(path)
+            .arg(tool_path(path))
             .arg("-");
         command
     }
@@ -330,7 +345,10 @@ impl Formatter for PythonFormatter {
         match run_formatter(self.command(path), source) {
             Err(FormatError::NotAvailable) => {
                 let mut fallback = tool_command("black");
-                fallback.args(["--stdin-filename"]).arg(path).arg("-");
+                fallback
+                    .args(["--stdin-filename"])
+                    .arg(tool_path(path))
+                    .arg("-");
                 run_formatter(fallback, source)
             }
             other => other,
@@ -364,7 +382,7 @@ impl Formatter for ClangFormatter {
 
     fn command(&self, path: &Path) -> Command {
         let mut command = tool_command("clang-format");
-        command.arg(format!("-assume-filename={}", path.display()));
+        command.arg(format!("-assume-filename={}", tool_path(path).display()));
         command
     }
 
@@ -989,6 +1007,43 @@ mod tests {
             }
             Err(other) => panic!("unexpected formatting error: {other}"),
         }
+    }
+
+    // An open file's path is canonicalize()'s `\\?\D:\...` form. Given
+    // that as --stdin-filepath, Prettier never answered, and every format
+    // ended in "formatter timed out" after 10 s.
+    #[test]
+    fn real_prettier_formats_a_file_opened_by_its_verbatim_path_if_installed() {
+        let root = std::env::temp_dir().join(format!("lightline-verbatim-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("app.js");
+        std::fs::write(&file, "").unwrap();
+        let opened = std::fs::canonicalize(&file).unwrap();
+        if cfg!(windows) {
+            assert!(opened.to_string_lossy().starts_with(r"\\?\"), "{opened:?}");
+        }
+        let started = std::time::Instant::now();
+        let result = PrettierFormatter.format("const   a={b:1}\n", &opened);
+        std::fs::remove_dir_all(&root).unwrap();
+        match result {
+            Ok(formatted) => assert_eq!(formatted, "const a = { b: 1 };\n"),
+            Err(FormatError::NotAvailable) => eprintln!("skipped: prettier not found on PATH"),
+            Err(other) => panic!("{other} after {:?}", started.elapsed()),
+        }
+    }
+
+    #[test]
+    fn external_tools_get_the_plain_form_of_a_path() {
+        assert_eq!(
+            tool_path(Path::new(r"\\?\D:\Code Work\app.js")),
+            Path::new(r"D:\Code Work\app.js")
+        );
+        assert_eq!(
+            tool_path(Path::new(r"\\?\UNC\server\share\app.js")),
+            Path::new(r"\\server\share\app.js")
+        );
+        assert_eq!(tool_path(Path::new(r"D:\app.js")), Path::new(r"D:\app.js"));
+        assert_eq!(tool_path(Path::new("src/app.js")), Path::new("src/app.js"));
     }
 
     #[test]

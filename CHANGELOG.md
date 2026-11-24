@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Fixed
 
+- **Prettier Formats Again**: With Prettier turned on in Extensions, `Shift+Alt+F` (and format-on-save) on a JavaScript, TypeScript, CSS or other Prettier file showed *Formatting with Prettier…* for 10 seconds, then *Prettier formatting failed: formatter timed out and was stopped*, and left the file as it was. LightLine gave Prettier the file's path in Windows' long `\\?\D:\…` form, which Prettier never answers. Formatters now get the ordinary `D:\…` path, and the file is formatted straight away. Ruff, Black and clang-format get the ordinary path too.
 - **Sharp Switches in Settings**: The on/off switches in Settings had stair-stepped ends and a jagged knob, which looked blurred, especially on a display scaled to 125% or more. They're now drawn smooth at the display's exact size: round ends, a round knob, and an even outline when off.
 
 ## [v0.12.0] - 2026-11-16
