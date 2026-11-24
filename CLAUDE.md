@@ -64,7 +64,7 @@ Disk space on the dev machine is tight. Prefer `CARGO_INCREMENTAL=0` for long se
 - **Command Palette entries** are `(name, numeric id)` pairs in `panels.rs::QUICK_COMMANDS`, run by id in `run_command` (which `activate_quick_item` calls). Ids are global; pick an unused one.
 - **The menu bar** (`menu_bar.rs`) lists its items as data: each replays its shortcut through `key` (with `replayed_modifiers`, never the thread's key state) or runs a palette id. A new command that belongs in a menu goes in its list there.
 - **"Links after a line"** (▶ Run, Debug, Run test, merge-conflict Accept…) all go through `codelens.rs`. `lens_on_line` decides, `lens_links` lists, paint records hit spans, and `lens_click` acts.
-- **The diff view** (Git review and Local History compare) is gated by `App::showing_diff()` and closed by `close_diff()`. Use these instead of checking `review_file` directly.
+- **The diff view** (Git review, Local History compare, and AI proposals in `ai_edits.rs`) is gated by `App::showing_diff()` and closed by `close_diff()`; the compare modes share their header buttons through `compare_header`. Use these instead of checking `review_file` directly.
 - **Edits must go through `App::replace_range`**, which also notifies LSP and syntax. Wrap multi-step edits in `doc_mut().begin_group()`/`end_group()` so Ctrl+Z undoes them in one step.
 
 ## User data and settings

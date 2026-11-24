@@ -44,7 +44,9 @@ pub(super) struct ProjectAccess {
 const TOOL_INSTRUCTIONS: &str = "You can look through the user's project with the tools \
 search, list_files, read_file and problems. Use them when the question is about the project \
 and you haven't been shown the code it needs; don't guess what a file contains. Paths are \
-relative to the project's folder. Say which files your answer is based on.";
+relative to the project's folder. Say which files your answer is based on. To change \
+code, use propose_edit or propose_new_file rather than showing the whole changed file: the \
+user reviews each proposal before anything changes, so say briefly what you proposed.";
 
 impl App {
     /// The project as a question sees it, when the model may look through

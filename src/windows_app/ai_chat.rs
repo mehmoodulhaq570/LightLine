@@ -50,6 +50,8 @@ enum AiEvent {
     Note(u64, String),
     /// This model refused tools; it isn't offered them again.
     ToolsRefused(String),
+    /// A change the model proposed (ai_edits.rs).
+    Proposal(u64, lightline::ai_tools::FileProposal),
     /// The provider card's check: its generation and the models found.
     Provider(u64, Result<Vec<String>, String>),
 }
@@ -139,6 +141,8 @@ pub(super) struct ChatEntry {
     pub(super) asking: bool,
     /// A muted line under the answer.
     pub(super) note: Option<String>,
+    /// Changes the model proposed in this answer.
+    pub(super) proposals: Vec<super::ai_edits::AnswerProposal>,
     target: Option<AiTarget>,
     /// Why an answer ended early.
     pub(super) error: Option<String>,
@@ -158,12 +162,21 @@ impl ChatEntry {
             steps: Vec::new(),
             asking: false,
             note: None,
+            proposals: Vec::new(),
             target: None,
             error: None,
             revision: 0,
             view: MarkdownSnippet::default(),
         }
     }
+}
+
+/// A button on the changes card.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum ProposalButton {
+    Review,
+    ApplyAll,
+    Discard,
 }
 
 /// A button on an answer.
@@ -203,6 +216,9 @@ pub(super) struct AiHits {
     pub(super) permission: Vec<(RECT, super::ai_project::Permission)>,
     /// "Read" lines, with the file and line each opens.
     pub(super) steps: Vec<(RECT, PathBuf, usize)>,
+    /// The changes card: a file's row (entry, file) and its buttons.
+    pub(super) proposal_rows: Vec<(RECT, usize, usize)>,
+    pub(super) proposal_buttons: Vec<(RECT, usize, ProposalButton)>,
 }
 
 pub(super) struct AiChat {
@@ -577,6 +593,12 @@ impl App {
                 }
                 AiEvent::ToolsRefused(model) => {
                     self.ai.tools_refused.insert(model);
+                }
+                AiEvent::Proposal(id, proposal) => {
+                    if self.ai_current(id) && !self.ai.entries.is_empty() {
+                        let entry = self.ai.entries.len() - 1;
+                        self.ai_add_proposal(entry, proposal);
+                    }
                 }
                 AiEvent::Done(id, result) => {
                     if self.ai_current(id) {
@@ -1025,6 +1047,9 @@ impl App {
                         let step = if allowed == Some(true) {
                             let input = call.input.clone().unwrap_or_default();
                             let outcome = access.project.run(&call.name, &input, &cancel);
+                            if let Some(proposal) = outcome.proposal.clone() {
+                                let _ = tx.send(AiEvent::Proposal(id, *proposal));
+                            }
                             let step = AiStep {
                                 summary: outcome.summary,
                                 error: outcome.is_error,
@@ -1096,6 +1121,9 @@ impl App {
 
     pub(super) fn ai_new_chat(&mut self, hwnd: HWND) {
         self.ai_stop(hwnd);
+        if self.ai_review.is_some() {
+            self.close_diff();
+        }
         self.ai.entries.clear();
         self.ai.chat_allowed = false;
         self.ai.scroll.set(0);
@@ -1239,7 +1267,19 @@ impl App {
                 return;
             }
         }
-        if let Some((_, answer)) = hits.permission.iter().find(|(rect, _)| inside(rect)) {
+        if let Some((_, entry, button)) =
+            hits.proposal_buttons.iter().find(|(rect, ..)| inside(rect))
+        {
+            match button {
+                ProposalButton::Review => self.ai_proposals_review(hwnd, *entry),
+                ProposalButton::ApplyAll => self.ai_proposals_apply_all(hwnd, *entry),
+                ProposalButton::Discard => self.ai_proposals_discard(hwnd, *entry),
+            }
+        } else if let Some((_, entry, file)) =
+            hits.proposal_rows.iter().find(|(rect, ..)| inside(rect))
+        {
+            self.ai_review(hwnd, *entry, *file);
+        } else if let Some((_, answer)) = hits.permission.iter().find(|(rect, _)| inside(rect)) {
             self.ai_answer_permission(hwnd, *answer);
         } else if let Some((_, path, line)) = hits.steps.iter().find(|(rect, ..)| inside(rect)) {
             self.ai_open_step(hwnd, path.clone(), *line);
