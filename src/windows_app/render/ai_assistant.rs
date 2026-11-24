@@ -1,5 +1,5 @@
 use super::super::ai_chat::{
-    AiAction, ChatEntry, ProposalButton, SUGGESTED_MODEL, model_menu_models,
+    AiAction, AiTask, ChatEntry, ContextOffer, ProposalButton, SUGGESTED_MODEL, model_menu_models,
 };
 use super::super::ai_edits::ProposalStatus;
 use super::super::ai_project::{Permission, StepKind};
@@ -24,7 +24,7 @@ const AI_PROMISES: [&str; 3] = [
 ];
 
 // Most lines the message box grows to before its text scrolls.
-const COMPOSER_LINES: usize = 6;
+const COMPOSER_LINES: usize = 8;
 
 // An attached file's chip: its icon (from the path), what it says, and
 // whether it's amber.
@@ -32,6 +32,9 @@ struct ChipSpec {
     path: PathBuf,
     label: String,
     warn: bool,
+    // The open file, offered: it goes unless taken off, and looks quieter
+    // than a file attached on purpose.
+    offered: bool,
 }
 
 // The permission card, laid out (`ai_permission_layout`).
@@ -49,6 +52,7 @@ fn chip_specs(chips: &[super::super::ai_attach::Chip]) -> Vec<ChipSpec> {
             path: chip.path.clone(),
             label: chip.label.clone(),
             warn: chip.warn,
+            offered: false,
         })
         .collect()
 }
@@ -133,18 +137,31 @@ impl App {
         *self.ai.hits.borrow_mut() = Default::default();
         let header_bottom = rect.top + s(AI_HEADER);
         self.paint_ai_header(hdc, rect, header_bottom);
+        if self.ai_dragging {
+            // The edge being dragged.
+            Self::fill(
+                hdc,
+                RECT {
+                    left: rect.left,
+                    top: rect.top + s(CARD_RADIUS),
+                    right: rect.left + s(2),
+                    bottom: rect.bottom - s(CARD_RADIUS),
+                },
+                self.theme.violet,
+            );
+        }
 
         let content = RECT {
-            left: rect.left + s(16),
+            left: rect.left + s(12),
             top: header_bottom + s(14),
-            right: rect.right - s(16),
-            bottom: rect.bottom - s(14),
+            right: rect.right - s(12),
+            bottom: rect.bottom - s(12),
         };
         unsafe { SelectObject(hdc, self.ui_font) };
         let line_height = self.text_height(hdc) + s(4);
         if !self.ai_ready() {
             let composer = RECT {
-                top: content.bottom - s(50),
+                top: content.bottom - self.ai_composer_height(0, 1, line_height),
                 ..content
             };
             self.paint_ai_setup_state(
@@ -152,78 +169,99 @@ impl App {
                 RECT {
                     top: content.top + s(10),
                     bottom: composer.top - s(12),
-                    ..content
+                    left: content.left + s(4),
+                    right: content.right - s(4),
                 },
             );
-            self.paint_ai_composer(hdc, composer, &[], false);
+            self.paint_ai_composer(hdc, composer, &[], &[], false);
             return;
         }
 
-        let text_width = (content.right - content.left - s(64)).max(s(40));
-        let lines = self.wrap_ranges(hdc, &self.ai.input, text_width);
+        // The message box: chips for what goes with the question, the
+        // text, and a row with @, the model and Send.
+        let inner_width = (content.right - content.left - s(24)).max(s(40));
+        let chips = self.ai_composer_chips();
+        let (spans, chips_height) = if chips.is_empty() {
+            (Vec::new(), 0)
+        } else {
+            let (spans, height) = self.ai_chip_spans(hdc, &chips, inner_width, true);
+            (spans, height + s(6))
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let lines = self.wrap_ranges(hdc, &self.ai.input, inner_width);
         let shown = lines.len().clamp(1, COMPOSER_LINES);
         let composer = RECT {
-            top: content.bottom - (shown as i32 * line_height + s(28)).max(s(50)),
+            top: content.bottom - self.ai_composer_height(chips_height, shown, line_height),
             ..content
         };
-        let mut conversation_bottom = composer.top - s(10);
-        // Files waiting to go with the question, above the box.
-        if !self.ai.attachments.is_empty() {
-            let chips: Vec<ChipSpec> = self
-                .ai
-                .attachments
-                .iter()
-                .map(|attached| ChipSpec {
-                    path: attached.path.clone(),
-                    label: if attached.secret {
-                        format!("{} \u{00b7} looks like secrets", attached.name)
-                    } else {
-                        attached.name.clone()
-                    },
-                    warn: attached.secret,
-                })
-                .collect();
-            let (spans, height) =
-                self.ai_chip_spans(hdc, &chips, composer.right - composer.left, true);
-            let top = conversation_bottom - height;
-            let mut hits = Vec::new();
-            for (index, (chip, span)) in chips.iter().zip(&spans).enumerate() {
-                let rect = RECT {
-                    left: composer.left + span.left,
-                    top: top + span.top,
-                    right: composer.left + span.right,
-                    bottom: top + span.bottom,
-                };
-                if let Some(close) = self.paint_ai_chip(hdc, rect, chip, true) {
-                    hits.push((close, index));
-                }
-            }
-            self.ai.hits.borrow_mut().chip_close = hits;
-            conversation_bottom = top - s(8);
-        }
-        if let Some(label) = self.ai_selection_label() {
-            let top = conversation_bottom - line_height;
-            self.paint_ai_context(hdc, &label, RECT { top, ..composer });
-            conversation_bottom = top - s(6);
-        }
+        let conversation_bottom = composer.top - s(10);
         self.paint_ai_conversation(
             hdc,
             RECT {
                 bottom: conversation_bottom,
+                left: content.left + s(4),
+                right: content.right - s(4),
                 ..content
             },
         );
-        self.paint_ai_composer(hdc, composer, &lines, true);
+        self.paint_ai_composer(hdc, composer, &chips, &spans, true);
         if self.ai_mention_query().is_some() {
             self.paint_ai_mentions(hdc, composer, conversation_bottom, header_bottom);
         }
         if self.ai.model_menu_open {
-            self.paint_ai_model_picker(hdc, rect, header_bottom);
+            self.paint_ai_model_picker(hdc, rect, header_bottom, composer.top);
         }
     }
 
-    // A 35 px header like the side panels': CHAT, the model (its picker),
-    // New Chat and Close.
+    // The message box's height: its chips, `shown` lines of text and the
+    // row of buttons under them.
+    fn ai_composer_height(&self, chips_height: i32, shown: usize, line_height: i32) -> i32 {
+        let s = |value: i32| self.scale(value);
+        s(10) + chips_height + shown as i32 * line_height + s(6) + s(28) + s(6)
+    }
+
+    // The chips above the text: attached files, then the selection or the
+    // open file (the last one, when there is one).
+    fn ai_composer_chips(&self) -> Vec<ChipSpec> {
+        let mut chips: Vec<ChipSpec> = self
+            .ai
+            .attachments
+            .iter()
+            .map(|attached| ChipSpec {
+                path: attached.path.clone(),
+                label: if attached.secret {
+                    format!("{} \u{00b7} looks like secrets", attached.name)
+                } else {
+                    attached.name.clone()
+                },
+                warn: attached.secret,
+                offered: false,
+            })
+            .collect();
+        match self.ai_context_offer() {
+            Some(ContextOffer::Selection(label)) => chips.push(ChipSpec {
+                path: self
+                    .doc()
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("untitled.txt")),
+                label: label.replacen(", ", " \u{00b7} ", 1),
+                warn: false,
+                offered: false,
+            }),
+            Some(ContextOffer::OpenFile(path)) => chips.push(ChipSpec {
+                label: self.ai_file_name(&path),
+                path,
+                warn: false,
+                offered: true,
+            }),
+            None => {}
+        }
+        chips
+    }
+
+    // A 35 px header like the side panels': CHAT and the chat's first
+    // question, New Chat and Close.
     fn paint_ai_header(&self, hdc: HDC, rect: RECT, header_bottom: i32) {
         let s = |value: i32| self.scale(value);
         unsafe { SelectObject(hdc, self.ui_font) };
@@ -239,7 +277,8 @@ impl App {
             bottom: mid + s(12),
         };
         self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, close, s(16));
-        if let Some(model) = self.settings.ai_model.as_deref() {
+        let mut right = close.left;
+        if self.settings.ai_model.is_some() {
             let new_chat = RECT {
                 left: close.left - s(26),
                 right: close.left - s(2),
@@ -247,52 +286,29 @@ impl App {
             };
             self.glyph_in(hdc, DebugGlyph::Plus, self.theme.muted, new_chat, s(16));
             self.ai.hits.borrow_mut().new_chat = Some(new_chat);
-
-            let label = ai::model_label(model);
-            let chip_left = title_right + s(10);
-            let chip_right =
-                (chip_left + self.text_width(hdc, &label) + s(30)).min(new_chat.left - s(8));
-            if chip_right - chip_left >= s(56) {
-                let chip = RECT {
-                    left: chip_left,
-                    top: mid - s(11),
-                    right: chip_right,
-                    bottom: mid + s(11),
-                };
-                let fill = if self.ai.model_menu_open {
-                    blend(self.theme.sidebar_bg, self.theme.violet, 0.3)
-                } else {
-                    blend(self.theme.sidebar_bg, self.theme.violet, 0.14)
-                };
-                Self::rounded_fill(hdc, chip, s(4), fill);
-                self.label_ellipsis(
-                    hdc,
-                    &label,
-                    chip.left + s(8),
-                    mid - self.text_height(hdc) / 2,
-                    blend(self.theme.violet, self.theme.text, 0.6),
-                    RECT {
-                        right: chip.right - s(20),
-                        ..chip
-                    },
-                );
-                self.glyph_in(
-                    hdc,
-                    if self.ai.model_menu_open {
-                        DebugGlyph::ChevronUp
-                    } else {
-                        DebugGlyph::ChevronDown
-                    },
-                    self.theme.muted,
-                    RECT {
-                        left: chip.right - s(20),
-                        right: chip.right - s(4),
-                        ..chip
-                    },
-                    s(12),
-                );
-                self.ai.hits.borrow_mut().model = Some(chip);
-            }
+            right = new_chat.left;
+        }
+        // The chat's first question names it.
+        if let Some(first) = self
+            .ai
+            .entries
+            .iter()
+            .find(|entry| entry.role == Role::User)
+        {
+            let name = first.text.lines().next().unwrap_or_default();
+            unsafe { SelectObject(hdc, self.small_font) };
+            self.label_ellipsis(
+                hdc,
+                &format!("\u{00b7}  {name}"),
+                title_right + s(8),
+                mid - self.text_height(hdc) / 2,
+                self.theme.muted,
+                RECT {
+                    right: right - s(8),
+                    ..rect
+                },
+            );
+            unsafe { SelectObject(hdc, self.ui_font) };
         }
         Self::fill(
             hdc,
@@ -308,14 +324,15 @@ impl App {
 
     /// The themed model picker. It deliberately stays within the assistant
     /// card and above the composer, unlike the old native popup menu.
-    fn paint_ai_model_picker(&self, hdc: HDC, panel: RECT, header_bottom: i32) {
+    // It opens above the message box (`above`), where its chip is.
+    fn paint_ai_model_picker(&self, hdc: HDC, panel: RECT, header_bottom: i32, above: i32) {
         let s = |value: i32| self.scale(value);
-        let menu_top = header_bottom + s(8);
+        let menu_bottom = above - s(8);
         let menu = RECT {
             left: panel.left + s(18),
-            top: menu_top,
+            top: (menu_bottom - s(451)).max(header_bottom + s(8)),
             right: panel.right - s(18),
-            bottom: (menu_top + s(451)).min(panel.bottom - s(78)),
+            bottom: menu_bottom,
         };
         if menu.right - menu.left < s(210) || menu.bottom - menu.top < s(240) {
             return;
@@ -486,6 +503,7 @@ impl App {
         let row_height = s(36);
         let section_height = s(22);
         let current = self.settings.ai_model.as_deref();
+        let remote = !ai::is_local(&self.settings.ai_endpoint);
         let mut y = list.top;
         let mut previous_cloud = None;
         let mut visible_rows = 0usize;
@@ -499,7 +517,18 @@ impl App {
                 if y + section_height + row_height > list.bottom {
                     break;
                 }
-                let title = if cloud { "CLOUD" } else { "LOCAL" };
+                // From a cloud service, every model is that service's.
+                let title = if remote {
+                    if ai::is_anthropic(&self.settings.ai_endpoint) {
+                        "ANTHROPIC"
+                    } else {
+                        "MODELS"
+                    }
+                } else if cloud {
+                    "CLOUD"
+                } else {
+                    "LOCAL"
+                };
                 Self::label(
                     hdc,
                     title,
@@ -555,6 +584,8 @@ impl App {
 
             let meta = if selected {
                 "Selected"
+            } else if remote {
+                ""
             } else if cloud {
                 "Cloud"
             } else {
@@ -593,7 +624,7 @@ impl App {
             }
             self.label_ellipsis(
                 hdc,
-                model,
+                &ai::model_label(model),
                 row.left + s(64),
                 row.top + s(8),
                 self.theme.text,
@@ -968,56 +999,93 @@ impl App {
     fn paint_ai_empty_chat(&self, hdc: HDC, area: RECT) {
         let s = |value: i32| self.scale(value);
         let mut y = self.paint_ai_intro(hdc, area, "Ask about your code");
-        let line_height = self.text_height(hdc) + s(4);
-        let model = self.settings.ai_model.as_deref().unwrap_or_default();
+        unsafe { SelectObject(hdc, self.small_font) };
+        let small = self.text_height(hdc) + s(4);
+        let model = self
+            .settings
+            .ai_model
+            .as_deref()
+            .map(ai::model_label)
+            .unwrap_or_default();
+        let raw = self.settings.ai_model.as_deref().unwrap_or_default();
         let local = ai::is_local(&self.settings.ai_endpoint);
         let source = if !local {
             format!(
-                "Answers come from {model} via {}: your questions and the code you \
-                 include are sent there.",
+                "Answers come from {model} via {}. Your question and the files shown as \
+                 chips are sent there.",
                 ai::host(&self.settings.ai_endpoint)
             )
-        } else if ai::is_cloud_model(model) {
+        } else if ai::is_cloud_model(raw) {
             format!(
-                "Answers come from {model}, a cloud model: your questions and the code \
-                 you include are sent to ollama.com."
+                "Answers come from {model}, a cloud model. Your question and the files \
+                 shown as chips are sent to ollama.com."
             )
         } else {
-            format!("Answers come from {model}, running on your PC.")
+            format!("Answers come from {model}, running on this PC.")
         };
-        y = self.paint_wrapped(
-            hdc,
-            &format!(
-                "Select code in the editor to include it with your question, or type @ to \
-                 attach files. {source}"
+        y = self.paint_wrapped(hdc, &source, area, y, small, self.theme.muted);
+        unsafe { SelectObject(hdc, self.ui_font) };
+
+        y += s(12);
+        let row = s(32);
+        let mut hits = Vec::new();
+        for (glyph, label, task) in [
+            (DebugGlyph::Book, "Explain this file", AiTask::ExplainFile),
+            (
+                DebugGlyph::Warning,
+                "Fix problems in the selection",
+                AiTask::Fix,
             ),
+            (
+                DebugGlyph::Check,
+                "Write tests for the selection",
+                AiTask::Tests,
+            ),
+        ] {
+            let rect = RECT {
+                left: area.left,
+                top: y,
+                right: area.right,
+                bottom: y + row,
+            };
+            if rect.bottom > area.bottom {
+                break;
+            }
+            self.panel_card(hdc, rect, s(6), self.theme.edge, self.theme.sidebar_bg);
+            self.glyph_in(
+                hdc,
+                glyph,
+                self.theme.muted,
+                RECT {
+                    left: rect.left + s(6),
+                    right: rect.left + s(30),
+                    ..rect
+                },
+                s(15),
+            );
+            self.label_mid(
+                hdc,
+                label,
+                rect.left + s(34),
+                (rect.top + rect.bottom) / 2,
+                self.theme.text,
+                rect,
+            );
+            hits.push((rect, task));
+            y = rect.bottom + s(6);
+        }
+        self.ai.hits.borrow_mut().suggestions = hits;
+        y += s(10);
+        unsafe { SelectObject(hdc, self.small_font) };
+        self.paint_wrapped(
+            hdc,
+            "Nothing is sent until you ask, and nothing runs in the background.",
             area,
             y,
-            line_height,
-            self.theme.text,
-        );
-        self.paint_ai_promises(hdc, area, y + s(12), line_height);
-    }
-
-    // The line above the message box saying which code will be sent.
-    fn paint_ai_context(&self, hdc: HDC, label: &str, row: RECT) {
-        let s = |value: i32| self.scale(value);
-        unsafe { SelectObject(hdc, self.ui_font) };
-        let dot = RECT {
-            left: row.left + s(2),
-            top: row.top + s(7),
-            right: row.left + s(9),
-            bottom: row.top + s(14),
-        };
-        Self::rounded_fill(hdc, dot, s(3), self.theme.violet);
-        self.label_ellipsis(
-            hdc,
-            &format!("Includes {label}"),
-            row.left + s(16),
-            row.top,
+            small,
             self.theme.muted,
-            row,
         );
+        unsafe { SelectObject(hdc, self.ui_font) };
     }
 
     fn paint_ai_conversation(&self, hdc: HDC, area: RECT) {
@@ -2100,11 +2168,20 @@ impl App {
     // The message box: `lines` of typed text (already wrapped), and the Send
     // button, which is Stop while an answer arrives. Disabled until a model
     // is chosen.
-    // `lines`: the typed text wrapped (byte ranges of it); as many as fit
-    // are shown, keeping the caret's line in view.
-    fn paint_ai_composer(&self, hdc: HDC, input: RECT, lines: &[(usize, usize)], enabled: bool) {
+    // The message box in `input`: `chips` (placed at `spans`) for what goes
+    // with the question, the typed text wrapped, as many lines as fit with
+    // the caret's line in view, and a row with @, the model and Send.
+    // Disabled until a model is chosen.
+    fn paint_ai_composer(
+        &self,
+        hdc: HDC,
+        input: RECT,
+        chips: &[ChipSpec],
+        spans: &[RECT],
+        enabled: bool,
+    ) {
         let s = |value: i32| self.scale(value);
-        if input.bottom - input.top < s(30) {
+        if input.bottom - input.top < s(40) {
             return;
         }
         let focused = enabled && self.ai_typing();
@@ -2114,29 +2191,60 @@ impl App {
             self.theme.edge
         };
         self.panel_card(hdc, input, s(9), edge, self.theme.editor_bg);
-        let send = RECT {
-            left: input.right - s(42),
-            top: input.bottom - s(43),
-            right: input.right - s(7),
-            bottom: input.bottom - s(8),
-        };
+        let inner_left = input.left + s(12);
+        let mut top = input.top + s(10);
+
+        // Chips: attached files (✕ takes one off), then the selection or
+        // the open file.
+        if !chips.is_empty() {
+            let attached = self.ai.attachments.len();
+            let mut closes = Vec::new();
+            let mut bottom = top;
+            for (index, (chip, span)) in chips.iter().zip(spans).enumerate() {
+                let rect = RECT {
+                    left: inner_left + span.left,
+                    top: top + span.top,
+                    right: inner_left + span.right,
+                    bottom: top + span.bottom,
+                };
+                bottom = bottom.max(rect.bottom);
+                if let Some(close) = self.paint_ai_chip(hdc, rect, chip, true) {
+                    if index < attached {
+                        closes.push((close, index));
+                    } else {
+                        self.ai.hits.borrow_mut().context_close = Some(close);
+                    }
+                }
+            }
+            self.ai.hits.borrow_mut().chip_close = closes;
+            top = bottom + s(6);
+        }
+
+        let row_top = input.bottom - s(6) - s(28);
         let text = RECT {
-            left: input.left + s(14),
-            top: input.top + s(14),
-            right: send.left - s(8),
-            bottom: input.bottom - s(10),
+            left: inner_left,
+            top,
+            right: input.right - s(12),
+            bottom: row_top - s(4),
         };
         unsafe { SelectObject(hdc, self.ui_font) };
         let line_height = self.text_height(hdc) + s(4);
+        let lines = if enabled {
+            self.wrap_ranges(hdc, &self.ai.input, text.right - text.left)
+        } else {
+            Vec::new()
+        };
         if !enabled || self.ai.input.is_empty() {
-            let placeholder = if enabled {
-                "Ask about your code\u{2026} (@ to attach files)".to_string()
+            let placeholder = if !enabled {
+                "Connect a model to start chatting"
+            } else if self.ai.entries.is_empty() {
+                "Ask about your code\u{2026} (@ for files)"
             } else {
-                "Connect a model to start chatting".to_string()
+                "Ask a follow-up\u{2026} (@ for files)"
             };
             self.label_ellipsis(
                 hdc,
-                &placeholder,
+                placeholder,
                 text.left,
                 text.top,
                 self.theme.muted,
@@ -2145,7 +2253,7 @@ impl App {
         }
         // The lines shown: the caret's line stays in view.
         let caret = self.ai.caret.min(self.ai.input.len());
-        let caret_line = super::super::ai_composer::caret_line(lines, caret);
+        let caret_line = super::super::ai_composer::caret_line(&lines, caret);
         let fit = (((text.bottom - text.top) / line_height.max(1)) as usize).max(1);
         let first = self
             .ai
@@ -2179,7 +2287,7 @@ impl App {
                 end,
             });
         }
-        *self.ai.composer_lines.borrow_mut() = lines.to_vec();
+        *self.ai.composer_lines.borrow_mut() = lines.clone();
         *self.ai.composer_rows.borrow_mut() = rows;
         if focused {
             let (x, y) = match lines.get(caret_line) {
@@ -2202,6 +2310,83 @@ impl App {
             );
         }
 
+        // The row under the text: @, the model, and Send (Stop while an
+        // answer arrives).
+        let row_mid = row_top + s(14);
+        let mut x = input.left + s(6);
+        if enabled {
+            let at = RECT {
+                left: x,
+                top: row_mid - s(12),
+                right: x + s(26),
+                bottom: row_mid + s(12),
+            };
+            self.label_mid(
+                hdc,
+                "@",
+                at.left + (s(26) - self.text_width(hdc, "@")) / 2,
+                row_mid,
+                self.theme.muted,
+                at,
+            );
+            self.ai.hits.borrow_mut().at_button = Some(at);
+            x = at.right + s(4);
+            if let Some(model) = self.settings.ai_model.as_deref() {
+                unsafe { SelectObject(hdc, self.small_font) };
+                let label = ai::model_label(model);
+                let chip = RECT {
+                    left: x,
+                    top: row_mid - s(12),
+                    right: (x + self.text_width(hdc, &label) + s(30)).min(input.right - s(48)),
+                    bottom: row_mid + s(12),
+                };
+                if chip.right - chip.left >= s(48) {
+                    if self.ai.model_menu_open {
+                        Self::rounded_fill(
+                            hdc,
+                            chip,
+                            s(4),
+                            blend(self.theme.editor_bg, self.theme.violet, 0.25),
+                        );
+                    }
+                    self.label_ellipsis(
+                        hdc,
+                        &label,
+                        chip.left + s(8),
+                        row_mid - self.text_height(hdc) / 2,
+                        blend(self.theme.muted, self.theme.text, 0.5),
+                        RECT {
+                            right: chip.right - s(20),
+                            ..chip
+                        },
+                    );
+                    self.glyph_in(
+                        hdc,
+                        if self.ai.model_menu_open {
+                            DebugGlyph::ChevronUp
+                        } else {
+                            DebugGlyph::ChevronDown
+                        },
+                        self.theme.muted,
+                        RECT {
+                            left: chip.right - s(20),
+                            right: chip.right - s(4),
+                            ..chip
+                        },
+                        s(12),
+                    );
+                    self.ai.hits.borrow_mut().model = Some(chip);
+                }
+                unsafe { SelectObject(hdc, self.ui_font) };
+            }
+        }
+
+        let send = RECT {
+            left: input.right - s(6) - s(32),
+            top: row_mid - s(13),
+            right: input.right - s(6),
+            bottom: row_mid + s(13),
+        };
         let busy = enabled && self.ai.busy();
         let ready = enabled && !self.ai.input.trim().is_empty();
         let fill = if ready && !busy {
@@ -2209,7 +2394,7 @@ impl App {
         } else {
             self.theme.active_bg
         };
-        Self::rounded_fill(hdc, send, s(9), fill);
+        Self::rounded_fill(hdc, send, s(6), fill);
         unsafe {
             if busy {
                 // Stop: a square.
@@ -2235,21 +2420,22 @@ impl App {
                 let previous_brush = SelectObject(hdc, brush);
                 let previous_pen = SelectObject(hdc, GetStockObject(NULL_PEN));
                 let middle = (send.top + send.bottom) / 2;
+                let cx = (send.left + send.right) / 2;
                 let points = [
                     POINT {
-                        x: send.left + s(10),
-                        y: send.top + s(8),
+                        x: cx - s(6),
+                        y: middle - s(6),
                     },
                     POINT {
-                        x: send.right - s(8),
+                        x: cx + s(7),
                         y: middle,
                     },
                     POINT {
-                        x: send.left + s(10),
-                        y: send.bottom - s(8),
+                        x: cx - s(6),
+                        y: middle + s(6),
                     },
                     POINT {
-                        x: send.left + s(14),
+                        x: cx - s(3),
                         y: middle,
                     },
                 ];
@@ -2314,13 +2500,17 @@ impl App {
         } else {
             self.theme.blue
         };
-        self.panel_card(
-            hdc,
-            rect,
-            s(11),
-            blend(back, accent, 0.45),
-            blend(back, accent, 0.1),
-        );
+        if chip.offered {
+            self.panel_card(hdc, rect, s(11), self.theme.edge, self.theme.editor_bg);
+        } else {
+            self.panel_card(
+                hdc,
+                rect,
+                s(11),
+                blend(back, accent, 0.45),
+                blend(back, accent, 0.1),
+            );
+        }
         let icon = s(13);
         let middle = (rect.top + rect.bottom) / 2;
         let icon_left = rect.left + s(7);
@@ -2357,6 +2547,8 @@ impl App {
         unsafe { SelectObject(hdc, self.small_font) };
         let text = if chip.warn {
             blend(self.theme.warning, self.theme.text, 0.3)
+        } else if chip.offered {
+            self.theme.muted
         } else {
             blend(self.theme.muted, self.theme.text, 0.55)
         };

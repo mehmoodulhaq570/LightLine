@@ -289,9 +289,10 @@ pub(super) struct AiChat {
     /// change to the box.
     pub(super) mention_selected: usize,
     pub(super) mention_dismissed: bool,
-    /// The selection or open file the user took off the next question, by
-    /// its document's path (None: an untitled one).
-    pub(super) context_skipped: Option<Option<PathBuf>>,
+    /// The selection or open file the user took off the next question: its
+    /// document's path (None: an untitled one), and whether it was the
+    /// selection.
+    pub(super) context_skipped: Option<(Option<PathBuf>, bool)>,
     /// "Allow for This Chat" was chosen; a new chat asks again.
     pub(super) chat_allowed: bool,
     /// The question waiting on the permission card, and where its answer goes.
@@ -847,10 +848,11 @@ impl App {
             return None;
         }
         let path = self.doc().path.clone();
-        if self.ai.context_skipped.as_ref() == Some(&path) {
+        let selection = self.ai_selection_label();
+        if self.ai.context_skipped.as_ref() == Some(&(path.clone(), selection.is_some())) {
             return None;
         }
-        if let Some(label) = self.ai_selection_label() {
+        if let Some(label) = selection {
             return Some(ContextOffer::Selection(label));
         }
         let path = path?;
@@ -859,10 +861,8 @@ impl App {
             .attachments
             .iter()
             .any(|attached| Self::same_path(&attached.path, &path));
-        (self.settings.ai_include_open_file
-            && !attached
-            && !super::ai_attach::looks_secret(&path))
-        .then_some(ContextOffer::OpenFile(path))
+        (self.settings.ai_include_open_file && !attached && !super::ai_attach::looks_secret(&path))
+            .then_some(ContextOffer::OpenFile(path))
     }
 
     /// Sends the typed message, with the selected code.
@@ -881,13 +881,11 @@ impl App {
         let added = match offer {
             Some(ContextOffer::OpenFile(path)) => {
                 let name = self.ai_file_name(&path);
-                self.ai
-                    .attachments
-                    .push(super::ai_attach::Attachment {
-                        path,
-                        name,
-                        secret: false,
-                    });
+                self.ai.attachments.push(super::ai_attach::Attachment {
+                    path,
+                    name,
+                    secret: false,
+                });
                 true
             }
             _ => false,
@@ -1484,7 +1482,8 @@ impl App {
             self.ai_accept_mention(hwnd, Some(path.clone()));
             self.focus_ai_input();
         } else if hits.context_close.as_ref().is_some_and(inside) {
-            self.ai.context_skipped = Some(self.doc().path.clone());
+            let selection = self.ai_selection_label().is_some();
+            self.ai.context_skipped = Some((self.doc().path.clone(), selection));
             self.focus_ai_input();
         } else if hits.at_button.as_ref().is_some_and(inside) {
             self.focus_ai_input();
