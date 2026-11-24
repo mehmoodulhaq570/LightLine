@@ -641,3 +641,10 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 - Next: part 2 (composer, open-file chip, model picker in composer, empty panel, resizable width in session.json, `aiIncludeOpenFile`), then part 3 (chat history, `chat_store.rs`, `aiKeepChats`).
 - D: is nearly full (~1.4 GB free after `cargo clean --release`).
 - Added on the same branch after feedback: chat answers use their own font sizes (`CHAT_FONT_SIZES` in markdown_view.rs: body 14, code 13, headings 18/16/15/14) and 2 px line gaps (`wrap_code` also means "chat"); the question box has a real caret (`windows_app/ai_composer.rs`: `AiChat.caret`, arrows/Ctrl words, Home/End, Up/Down by wrapped line, Delete, click via `composer_rows`; `@` works on the text before the caret); Copy icons show a green tick for 1.5 s (`AI_COPIED_TIMER` = 29, one-shot). All checked live with real Claude, 0 stale px.
+
+## Part 1 is PR #113; part 2 on branch `ai-chat-redesign-2` (stacked on part 1), 2026-11-24
+
+- Composer: chips row inside the box (attachments + `ai_context_offer`: the selection, else the open file, `ContextOffer`), text up to 8 lines, bottom row @ (inserts @) / model chip (picker now opens above the box, `paint_ai_model_picker(.., above)`) / Send. Taking a chip off sets `AiChat.context_skipped = (path, is_selection)` until send. Setting `aiIncludeOpenFile` (Settings toggle "Include the open file"; settings_panel count test now 28).
+- Header: CHAT · first question. Empty panel: Explain this file (`AiTask::ExplainFile`, whole file), Fix problems in the selection, Write tests for the selection, one privacy line.
+- Resizable: drag the left edge (`on_ai_edge`, `ai_dragging`, `resize_ai_panel`, 300 px to half the room right of the sidebar), width in session.json `aiWidth` (`App.ai_user_width`, also in RecoveryKey). Model menu: ANTHROPIC heading and product names for remote providers.
+- Live with real Claude: open file sent and answered from, chips, menu, @, resize; 0 stale px. Next: part 3 (earlier chats).

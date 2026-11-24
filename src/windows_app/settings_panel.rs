@@ -1245,7 +1245,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 27);
+        assert_eq!(setting_count(), 28);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }
