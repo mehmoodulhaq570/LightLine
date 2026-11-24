@@ -120,7 +120,7 @@ Two crates in one package.
 | File watching | `watcher.rs` | `ReadDirectoryChangesW`, one per watched folder |
 | Extensions | `extensions/` (`zed_registry`, `installer`, `zed_manifest`), `color_theme.rs`, `icon_theme.rs` | See §6 |
 | Markdown | `markdown.rs`, `image_cache.rs` | Blocks for the rendered preview; opt-in web image cache |
-| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…) |
+| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…), plus Claude through Anthropic's Messages API (`is_anthropic`: `x-api-key`, `anthropic-version`, `/v1/messages`, its own SSE events; `ANTHROPIC_API_KEY`) |
 | Process lifetime | `jobs.rs` | Kill-on-close job object: every child process dies with LightLine |
 | Clipboard | `clipboard.rs` | |
 

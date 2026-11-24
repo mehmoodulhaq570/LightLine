@@ -1,12 +1,14 @@
 //! Chatting with a language model through the OpenAI-compatible HTTP API
 //! that Ollama, LM Studio and llama.cpp's server all offer, and cloud
-//! services such as OpenAI, OpenRouter and Groq. Ollama on this PC is the
-//! default, so code never leaves the machine unless the user points
-//! `aiEndpoint` somewhere else.
+//! services such as OpenAI, OpenRouter and Groq; and through Anthropic's own
+//! Messages API for Claude (`is_anthropic`), which has its own request and
+//! streamed events. Ollama on this PC is the default, so code never leaves
+//! the machine unless the user points `aiEndpoint` somewhere else.
 //!
 //! A cloud service wants an API key. It's kept in Windows Credential Manager
-//! under the service's host name (or read from OPENAI_API_KEY), sent only to
-//! that host, and kept out of every error message.
+//! under the service's host name (or read from OPENAI_API_KEY, or
+//! ANTHROPIC_API_KEY for Claude), sent only to that host, and kept out of
+//! every error message.
 //!
 //! Nothing here runs on its own: a request is made only when the user
 //! connects, picks a model or sends a message, always on a worker thread,
@@ -70,19 +72,39 @@ impl Message {
 pub struct Server {
     pub endpoint: String,
     key: Option<String>,
+    // Claude's own API rather than OpenAI's chat format.
+    claude: bool,
 }
 
 impl Server {
     pub fn new(endpoint: impl Into<String>, key: Option<String>) -> Self {
+        let endpoint = endpoint.into();
         Self {
-            endpoint: endpoint.into(),
+            claude: is_anthropic(&endpoint),
+            endpoint,
             key: key
                 .map(|key| key.trim().to_string())
                 .filter(|key| !key.is_empty()),
         }
     }
 
+    // A server on this PC that speaks Claude's API, for tests.
+    #[cfg(test)]
+    fn claude_at(endpoint: impl Into<String>, key: Option<String>) -> Self {
+        Self {
+            claude: true,
+            ..Self::new(endpoint, key)
+        }
+    }
+
     fn authorize<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+        if self.claude {
+            let request = request.header("anthropic-version", ANTHROPIC_VERSION);
+            return match &self.key {
+                Some(key) => request.header("x-api-key", key),
+                None => request,
+            };
+        }
         match &self.key {
             Some(key) => request.header("Authorization", format!("Bearer {key}")),
             None => request,
@@ -161,6 +183,32 @@ pub enum KeySource {
 
 /// The environment variable read when no key is saved.
 pub const KEY_VARIABLE: &str = "OPENAI_API_KEY";
+/// The one read for Claude instead, as Anthropic's own tools do.
+pub const ANTHROPIC_KEY_VARIABLE: &str = "ANTHROPIC_API_KEY";
+
+/// The environment variable that holds a key for `endpoint`.
+pub fn key_variable(endpoint: &str) -> &'static str {
+    if is_anthropic(endpoint) {
+        ANTHROPIC_KEY_VARIABLE
+    } else {
+        KEY_VARIABLE
+    }
+}
+
+// Claude's own API, the Messages API, which isn't OpenAI's chat format: its
+// own address, headers, request and streamed events.
+const ANTHROPIC_HOST: &str = "api.anthropic.com";
+const ANTHROPIC_VERSION: &str = "2026-10-21";
+// Lets a request Claude's safety checks decline be answered by another
+// Claude model where one can.
+const ANTHROPIC_FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+/// The Claude model a new connection starts with.
+pub const CLAUDE_DEFAULT_MODEL: &str = "claude-opus-5-5";
+
+/// Whether `endpoint` is Anthropic's Claude API.
+pub fn is_anthropic(endpoint: &str) -> bool {
+    host(endpoint) == ANTHROPIC_HOST
+}
 
 // The Credential Manager entry holding the key for `endpoint`'s host.
 #[cfg(windows)]
@@ -169,7 +217,8 @@ fn key_target(endpoint: &str) -> String {
 }
 
 /// The key to send to `endpoint`: the one saved for its host, else
-/// OPENAI_API_KEY. None for a server on this PC.
+/// OPENAI_API_KEY (ANTHROPIC_API_KEY for Claude). None for a server on
+/// this PC.
 pub fn find_key(endpoint: &str) -> Option<(String, KeySource)> {
     if is_local(endpoint) {
         return None;
@@ -178,7 +227,7 @@ pub fn find_key(endpoint: &str) -> Option<(String, KeySource)> {
     if let Some(key) = crate::credentials::read(&key_target(endpoint)) {
         return Some((key, KeySource::Saved));
     }
-    std::env::var(KEY_VARIABLE)
+    std::env::var(key_variable(endpoint))
         .ok()
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty())
@@ -254,7 +303,13 @@ fn server_error(status: u16, body: &str) -> String {
 /// The models `server` offers, sorted by name.
 pub fn list_models(server: &Server) -> Result<Vec<String>, String> {
     let endpoint = server.endpoint.as_str();
-    let request = ureq::get(&api_url(endpoint, "models"))
+    // Claude's list comes 20 to a page unless asked for more.
+    let path = if server.claude {
+        "models?limit=1000"
+    } else {
+        "models"
+    };
+    let request = ureq::get(&api_url(endpoint, path))
         .config()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_global(Some(LIST_TIMEOUT))
@@ -345,6 +400,10 @@ pub fn is_cloud_model(model: &str) -> bool {
 /// is preferred, and a dated snapshot or a preview comes after the model
 /// it's a version of.
 pub fn pick_model(models: &[String], remote: bool) -> Option<String> {
+    // From Claude's API, its current Opus.
+    if let Some(claude) = models.iter().find(|model| *model == CLAUDE_DEFAULT_MODEL) {
+        return Some(claude.clone());
+    }
     let rank = |model: &str| {
         let model = model.to_ascii_lowercase();
         let chat = !model.contains("base");
@@ -377,6 +436,140 @@ fn request_body(model: &str, messages: &[Message]) -> String {
         .map(|message| json!({"role": message.role.as_str(), "content": message.content}))
         .collect();
     json!({"model": model, "messages": messages, "stream": true}).to_string()
+}
+
+/// What an answer is for: a chat answer may think a while; an inline
+/// completion should come quickly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Purpose {
+    Chat,
+    Inline,
+}
+
+// Claude models of the current API generation: adaptive thinking, the
+// `effort` setting and up to 128K tokens of output. Older ones take fewer
+// tokens and refuse `effort`.
+fn claude_current(model: &str) -> bool {
+    const CURRENT: [&str; 9] = [
+        "claude-fable",
+        "claude-mythos",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+    ];
+    let model = model.to_ascii_lowercase();
+    CURRENT.iter().any(|family| model.starts_with(family))
+}
+
+// Models whose declined answers another Claude model can take over.
+fn claude_has_fallbacks(model: &str) -> bool {
+    matches!(
+        model,
+        "claude-fable-5-2"
+            | "claude-fable-5-1"
+            | "claude-mythos-5-2"
+            | "claude-mythos-5-1"
+            | "claude-opus-5-5"
+            | "claude-opus-5"
+            | "claude-sonnet-5-5"
+    )
+}
+
+/// What Claude's API takes for `messages`. Its system prompt is a field of
+/// its own, turns alternate between user and assistant starting with the
+/// user, and none may be empty: system messages are joined into `system`,
+/// neighbouring turns of one role are joined, and empty ones (an answer
+/// that was stopped before it began) and a leading assistant turn dropped.
+fn claude_request_body(model: &str, messages: &[Message], purpose: Purpose) -> String {
+    let system: Vec<&str> = messages
+        .iter()
+        .filter(|message| message.role == Role::System && !message.content.trim().is_empty())
+        .map(|message| message.content.as_str())
+        .collect();
+    let mut turns: Vec<(Role, String)> = Vec::new();
+    for message in messages {
+        if message.role == Role::System || message.content.trim().is_empty() {
+            continue;
+        }
+        match turns.last_mut() {
+            Some((role, text)) if *role == message.role => {
+                text.push_str("\n\n");
+                text.push_str(&message.content);
+            }
+            _ => turns.push((message.role, message.content.clone())),
+        }
+    }
+    let first_user = turns
+        .iter()
+        .position(|(role, _)| *role == Role::User)
+        .unwrap_or(turns.len());
+    let turns: Vec<Value> = turns[first_user..]
+        .iter()
+        .map(|(role, text)| json!({"role": role.as_str(), "content": text}))
+        .collect();
+    let current = claude_current(model);
+    let mut body = json!({
+        "model": model,
+        "max_tokens": if current { 64_000 } else { 4_096 },
+        "stream": true,
+        "messages": turns,
+    });
+    if !system.is_empty() {
+        body["system"] = json!(system.join("\n\n"));
+    }
+    if current {
+        let effort = match purpose {
+            Purpose::Chat => "medium",
+            Purpose::Inline => "low",
+        };
+        body["output_config"] = json!({"effort": effort});
+    }
+    if claude_has_fallbacks(model) {
+        body["fallbacks"] = json!("default");
+    }
+    body.to_string()
+}
+
+/// Shown when Claude's safety checks decline to answer.
+pub const CLAUDE_DECLINED: &str = "Claude declined to answer this request.";
+
+// One line of Claude's streamed answer: "data: {json}" whose "type" says
+// what it is. Text arrives as content_block_delta / text_delta; thinking
+// and the rest are skipped; message_stop ends it.
+fn parse_claude_event(line: &str) -> Event {
+    let Some(data) = line.strip_prefix("data:") else {
+        return Event::Nothing;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(data.trim()) else {
+        return Event::Nothing;
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("content_block_delta") => {
+            match (
+                value.pointer("/delta/type").and_then(Value::as_str),
+                value.pointer("/delta/text").and_then(Value::as_str),
+            ) {
+                (Some("text_delta"), Some(text)) if !text.is_empty() => {
+                    Event::Text(text.to_owned())
+                }
+                _ => Event::Nothing,
+            }
+        }
+        Some("message_delta")
+            if value.pointer("/delta/stop_reason").and_then(Value::as_str) == Some("refusal") =>
+        {
+            Event::Error(CLAUDE_DECLINED.into())
+        }
+        Some("message_stop") => Event::Done,
+        Some("error") => Event::Error(
+            error_message(&value).unwrap_or_else(|| "Claude's API reported an error".into()),
+        ),
+        _ => Event::Nothing,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -424,27 +617,43 @@ pub fn stream_chat(
     cancel: &AtomicBool,
     on_text: impl FnMut(&str),
 ) -> Result<(), String> {
-    stream_answer(server, model, messages, cancel, on_text).map_err(|error| server.redact(error))
+    stream_answer(server, model, messages, Purpose::Chat, cancel, on_text)
+        .map_err(|error| server.redact(error))
 }
 
 fn stream_answer(
     server: &Server,
     model: &str,
     messages: &[Message],
+    purpose: Purpose,
     cancel: &AtomicBool,
     mut on_text: impl FnMut(&str),
 ) -> Result<(), String> {
     let endpoint = server.endpoint.as_str();
-    let request = ureq::post(&api_url(endpoint, "chat/completions"))
+    let claude = server.claude;
+    let (path, body, parse): (&str, String, fn(&str) -> Event) = if claude {
+        let body = claude_request_body(model, messages, purpose);
+        ("messages", body, parse_claude_event)
+    } else {
+        (
+            "chat/completions",
+            request_body(model, messages),
+            parse_event,
+        )
+    };
+    let mut request = ureq::post(&api_url(endpoint, path))
         .config()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_recv_response(Some(FIRST_TOKEN_TIMEOUT))
         .http_status_as_error(false)
         .build()
         .header("Content-Type", "application/json");
+    if claude && claude_has_fallbacks(model) {
+        request = request.header("anthropic-beta", ANTHROPIC_FALLBACK_BETA);
+    }
     let response = server
         .authorize(request)
-        .send(request_body(model, messages))
+        .send(body)
         .map_err(|error| unreachable(endpoint, &error))?;
     let status = response.status().as_u16();
     let mut body = response.into_body();
@@ -488,7 +697,7 @@ fn stream_answer(
         };
         last_line = Instant::now();
         let line = line.map_err(|error| format!("The answer was cut off ({error})"))?;
-        match parse_event(&line) {
+        match parse(&line) {
             Event::Text(text) => {
                 quiet_limit = STALL_TIMEOUT;
                 received += text.len();
@@ -528,9 +737,10 @@ pub fn complete_inline(
         Message::new(Role::User, prompt),
     ];
     let mut output = String::new();
-    stream_chat(server, model, &messages, cancel, |chunk| {
+    stream_answer(server, model, &messages, Purpose::Inline, cancel, |chunk| {
         output.push_str(chunk);
-    })?;
+    })
+    .map_err(|error| server.redact(error))?;
     Ok(clean_inline_completion(&output))
 }
 
@@ -788,6 +998,169 @@ mod tests {
                 .contains("authorization: bearer sk-test-123")
         );
         assert!(!format!("{server:?}").contains("sk-test-123"));
+    }
+
+    #[test]
+    fn claude_is_recognized_by_its_host_and_reads_its_own_key_variable() {
+        assert!(is_anthropic("https://api.anthropic.com"));
+        assert!(is_anthropic("https://API.anthropic.com/v1/"));
+        assert!(!is_anthropic("https://api.openai.com"));
+        assert!(!is_anthropic("https://openrouter.ai/api"));
+        assert_eq!(
+            key_variable("https://api.anthropic.com"),
+            "ANTHROPIC_API_KEY"
+        );
+        assert_eq!(key_variable("https://api.openai.com"), "OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn claude_gets_its_own_request() {
+        let messages = [
+            Message::new(Role::System, "Be brief."),
+            // An earlier answer that was stopped before it began.
+            Message::new(Role::Assistant, ""),
+            Message::new(Role::User, "first"),
+            Message::new(Role::User, "and more"),
+            Message::new(Role::Assistant, "an answer"),
+            Message::new(Role::User, "next"),
+        ];
+        let body: Value = serde_json::from_str(&claude_request_body(
+            "claude-opus-5-5",
+            &messages,
+            Purpose::Chat,
+        ))
+        .unwrap();
+        assert_eq!(body["model"], "claude-opus-5-5");
+        assert_eq!(body["system"], "Be brief.");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["max_tokens"], 64_000);
+        assert_eq!(body["output_config"]["effort"], "medium");
+        assert_eq!(body["fallbacks"], "default");
+        assert_eq!(
+            body["messages"],
+            json!([
+                {"role": "user", "content": "first\n\nand more"},
+                {"role": "assistant", "content": "an answer"},
+                {"role": "user", "content": "next"},
+            ])
+        );
+        // Sampling settings are refused by the API version LightLine sends.
+        assert!(body.get("temperature").is_none());
+
+        let inline: Value = serde_json::from_str(&claude_request_body(
+            "claude-sonnet-5-5",
+            &messages,
+            Purpose::Inline,
+        ))
+        .unwrap();
+        assert_eq!(inline["output_config"]["effort"], "low");
+
+        // Older models take less output and no effort setting.
+        let old: Value = serde_json::from_str(&claude_request_body(
+            "claude-haiku-4-5",
+            &messages,
+            Purpose::Chat,
+        ))
+        .unwrap();
+        assert_eq!(old["max_tokens"], 4_096);
+        assert!(old.get("output_config").is_none());
+        assert!(old.get("fallbacks").is_none());
+    }
+
+    #[test]
+    fn claudes_stream_becomes_text_done_or_errors() {
+        let text = r#"data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hi"}}"#;
+        assert_eq!(parse_claude_event(text), Event::Text("Hi".into()));
+        let thinking = r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}"#;
+        assert_eq!(parse_claude_event(thinking), Event::Nothing);
+        assert_eq!(parse_claude_event("event: ping"), Event::Nothing);
+        assert_eq!(
+            parse_claude_event(r#"data: {"type":"message_stop"}"#),
+            Event::Done
+        );
+        let refused = r#"data: {"type":"message_delta","delta":{"stop_reason":"refusal"}}"#;
+        assert_eq!(
+            parse_claude_event(refused),
+            Event::Error(CLAUDE_DECLINED.into())
+        );
+        let finished = r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#;
+        assert_eq!(parse_claude_event(finished), Event::Nothing);
+        let overloaded =
+            r#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
+        assert_eq!(
+            parse_claude_event(overloaded),
+            Event::Error("Overloaded".into())
+        );
+    }
+
+    #[test]
+    fn claude_answers_stream_with_its_headers() {
+        let (endpoint, request) = serve_and_record(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+             event: message_start\ndata: {\"type\":\"message_start\",\"message\":{}}\n\n\
+             event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n\
+             event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" there\"}}\n\n\
+             event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
+        let cancel = AtomicBool::new(false);
+        let mut answer = String::new();
+        let messages = [Message::new(Role::User, "hi")];
+        stream_chat(&server, "claude-opus-5-5", &messages, &cancel, |piece| {
+            answer.push_str(piece)
+        })
+        .unwrap();
+        assert_eq!(answer, "Hello there");
+        let request = request.recv().unwrap();
+        let lower = request.to_ascii_lowercase();
+        assert!(lower.starts_with("post /v1/messages "), "{request}");
+        assert!(lower.contains("x-api-key: sk-ant-test"), "{request}");
+        assert!(lower.contains("anthropic-version: 2026-10-21"), "{request}");
+        assert!(
+            lower.contains("anthropic-beta: server-side-fallback-2026-07-01"),
+            "{request}"
+        );
+        assert!(!lower.contains("authorization"), "{request}");
+    }
+
+    #[test]
+    fn claudes_errors_and_model_list_are_read() {
+        let (endpoint, request) = serve_and_record(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: 109\r\n\r\n{\"data\":[{\"type\":\"model\",\"id\":\"claude-sonnet-5-5\"},\
+             {\"type\":\"model\",\"id\":\"claude-opus-5-5\"}],\"has_more\":false}",
+        );
+        let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
+        let models = list_models(&server).unwrap();
+        assert_eq!(models, ["claude-opus-5-5", "claude-sonnet-5-5"]);
+        assert!(
+            request
+                .recv()
+                .unwrap()
+                .starts_with("GET /v1/models?limit=1000 ")
+        );
+        // Claude's Opus is where a new connection starts.
+        assert_eq!(
+            pick_model(&models, true).as_deref(),
+            Some(CLAUDE_DEFAULT_MODEL)
+        );
+
+        let endpoint = serve_once(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: 86\r\n\r\n{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}",
+        );
+        let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
+        let error = list_models(&server).unwrap_err();
+        assert!(error.contains("didn't accept the API key"), "{error}");
+
+        let endpoint = serve_once(
+            "HTTP/1.1 529 Overloaded\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: 75\r\n\r\n{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}",
+        );
+        let cancel = AtomicBool::new(false);
+        let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
+        let error = stream_chat(&server, "claude-opus-5-5", &[], &cancel, |_| {}).unwrap_err();
+        assert_eq!(error, "Overloaded");
     }
 
     #[test]
