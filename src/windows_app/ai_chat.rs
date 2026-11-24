@@ -58,9 +58,20 @@ enum AiEvent {
     Provider(u64, Result<Vec<String>, String>),
 }
 
+/// The chip for what goes with the next question besides attached files.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum ContextOffer {
+    /// The selection, e.g. "app.rs, lines 40–82".
+    Selection(String),
+    /// The open file, sent like an attached one.
+    OpenFile(PathBuf),
+}
+
 /// Something the editor asks the assistant to do with code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AiTask {
+    /// The whole open file (the empty panel's first action).
+    ExplainFile,
     Explain,
     Fix,
     Tests,
@@ -71,12 +82,20 @@ pub(super) enum AiTask {
 
 impl AiTask {
     fn for_selection(self) -> bool {
-        !matches!(self, AiTask::ExplainError | AiTask::FixError)
+        !matches!(
+            self,
+            AiTask::ExplainError | AiTask::FixError | AiTask::ExplainFile
+        )
     }
 
     // What the chat shows as the question, and what the model is asked.
     fn wording(self) -> (&'static str, &'static str) {
         match self {
+            AiTask::ExplainFile => (
+                "Explain this file",
+                "Explain what this file does: its purpose, its main parts and how they fit \
+                 together. Be brief.",
+            ),
             AiTask::Explain => (
                 "Explain this code",
                 "Explain what this code does, briefly and step by step.",
@@ -234,6 +253,12 @@ pub(super) struct AiHits {
     pub(super) chip_close: Vec<(RECT, usize)>,
     /// The permission card's buttons.
     pub(super) permission: Vec<(RECT, super::ai_project::Permission)>,
+    /// The ✕ on the chip for the selection or the open file.
+    pub(super) context_close: Option<RECT>,
+    /// The @ button under the message box.
+    pub(super) at_button: Option<RECT>,
+    /// The empty panel's actions.
+    pub(super) suggestions: Vec<(RECT, AiTask)>,
     /// "Read" lines, with the file and line each opens.
     pub(super) steps: Vec<(RECT, PathBuf, usize)>,
     /// A finished answer's folded steps: the line, its entry and the
@@ -264,6 +289,9 @@ pub(super) struct AiChat {
     /// change to the box.
     pub(super) mention_selected: usize,
     pub(super) mention_dismissed: bool,
+    /// The selection or open file the user took off the next question, by
+    /// its document's path (None: an untitled one).
+    pub(super) context_skipped: Option<Option<PathBuf>>,
     /// "Allow for This Chat" was chosen; a new chat asks again.
     pub(super) chat_allowed: bool,
     /// The question waiting on the permission card, and where its answer goes.
@@ -314,6 +342,7 @@ impl AiChat {
             mention_selected: 0,
             mention_dismissed: false,
             chat_allowed: false,
+            context_skipped: None,
             permission: None,
             tools_refused: Default::default(),
             focused: false,
@@ -810,18 +839,68 @@ impl App {
         self.ai_context(start, end)
     }
 
+    /// What goes with the next question besides attached files, shown as a
+    /// chip: the selection, else (with aiIncludeOpenFile) the open file.
+    /// None once the user took it off, until the question is sent.
+    pub(super) fn ai_context_offer(&self) -> Option<ContextOffer> {
+        if !self.ai_editable() {
+            return None;
+        }
+        let path = self.doc().path.clone();
+        if self.ai.context_skipped.as_ref() == Some(&path) {
+            return None;
+        }
+        if let Some(label) = self.ai_selection_label() {
+            return Some(ContextOffer::Selection(label));
+        }
+        let path = path?;
+        let attached = self
+            .ai
+            .attachments
+            .iter()
+            .any(|attached| Self::same_path(&attached.path, &path));
+        (self.settings.ai_include_open_file
+            && !attached
+            && !super::ai_attach::looks_secret(&path))
+        .then_some(ContextOffer::OpenFile(path))
+    }
+
     /// Sends the typed message, with the selected code.
     pub(super) fn ai_send(&mut self, hwnd: HWND) {
         let question = self.ai.input.trim().to_string();
         if question.is_empty() || self.ai.busy() {
             return;
         }
-        let context = self.ai_selection_context();
+        // What the chip above the text offers: the selection, or the open
+        // file as an attachment.
+        let offer = self.ai_context_offer();
+        let context = match &offer {
+            Some(ContextOffer::Selection(_)) => self.ai_selection_context(),
+            _ => None,
+        };
+        let added = match offer {
+            Some(ContextOffer::OpenFile(path)) => {
+                let name = self.ai_file_name(&path);
+                self.ai
+                    .attachments
+                    .push(super::ai_attach::Attachment {
+                        path,
+                        name,
+                        secret: false,
+                    });
+                true
+            }
+            _ => false,
+        };
         // Asks first about a secrets file; "Don't Send" keeps the question.
         let Some(files) = self.ai_files_for_question(hwnd) else {
+            if added {
+                self.ai.attachments.pop();
+            }
             unsafe { InvalidateRect(hwnd, null(), 0) };
             return;
         };
+        self.ai.context_skipped = None;
         self.ai_clear_input();
         self.ai_ask(hwnd, question.clone(), question, context, files);
     }
@@ -859,6 +938,27 @@ impl App {
             return;
         }
         let (shown, instruction) = task.wording();
+        if task == AiTask::ExplainFile {
+            if !self.ai_editable() {
+                self.status = "Open a file first".into();
+                return;
+            }
+            let last = self.doc().line_count().saturating_sub(1);
+            let end = Pos {
+                line: last,
+                byte: self.doc().line(last).len(),
+            };
+            if let Some(context) = self.ai_context(Pos { line: 0, byte: 0 }, end) {
+                self.ai_ask(
+                    hwnd,
+                    shown.into(),
+                    instruction.into(),
+                    Some(context),
+                    Vec::new(),
+                );
+            }
+            return;
+        }
         if task.for_selection() {
             let Some(context) = self.ai_selection_context() else {
                 self.status = "Select some code first".into();
@@ -1382,6 +1482,15 @@ impl App {
             }
         } else if let Some((_, path)) = hits.mentions.iter().find(|(rect, _)| inside(rect)) {
             self.ai_accept_mention(hwnd, Some(path.clone()));
+            self.focus_ai_input();
+        } else if hits.context_close.as_ref().is_some_and(inside) {
+            self.ai.context_skipped = Some(self.doc().path.clone());
+            self.focus_ai_input();
+        } else if hits.at_button.as_ref().is_some_and(inside) {
+            self.focus_ai_input();
+            self.ai_insert("@");
+        } else if let Some((_, task)) = hits.suggestions.iter().find(|(rect, _)| inside(rect)) {
+            self.ai_run_task(hwnd, *task);
             self.focus_ai_input();
         } else if let Some((_, index)) = hits.chip_close.iter().find(|(rect, _)| inside(rect)) {
             self.ai_remove_attachment(hwnd, *index);
