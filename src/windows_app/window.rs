@@ -334,7 +334,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 let over_ai = app.ai_assistant_visible
                     && !app.welcome
                     && !app.quick_open
-                    && point.x >= app.editor_right(hwnd);
+                    && point.x >= app.editor_right(hwnd)
+                    && !app.on_ai_edge(hwnd, point.x);
                 let over_ai_input = over_ai
                     && app.ai.hits.borrow().composer.is_some_and(|rect| {
                         point.x >= rect.left
@@ -366,6 +367,8 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                         IDC_SIZENS
                     } else if app.divider_dragging
                         || app.sidebar_dragging
+                        || app.ai_dragging
+                        || app.on_ai_edge(hwnd, point.x)
                         || app.split_divider_at(hwnd, point.x, point.y)
                         || (app.sidebar_width > 0
                             && app.sidebar_started.is_none()
@@ -513,6 +516,7 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 || app.problem_scrollbar_grab.is_some()
                 || app.divider_dragging
                 || app.sidebar_dragging
+                || app.ai_dragging
                 || app.terminal_resizing
                 || app.terminal_selecting)
                 && wparam & 1 != 0
@@ -557,6 +561,10 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             app.dragging = false;
             app.divider_dragging = false;
             app.sidebar_dragging = false;
+            if std::mem::take(&mut app.ai_dragging) {
+                // The edge's accent line goes.
+                unsafe { InvalidateRect(hwnd, null(), 0) };
+            }
             app.terminal_resizing = false;
             // Selection itself (anchor/end) stays put so it's still visible
             // and copyable with Ctrl+Shift+C after releasing the mouse.
@@ -573,11 +581,13 @@ fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
             let was_dragging = app.dragging
                 || app.divider_dragging
                 || app.sidebar_dragging
+                || app.ai_dragging
                 || app.terminal_resizing
                 || app.terminal_selecting;
             app.dragging = false;
             app.divider_dragging = false;
             app.sidebar_dragging = false;
+            app.ai_dragging = false;
             app.terminal_resizing = false;
             app.terminal_selecting = false;
             app.problem_scrollbar_grab = None;

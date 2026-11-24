@@ -1683,6 +1683,12 @@ impl App {
             }
             return;
         }
+        if self.on_ai_edge(hwnd, x) {
+            self.ai_dragging = true;
+            unsafe { SetCapture(hwnd) };
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        }
         if self.ai_assistant_visible {
             let gap = self.chrome_gap();
             let ai_left = self.editor_right(hwnd) + gap;
@@ -2190,6 +2196,10 @@ impl App {
         }
         if self.sidebar_dragging {
             self.resize_sidebar(hwnd, x);
+            return;
+        }
+        if self.ai_dragging {
+            self.resize_ai_panel(hwnd, x);
             return;
         }
         if self.terminal_resizing {

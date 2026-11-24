@@ -6,6 +6,7 @@ type RecoveryTabKey = (Option<PathBuf>, u64, bool, bool, bool, [EditorView; 2]);
 pub(super) struct RecoveryKey {
     root: Option<PathBuf>,
     active: usize,
+    ai_width: Option<i32>,
     tabs: Vec<RecoveryTabKey>,
 }
 
@@ -14,6 +15,7 @@ impl App {
         RecoveryKey {
             root: self.workspace_root.clone(),
             active: self.active,
+            ai_width: self.ai_user_width,
             tabs: self
                 .tabs
                 .iter()
@@ -69,6 +71,7 @@ impl App {
             root: self.workspace_root.clone(),
             active,
             tabs,
+            ai_width: self.ai_user_width.map(|width| width as u32),
         }
     }
 
@@ -134,6 +137,7 @@ impl App {
     // twice as long to respond.
     pub(super) fn restore_session(&mut self, hwnd: HWND) {
         let mut session = workflow::load_session();
+        self.ai_user_width = session.ai_width.map(|width| width as i32);
         if session.tabs.iter().any(|tab| tab.recovery.is_some()) {
             let answer = dialog::show_dialog(
                 hwnd,
