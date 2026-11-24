@@ -753,10 +753,31 @@ impl App {
             return;
         }
         self.extension_list_read = true;
+        self.find_prettier();
         use lightline::extensions::lightline_list;
         if let Ok(entries) = lightline_list::parse(lightline_list::BUILT_IN) {
             merge_extension_list(&mut self.extensions, entries);
         }
+    }
+
+    /// Prettier is on by default and formats whenever it's found, so the
+    /// panel shows whether it is: Installed and In Use say Prettier, not
+    /// Install and the built-in formatter. Files are looked up on a worker;
+    /// no process starts.
+    fn find_prettier(&self) {
+        let near = self
+            .doc()
+            .path
+            .clone()
+            .or_else(|| self.workspace_root.as_ref().map(|root| root.join("_")));
+        let tx = self.worker_tx.clone();
+        std::thread::spawn(move || {
+            let found = match near.as_deref() {
+                Some(near) => lightline::formatter::prettier_for(near).is_some(),
+                None => workflow::resolve_command("prettier").is_some(),
+            };
+            tx.send(WorkerMessage::PrettierFound(found));
+        });
     }
 
     /// The latest list from the repository. If it couldn't be read, the

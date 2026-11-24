@@ -980,6 +980,15 @@ impl App {
                         };
                     }
                 }
+                WorkerMessage::PrettierFound(found) => {
+                    let enabled = self.settings.prettier_enabled;
+                    if let Some(ext) = self.extensions.iter_mut().find(|e| e.id == "prettier")
+                        && !ext.installing
+                    {
+                        ext.installed = found && enabled;
+                    }
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
+                }
                 WorkerMessage::ExtensionsScanned(scanned) => {
                     self.apply_extension_scan(hwnd, scanned);
                 }
@@ -1003,7 +1012,8 @@ impl App {
                                     name: id,
                                     publisher: "zed-industries/extensions".into(),
                                     version,
-                                    description: "Zed extension: install to see whether                                                   LightLine supports it yet"
+                                    description: "Zed extension: install to see whether \
+                                                  LightLine supports it yet"
                                         .into(),
                                     ..Extension::default()
                                 });
@@ -1118,14 +1128,27 @@ impl App {
                     // made against, and only if its content hasn't changed
                     // since -- the user may have kept typing (or switched
                     // tabs entirely) while the formatter ran in the
-                    // background. A stale result is silently dropped rather
-                    // than clobbering newer text.
+                    // background. A stale result is dropped rather than
+                    // clobbering newer text, and the status bar says so:
+                    // dropped silently, it left "Formatting with..." up
+                    // and looked like formatting that sometimes didn't work.
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
                     let still_current = self.doc().path.as_deref() == Some(path.as_path())
                         && self.doc().change_serial() == serial;
                     if !still_current {
+                        self.status = if then_save {
+                            format!(
+                                "Saved {name}; not formatted, because it changed while \
+                                 {formatter} was running"
+                            )
+                        } else {
+                            format!(
+                                "{name} wasn't formatted: it changed while {formatter} was \
+                                 running. Press Shift+Alt+F again"
+                            )
+                        };
                         continue;
                     }
-                    let name = path.file_name().unwrap_or_default().to_string_lossy();
                     match result {
                         Ok(formatted) => {
                             let changed = self.apply_formatted(&formatted);

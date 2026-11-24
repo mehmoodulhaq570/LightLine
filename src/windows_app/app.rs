@@ -85,6 +85,9 @@ pub(super) enum WorkerMessage {
     // folder, the new file and the copy's outcome.
     FileAdded(u64, PathBuf, PathBuf, Result<(), String>),
     ExtensionInstalled(String, bool),
+    // Whether Prettier can be found (the project's, else PATH's), looked up
+    // when the Extensions panel first opens.
+    PrettierFound(bool),
     // The full Zed registry id/version list, for the Extensions panel search.
     ZedRegistryList(Result<Vec<(String, String)>, String>),
     // LightLine's own extension list, as fetched from the repository.
