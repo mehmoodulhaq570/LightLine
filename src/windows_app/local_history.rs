@@ -15,17 +15,18 @@ pub(super) struct HistoryCompare {
 }
 
 impl App {
-    /// True while the diff view replaces the editor: a Git change or a
-    /// Local History version.
+    /// True while the diff view replaces the editor: a Git change, a
+    /// Local History version, or a change the AI proposed.
     pub(super) fn showing_diff(&self) -> bool {
         (self.side_view == SideView::Review && self.review_file.is_some())
             || self.history_compare.is_some()
+            || self.ai_review.is_some()
     }
 
     pub(super) fn close_diff(&mut self) {
         self.review_file = None;
         // Its hint (Restore, F7, Esc) no longer applies.
-        if self.history_compare.take().is_some() {
+        if self.history_compare.take().is_some() || self.ai_review.take().is_some() {
             self.status.clear();
         }
     }
@@ -166,40 +167,6 @@ impl App {
         self.move_cursor(Pos { line, byte: 0 }, false);
         self.keep_cursor_visible(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
-    }
-
-    /// The Restore and Close buttons at the right of the diff's header.
-    pub(super) fn history_buttons(&self, right: i32) -> (RECT, RECT) {
-        let top = self.editor_top() + self.scale(6);
-        let bottom = top + self.scale(26);
-        let close = RECT {
-            left: right - self.scale(16 + 64),
-            top,
-            right: right - self.scale(16),
-            bottom,
-        };
-        let restore = RECT {
-            left: close.left - self.scale(8 + 84),
-            top,
-            right: close.left - self.scale(8),
-            bottom,
-        };
-        (restore, close)
-    }
-
-    /// Handles a click in the diff's header; true when it hit a button.
-    pub(super) fn history_header_click(&mut self, hwnd: HWND, x: i32, y: i32) -> bool {
-        let (restore, close) = self.history_buttons(self.editor_right(hwnd));
-        let inside = |r: RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-        if inside(restore) {
-            self.restore_history(hwnd);
-        } else if inside(close) {
-            self.close_diff();
-            unsafe { InvalidateRect(hwnd, null(), 0) };
-        } else {
-            return false;
-        }
-        true
     }
 
     /// The diff header's two labels while a version is compared.

@@ -1,4 +1,7 @@
-use super::super::ai_chat::{AiAction, ChatEntry, SUGGESTED_MODEL, model_menu_models};
+use super::super::ai_chat::{
+    AiAction, ChatEntry, ProposalButton, SUGGESTED_MODEL, model_menu_models,
+};
+use super::super::ai_edits::ProposalStatus;
 use super::super::ai_project::Permission;
 use super::super::markdown_view::SNIPPET_CODE_HEADER;
 use super::super::*;
@@ -1064,6 +1067,9 @@ impl App {
             unsafe { SelectObject(hdc, self.ui_font) };
             height += s(6) + self.wrap_text(hdc, note, width).len() as i32 * line_height;
         }
+        if !entry.proposals.is_empty() {
+            height += s(10) + self.ai_changes_height(entry);
+        }
         if !answer.is_empty() && !self.ai_receiving(last) {
             height += s(28);
         }
@@ -1116,6 +1122,248 @@ impl App {
             buttons,
             height,
         }
+    }
+
+    // The changes card: a 32 px header, a 26 px row per file, and a 42 px
+    // row of buttons while anything waits.
+    fn ai_changes_height(&self, entry: &ChatEntry) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let pending = entry
+            .proposals
+            .iter()
+            .any(|item| item.status == ProposalStatus::Pending);
+        s(32) + entry.proposals.len() as i32 * s(26) + if pending { s(44) } else { s(8) }
+    }
+
+    // Paints answer `index`'s changes card from `top`; returns its bottom.
+    fn paint_ai_changes(
+        &self,
+        hdc: HDC,
+        index: usize,
+        entry: &ChatEntry,
+        bounds: RECT,
+        top: i32,
+        clip: RECT,
+    ) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let card = RECT {
+            left: bounds.left,
+            top,
+            right: bounds.right,
+            bottom: top + self.ai_changes_height(entry),
+        };
+        let visible = |rect: &RECT| rect.bottom > clip.top && rect.top < clip.bottom;
+        let back = self.theme.sidebar_bg;
+        self.panel_card(
+            hdc,
+            card,
+            s(8),
+            blend(back, self.theme.blue, 0.4),
+            blend(back, self.theme.blue, 0.06),
+        );
+        let pending = entry
+            .proposals
+            .iter()
+            .filter(|item| item.status == ProposalStatus::Pending)
+            .count();
+        let applied = entry
+            .proposals
+            .iter()
+            .filter(|item| item.status == ProposalStatus::Applied)
+            .count();
+        let files = entry.proposals.len();
+        let (title, note) = if pending > 0 {
+            (
+                "Proposed changes".to_string(),
+                format!(
+                    "{files} {} \u{00b7} {}",
+                    if files == 1 { "file" } else { "files" },
+                    if applied == 0 {
+                        "nothing changed yet".to_string()
+                    } else {
+                        format!("{applied} applied")
+                    }
+                ),
+            )
+        } else if applied > 0 {
+            (
+                "Changes applied".to_string(),
+                "not saved yet \u{00b7} Ctrl+Z undoes".to_string(),
+            )
+        } else {
+            ("Changes not applied".to_string(), String::new())
+        };
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let header_middle = card.top + s(16);
+        let inner = RECT {
+            left: card.left + s(12),
+            right: card.right - s(12),
+            ..clip
+        };
+        self.label_mid(
+            hdc,
+            &title,
+            inner.left,
+            header_middle,
+            self.theme.text,
+            inner,
+        );
+        unsafe { SelectObject(hdc, self.small_font) };
+        let note_width = self.text_width(hdc, &note);
+        self.label_mid(
+            hdc,
+            &note,
+            (inner.right - note_width).max(inner.left + self.text_width(hdc, &title) + s(70)),
+            header_middle,
+            self.theme.muted,
+            inner,
+        );
+        Self::fill(
+            hdc,
+            RECT {
+                left: card.left + s(1),
+                top: card.top + s(32),
+                right: card.right - s(1),
+                bottom: card.top + s(32) + 1,
+            },
+            self.theme.edge,
+        );
+        let use_theme = self.has_extension("material-icon-theme");
+        let mut rows = Vec::new();
+        let mut y = card.top + s(32);
+        for (file, item) in entry.proposals.iter().enumerate() {
+            let row = RECT {
+                left: card.left + s(1),
+                top: y,
+                right: card.right - s(1),
+                bottom: y + s(26),
+            };
+            let middle = (row.top + row.bottom) / 2;
+            let icon = RECT {
+                left: inner.left,
+                top: middle - s(8),
+                right: inner.left + s(16),
+                bottom: middle + s(8),
+            };
+            match &item.status {
+                ProposalStatus::Applied => {
+                    self.glyph_in(hdc, DebugGlyph::Check, self.theme.green, icon, s(14))
+                }
+                _ => {
+                    self.icons.draw_for_path(
+                        hdc,
+                        &item.proposal.path,
+                        false,
+                        false,
+                        use_theme,
+                        icon.left,
+                        icon.top + s(1),
+                        s(14),
+                    );
+                }
+            }
+            let name = item
+                .proposal
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| item.proposal.name.clone());
+            let folder = match item.proposal.name.rsplit_once('/') {
+                Some((folder, _)) => folder.to_string(),
+                None => String::new(),
+            };
+            let detail = match &item.status {
+                ProposalStatus::Skipped => "skipped".to_string(),
+                ProposalStatus::Stale(_) => "no longer fits".to_string(),
+                _ if item.proposal.new_file => {
+                    if folder.is_empty() {
+                        "new file".to_string()
+                    } else {
+                        format!("{folder} \u{00b7} new file")
+                    }
+                }
+                _ => folder,
+            };
+            unsafe { SelectObject(hdc, self.ui_font) };
+            let name_left = icon.right + s(8);
+            let name_color = match item.status {
+                ProposalStatus::Skipped | ProposalStatus::Stale(_) => self.theme.muted,
+                _ => self.theme.text,
+            };
+            self.label_mid(hdc, &name, name_left, middle, name_color, inner);
+            let name_right = name_left + self.text_width(hdc, &name);
+            unsafe { SelectObject(hdc, self.small_font) };
+            let plus = format!("+{}", item.proposal.added);
+            let minus = format!("\u{2212}{}", item.proposal.removed);
+            let minus_left = inner.right - self.text_width(hdc, &minus);
+            let plus_left = minus_left - s(8) - self.text_width(hdc, &plus);
+            self.label_mid(hdc, &minus, minus_left, middle, self.theme.error, inner);
+            self.label_mid(hdc, &plus, plus_left, middle, self.theme.green, inner);
+            let detail_color = match item.status {
+                ProposalStatus::Stale(_) => self.theme.warning,
+                _ => self.theme.muted,
+            };
+            self.label_ellipsis(
+                hdc,
+                &detail,
+                name_right + s(8),
+                middle - self.text_height(hdc) / 2,
+                detail_color,
+                RECT {
+                    right: plus_left - s(8),
+                    ..inner
+                },
+            );
+            if item.status == ProposalStatus::Pending && visible(&row) {
+                rows.push((row, index, file));
+            }
+            y += s(26);
+        }
+        let mut buttons = Vec::new();
+        if pending > 0 {
+            unsafe { SelectObject(hdc, self.ui_font) };
+            let mut x = inner.left;
+            let button_top = y + s(9);
+            for (label, button, fill) in [
+                ("Review", ProposalButton::Review, Some(self.theme.violet)),
+                ("Apply All", ProposalButton::ApplyAll, Some(ui(18, 122, 82))),
+                ("Discard", ProposalButton::Discard, None),
+            ] {
+                let rect = RECT {
+                    left: x,
+                    top: button_top,
+                    right: x + self.text_width(hdc, label) + s(20),
+                    bottom: button_top + s(26),
+                };
+                let color = match fill {
+                    Some(fill) => {
+                        Self::rounded_fill(hdc, rect, s(4), fill);
+                        ui(255, 255, 255)
+                    }
+                    None => {
+                        self.panel_card(hdc, rect, s(4), self.theme.edge, self.theme.editor_bg);
+                        self.theme.text
+                    }
+                };
+                self.label_mid(
+                    hdc,
+                    label,
+                    rect.left + s(10),
+                    (rect.top + rect.bottom) / 2,
+                    color,
+                    rect,
+                );
+                if visible(&rect) {
+                    buttons.push((rect, index, button));
+                }
+                x = rect.right + s(6);
+            }
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let mut hits = self.ai.hits.borrow_mut();
+        hits.proposal_rows.extend(rows);
+        hits.proposal_buttons.extend(buttons);
+        card.bottom
     }
 
     // An answer's steps (one 22 px line each) and permission card.
@@ -1401,6 +1649,9 @@ impl App {
                 line_height,
                 self.theme.muted,
             );
+        }
+        if !entry.proposals.is_empty() {
+            y = self.paint_ai_changes(hdc, index, entry, bounds, y + s(10), clip);
         }
         if !answer.is_empty() && !self.ai_receiving(last) {
             let label = "Copy answer";

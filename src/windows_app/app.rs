@@ -1014,6 +1014,8 @@ pub(super) struct App {
     pub(super) history_pick: Option<Vec<lightline::local_history::Version>>,
     // A saved version shown in the diff view beside the file.
     pub(super) history_compare: Option<super::local_history::HistoryCompare>,
+    /// A change the AI proposed, shown in the diff view (ai_edits.rs).
+    pub(super) ai_review: Option<super::ai_edits::ProposalReview>,
     pub(super) search_input: bool,
     pub(super) project_query: String,
     pub(super) search_options: lightline::text_search::SearchOptions,
@@ -1689,6 +1691,7 @@ impl App {
             language_pick: false,
             history_pick: None,
             history_compare: None,
+            ai_review: None,
             search_input: false,
             project_query: String::new(),
             search_options: Default::default(),

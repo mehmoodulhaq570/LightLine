@@ -1,7 +1,9 @@
 //! The project tools the AI Assistant's model may call
-//! (design/ai-project-access-design.html, part 2): search the project, list
-//! its files, read a file, and see the problems language servers report.
-//! They only read, and only inside the open folder.
+//! (design/ai-project-access-design.html, parts 2 and 3): search the project, list
+//! its files, read a file, and see the problems language servers report;
+//! and (part 3) propose an edit or a new file. Nothing here writes: a
+//! proposal is recorded for the user to review and apply, and later reads
+//! in the same question see it.
 //!
 //! What may be read is decided once per question: the files
 //! `workflow::workspace_files` lists (so nothing in `.git`, build or
@@ -14,8 +16,8 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, OnceLock};
 
 /// Tool calls per question; past this the model answers with what it has.
 pub const MAX_STEPS: usize = 25;
@@ -26,6 +28,10 @@ const MAX_READ_BYTES: usize = 24 * 1024;
 const MAX_PROBLEMS: usize = 100;
 /// A file bigger than this isn't read whole; its first part is.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+/// A proposed new file can be at most this big.
+const MAX_NEW_FILE_BYTES: usize = 256 * 1024;
+/// A file is edited only when all of it was read.
+const MAX_EDITED_FILE_BYTES: usize = MAX_FILE_BYTES as usize;
 
 /// Whether `path` looks like it holds secrets: environment files, keys and
 /// credentials. The model can't read these, and attaching one asks first.
@@ -109,7 +115,96 @@ pub fn definitions() -> Vec<ToolDef> {
                 }
             }),
         },
+        ToolDef {
+            name: "propose_edit",
+            description: "Propose a change to a file of the user's project: replace the text \
+                          `find` with `replace`. `find` must appear exactly once in the file, \
+                          so copy it from read_file (without the line numbers) and include \
+                          enough lines to make it unique. Nothing changes until the user \
+                          reviews and applies it. Call it once per change; later reads show \
+                          the file with your proposals.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "The file's path within the project"},
+                    "find": {"type": "string", "description": "The exact text to replace"},
+                    "replace": {"type": "string", "description": "The text to put in its place"}
+                },
+                "required": ["path", "find", "replace"]
+            }),
+        },
+        ToolDef {
+            name: "propose_new_file",
+            description: "Propose a new file in the user's project, with all of its contents. \
+                          The path must not exist yet. Nothing is created until the user \
+                          reviews and applies it.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "The new file's path within the project, e.g. tests/sum_test.rs"},
+                    "content": {"type": "string", "description": "The whole file"}
+                },
+                "required": ["path", "content"]
+            }),
+        },
     ]
+}
+
+/// A change the model proposed to one file: everything it proposed for
+/// that file in one question.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileProposal {
+    pub path: PathBuf,
+    /// Its path within the project, as shown.
+    pub name: String,
+    pub new_file: bool,
+    /// The text the proposals start from: the editor's or the file's.
+    pub original: String,
+    /// The text with every proposal made.
+    pub proposed: String,
+    /// Each edit, in order: the text found and what replaces it.
+    pub edits: Vec<(String, String)>,
+    /// Lines added and removed, from `original` to `proposed`.
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// Lines added and removed from `before` to `after`.
+pub fn line_counts(before: &str, after: &str) -> (usize, usize) {
+    let rows = crate::workflow::text_diff_rows(before, after);
+    let mut added = 0;
+    let mut removed = 0;
+    for row in rows.iter().filter(|row| row.changed) {
+        match (row.before_number, row.after_number) {
+            (Some(_), Some(_)) => {
+                added += 1;
+                removed += 1;
+            }
+            (None, Some(_)) => added += 1,
+            (Some(_), None) => removed += 1,
+            (None, None) => {}
+        }
+    }
+    (added, removed)
+}
+
+/// Applies `edits` to `text` in order, each `find` matching exactly once.
+/// Err names the first edit that no longer fits.
+pub fn apply_edits(text: &str, edits: &[(String, String)]) -> Result<String, String> {
+    let mut text = text.to_string();
+    for (number, (find, replace)) in edits.iter().enumerate() {
+        match text.matches(find.as_str()).count() {
+            1 => text = text.replacen(find.as_str(), replace, 1),
+            0 => return Err(format!("change {} no longer matches the file", number + 1)),
+            _ => {
+                return Err(format!(
+                    "change {} matches more than one place now",
+                    number + 1
+                ));
+            }
+        }
+    }
+    Ok(text)
 }
 
 /// A problem a language server reports, as the editor holds it.
@@ -130,6 +225,8 @@ pub struct Outcome {
     pub summary: String,
     pub is_error: bool,
     pub opened: Option<(PathBuf, usize)>,
+    /// For a proposal: the file's proposals so far.
+    pub proposal: Option<Box<FileProposal>>,
 }
 
 impl Outcome {
@@ -139,6 +236,7 @@ impl Outcome {
             summary: summary.into(),
             is_error: true,
             opened: None,
+            proposal: None,
         }
     }
 }
@@ -153,6 +251,8 @@ pub struct Project {
     /// The files that may be read, with their lowercase relative paths,
     /// listed the first time a tool needs them.
     files: OnceLock<Vec<(PathBuf, String)>>,
+    /// What the model proposed this question, by key.
+    proposals: Mutex<HashMap<String, FileProposal>>,
 }
 
 // `path` relative to `root`, lowercase, with `/`: the key paths are looked
@@ -237,6 +337,7 @@ impl Project {
             edited,
             problems,
             files: OnceLock::new(),
+            proposals: Mutex::new(HashMap::new()),
         }
     }
 
@@ -284,6 +385,8 @@ impl Project {
             "list_files" => self.list(input),
             "read_file" => self.read(input),
             "problems" => self.problems(input),
+            "propose_edit" => self.propose_edit(input),
+            "propose_new_file" => self.propose_new_file(input),
             other => Outcome::error(
                 format!("There's no tool called {other}."),
                 format!("Unknown tool {other}"),
@@ -351,6 +454,7 @@ impl Project {
             summary,
             is_error: false,
             opened: None,
+            proposal: None,
         }
     }
 
@@ -395,37 +499,61 @@ impl Project {
             summary,
             is_error: false,
             opened: None,
+            proposal: None,
         }
+    }
+
+    // The text of readable file `path` (`key`): the editor's when it has
+    // unsaved edits, else the file's first MAX_FILE_BYTES. The bool says
+    // whether that's all of it.
+    fn text_of(&self, path: &Path, key: &str) -> Result<(String, bool), Outcome> {
+        if let Some(text) = self.edited.get(key) {
+            return Ok((text.clone(), true));
+        }
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let read = std::fs::File::open(path)
+            .and_then(|file| file.take(MAX_FILE_BYTES).read_to_end(&mut bytes));
+        if let Err(error) = read {
+            return Err(Outcome::error(
+                format!("{key} couldn't be read: {error}"),
+                format!("Couldn't read {key}"),
+            ));
+        }
+        if bytes.iter().take(8192).any(|&byte| byte == 0) {
+            return Err(Outcome::error(
+                format!("{key} isn't a text file."),
+                format!("Not text: {key}"),
+            ));
+        }
+        let whole = (bytes.len() as u64) < MAX_FILE_BYTES;
+        Ok((String::from_utf8_lossy(&bytes).replace("\r\n", "\n"), whole))
+    }
+
+    fn proposal_for(&self, key: &str) -> Option<FileProposal> {
+        self.proposals.lock().ok()?.get(key).cloned()
     }
 
     fn read(&self, input: &Value) -> Outcome {
         let Some(asked) = input_str(input, "path") else {
             return Outcome::error("read_file needs a path.", "Read without a path");
         };
-        let (path, key) = match self.find(asked) {
-            Ok(found) => found,
-            Err(outcome) => return outcome,
-        };
-        let text = match self.edited.get(&key) {
-            Some(text) => text.clone(),
+        // A file with proposals reads as proposed, new files included.
+        let proposed = self.proposal_for(&asked_key(asked));
+        let (path, key, text) = match proposed {
+            Some(proposal) => {
+                let key = asked_key(asked);
+                (proposal.path, key, proposal.proposed)
+            }
             None => {
-                use std::io::Read;
-                let mut bytes = Vec::new();
-                let read = std::fs::File::open(&path)
-                    .and_then(|file| file.take(MAX_FILE_BYTES).read_to_end(&mut bytes));
-                if let Err(error) = read {
-                    return Outcome::error(
-                        format!("{key} couldn't be read: {error}"),
-                        format!("Couldn't read {key}"),
-                    );
+                let (path, key) = match self.find(asked) {
+                    Ok(found) => found,
+                    Err(outcome) => return outcome,
+                };
+                match self.text_of(&path, &key) {
+                    Ok((text, _)) => (path, key, text),
+                    Err(outcome) => return outcome,
                 }
-                if bytes.iter().take(8192).any(|&byte| byte == 0) {
-                    return Outcome::error(
-                        format!("{key} isn't a text file."),
-                        format!("Not text: {key}"),
-                    );
-                }
-                String::from_utf8_lossy(&bytes).replace("\r\n", "\n")
             }
         };
         let lines: Vec<&str> = text.lines().collect();
@@ -460,6 +588,11 @@ impl Project {
         } else {
             format!("{key}, lines {first}\u{2013}{shown_last} of {total}:")
         };
+        let header = if self.proposal_for(&key).is_some() {
+            format!("{header} (with your proposed changes, not applied yet)")
+        } else {
+            header
+        };
         let mut content = format!("{header}\n{out}");
         if shown_last < last.min(total) {
             content.push_str(&format!(
@@ -481,7 +614,167 @@ impl Project {
             ),
             is_error: false,
             opened: Some((path, first)),
+            proposal: None,
         }
+    }
+
+    // Records `proposal` and reports it.
+    fn proposed(&self, proposal: FileProposal, summary: String) -> Outcome {
+        let key = asked_key(&proposal.name);
+        if let Ok(mut proposals) = self.proposals.lock() {
+            proposals.insert(key, proposal.clone());
+        }
+        Outcome {
+            content: "Proposed. Nothing changes until the user reviews and applies it; \
+                      read_file now shows the file with your proposals."
+                .into(),
+            summary,
+            is_error: false,
+            opened: None,
+            proposal: Some(Box::new(proposal)),
+        }
+    }
+
+    fn propose_edit(&self, input: &Value) -> Outcome {
+        let (Some(asked), Some(find)) = (
+            input_str(input, "path"),
+            input.get("find").and_then(Value::as_str),
+        ) else {
+            return Outcome::error(
+                "propose_edit needs path, find and replace.",
+                "Edit without path or find",
+            );
+        };
+        let Some(replace) = input.get("replace").and_then(Value::as_str) else {
+            return Outcome::error("propose_edit needs replace.", "Edit without replace");
+        };
+        if find.is_empty() {
+            return Outcome::error("find can't be empty.", "Edit with nothing to find");
+        }
+        let earlier = self.proposal_for(&asked_key(asked));
+        let (path, key, base, original, mut edits, new_file) = match earlier {
+            Some(earlier) => (
+                earlier.path,
+                asked_key(asked),
+                earlier.proposed,
+                earlier.original,
+                earlier.edits,
+                earlier.new_file,
+            ),
+            None => {
+                let (path, key) = match self.find(asked) {
+                    Ok(found) => found,
+                    Err(outcome) => return outcome,
+                };
+                let (text, whole) = match self.text_of(&path, &key) {
+                    Ok(read) => read,
+                    Err(outcome) => return outcome,
+                };
+                if !whole || text.len() > MAX_EDITED_FILE_BYTES {
+                    return Outcome::error(
+                        format!("{key} is too big to change here."),
+                        format!("Too big to change: {key}"),
+                    );
+                }
+                (path, key, text.clone(), text, Vec::new(), false)
+            }
+        };
+        match base.matches(find).count() {
+            1 => {}
+            0 => {
+                return Outcome::error(
+                    format!(
+                        "find doesn't appear in {key}. Read the file again and copy the text \
+                         exactly, without the line numbers."
+                    ),
+                    format!("Change to {key} didn't match"),
+                );
+            }
+            count => {
+                return Outcome::error(
+                    format!(
+                        "find appears {count} times in {key}. Include more of the surrounding \
+                         lines so it matches exactly once."
+                    ),
+                    format!("Change to {key} matched {count} places"),
+                );
+            }
+        }
+        let proposed = base.replacen(find, replace, 1);
+        edits.push((find.to_string(), replace.to_string()));
+        let (added, removed) = line_counts(&original, &proposed);
+        let summary = format!("Proposed a change to {key} \u{00b7} +{added} \u{2212}{removed}");
+        self.proposed(
+            FileProposal {
+                path,
+                name: key,
+                new_file,
+                original,
+                proposed,
+                edits,
+                added,
+                removed,
+            },
+            summary,
+        )
+    }
+
+    fn propose_new_file(&self, input: &Value) -> Outcome {
+        let (Some(asked), Some(content)) = (
+            input_str(input, "path"),
+            input.get("content").and_then(Value::as_str),
+        ) else {
+            return Outcome::error(
+                "propose_new_file needs path and content.",
+                "New file without path or content",
+            );
+        };
+        let key = asked_key(asked);
+        let bad = key.is_empty()
+            || key.contains(':')
+            || asked.trim().starts_with(['/', '\\'])
+            || key
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == ".." || part == ".git")
+            || looks_secret(Path::new(&key));
+        if bad {
+            return Outcome::error(
+                format!(
+                    "{asked} can't be created: give a path inside the project, like src/new.rs."
+                ),
+                format!("Not allowed: {asked}"),
+            );
+        }
+        let path = self
+            .root
+            .join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if path.exists() || self.proposal_for(&key).is_some() {
+            return Outcome::error(
+                format!("{key} already exists; use propose_edit to change it."),
+                format!("Already exists: {key}"),
+            );
+        }
+        if content.len() > MAX_NEW_FILE_BYTES {
+            return Outcome::error(
+                format!("{key} is too big to propose (256 KB at most)."),
+                format!("Too big: {key}"),
+            );
+        }
+        let (added, _) = line_counts("", content);
+        let summary = format!("Proposed a new file {key} \u{00b7} +{added}");
+        self.proposed(
+            FileProposal {
+                path,
+                name: key,
+                new_file: true,
+                original: String::new(),
+                proposed: content.to_string(),
+                edits: Vec::new(),
+                added,
+                removed: 0,
+            },
+            summary,
+        )
     }
 
     fn problems(&self, input: &Value) -> Outcome {
@@ -519,6 +812,7 @@ impl Project {
             },
             is_error: false,
             opened: None,
+            proposal: None,
         }
     }
 }
@@ -700,6 +994,119 @@ mod tests {
             "{}",
             read.content
         );
+    }
+
+    #[test]
+    fn edits_are_proposed_not_made_and_later_reads_see_them() {
+        let folder = Folder::new("propose");
+        let path = folder.write("src/main.rs", "fn main() {\n    run();\n}\n");
+        let project = project(&folder);
+        let first = run(
+            &project,
+            "propose_edit",
+            json!({"path": "src/main.rs", "find": "    run();", "replace": "    setup();\n    run();"}),
+        );
+        assert!(!first.is_error, "{}", first.content);
+        assert_eq!(
+            first.summary,
+            "Proposed a change to src/main.rs \u{00b7} +1 \u{2212}0"
+        );
+        // The file itself is untouched.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "fn main() {\n    run();\n}\n"
+        );
+        let read = run(&project, "read_file", json!({"path": "src/main.rs"}));
+        assert!(read.content.contains("2|     setup();"), "{}", read.content);
+        assert!(read.content.contains("not applied yet"));
+        // A second change builds on the first.
+        let second = run(
+            &project,
+            "propose_edit",
+            json!({"path": "src/main.rs", "find": "fn main()", "replace": "pub fn main()"}),
+        );
+        let proposal = second.proposal.unwrap();
+        assert_eq!(proposal.original, "fn main() {\n    run();\n}\n");
+        assert_eq!(
+            proposal.proposed,
+            "pub fn main() {\n    setup();\n    run();\n}\n"
+        );
+        assert_eq!(proposal.edits.len(), 2);
+        assert_eq!((proposal.added, proposal.removed), (2, 1));
+        assert_eq!(
+            apply_edits(&proposal.original, &proposal.edits).unwrap(),
+            proposal.proposed
+        );
+    }
+
+    #[test]
+    fn an_edit_must_match_exactly_once() {
+        let folder = Folder::new("match");
+        folder.write("a.rs", "x();\nx();\n");
+        let project = project(&folder);
+        let twice = run(
+            &project,
+            "propose_edit",
+            json!({"path": "a.rs", "find": "x();", "replace": "y();"}),
+        );
+        assert!(
+            twice.is_error && twice.content.contains("2 times"),
+            "{}",
+            twice.content
+        );
+        let none = run(
+            &project,
+            "propose_edit",
+            json!({"path": "a.rs", "find": "z();", "replace": "y();"}),
+        );
+        assert!(none.is_error && none.content.contains("doesn't appear"));
+        let secret = run(
+            &project,
+            "propose_edit",
+            json!({"path": ".env", "find": "a", "replace": "b"}),
+        );
+        assert!(secret.is_error);
+        assert!(apply_edits("x();\n", &[("z".into(), "y".into())]).is_err());
+    }
+
+    #[test]
+    fn new_files_stay_inside_the_project_and_dont_replace_any() {
+        let folder = Folder::new("newfile");
+        folder.write("src/main.rs", "fn main() {}\n");
+        let project = project(&folder);
+        let made = run(
+            &project,
+            "propose_new_file",
+            json!({"path": "tests/sum_test.rs", "content": "#[test]\nfn t() {}\n"}),
+        );
+        assert!(!made.is_error, "{}", made.content);
+        assert_eq!(
+            made.summary,
+            "Proposed a new file tests/sum_test.rs \u{00b7} +2"
+        );
+        assert!(!folder.0.join("tests").exists());
+        let proposal = made.proposal.unwrap();
+        assert!(proposal.new_file);
+        assert_eq!(proposal.path, folder.0.join("tests").join("sum_test.rs"));
+        // It reads back as proposed.
+        let read = run(&project, "read_file", json!({"path": "tests/sum_test.rs"}));
+        assert!(read.content.contains("2| fn t() {}"), "{}", read.content);
+        for bad in [
+            "src/main.rs",
+            "../out.rs",
+            "C:/x.rs",
+            "/x.rs",
+            ".git/hooks/x",
+            ".env",
+            "a//b.rs",
+        ] {
+            let refused = run(
+                &project,
+                "propose_new_file",
+                json!({"path": bad, "content": "x"}),
+            );
+            assert!(refused.is_error, "{bad} was allowed");
+        }
     }
 
     #[test]

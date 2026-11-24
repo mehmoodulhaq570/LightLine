@@ -342,10 +342,16 @@ impl App {
             },
             self.theme.edge,
         );
-        let history = self.history_labels();
-        let (restore, close) = self.history_buttons(right);
-        let (before_label, after_label, after_right) = match &history {
-            Some((before, after)) => (before.clone(), after.clone(), restore.left - self.scale(8)),
+        let header = self.compare_header(right);
+        let (before_label, after_label, after_right) = match &header {
+            Some(header) => (
+                header.before.clone(),
+                header.after.clone(),
+                header
+                    .buttons
+                    .first()
+                    .map_or(right, |(rect, ..)| rect.left - self.scale(8)),
+            ),
             None => {
                 let name = self
                     .review_file
@@ -385,33 +391,30 @@ impl App {
                 bottom: top + self.scale(36),
             },
         );
-        if history.is_some() {
-            // Restore is the action this view is for; Close (or Esc) leaves.
-            Self::rounded_fill(hdc, restore, self.scale(6), self.theme.violet);
-            let width = self.text_width(hdc, "Restore");
+        // The view's actions (Restore or Apply first; Esc leaves).
+        for (rect, label, primary, _) in header.iter().flat_map(|header| &header.buttons) {
+            let rect = *rect;
+            let color = if *primary {
+                Self::rounded_fill(hdc, rect, self.scale(6), self.theme.violet);
+                label_on(self.theme.violet, 255, 255, 255)
+            } else {
+                self.panel_card(
+                    hdc,
+                    rect,
+                    self.scale(6),
+                    self.theme.edge,
+                    self.theme.editor_bg,
+                );
+                self.theme.text
+            };
+            let width = self.text_width(hdc, label);
             self.label_mid(
                 hdc,
-                "Restore",
-                (restore.left + restore.right - width) / 2,
-                (restore.top + restore.bottom) / 2,
-                label_on(self.theme.violet, 255, 255, 255),
-                restore,
-            );
-            self.panel_card(
-                hdc,
-                close,
-                self.scale(6),
-                self.theme.edge,
-                self.theme.editor_bg,
-            );
-            let width = self.text_width(hdc, "Close");
-            self.label_mid(
-                hdc,
-                "Close",
-                (close.left + close.right - width) / 2,
-                (close.top + close.bottom) / 2,
-                self.theme.text,
-                close,
+                label,
+                (rect.left + rect.right - width) / 2,
+                (rect.top + rect.bottom) / 2,
+                color,
+                rect,
             );
         }
         unsafe { SelectObject(hdc, self.font) };
@@ -505,7 +508,9 @@ impl App {
         if self.diff_rows.is_empty() {
             Self::label(
                 hdc,
-                if history.is_some() {
+                if self.ai_review.is_some() {
+                    "The proposal makes no change to the file as it is now."
+                } else if self.history_compare.is_some() {
                     "This version is the same as the file now."
                 } else if self.review_staged {
                     "Nothing staged in this file."

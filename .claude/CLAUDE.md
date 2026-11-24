@@ -120,7 +120,7 @@ Two crates in one package.
 | File watching | `watcher.rs` | `ReadDirectoryChangesW`, one per watched folder |
 | Extensions | `extensions/` (`zed_registry`, `installer`, `zed_manifest`), `color_theme.rs`, `icon_theme.rs` | See §6 |
 | Markdown | `markdown.rs`, `image_cache.rs` | Blocks for the rendered preview; opt-in web image cache |
-| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…), plus Claude through Anthropic's Messages API (`is_anthropic`: `x-api-key`, `anthropic-version`, `/v1/messages`, its own SSE events; `ANTHROPIC_API_KEY`). Project tools in `ai_tools.rs` (search, list_files, read_file, problems; readable = `workspace_files` minus secrets) run through `ai::chat_with_tools` in both protocols (Claude's thinking blocks are sent back unchanged); the UI side (permission card, step lines) is `windows_app/ai_project.rs`, attachments `windows_app/ai_attach.rs` |
+| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…), plus Claude through Anthropic's Messages API (`is_anthropic`: `x-api-key`, `anthropic-version`, `/v1/messages`, its own SSE events; `ANTHROPIC_API_KEY`). Project tools in `ai_tools.rs` (search, list_files, read_file, problems; readable = `workspace_files` minus secrets) run through `ai::chat_with_tools` in both protocols (Claude's thinking blocks are sent back unchanged); the UI side (permission card, step lines) is `windows_app/ai_project.rs`, proposed edits (changes card, review, apply via `replace_range`) `windows_app/ai_edits.rs`, attachments `windows_app/ai_attach.rs` |
 | Process lifetime | `jobs.rs` | Kill-on-close job object: every child process dies with LightLine |
 | Clipboard | `clipboard.rs` | |
 
@@ -215,7 +215,7 @@ Background work runs on threads and wakes the window.
   2. `lens_links` lists them;
   3. paint records where each link was drawn;
   4. `lens_click` acts on a click.
-- **The diff view** (Git review and Local History compare) is gated by `App::showing_diff()` and closed with `close_diff()`. Use these instead of checking `review_file` directly.
+- **The diff view** (Git review, Local History compare, and AI proposals in `ai_edits.rs`) is gated by `App::showing_diff()` and closed with `close_diff()`; the compare modes share their header buttons through `compare_header`. Use these instead of checking `review_file` directly.
 - **Edits must go through `App::replace_range`**, which also tells the language server and syntax worker. Wrap multi-step edits in `doc_mut().begin_group()` / `end_group()` so a single Ctrl+Z undoes them.
 - **Tabs and split panes are views.** Two panes can show one document, each with its own cursor and scroll; text and undo history are shared. Never copy a document's text per view.
 - **Session restore is lazy.** Only the visible tab is read at startup (`Tab::unloaded`).

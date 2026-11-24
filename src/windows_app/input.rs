@@ -2010,9 +2010,9 @@ impl App {
         if self.showing_diff() && y >= self.editor_top() {
             // The two panes mirror a file that is also open in the editor, so a
             // click jumps to the line under the pointer instead of doing nothing.
-            if self.history_compare.is_none() {
+            if self.history_compare.is_none() && self.ai_review.is_none() {
                 self.open_diff_line(hwnd, y);
-            } else if !self.history_header_click(hwnd, x, y) {
+            } else if !self.compare_header_click(hwnd, x, y) && self.history_compare.is_some() {
                 self.history_diff_click(hwnd, y);
             }
             return;
