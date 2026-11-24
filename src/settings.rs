@@ -61,6 +61,9 @@ pub struct Settings {
     pub default_terminal_profile: ShellKind,
     /// Load web images in Markdown previews without asking first.
     pub markdown_load_remote_images: bool,
+    /// `aiProjectAccess`: whether the AI Assistant's model may search and
+    /// read the project: "ask" (once per chat), "always" or "off".
+    pub ai_project_access: AiProjectAccess,
     /// The installed color-theme variant in use, by name (e.g. "Dracula");
     /// None is LightLine's own theme.
     pub color_theme: Option<String>,
@@ -115,6 +118,7 @@ impl Default for Settings {
             parse_limit_kb: 4096,
             default_terminal_profile: ShellKind::PowerShell,
             markdown_load_remote_images: false,
+            ai_project_access: AiProjectAccess::Ask,
             color_theme: None,
             ai_endpoint: crate::ai::DEFAULT_ENDPOINT.to_string(),
             ai_model: None,
@@ -316,6 +320,13 @@ impl Settings {
         {
             settings.markdown_load_remote_images = b;
         }
+        if let Some(access) = value
+            .get("aiProjectAccess")
+            .and_then(|v| v.as_str())
+            .and_then(AiProjectAccess::parse)
+        {
+            settings.ai_project_access = access;
+        }
         if let Some(s) = value
             .get("terminalDefaultProfile")
             .or_else(|| value.get("terminalShell"))
@@ -502,6 +513,10 @@ impl Settings {
             serde_json::Value::Bool(self.markdown_load_remote_images),
         );
         obj.insert(
+            "aiProjectAccess".into(),
+            serde_json::Value::String(self.ai_project_access.key().into()),
+        );
+        obj.insert(
             "terminalDefaultProfile".into(),
             serde_json::Value::String(self.default_terminal_profile.name().to_string()),
         );
@@ -519,6 +534,36 @@ impl Settings {
             obj.insert("languageServers".into(), serde_json::Value::Object(servers));
         }
         obj
+    }
+}
+
+/// Whether the AI Assistant's model may search and read the project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiProjectAccess {
+    /// Asks once per chat.
+    Ask,
+    Always,
+    Off,
+}
+
+impl AiProjectAccess {
+    /// Its value in settings.json.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Always => "always",
+            Self::Off => "off",
+        }
+    }
+
+    /// Reads a settings.json value. None leaves the default.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ask" => Some(Self::Ask),
+            "always" | "on" | "true" => Some(Self::Always),
+            "off" | "never" | "false" => Some(Self::Off),
+            _ => None,
+        }
     }
 }
 
@@ -595,6 +640,7 @@ const OWN_KEYS: &[&str] = &[
     "aiEndpoint",
     "aiModel",
     "markdownLoadRemoteImages",
+    "aiProjectAccess",
     "terminalDefaultProfile",
     "terminalSymbolFont",
     "languageServers",
@@ -866,6 +912,29 @@ mod tests {
         };
         let loaded = Settings::parse(&s.to_json()).unwrap();
         assert!(loaded.markdown_load_remote_images);
+    }
+
+    #[test]
+    fn ai_project_access_round_trips() {
+        assert_eq!(Settings::default().ai_project_access, AiProjectAccess::Ask);
+        for access in [
+            AiProjectAccess::Ask,
+            AiProjectAccess::Always,
+            AiProjectAccess::Off,
+        ] {
+            let s = Settings {
+                ai_project_access: access,
+                ..Settings::default()
+            };
+            assert_eq!(
+                Settings::parse(&s.to_json()).unwrap().ai_project_access,
+                access
+            );
+        }
+        let loose = Settings::parse(r#"{"aiProjectAccess": "never"}"#).unwrap();
+        assert_eq!(loose.ai_project_access, AiProjectAccess::Off);
+        let unknown = Settings::parse(r#"{"aiProjectAccess": "maybe"}"#).unwrap();
+        assert_eq!(unknown.ai_project_access, AiProjectAccess::Ask);
     }
 
     #[test]

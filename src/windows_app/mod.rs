@@ -1,5 +1,6 @@
 mod ai_attach;
 mod ai_chat;
+mod ai_project;
 mod ai_provider;
 mod app;
 mod background_save;

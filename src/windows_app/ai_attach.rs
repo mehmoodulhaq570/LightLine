@@ -47,21 +47,7 @@ pub(super) struct SentFile {
     pub(super) cut: bool,
 }
 
-/// Whether `path` looks like it holds secrets: environment files, keys and
-/// credentials. These are never sent without asking.
-pub(super) fn looks_secret(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    name.starts_with(".env")
-        || name.starts_with("id_rsa")
-        || name.starts_with("id_ed25519")
-        || name.starts_with("credentials")
-        || [".pem", ".key", ".pfx", ".p12"]
-            .iter()
-            .any(|suffix| name.ends_with(suffix))
-}
+pub(super) use lightline::ai_tools::looks_secret;
 
 fn is_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|&byte| byte == 0)

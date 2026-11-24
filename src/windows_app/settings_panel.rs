@@ -11,7 +11,7 @@
 
 use super::render::blend;
 use super::*;
-use lightline::settings::{InlineDiagnostics, Settings};
+use lightline::settings::{AiProjectAccess, InlineDiagnostics, Settings};
 use lightline::terminal::ShellKind;
 use std::sync::OnceLock;
 
@@ -59,6 +59,7 @@ enum Setting {
     MarkdownImages,
     AiEndpoint,
     AiModel,
+    AiProjectAccess,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +119,7 @@ const ROWS: &[Row] = &[
     Row::Heading("AI ASSISTANT"),
     Row::Choice(Setting::AiEndpoint),
     Row::Info(Setting::AiModel),
+    Row::Choice(Setting::AiProjectAccess),
     Row::OpenJson,
 ];
 
@@ -156,6 +158,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::MarkdownImages => "Load web images in previews",
         Setting::AiEndpoint => "Server",
         Setting::AiModel => "Model",
+        Setting::AiProjectAccess => "Project access",
     }
 }
 
@@ -188,6 +191,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::MarkdownImages => "markdownLoadRemoteImages",
         Setting::AiEndpoint => "aiEndpoint",
         Setting::AiModel => "aiModel",
+        Setting::AiProjectAccess => "aiProjectAccess",
     }
 }
 
@@ -230,6 +234,9 @@ fn tip(setting: Setting) -> &'static str {
         }
         Setting::AiEndpoint => "Where the AI Assistant sends questions  \u{b7}  aiEndpoint",
         Setting::AiModel => "Chosen in the AI Assistant panel  \u{b7}  aiModel",
+        Setting::AiProjectAccess => {
+            "Whether the AI may search and read the project  \u{b7}  aiProjectAccess"
+        }
     }
 }
 
@@ -380,6 +387,12 @@ impl App {
                     settings.ai_endpoint.clone()
                 }
             }
+            Setting::AiProjectAccess => match settings.ai_project_access {
+                AiProjectAccess::Ask => "Ask per chat",
+                AiProjectAccess::Always => "Always",
+                AiProjectAccess::Off => "Off",
+            }
+            .into(),
             Setting::AiModel => settings
                 .ai_model
                 .clone()
@@ -401,6 +414,7 @@ impl App {
                 now.default_terminal_profile != default.default_terminal_profile
             }
             Setting::InlineProblems => now.inline_diagnostics != default.inline_diagnostics,
+            Setting::AiProjectAccess => now.ai_project_access != default.ai_project_access,
             Setting::AiEndpoint | Setting::AiModel => false,
             toggle => setting_on_in(now, toggle) != setting_on_in(default, toggle),
         }
@@ -434,6 +448,10 @@ impl App {
             }
             Setting::InlineProblems => {
                 self.settings.inline_diagnostics = default.inline_diagnostics;
+                self.save_settings_change(hwnd);
+            }
+            Setting::AiProjectAccess => {
+                self.settings.ai_project_access = default.ai_project_access;
                 self.save_settings_change(hwnd);
             }
             Setting::AiEndpoint | Setting::AiModel => {}
@@ -731,6 +749,14 @@ impl App {
                 self.save_settings_change(hwnd);
             }
             Row::Choice(Setting::AiEndpoint) => self.show_ai_provider(hwnd, false),
+            Row::Choice(Setting::AiProjectAccess) => {
+                self.settings.ai_project_access = match self.settings.ai_project_access {
+                    AiProjectAccess::Ask => AiProjectAccess::Always,
+                    AiProjectAccess::Always => AiProjectAccess::Off,
+                    AiProjectAccess::Off => AiProjectAccess::Ask,
+                };
+                self.save_settings_change(hwnd);
+            }
             Row::OpenJson if contains(self.settings_json_link(rect), x, y) => {
                 self.open_settings(hwnd);
             }
@@ -1210,7 +1236,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 26);
+        assert_eq!(setting_count(), 27);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }
