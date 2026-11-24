@@ -35,6 +35,29 @@ pub(super) enum StepKind {
 }
 
 impl StepKind {
+    /// How a kept chat names it (lightline::chat_store).
+    pub(super) fn key(self) -> &'static str {
+        match self {
+            StepKind::Search => "search",
+            StepKind::Read => "read",
+            StepKind::List => "list",
+            StepKind::Problems => "problems",
+            StepKind::Change => "change",
+            StepKind::Other => "other",
+        }
+    }
+
+    pub(super) fn from_key(key: &str) -> Self {
+        match key {
+            "search" => StepKind::Search,
+            "read" => StepKind::Read,
+            "list" => StepKind::List,
+            "problems" => StepKind::Problems,
+            "change" => StepKind::Change,
+            _ => StepKind::Other,
+        }
+    }
+
     pub(super) fn of(tool: &str) -> Self {
         match tool {
             "search" => StepKind::Search,

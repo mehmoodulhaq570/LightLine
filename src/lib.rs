@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod ai_tools;
+pub mod chat_store;
 #[cfg(windows)]
 pub mod clipboard;
 pub mod color_theme;

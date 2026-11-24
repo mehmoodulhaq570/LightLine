@@ -94,6 +94,8 @@ pub(super) const QUICK_COMMANDS: &[(&str, u8)] = &[
     ("AI: Explain Error at Cursor", 44),
     ("AI: Fix Error at Cursor", 45),
     ("AI: New Chat", 46),
+    ("AI: Show Earlier Chats", 72),
+    ("AI: Delete All Chats", 73),
     ("AI: Choose Provider\u{2026}", 64),
     ("Local History: Show File History", 65),
     ("Merge Conflict: Next Conflict", 66),
@@ -405,6 +407,15 @@ impl App {
                 }
                 self.ai_new_chat(hwnd);
             }
+            72 => {
+                if !self.ai_assistant_visible {
+                    self.toggle_ai_assistant(hwnd);
+                }
+                if !self.ai.history_open {
+                    self.ai_toggle_history(hwnd);
+                }
+            }
+            73 => self.ai_delete_all_chats(hwnd),
             60 => self.show_ai_provider(hwnd, true),
             64 => self.show_ai_provider(hwnd, false),
             65 => self.show_file_history(hwnd),

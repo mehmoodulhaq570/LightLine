@@ -231,6 +231,7 @@ Per-user state lives in `%APPDATA%\LightLine\`:
 | `settings.json` | User settings |
 | `session.json` | Workspace root, tabs, cursors, and unsaved-text recovery checkpoints, written about every 5 s by one background writer, atomically |
 | `history\` | Local History |
+| `chats\` | Earlier AI chats: a folder per workspace (hash of its path) with `index.json` and one file per chat, the last 50 (`chat_store.rs`) |
 | `extensions\` | Installed extensions, with `.staging-*`, `.backup-*` and `.update-*.lock` during installs |
 | `pyright\` | Downloaded Pyright |
 | `cache\` | Caches |
@@ -241,7 +242,7 @@ Settings keys:
 - **Editor:** `fontFamily`, `fontSize`, `tabSize`, `insertSpaces`, `wordWrap`, `autoClosePairs`, `autoIndent`, `smoothScrolling`, `parseLimitKb`.
 - **Formatting:** `formatOnSave`, `prettierEnabled`.
 - **Visual aids:** `animations`, `inlayHints`, `occurrencesHighlight`, `stickyScroll`, `bracketMatching`, `indentGuides`, `showMinimap`, `bracketPairColorization`, `gitBlame`, `codeLens`.
-- **Other:** `localHistory`, `colorTheme`, `aiEndpoint`, `aiModel`, `aiProjectAccess`, `markdownLoadRemoteImages`, `terminalDefaultProfile`.
+- **Other:** `localHistory`, `colorTheme`, `aiEndpoint`, `aiModel`, `aiProjectAccess`, `aiIncludeOpenFile`, `aiKeepChats`, `markdownLoadRemoteImages`, `terminalDefaultProfile`.
 
 **Adding a setting means editing `settings.rs` in five places:** the struct field, `Default`, parsing, serializing, and the `OWN_KEYS` list. Document it in the settings table in `docs/USER_GUIDE.md`.
 

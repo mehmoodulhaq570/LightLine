@@ -69,7 +69,7 @@ Disk space on the dev machine is tight. Prefer `CARGO_INCREMENTAL=0` for long se
 
 ## User data and settings
 
-- Per-user state lives in `%APPDATA%\LightLine\`: `settings.json`, `session.json` (tabs plus unsaved-text recovery), `history\` (Local History), `extensions\`, `pyright\`.
+- Per-user state lives in `%APPDATA%\LightLine\`: `settings.json`, `session.json` (tabs plus unsaved-text recovery), `history\` (Local History), `chats\` (earlier AI chats, one folder per workspace), `extensions\`, `pyright\`.
 - **Adding a setting means editing `settings.rs` in five places**: the struct field, `Default`, parsing, serializing, and the `OWN_KEYS` list. Document it in the settings table in `docs/USER_GUIDE.md`.
 - Settings the library needs globally are pushed in at load and on reload via setters, such as `syntax::set_parse_limit_kb` and `local_history::set_enabled`. Do the same for any new one.
 

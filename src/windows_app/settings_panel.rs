@@ -61,6 +61,7 @@ enum Setting {
     AiModel,
     AiProjectAccess,
     AiOpenFile,
+    AiKeepChats,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,6 +123,7 @@ const ROWS: &[Row] = &[
     Row::Info(Setting::AiModel),
     Row::Choice(Setting::AiProjectAccess),
     Row::Toggle(Setting::AiOpenFile),
+    Row::Toggle(Setting::AiKeepChats),
     Row::OpenJson,
 ];
 
@@ -162,6 +164,7 @@ fn label(setting: Setting) -> &'static str {
         Setting::AiModel => "Model",
         Setting::AiProjectAccess => "Project access",
         Setting::AiOpenFile => "Include the open file",
+        Setting::AiKeepChats => "Keep earlier chats",
     }
 }
 
@@ -196,6 +199,7 @@ fn json_key(setting: Setting) -> &'static str {
         Setting::AiModel => "aiModel",
         Setting::AiProjectAccess => "aiProjectAccess",
         Setting::AiOpenFile => "aiIncludeOpenFile",
+        Setting::AiKeepChats => "aiKeepChats",
     }
 }
 
@@ -243,6 +247,9 @@ fn tip(setting: Setting) -> &'static str {
         }
         Setting::AiOpenFile => {
             "The file you're in goes with a question unless removed  \u{b7}  aiIncludeOpenFile"
+        }
+        Setting::AiKeepChats => {
+            "The last 50 chats per folder, on this PC only  \u{b7}  aiKeepChats"
         }
     }
 }
@@ -294,6 +301,7 @@ fn setting_on_in(settings: &Settings, setting: Setting) -> bool {
         Setting::EditorConfig => settings.editor_config,
         Setting::MarkdownImages => settings.markdown_load_remote_images,
         Setting::AiOpenFile => settings.ai_include_open_file,
+        Setting::AiKeepChats => settings.ai_keep_chats,
         Setting::Animations => settings.animations,
         Setting::SmoothScrolling => settings.smooth_scrolling,
         _ => false,
@@ -792,6 +800,7 @@ impl App {
             Setting::EditorConfig => &mut settings.editor_config,
             Setting::MarkdownImages => &mut settings.markdown_load_remote_images,
             Setting::AiOpenFile => &mut settings.ai_include_open_file,
+            Setting::AiKeepChats => &mut settings.ai_keep_chats,
             Setting::Animations => &mut settings.animations,
             Setting::SmoothScrolling => &mut settings.smooth_scrolling,
             _ => return,
@@ -1245,7 +1254,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_listed_once() {
-        assert_eq!(setting_count(), 28);
+        assert_eq!(setting_count(), 29);
         let all = shown_rows("");
         assert_eq!(all.len(), ROWS.len());
     }
