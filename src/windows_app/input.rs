@@ -2259,8 +2259,11 @@ impl App {
             .map(|diagnostic| EditorContextDiagnostic::from_lsp(&diagnostic));
         let has_hunk = self.active_hunk_at_cursor().is_some();
         let can_rename = self.tab().lsp_language().is_some();
-        self.editor_context =
-            Some(EditorContextMenu::new(x, y, problem, selected, has_hunk).with_rename(can_rename));
+        self.editor_context = Some(
+            EditorContextMenu::new(x, y, problem, selected, has_hunk)
+                .with_rename(can_rename)
+                .with_attach(self.doc().path.is_some()),
+        );
         unsafe { InvalidateRect(hwnd, null(), 0) };
         true
     }
@@ -2377,7 +2380,17 @@ impl App {
             const CMD_RENAME: usize = 6;
             const CMD_DELETE: usize = 7;
             const CMD_CLOSE_WORKSPACE: usize = 8;
+            const CMD_ADD_TO_AI: usize = 10;
 
+            if !is_dir {
+                AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    CMD_ADD_TO_AI,
+                    wide("Add to AI Chat").as_ptr(),
+                );
+                AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            }
             AppendMenuW(menu, MF_STRING, CMD_NEW_FILE, wide("New File...").as_ptr());
             AppendMenuW(
                 menu,
@@ -2437,6 +2450,9 @@ impl App {
             };
 
             match cmd {
+                CMD_ADD_TO_AI => {
+                    self.ai_attach_from_menu(hwnd, clicked_path.clone());
+                }
                 CMD_NEW_FILE => {
                     self.start_explorer_input(parent_dir, false, false, None, hwnd);
                 }

@@ -1,3 +1,4 @@
+mod ai_attach;
 mod ai_chat;
 mod ai_provider;
 mod app;

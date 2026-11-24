@@ -20,7 +20,7 @@ pub(super) const AI_EVENT_MESSAGE: u32 = WM_APP + 10;
 
 const ANSWER_FLUSH: Duration = Duration::from_millis(50);
 // Code sent along with a question: at most this much.
-const MAX_CONTEXT_LINES: usize = 400;
+pub(super) const MAX_CONTEXT_LINES: usize = 400;
 const MAX_CONTEXT_BYTES: usize = 24 * 1024;
 // Earlier messages sent along for context, newest first, up to this size.
 const MAX_HISTORY_BYTES: usize = 48 * 1024;
@@ -122,6 +122,8 @@ pub(super) struct ChatEntry {
     prompt: String,
     /// The code sent with a question, e.g. "app.rs, lines 40–82".
     pub(super) context: Option<String>,
+    /// The files sent with a question, as chips.
+    pub(super) chips: Vec<super::ai_attach::Chip>,
     target: Option<AiTarget>,
     /// Why an answer ended early.
     pub(super) error: Option<String>,
@@ -137,6 +139,7 @@ impl ChatEntry {
             text,
             prompt,
             context: None,
+            chips: Vec::new(),
             target: None,
             error: None,
             revision: 0,
@@ -174,12 +177,22 @@ pub(super) struct AiHits {
     pub(super) composer: Option<RECT>,
     pub(super) send: Option<RECT>,
     pub(super) actions: Vec<(RECT, AiAction)>,
+    /// The @ list's rows.
+    pub(super) mentions: Vec<(RECT, PathBuf)>,
+    /// The ✕ on each attached file's chip, by its index.
+    pub(super) chip_close: Vec<(RECT, usize)>,
 }
 
 pub(super) struct AiChat {
     pub(super) entries: Vec<ChatEntry>,
     /// The message being typed.
     pub(super) input: String,
+    /// Files to send with the next question (ai_attach.rs).
+    pub(super) attachments: Vec<super::ai_attach::Attachment>,
+    /// The @ list's chosen row, and whether Esc closed it until the next
+    /// change to the box.
+    pub(super) mention_selected: usize,
+    pub(super) mention_dismissed: bool,
     /// Whether the message box has keyboard focus.
     pub(super) focused: bool,
     /// How far the conversation is scrolled, in pixels from its top.
@@ -215,6 +228,9 @@ impl AiChat {
         Self {
             entries: Vec::new(),
             input: String::new(),
+            attachments: Vec::new(),
+            mention_selected: 0,
+            mention_dismissed: false,
             focused: false,
             scroll: Cell::new(0),
             follow: Cell::new(true),
@@ -292,7 +308,7 @@ fn fence_language(path: Option<&Path>) -> String {
 }
 
 // `text` cut to MAX_CONTEXT_LINES lines and MAX_CONTEXT_BYTES bytes.
-fn clip_context(text: &str) -> (String, bool) {
+pub(super) fn clip_context(text: &str) -> (String, bool) {
     let mut clipped = String::new();
     for (index, line) in text.split('\n').enumerate() {
         if index >= MAX_CONTEXT_LINES || clipped.len() + line.len() + 1 > MAX_CONTEXT_BYTES {
@@ -668,8 +684,14 @@ impl App {
             return;
         }
         let context = self.ai_selection_context();
+        // Asks first about a secrets file; "Don't Send" keeps the question.
+        let Some(files) = self.ai_files_for_question(hwnd) else {
+            unsafe { InvalidateRect(hwnd, null(), 0) };
+            return;
+        };
         self.ai.input.clear();
-        self.ai_ask(hwnd, question.clone(), question, context);
+        self.ai_input_changed();
+        self.ai_ask(hwnd, question.clone(), question, context, files);
     }
 
     /// The error or warning at the cursor, errors first.
@@ -710,7 +732,13 @@ impl App {
                 self.status = "Select some code first".into();
                 return;
             };
-            self.ai_ask(hwnd, shown.into(), instruction.into(), Some(context));
+            self.ai_ask(
+                hwnd,
+                shown.into(),
+                instruction.into(),
+                Some(context),
+                Vec::new(),
+            );
             return;
         }
 
@@ -795,6 +823,7 @@ impl App {
             format!("{shown} {kind}: {message}"),
             instruction,
             Some(context),
+            Vec::new(),
         );
     }
 
@@ -806,6 +835,7 @@ impl App {
         shown: String,
         instruction: String,
         context: Option<AiContext>,
+        files: Vec<super::ai_attach::SentFile>,
     ) {
         let Some(model) = self.settings.ai_model.clone() else {
             return;
@@ -813,7 +843,7 @@ impl App {
         if self.ai.busy() {
             return;
         }
-        let prompt = match &context {
+        let mut prompt = match &context {
             Some(context) => {
                 let (code, clipped) = clip_context(&context.code);
                 let note = if clipped { " (cut short)" } else { "" };
@@ -824,6 +854,15 @@ impl App {
             }
             None => instruction,
         };
+        for file in files.iter().filter(|file| !file.text.is_empty()) {
+            let note = if file.cut { " (cut short)" } else { "" };
+            prompt.push_str(&format!(
+                "\n\nFile {}{note}:\n```{}\n{}\n```",
+                file.name,
+                file.language,
+                file.text.trim_end_matches('\n')
+            ));
+        }
 
         // Earlier messages give the model the conversation so far.
         let mut history = Vec::new();
@@ -852,6 +891,7 @@ impl App {
             question.context = Some(context.label);
             question.target = context.target;
         }
+        question.chips = files.into_iter().map(|file| file.chip).collect();
         self.ai.entries.push(question);
         self.ai.entries.push(ChatEntry::new(
             Role::Assistant,
@@ -1047,7 +1087,13 @@ impl App {
                 return;
             }
         }
-        if hits.new_chat.as_ref().is_some_and(inside) {
+        if let Some((_, path)) = hits.mentions.iter().find(|(rect, _)| inside(rect)) {
+            self.ai_accept_mention(hwnd, Some(path.clone()));
+            self.focus_ai_input();
+        } else if let Some((_, index)) = hits.chip_close.iter().find(|(rect, _)| inside(rect)) {
+            self.ai_remove_attachment(hwnd, *index);
+            self.focus_ai_input();
+        } else if hits.new_chat.as_ref().is_some_and(inside) {
             self.ai_new_chat(hwnd);
         } else if let Some(chip) = hits.model.filter(inside) {
             self.ai_model_menu(hwnd, chip.left, chip.bottom);
@@ -1163,6 +1209,9 @@ impl App {
                 _ => true,
             };
         }
+        if let Some(handled) = self.ai_mention_key(hwnd, key, ctrl) {
+            return handled;
+        }
         match key {
             k if k == VK_RETURN as u32 && !ctrl => {
                 if shift {
@@ -1182,12 +1231,16 @@ impl App {
                 true
             }
             k if k == VK_BACK as u32 => {
-                if ctrl {
+                if self.ai.input.is_empty() && !self.ai.attachments.is_empty() {
+                    // Backspace in an empty box takes off the last file.
+                    self.ai.attachments.pop();
+                } else if ctrl {
                     let kept = self.ai.input.trim_end().rfind(char::is_whitespace);
                     self.ai.input.truncate(kept.map_or(0, |index| index + 1));
                 } else {
                     self.ai.input.pop();
                 }
+                self.ai_input_changed();
                 unsafe { InvalidateRect(hwnd, null(), 0) };
                 true
             }
@@ -1246,6 +1299,7 @@ impl App {
     fn ai_type(&mut self, hwnd: HWND, text: &str) {
         if self.ai.input.len() + text.len() <= MAX_INPUT_BYTES {
             self.ai.input.push_str(text);
+            self.ai_input_changed();
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
