@@ -344,6 +344,8 @@ The AI Assistant (the sparkle in the left rail) chats about your code with a mod
 
 Answers appear as they're written. **Esc** stops one, **+** starts a new chat, and the model name at the top switches models or turns the assistant off.
 
+**Attaching files:** type `@` in the question box and a list of the project's files appears, matched as you type (names that start with what you typed come first). **Enter** or **Tab** attaches the chosen file, **Up**/**Down** choose, and **Esc** closes the list. **Add to AI Chat** on a file in the Explorer, or **Add file to AI chat** in the editor's right-click menu, attaches that file and opens the panel. Each attached file shows as a chip above the box, so you see what will be sent before you press Enter; **✕** on a chip, or **Backspace** in an empty box, takes it off. On Enter the files go with the question, each cut like selected code (400 lines or 24 KB) and 96 KB in all; the chips stay on the question in the chat and say how much was sent, such as *ai.rs · 1,320 lines, cut to 400*. An open file is sent as it is in the editor, unsaved edits included. Files the `.gitignore` hides aren't in the `@` list, but you can still attach one from the Explorer. A binary file can't be attached, and a file that looks like it holds secrets (`.env`, `*.pem`, `*.key`, `id_rsa`, `credentials`…) shows amber and asks before it's sent; **Don't Send**, the default, keeps your question.
+
 Each code block in an answer has three buttons:
 
 - **Insert** adds the code at the cursor.

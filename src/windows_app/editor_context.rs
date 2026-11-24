@@ -15,6 +15,7 @@ enum EditorContextAction {
     FixSelection,
     TestsForSelection,
     CommentsForSelection,
+    AddFileToChat,
     QuickFix,
     RenameSymbol,
     Cut,
@@ -86,6 +87,8 @@ pub(super) struct EditorContextMenu {
     has_hunk: bool,
     // The file has a language server to rename with.
     can_rename: bool,
+    // The file is saved somewhere, so it can go with an AI question.
+    can_attach: bool,
     highlighted: Option<EditorContextAction>,
 }
 
@@ -112,12 +115,18 @@ impl EditorContextMenu {
             has_selection,
             has_hunk,
             can_rename: false,
+            can_attach: false,
             highlighted,
         }
     }
 
     pub(super) fn with_rename(mut self, can_rename: bool) -> Self {
         self.can_rename = can_rename;
+        self
+    }
+
+    pub(super) fn with_attach(mut self, can_attach: bool) -> Self {
+        self.can_attach = can_attach;
         self
     }
 
@@ -138,6 +147,9 @@ impl EditorContextMenu {
                 EditorContextAction::Cut,
                 EditorContextAction::Copy,
             ]);
+        }
+        if self.can_attach {
+            actions.push(EditorContextAction::AddFileToChat);
         }
         if self.has_hunk {
             actions.extend([
@@ -212,6 +224,7 @@ fn action_label(
         EditorContextAction::FixSelection => "Fix selection".into(),
         EditorContextAction::TestsForSelection => "Write tests for selection".into(),
         EditorContextAction::CommentsForSelection => "Add comments to selection".into(),
+        EditorContextAction::AddFileToChat => "Add file to AI chat".into(),
         EditorContextAction::QuickFix => "Quick fix...".into(),
         EditorContextAction::RenameSymbol => "Rename symbol".into(),
         EditorContextAction::Cut => "Cut".into(),
@@ -292,6 +305,19 @@ impl App {
                     s(30),
                 ));
             }
+        }
+        if menu.can_attach {
+            if !specs.is_empty() {
+                specs.push((ContextElementKind::Divider, s(7)));
+            }
+            specs.push((ContextElementKind::Section("AI · FILE"), s(18)));
+            specs.push((
+                ContextElementKind::Row {
+                    action: EditorContextAction::AddFileToChat,
+                    enabled: true,
+                },
+                s(30),
+            ));
         }
         specs.push((ContextElementKind::Divider, s(7)));
         specs.push((ContextElementKind::Section("EDIT"), s(18)));
@@ -501,6 +527,11 @@ impl App {
             EditorContextAction::FixSelection => self.ai_run_task(hwnd, AiTask::Fix),
             EditorContextAction::TestsForSelection => self.ai_run_task(hwnd, AiTask::Tests),
             EditorContextAction::CommentsForSelection => self.ai_run_task(hwnd, AiTask::Comments),
+            EditorContextAction::AddFileToChat => {
+                if let Some(path) = self.doc().path.clone() {
+                    self.ai_attach_from_menu(hwnd, path);
+                }
+            }
             EditorContextAction::QuickFix => self.request_code_actions(hwnd),
             EditorContextAction::RenameSymbol => self.start_rename(hwnd),
             EditorContextAction::Cut => {

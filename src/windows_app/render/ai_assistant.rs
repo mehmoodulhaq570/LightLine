@@ -1,6 +1,7 @@
 use super::super::ai_chat::{AiAction, ChatEntry, SUGGESTED_MODEL, model_menu_models};
 use super::super::markdown_view::SNIPPET_CODE_HEADER;
 use super::super::*;
+use super::blend;
 use lightline::ai::{self, Role};
 
 // The AI Assistant panel. Until a model is chosen it explains the
@@ -20,6 +21,25 @@ const AI_PROMISES: [&str; 3] = [
 
 // Most lines the message box grows to before its text scrolls.
 const COMPOSER_LINES: usize = 6;
+
+// An attached file's chip: its icon (from the path), what it says, and
+// whether it's amber.
+struct ChipSpec {
+    path: PathBuf,
+    label: String,
+    warn: bool,
+}
+
+fn chip_specs(chips: &[super::super::ai_attach::Chip]) -> Vec<ChipSpec> {
+    chips
+        .iter()
+        .map(|chip| ChipSpec {
+            path: chip.path.clone(),
+            label: chip.label.clone(),
+            warn: chip.warn,
+        })
+        .collect()
+}
 
 impl App {
     pub(in crate::windows_app) fn paint_ai_assistant(&self, hdc: HDC, rect: RECT) {
@@ -68,6 +88,40 @@ impl App {
             ..content
         };
         let mut conversation_bottom = composer.top - s(10);
+        // Files waiting to go with the question, above the box.
+        if !self.ai.attachments.is_empty() {
+            let chips: Vec<ChipSpec> = self
+                .ai
+                .attachments
+                .iter()
+                .map(|attached| ChipSpec {
+                    path: attached.path.clone(),
+                    label: if attached.secret {
+                        format!("{} \u{00b7} looks like secrets", attached.name)
+                    } else {
+                        attached.name.clone()
+                    },
+                    warn: attached.secret,
+                })
+                .collect();
+            let (spans, height) =
+                self.ai_chip_spans(hdc, &chips, composer.right - composer.left, true);
+            let top = conversation_bottom - height;
+            let mut hits = Vec::new();
+            for (index, (chip, span)) in chips.iter().zip(&spans).enumerate() {
+                let rect = RECT {
+                    left: composer.left + span.left,
+                    top: top + span.top,
+                    right: composer.left + span.right,
+                    bottom: top + span.bottom,
+                };
+                if let Some(close) = self.paint_ai_chip(hdc, rect, chip, true) {
+                    hits.push((close, index));
+                }
+            }
+            self.ai.hits.borrow_mut().chip_close = hits;
+            conversation_bottom = top - s(8);
+        }
         if let Some(label) = self.ai_selection_label() {
             let top = conversation_bottom - line_height;
             self.paint_ai_context(hdc, &label, RECT { top, ..composer });
@@ -86,6 +140,9 @@ impl App {
             &lines[lines.len() - shown.min(lines.len())..],
             true,
         );
+        if self.ai_mention_query().is_some() {
+            self.paint_ai_mentions(hdc, composer, conversation_bottom, header_bottom);
+        }
         if self.ai.model_menu_open {
             self.paint_ai_model_picker(hdc, rect, header_bottom);
         }
@@ -870,7 +927,10 @@ impl App {
         };
         y = self.paint_wrapped(
             hdc,
-            &format!("Select code in the editor to include it with your question. {source}"),
+            &format!(
+                "Select code in the editor to include it with your question, or type @ to \
+                 attach files. {source}"
+            ),
             area,
             y,
             line_height,
@@ -966,7 +1026,13 @@ impl App {
             } else {
                 0
             };
-            return s(20) + lines * line_height + context;
+            let chips = if entry.chips.is_empty() {
+                0
+            } else {
+                let specs = chip_specs(&entry.chips);
+                s(6) + self.ai_chip_spans(hdc, &specs, width - s(24), false).1
+            };
+            return s(20) + lines * line_height + context + chips;
         }
         let mut height = s(26);
         let (answer, thinking) = ai::visible_answer(&entry.text);
@@ -1018,6 +1084,22 @@ impl App {
                     self.theme.muted,
                     inner,
                 );
+                y += line_height + s(2);
+            }
+            if !entry.chips.is_empty() {
+                let specs = chip_specs(&entry.chips);
+                let (spans, _) = self.ai_chip_spans(hdc, &specs, inner.right - inner.left, false);
+                let top = y + s(6);
+                for (chip, span) in specs.iter().zip(&spans) {
+                    let rect = RECT {
+                        left: inner.left + span.left,
+                        top: top + span.top,
+                        right: inner.left + span.right,
+                        bottom: top + span.bottom,
+                    };
+                    self.paint_ai_chip(hdc, rect, chip, false);
+                }
+                unsafe { SelectObject(hdc, self.ui_font) };
             }
             return;
         }
@@ -1220,7 +1302,7 @@ impl App {
         let line_height = self.text_height(hdc) + s(4);
         if !enabled || self.ai.input.is_empty() {
             let placeholder = if enabled {
-                "Ask about your code\u{2026}".to_string()
+                "Ask about your code\u{2026} (@ to attach files)".to_string()
             } else {
                 "Connect a model to start chatting".to_string()
             };
@@ -1325,6 +1407,249 @@ impl App {
 
     // Draws `text` word-wrapped to `area`'s width from `y`, stopping at its
     // bottom; returns the y below the last line.
+    /// Where each chip goes, relative to the top left of a box `width`
+    /// wide: left to right, wrapping to a new row, each at most the full
+    /// width. Also the total height. `closable` chips leave room for a ✕.
+    fn ai_chip_spans(
+        &self,
+        hdc: HDC,
+        chips: &[ChipSpec],
+        width: i32,
+        closable: bool,
+    ) -> (Vec<RECT>, i32) {
+        let s = |value: i32| self.scale(value);
+        let (height, gap) = (s(22), s(5));
+        unsafe { SelectObject(hdc, self.small_font) };
+        let mut spans = Vec::with_capacity(chips.len());
+        let (mut x, mut y) = (0, 0);
+        for chip in chips {
+            let close = if closable { s(17) } else { 0 };
+            let wanted = s(27) + self.text_width(hdc, &chip.label) + close + s(8);
+            let w = wanted.min(width);
+            if x > 0 && x + w > width {
+                x = 0;
+                y += height + gap;
+            }
+            spans.push(RECT {
+                left: x,
+                top: y,
+                right: x + w,
+                bottom: y + height,
+            });
+            x += w + gap;
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let total = if chips.is_empty() { 0 } else { y + height };
+        (spans, total)
+    }
+
+    /// One file chip; with `closable`, also its ✕, whose rectangle is
+    /// returned for clicks.
+    fn paint_ai_chip(&self, hdc: HDC, rect: RECT, chip: &ChipSpec, closable: bool) -> Option<RECT> {
+        let s = |value: i32| self.scale(value);
+        let back = self.theme.sidebar_bg;
+        let accent = if chip.warn {
+            self.theme.warning
+        } else {
+            self.theme.blue
+        };
+        self.panel_card(
+            hdc,
+            rect,
+            s(11),
+            blend(back, accent, 0.45),
+            blend(back, accent, 0.1),
+        );
+        let icon = s(13);
+        let middle = (rect.top + rect.bottom) / 2;
+        let icon_left = rect.left + s(7);
+        let use_theme = self.has_extension("material-icon-theme");
+        if !self.icons.draw_for_path(
+            hdc,
+            &chip.path,
+            false,
+            false,
+            use_theme,
+            icon_left,
+            middle - icon / 2,
+            icon,
+        ) {
+            Self::rounded_fill(
+                hdc,
+                RECT {
+                    left: icon_left,
+                    top: middle - icon / 2,
+                    right: icon_left + icon,
+                    bottom: middle + icon / 2,
+                },
+                s(3),
+                accent,
+            );
+        }
+        let close = closable.then(|| RECT {
+            left: rect.right - s(20),
+            top: rect.top,
+            right: rect.right - s(3),
+            bottom: rect.bottom,
+        });
+        let text_right = close.map_or(rect.right - s(8), |close| close.left);
+        unsafe { SelectObject(hdc, self.small_font) };
+        let text = if chip.warn {
+            blend(self.theme.warning, self.theme.text, 0.3)
+        } else {
+            blend(self.theme.muted, self.theme.text, 0.55)
+        };
+        self.label_ellipsis(
+            hdc,
+            &chip.label,
+            icon_left + icon + s(6),
+            middle - self.text_height(hdc) / 2,
+            text,
+            RECT {
+                right: text_right,
+                ..rect
+            },
+        );
+        if let Some(close) = close {
+            self.glyph_in(hdc, DebugGlyph::Close, self.theme.muted, close, s(10));
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        close
+    }
+
+    /// The @ list: matching project files above the message box, over the
+    /// conversation, never above `top_limit`.
+    fn paint_ai_mentions(&self, hdc: HDC, composer: RECT, above: i32, top_limit: i32) {
+        let s = |value: i32| self.scale(value);
+        let matches = self.ai_mention_matches();
+        let row = s(26);
+        let footer = s(24);
+        let rows = matches.len().max(1) as i32;
+        let bottom = above.min(composer.top - s(6));
+        let top = (bottom - rows * row - footer - s(8)).max(top_limit + s(4));
+        let card = RECT {
+            left: composer.left,
+            top,
+            right: composer.right,
+            bottom,
+        };
+        self.panel_card(
+            hdc,
+            card,
+            s(6),
+            blend(self.theme.sidebar_bg, self.theme.blue, 0.4),
+            self.theme.editor_bg,
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let use_theme = self.has_extension("material-icon-theme");
+        let mut hits = Vec::new();
+        let mut y = card.top + s(4);
+        if matches.is_empty() {
+            let note = if self.quick_loading {
+                "Reading the project's files\u{2026}"
+            } else if self.workspace_root.is_none() {
+                "Open a folder to attach its files"
+            } else {
+                "No file matches"
+            };
+            self.label_mid(
+                hdc,
+                note,
+                card.left + s(10),
+                y + row / 2,
+                self.theme.muted,
+                card,
+            );
+            y += row;
+        }
+        for (index, path) in matches.iter().enumerate() {
+            let rect = RECT {
+                left: card.left + s(1),
+                top: y,
+                right: card.right - s(1),
+                bottom: y + row,
+            };
+            if index == self.ai.mention_selected {
+                Self::fill(hdc, rect, self.theme.select_bg);
+            }
+            let icon = s(15);
+            let middle = (rect.top + rect.bottom) / 2;
+            self.icons.draw_for_path(
+                hdc,
+                path,
+                false,
+                false,
+                use_theme,
+                rect.left + s(9),
+                middle - icon / 2,
+                icon,
+            );
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let folder = self.ai_file_name(path);
+            let folder = folder
+                .rsplit_once('/')
+                .map(|(folder, _)| folder.to_string())
+                .unwrap_or_default();
+            let name_left = rect.left + s(32);
+            self.label_mid(hdc, &name, name_left, middle, self.theme.text, rect);
+            if !folder.is_empty() {
+                unsafe { SelectObject(hdc, self.small_font) };
+                let name_right = name_left
+                    + {
+                        unsafe { SelectObject(hdc, self.ui_font) };
+                        let width = self.text_width(hdc, &name);
+                        unsafe { SelectObject(hdc, self.small_font) };
+                        width
+                    }
+                    + s(12);
+                let width = self.text_width(hdc, &folder);
+                let x = (rect.right - s(10) - width).max(name_right);
+                self.label_ellipsis(
+                    hdc,
+                    &folder,
+                    x,
+                    middle - self.text_height(hdc) / 2,
+                    self.theme.muted,
+                    RECT {
+                        right: rect.right - s(10),
+                        ..rect
+                    },
+                );
+                unsafe { SelectObject(hdc, self.ui_font) };
+            }
+            hits.push((rect, path.clone()));
+            y += row;
+        }
+        unsafe { SelectObject(hdc, self.small_font) };
+        let foot = RECT {
+            top: card.bottom - footer,
+            ..card
+        };
+        Self::fill(
+            hdc,
+            RECT {
+                left: card.left + s(1),
+                top: foot.top,
+                right: card.right - s(1),
+                bottom: foot.top + 1,
+            },
+            self.theme.edge,
+        );
+        self.label_mid(
+            hdc,
+            "Enter attaches \u{00b7} files .gitignore hides are left out \u{00b7} Esc",
+            card.left + s(10),
+            (foot.top + foot.bottom) / 2,
+            self.theme.muted,
+            foot,
+        );
+        unsafe { SelectObject(hdc, self.ui_font) };
+        self.ai.hits.borrow_mut().mentions = hits;
+    }
+
     pub(in crate::windows_app) fn paint_wrapped(
         &self,
         hdc: HDC,

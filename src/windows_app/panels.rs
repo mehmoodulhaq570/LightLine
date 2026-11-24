@@ -115,9 +115,15 @@ impl App {
         self.quick_selected = 0;
         self.quick_first = 0;
         self.quick_loading = false;
+        self.load_quick_files();
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+    }
+
+    /// Reads the workspace's file list on a worker, for Quick Open and the
+    /// AI's @ list. The last list (cleared when the workspace changes) is
+    /// used until the fresh one arrives.
+    pub(super) fn load_quick_files(&mut self) {
         if let Some(root) = self.workspace_root.clone() {
-            // The last list (cleared when the workspace changes) shows at
-            // once; a fresh one replaces it when it's read.
             self.quick_loading = self.quick_files.is_empty();
             let tx = self.worker_tx.clone();
             std::thread::spawn(move || {
@@ -137,7 +143,6 @@ impl App {
                 tx.send(WorkerMessage::Files(root, files));
             });
         }
-        unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
     pub(super) fn quick_commands(&self) -> Vec<(&'static str, u8)> {
