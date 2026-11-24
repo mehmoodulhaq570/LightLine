@@ -228,6 +228,70 @@ tested with LightLine, still without a server or a database of our own:
   `src/extensions/lightline_list.rs`, `windows_app/extensions_panel.rs`
   (`merge_extension_list`). Mock-up: `design/extension-list-design.html`.
 
+### Phase 3c — Our own extensions, in one repository (planned 2026-11-24, not started)
+
+LightLine's own extensions live in **one repository**, `lightline-extensions`
+(under `mehmoodulhaq570` for now; moving it to an organization later is fine,
+since GitHub redirects the old address). Decided over one repository per
+extension: one place to maintain, one CI, shared tooling and templates, and
+one PR can update several extensions. It stays out of the LightLine
+repository, so extension changes don't ride along with editor releases.
+
+**The repository:**
+
+- Folders by kind, each extension in Zed's format (`extension.toml`, then
+  `themes/`, `icon_themes/`, `snippets/`, `languages/` as Zed expects):
+
+  ```
+  lightline-extensions/
+    themes/<id>/            color themes
+    icon-themes/<id>/       icon themes
+    snippets/<id>/          snippet packs
+    languages/<id>/         language extensions (grammar repo + queries)
+    template/               a starting point for a new extension
+    README.md, CONTRIBUTING.md, LICENSE
+    .github/workflows/      checks every manifest on each PR
+  ```
+
+- Each extension keeps its own `version` in its `extension.toml`; the folder
+  name is its id (as everywhere in LightLine).
+- CI: every `extension.toml` parses and its parts exist; ids are unique and
+  match folders; themes and snippet files are valid JSON. A small checker
+  script in the repository, or `lightline_list` checks reused.
+- Zed's registry accepts extensions in a subfolder of a repository
+  (`path = "..."`), so ours can be submitted there too.
+
+**LightLine changes needed (one PR):**
+
+1. `registry/extensions.toml`: an optional `path` on `repository` + `commit`
+   entries, e.g. `path = "themes/lightline-dark"`. `lightline_list::parse`
+   checks it's relative, uses `/`, and has no `..` or drive (strict in
+   `problems`, the CI test).
+2. `installer.rs` (`fetch_commit`): with a `path`, download only that folder:
+   `git fetch --depth 1 --filter=blob:none <url> <commit>`, then
+   `git sparse-checkout set --no-cone /<path>/` and `git checkout`; then check
+   and promote `staging/<path>` exactly as a whole repository today
+   (validate, staging, backup, rollback, lock). Needs git 2.27+; an older git
+   gets a clear error. Without a `path`, nothing changes.
+3. The same change lets Zed registry entries with a `path` install
+   (`zed_registry::check_installable` refuses them today; Zed's own `html`,
+   `glsl`, `proto` are inside its huge main repository, which is why the
+   download must be partial). Their kinds still have to be supported.
+4. Tests: a local fixture repository with two extensions in subfolders
+   (install one, only its files arrive); `path` validation; an ignored live
+   test installing from the real repository.
+5. Docs: `USER_GUIDE.md` (Extensions), `CONTRIBUTING.md` (how to add an
+   extension to the new repository), this section, `CHANGELOG.md`.
+
+**Open questions for the next session:**
+
+- Which extensions to make first: LightLine's own color themes as an
+  installable pack, snippet packs for the languages LightLine runs (Python,
+  Rust, Go, JS/TS, C), or something new.
+- Whether to write a design page (`design/own-extensions-design.html`) first,
+  as for earlier features.
+- Whether any planned extension needs WASM (it would wait for §6's runtime).
+
 ### Phase 4 — Generalize the adapter pattern
 
 Each new supported Zed extension *type* gets its own adapter, not a special case
@@ -462,5 +526,6 @@ install language extensions you trust.
    options the extension computes. Those need the WASM runtime of §6.
 4. File icons for the new languages.
 5. Registry entries with a `path` (inside another repository) are still
-   refused before download (`zed_registry::check_installable`).
+   refused before download (`zed_registry::check_installable`). Planned as
+   part of Phase 3c (partial download of one folder).
 6. gcc/clang builds and Windows ARM64 still need a live check.

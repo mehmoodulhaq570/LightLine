@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-15 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-15)" at the end: it has the current state and the planned next steps.**
+Updated: 2026-11-24 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-24, night)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -655,3 +655,20 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 - `src/chat_store.rs` (portable): `%APPDATA%\LightLine\chats\<fnv64 of lowercased root | no-folder>\`, `index.json` (id/title/updated) + `<id>.json` per chat (ids are digits only), 50 per workspace, 2 MB per chat (oldest pairs dropped), atomic writes, one writer at a time (static Mutex). `list`/`load`/`save`/`delete`/`delete_all`, 6 tests.
 - `windows_app/ai_history.rs`: `ai_keep_chat` on a successful Done (thread; `AiChat.chat_id` set on first save), clock in the header (`DebugGlyph::History`) toggles the list (`history_open`, read on a thread via `AiEvent::Chats`), filter by typing, Up/Down/Enter/Delete/Esc, click opens (`AiEvent::ChatLoaded`, `ChatEntry::from_stored`), ✕ on the chosen row. Palette 72 AI: Show Earlier Chats, 73 AI: Delete All Chats (asks). Setting `aiKeepChats` (Settings count 29). `local_history::local_minutes`/`civil_from_days` are pub(super) for `chat_when`.
 - Live with real Claude: two chats kept as files, list, reopen, follow-up saved into the same chat (moved to top), filter, delete; 0 stale px.
+
+## Where things stand (2026-11-24, night)
+
+**Merged to `main`** (all squash-merged, CI green on x64 and ARM64 each time):
+
+- Chat redesign (`design/ai-chat-design.html`): part 1 #113 (`f98f6ca`), part 2 #116 (`f2fc079`, replaced #114, which GitHub closed when #113's branch was deleted), part 3 #115 (`5556033`). Local `main` is up to date and clean; the `ai-chat-redesign-*` branches are deleted. Older local branches (`feat/ai-*`, `feat/claude-provider`, `feat/extension-list`, `fix/prettier-*`) were left alone.
+- Real Claude (key in Credential Manager) tested live end to end; driver is the scratchpad `live_session.py` (commands file; `click`, `chars`, `key`, `chord`, `wheel`, `drag`, `shot`, `stale`, `stop`). The window's client area is narrower than the 1400 px window: read click positions off a screenshot.
+
+**Unreleased** now holds: snippet packs, checkers and their download offer, LightLine's list, Prettier fixes, Claude provider, @ attachments, project access, proposed edits, and the whole chat redesign. A good point for **v0.13.0** (rename the Unreleased section, push, `gh workflow run release.yml -f version=0.13.0`).
+
+**Next: our own extensions** (decided in conversation, plan in `docs/extension_implementation_plan.md`, Phase 3c):
+
+- One repository `lightline-extensions` for all of LightLine's own extensions (folders by kind, Zed's format, shared CI and template), not one repository each and not inside the LightLine repo. Under the maintainer's account for now.
+- LightLine needs one PR first: an optional `path` on list entries, and the installer downloading only that folder (`--filter=blob:none` + sparse checkout), which also unlocks Zed registry entries with a `path`.
+- Open: which extensions first (own color themes as a pack? snippet packs for the run languages?), whether to do a design page first, whether any need WASM.
+
+**Watch:** D: has under 1 GB free (debug `target` ~2 GB; `target/release` was cleaned). Free space before the next build-heavy session.
