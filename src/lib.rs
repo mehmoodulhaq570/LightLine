@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_tools;
 #[cfg(windows)]
 pub mod clipboard;
 pub mod color_theme;

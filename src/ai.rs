@@ -430,12 +430,17 @@ pub fn pick_model(models: &[String], remote: bool) -> Option<String> {
     best.map(|(_, model)| model)
 }
 
-fn request_body(model: &str, messages: &[Message]) -> String {
+fn openai_body(model: &str, messages: &[Message]) -> Value {
     let messages: Vec<Value> = messages
         .iter()
         .map(|message| json!({"role": message.role.as_str(), "content": message.content}))
         .collect();
-    json!({"model": model, "messages": messages, "stream": true}).to_string()
+    json!({"model": model, "messages": messages, "stream": true})
+}
+
+#[cfg(test)]
+fn request_body(model: &str, messages: &[Message]) -> String {
+    openai_body(model, messages).to_string()
 }
 
 /// What an answer is for: a chat answer may think a while; an inline
@@ -484,7 +489,12 @@ fn claude_has_fallbacks(model: &str) -> bool {
 /// user, and none may be empty: system messages are joined into `system`,
 /// neighbouring turns of one role are joined, and empty ones (an answer
 /// that was stopped before it began) and a leading assistant turn dropped.
+#[cfg(test)]
 fn claude_request_body(model: &str, messages: &[Message], purpose: Purpose) -> String {
+    claude_body(model, messages, purpose).to_string()
+}
+
+fn claude_body(model: &str, messages: &[Message], purpose: Purpose) -> Value {
     let system: Vec<&str> = messages
         .iter()
         .filter(|message| message.role == Role::System && !message.content.trim().is_empty())
@@ -531,7 +541,7 @@ fn claude_request_body(model: &str, messages: &[Message], purpose: Purpose) -> S
     if claude_has_fallbacks(model) {
         body["fallbacks"] = json!("default");
     }
-    body.to_string()
+    body
 }
 
 /// Shown when Claude's safety checks decline to answer.
@@ -627,20 +637,465 @@ fn stream_answer(
     messages: &[Message],
     purpose: Purpose,
     cancel: &AtomicBool,
+    on_text: impl FnMut(&str),
+) -> Result<(), String> {
+    let body = if server.claude {
+        claude_body(model, messages, purpose)
+    } else {
+        openai_body(model, messages)
+    };
+    let mut reader = Reader::new(server.claude);
+    stream_turn(server, model, body, cancel, &mut reader, on_text)
+}
+
+/// A tool call the model made.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    /// Its arguments, or the text that wasn't valid JSON.
+    pub input: Result<Value, String>,
+}
+
+/// What running a tool gave, for the model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolReply {
+    pub content: String,
+    pub is_error: bool,
+}
+
+/// How a question with tools went.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ToolsEnded {
+    /// The server or model refused tools, so it was asked without them.
+    pub tools_refused: bool,
+    pub steps: usize,
+}
+
+// What one streamed answer held besides its text.
+struct Turn {
+    calls: Vec<ToolCall>,
+    /// The assistant message to send back with the tools' results.
+    assistant: Value,
+    /// It stopped at its length limit, maybe in the middle of a call.
+    cut_off: bool,
+}
+
+// Reads one streamed answer: its text as it comes, and the tool calls and
+// (for Claude) every content block, thinking included, to send back.
+enum Reader {
+    OpenAi {
+        text: String,
+        // id, name, arguments as they arrive.
+        calls: Vec<(String, String, String)>,
+        finish: Option<String>,
+    },
+    Claude {
+        blocks: Vec<Value>,
+        partial: std::collections::HashMap<usize, String>,
+        stop: Option<String>,
+    },
+}
+
+impl Reader {
+    fn new(claude: bool) -> Self {
+        if claude {
+            Reader::Claude {
+                blocks: Vec::new(),
+                partial: std::collections::HashMap::new(),
+                stop: None,
+            }
+        } else {
+            Reader::OpenAi {
+                text: String::new(),
+                calls: Vec::new(),
+                finish: None,
+            }
+        }
+    }
+
+    fn line(&mut self, line: &str) -> Event {
+        let data = line
+            .strip_prefix("data:")
+            .and_then(|data| serde_json::from_str::<Value>(data.trim()).ok());
+        match self {
+            Reader::OpenAi {
+                text,
+                calls,
+                finish,
+            } => {
+                let event = parse_event(line);
+                if let Event::Text(piece) = &event {
+                    text.push_str(piece);
+                }
+                if let Some(value) = &data {
+                    let deltas = value
+                        .pointer("/choices/0/delta/tool_calls")
+                        .and_then(Value::as_array);
+                    for delta in deltas.into_iter().flatten() {
+                        let index = delta
+                            .get("index")
+                            .and_then(Value::as_u64)
+                            .map_or(calls.len().saturating_sub(1), |index| index as usize);
+                        while calls.len() <= index {
+                            calls.push(Default::default());
+                        }
+                        let call = &mut calls[index];
+                        if let Some(id) = delta.get("id").and_then(Value::as_str) {
+                            call.0 = id.to_owned();
+                        }
+                        if let Some(name) = delta.pointer("/function/name").and_then(Value::as_str)
+                        {
+                            call.1.push_str(name);
+                        }
+                        if let Some(arguments) =
+                            delta.pointer("/function/arguments").and_then(Value::as_str)
+                        {
+                            call.2.push_str(arguments);
+                        }
+                    }
+                    if let Some(reason) = value
+                        .pointer("/choices/0/finish_reason")
+                        .and_then(Value::as_str)
+                    {
+                        *finish = Some(reason.to_owned());
+                    }
+                }
+                event
+            }
+            Reader::Claude {
+                blocks,
+                partial,
+                stop,
+            } => {
+                let event = parse_claude_event(line);
+                let Some(value) = &data else {
+                    return event;
+                };
+                let index = value
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .map(|index| index as usize);
+                match (value.get("type").and_then(Value::as_str), index) {
+                    (Some("content_block_start"), Some(index)) => {
+                        while blocks.len() <= index {
+                            blocks.push(Value::Null);
+                        }
+                        let block = value.get("content_block").cloned().unwrap_or(Value::Null);
+                        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                            partial.insert(index, String::new());
+                        }
+                        blocks[index] = block;
+                    }
+                    (Some("content_block_delta"), Some(index)) if index < blocks.len() => {
+                        let block = &mut blocks[index];
+                        let delta = value.get("delta").cloned().unwrap_or(Value::Null);
+                        let append = |block: &mut Value, field: &str, piece: &str| {
+                            let joined = format!(
+                                "{}{piece}",
+                                block.get(field).and_then(Value::as_str).unwrap_or("")
+                            );
+                            block[field] = Value::String(joined);
+                        };
+                        match delta.get("type").and_then(Value::as_str) {
+                            Some("text_delta") => {
+                                let piece = delta.get("text").and_then(Value::as_str);
+                                append(block, "text", piece.unwrap_or(""));
+                            }
+                            Some("thinking_delta") => {
+                                let piece = delta.get("thinking").and_then(Value::as_str);
+                                append(block, "thinking", piece.unwrap_or(""));
+                            }
+                            Some("signature_delta") => {
+                                if let Some(signature) = delta.get("signature") {
+                                    block["signature"] = signature.clone();
+                                }
+                            }
+                            Some("input_json_delta") => {
+                                let piece = delta.get("partial_json").and_then(Value::as_str);
+                                partial
+                                    .entry(index)
+                                    .or_default()
+                                    .push_str(piece.unwrap_or(""));
+                            }
+                            _ => {}
+                        }
+                    }
+                    (Some("message_delta"), _) => {
+                        if let Some(reason) =
+                            value.pointer("/delta/stop_reason").and_then(Value::as_str)
+                        {
+                            *stop = Some(reason.to_owned());
+                        }
+                    }
+                    _ => {}
+                }
+                event
+            }
+        }
+    }
+
+    fn finish(self) -> Turn {
+        match self {
+            Reader::OpenAi {
+                text,
+                calls,
+                finish,
+            } => {
+                let calls: Vec<ToolCall> = calls
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, (_, name, _))| !name.is_empty())
+                    .map(|(index, (id, name, arguments))| ToolCall {
+                        id: if id.is_empty() {
+                            format!("call_{index}")
+                        } else {
+                            id
+                        },
+                        name,
+                        input: parse_arguments(&arguments),
+                    })
+                    .collect();
+                let tool_calls: Vec<Value> = calls
+                    .iter()
+                    .map(|call| {
+                        let arguments = match &call.input {
+                            Ok(value) => value.to_string(),
+                            Err(raw) => raw.clone(),
+                        };
+                        json!({
+                            "id": call.id,
+                            "type": "function",
+                            "function": {"name": call.name, "arguments": arguments},
+                        })
+                    })
+                    .collect();
+                let content = if text.is_empty() {
+                    Value::Null
+                } else {
+                    Value::String(text)
+                };
+                Turn {
+                    assistant: json!({
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": tool_calls,
+                    }),
+                    calls,
+                    cut_off: finish.as_deref() == Some("length"),
+                }
+            }
+            Reader::Claude {
+                mut blocks,
+                partial,
+                stop,
+            } => {
+                let mut calls = Vec::new();
+                for (index, block) in blocks.iter_mut().enumerate() {
+                    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                        continue;
+                    }
+                    let input =
+                        parse_arguments(partial.get(&index).map(String::as_str).unwrap_or(""));
+                    block["input"] = input.clone().unwrap_or_else(|_| json!({}));
+                    calls.push(ToolCall {
+                        id: block
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        name: block
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        input,
+                    });
+                }
+                blocks.retain(|block| !block.is_null());
+                Turn {
+                    assistant: json!({"role": "assistant", "content": blocks}),
+                    calls,
+                    cut_off: stop.as_deref() == Some("max_tokens"),
+                }
+            }
+        }
+    }
+}
+
+// A tool call's arguments: an object, `{}` when there were none, else the
+// text as it came.
+fn parse_arguments(raw: &str) -> Result<Value, String> {
+    if raw.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value) if value.is_object() => Ok(value),
+        _ => Err(raw.to_owned()),
+    }
+}
+
+// The tools as each API describes them. Claude's stream each argument as
+// it's written (eager_input_streaming), so they're checked before use.
+fn tools_json(claude: bool, tools: &[crate::ai_tools::ToolDef]) -> Value {
+    let tools: Vec<Value> = tools
+        .iter()
+        .map(|tool| {
+            if claude {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.schema,
+                    "eager_input_streaming": true,
+                })
+            } else {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.schema,
+                    },
+                })
+            }
+        })
+        .collect();
+    Value::Array(tools)
+}
+
+/// Like `stream_chat`, offering `tools` the model may call. Each call goes
+/// to `run_tool` and its reply back to the model, until it answers without
+/// one, `ai_tools::MAX_STEPS` calls are made (then it must answer with what
+/// it has), or `cancel` is set. A server or model that refuses tools is
+/// asked again without them. Text from every round reaches `on_text`.
+pub fn chat_with_tools(
+    server: &Server,
+    model: &str,
+    messages: &[Message],
+    tools: &[crate::ai_tools::ToolDef],
+    cancel: &AtomicBool,
+    mut on_text: impl FnMut(&str),
+    mut run_tool: impl FnMut(&ToolCall) -> ToolReply,
+) -> Result<ToolsEnded, String> {
+    let mut ended = ToolsEnded::default();
+    let mut rounds: Vec<Value> = Vec::new();
+    let mut use_tools = !tools.is_empty();
+    // A paragraph break goes between one round's words and the next's.
+    let mut wrote = false;
+    let mut needs_break = false;
+    loop {
+        let last_round = ended.steps >= crate::ai_tools::MAX_STEPS;
+        let mut body = if server.claude {
+            claude_body(model, messages, Purpose::Chat)
+        } else {
+            openai_body(model, messages)
+        };
+        if let Some(list) = body.get_mut("messages").and_then(Value::as_array_mut) {
+            list.extend(rounds.iter().cloned());
+        }
+        if use_tools {
+            body["tools"] = tools_json(server.claude, tools);
+            if last_round {
+                body["tool_choice"] = if server.claude {
+                    json!({"type": "none"})
+                } else {
+                    json!("none")
+                };
+            }
+        }
+        let mut reader = Reader::new(server.claude);
+        let streamed = stream_turn(server, model, body, cancel, &mut reader, |piece| {
+            if !piece.is_empty() {
+                if needs_break && wrote {
+                    on_text("\n\n");
+                }
+                needs_break = false;
+                wrote = true;
+            }
+            on_text(piece);
+        });
+        match streamed {
+            Err(error)
+                if use_tools
+                    && rounds.is_empty()
+                    && error.to_ascii_lowercase().contains("tool") =>
+            {
+                use_tools = false;
+                ended.tools_refused = true;
+                continue;
+            }
+            Err(error) => return Err(server.redact(error)),
+            Ok(()) => {}
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(ended);
+        }
+        let turn = reader.finish();
+        if turn.calls.is_empty() || !use_tools || last_round {
+            return Ok(ended);
+        }
+        if turn.cut_off {
+            return Err("The answer was cut off while it was asking to look at the project".into());
+        }
+        rounds.push(turn.assistant);
+        let mut results = Vec::new();
+        for call in &turn.calls {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(ended);
+            }
+            ended.steps += 1;
+            let reply = match &call.input {
+                Ok(_) => run_tool(call),
+                Err(raw) => ToolReply {
+                    content: json!({ "INVALID_JSON": raw }).to_string(),
+                    is_error: true,
+                },
+            };
+            results.push((call, reply));
+        }
+        if server.claude {
+            let blocks: Vec<Value> = results
+                .iter()
+                .map(|(call, reply)| {
+                    let mut block = json!({
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": reply.content,
+                    });
+                    if reply.is_error {
+                        block["is_error"] = json!(true);
+                    }
+                    block
+                })
+                .collect();
+            rounds.push(json!({"role": "user", "content": blocks}));
+        } else {
+            rounds.extend(results.iter().map(|(call, reply)| {
+                json!({"role": "tool", "tool_call_id": call.id, "content": reply.content})
+            }));
+        }
+        needs_break = true;
+    }
+}
+
+// Sends one request whose answer streams back, giving each piece of text to
+// `on_text` and every line to `reader`.
+fn stream_turn(
+    server: &Server,
+    model: &str,
+    body: Value,
+    cancel: &AtomicBool,
+    reader: &mut Reader,
     mut on_text: impl FnMut(&str),
 ) -> Result<(), String> {
     let endpoint = server.endpoint.as_str();
     let claude = server.claude;
-    let (path, body, parse): (&str, String, fn(&str) -> Event) = if claude {
-        let body = claude_request_body(model, messages, purpose);
-        ("messages", body, parse_claude_event)
+    let path = if claude {
+        "messages"
     } else {
-        (
-            "chat/completions",
-            request_body(model, messages),
-            parse_event,
-        )
+        "chat/completions"
     };
+    let body = body.to_string();
     let mut request = ureq::post(&api_url(endpoint, path))
         .config()
         .timeout_connect(Some(CONNECT_TIMEOUT))
@@ -697,7 +1152,7 @@ fn stream_answer(
         };
         last_line = Instant::now();
         let line = line.map_err(|error| format!("The answer was cut off ({error})"))?;
-        match parse(&line) {
+        match reader.line(&line) {
             Event::Text(text) => {
                 quiet_limit = STALL_TIMEOUT;
                 received += text.len();
@@ -1161,6 +1616,286 @@ mod tests {
         let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
         let error = stream_chat(&server, "claude-opus-5-5", &[], &cancel, |_| {}).unwrap_err();
         assert_eq!(error, "Overloaded");
+    }
+
+    // A server that answers each connection with the next of `responses`,
+    // handing over each request's body.
+    fn serve_sequence(responses: Vec<String>) -> (String, std::sync::mpsc::Receiver<Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let (got, bodies) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for response in responses {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let body_start = loop {
+                    let Ok(read) = stream.read(&mut chunk) else {
+                        return;
+                    };
+                    if read == 0 {
+                        return;
+                    }
+                    request.extend_from_slice(&chunk[..read]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let length = text[..end]
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break end + 4;
+                        }
+                    }
+                };
+                let body = serde_json::from_slice(&request[body_start..]).unwrap_or(Value::Null);
+                let _ = got.send(body);
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (address, bodies)
+    }
+
+    fn sse(events: &[Value]) -> String {
+        let mut out = String::from(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+        );
+        for event in events {
+            out.push_str(&format!("data: {event}\n\n"));
+        }
+        out
+    }
+
+    fn openai_tool_call(id: &str, arguments: [&str; 2]) -> String {
+        let mut text = sse(&[
+            json!({"choices": [{"delta": {"content": "Let me look."}}]}),
+            json!({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": id, "type": "function",
+                "function": {"name": "read_file", "arguments": arguments[0]}}]}}]}),
+            json!({"choices": [{"delta": {"tool_calls": [{"index": 0,
+                "function": {"arguments": arguments[1]}}]}, "finish_reason": "tool_calls"}]}),
+        ]);
+        text.push_str("data: [DONE]\n\n");
+        text
+    }
+
+    fn openai_text(text: &str) -> String {
+        let mut out = sse(&[json!({"choices": [{"delta": {"content": text}}]})]);
+        out.push_str("data: [DONE]\n\n");
+        out
+    }
+
+    fn tools() -> Vec<crate::ai_tools::ToolDef> {
+        crate::ai_tools::definitions()
+    }
+
+    #[test]
+    fn tool_calls_go_round_in_openais_format() {
+        let (endpoint, bodies) = serve_sequence(vec![
+            openai_tool_call("call_1", ["{\"path\":", "\"src/a.rs\"}"]),
+            openai_text("It's in a.rs."),
+        ]);
+        let server = Server::new(endpoint, None);
+        let cancel = AtomicBool::new(false);
+        let mut answer = String::new();
+        let mut asked = Vec::new();
+        let ended = chat_with_tools(
+            &server,
+            "m",
+            &[Message::new(Role::User, "where?")],
+            &tools(),
+            &cancel,
+            |piece| answer.push_str(piece),
+            |call| {
+                asked.push(call.clone());
+                ToolReply {
+                    content: "1| fn a() {}".into(),
+                    is_error: false,
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(answer, "Let me look.\n\nIt's in a.rs.");
+        assert_eq!(ended.steps, 1);
+        assert_eq!(asked[0].name, "read_file");
+        assert_eq!(asked[0].input, Ok(json!({"path": "src/a.rs"})));
+        let first = bodies.recv().unwrap();
+        assert_eq!(first["tools"][2]["function"]["name"], "read_file");
+        let second = bodies.recv().unwrap();
+        let messages = second["messages"].as_array().unwrap();
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["arguments"],
+            "{\"path\":\"src/a.rs\"}"
+        );
+        assert_eq!(
+            messages[2],
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "1| fn a() {}"})
+        );
+    }
+
+    #[test]
+    fn claudes_tool_use_sends_back_every_block_thinking_included() {
+        let first = sse(&[
+            json!({"type": "message_start", "message": {}}),
+            json!({"type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""}}),
+            json!({"type": "content_block_delta", "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "Find it."}}),
+            json!({"type": "content_block_delta", "index": 0,
+                "delta": {"type": "signature_delta", "signature": "sig-1"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "content_block_start", "index": 1,
+                "content_block": {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": "{\"query\": \"str"}}),
+            json!({"type": "content_block_delta", "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": "eam_chat\"}"}}),
+            json!({"type": "content_block_stop", "index": 1}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}}),
+            json!({"type": "message_stop"}),
+        ]);
+        let second = sse(&[
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Found it."}}),
+            json!({"type": "message_stop"}),
+        ]);
+        let (endpoint, bodies) = serve_sequence(vec![first, second]);
+        let server = Server::claude_at(endpoint, Some("sk-ant-test".into()));
+        let cancel = AtomicBool::new(false);
+        let mut answer = String::new();
+        chat_with_tools(
+            &server,
+            "claude-opus-5-5",
+            &[
+                Message::new(Role::System, "Be brief."),
+                Message::new(Role::User, "where?"),
+            ],
+            &tools(),
+            &cancel,
+            |piece| answer.push_str(piece),
+            |call| {
+                assert_eq!(call.input, Ok(json!({"query": "stream_chat"})));
+                ToolReply {
+                    content: "src/a.rs:1: fn stream_chat()".into(),
+                    is_error: false,
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(answer, "Found it.");
+        let first = bodies.recv().unwrap();
+        assert_eq!(first["tools"][0]["name"], "search");
+        assert_eq!(first["tools"][0]["eager_input_streaming"], true);
+        assert!(first.get("tool_choice").is_none());
+        let second = bodies.recv().unwrap();
+        let messages = second["messages"].as_array().unwrap();
+        assert_eq!(
+            messages[1],
+            json!({"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Find it.", "signature": "sig-1"},
+                {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"query": "stream_chat"}},
+            ]})
+        );
+        assert_eq!(
+            messages[2],
+            json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "src/a.rs:1: fn stream_chat()"},
+            ]})
+        );
+        assert_eq!(second["system"], "Be brief.");
+    }
+
+    #[test]
+    fn a_model_that_refuses_tools_is_asked_again_without_them() {
+        let refused = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\
+            Connection: close\r\nContent-Length: 75\r\n\r\n\
+            {\"error\":{\"message\":\"registry.ollama.ai/library/x does not support tools\"}}"
+            .to_string();
+        let (endpoint, bodies) = serve_sequence(vec![refused, openai_text("Plain answer.")]);
+        let server = Server::new(endpoint, None);
+        let cancel = AtomicBool::new(false);
+        let mut answer = String::new();
+        let ended = chat_with_tools(
+            &server,
+            "x",
+            &[Message::new(Role::User, "hi")],
+            &tools(),
+            &cancel,
+            |piece| answer.push_str(piece),
+            |_| unreachable!("no tools without tools"),
+        )
+        .unwrap();
+        assert!(ended.tools_refused);
+        assert_eq!(answer, "Plain answer.");
+        assert!(bodies.recv().unwrap().get("tools").is_some());
+        assert!(bodies.recv().unwrap().get("tools").is_none());
+    }
+
+    #[test]
+    fn broken_tool_input_isnt_run_and_the_model_is_told() {
+        let (endpoint, bodies) = serve_sequence(vec![
+            openai_tool_call("call_9", ["{\"path\": \"a", ".rs"]),
+            openai_text("Sorry."),
+        ]);
+        let server = Server::new(endpoint, None);
+        let cancel = AtomicBool::new(false);
+        chat_with_tools(
+            &server,
+            "m",
+            &[Message::new(Role::User, "hi")],
+            &tools(),
+            &cancel,
+            |_| {},
+            |_| unreachable!("a call with broken input never runs"),
+        )
+        .unwrap();
+        let _ = bodies.recv();
+        let second = bodies.recv().unwrap();
+        let reply = &second["messages"][2]["content"];
+        let reply: Value = serde_json::from_str(reply.as_str().unwrap()).unwrap();
+        assert_eq!(reply["INVALID_JSON"], "{\"path\": \"a.rs");
+    }
+
+    #[test]
+    fn after_25_steps_the_model_must_answer() {
+        let mut responses: Vec<String> = (0..crate::ai_tools::MAX_STEPS)
+            .map(|n| openai_tool_call(&format!("call_{n}"), ["{\"path\":", "\"a.rs\"}"]))
+            .collect();
+        responses.push(openai_text("Done looking."));
+        let (endpoint, bodies) = serve_sequence(responses);
+        let server = Server::new(endpoint, None);
+        let cancel = AtomicBool::new(false);
+        let mut runs = 0;
+        let ended = chat_with_tools(
+            &server,
+            "m",
+            &[Message::new(Role::User, "hi")],
+            &tools(),
+            &cancel,
+            |_| {},
+            |_| {
+                runs += 1;
+                ToolReply {
+                    content: "ok".into(),
+                    is_error: false,
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(runs, crate::ai_tools::MAX_STEPS);
+        assert_eq!(ended.steps, crate::ai_tools::MAX_STEPS);
+        let all: Vec<Value> = bodies.try_iter().collect();
+        assert_eq!(all.len(), crate::ai_tools::MAX_STEPS + 1);
+        assert!(all[0].get("tool_choice").is_none());
+        assert_eq!(all.last().unwrap()["tool_choice"], "none");
     }
 
     #[test]

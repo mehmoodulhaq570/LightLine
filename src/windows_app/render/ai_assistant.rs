@@ -1,4 +1,5 @@
 use super::super::ai_chat::{AiAction, ChatEntry, SUGGESTED_MODEL, model_menu_models};
+use super::super::ai_project::Permission;
 use super::super::markdown_view::SNIPPET_CODE_HEADER;
 use super::super::*;
 use super::blend;
@@ -28,6 +29,14 @@ struct ChipSpec {
     path: PathBuf,
     label: String,
     warn: bool,
+}
+
+// The permission card, laid out (`ai_permission_layout`).
+struct PermissionLayout {
+    title: String,
+    lines: Vec<String>,
+    buttons: Vec<(RECT, &'static str, Permission, bool)>,
+    height: i32,
 }
 
 fn chip_specs(chips: &[super::super::ai_attach::Chip]) -> Vec<ChipSpec> {
@@ -1034,7 +1043,7 @@ impl App {
             };
             return s(20) + lines * line_height + context + chips;
         }
-        let mut height = s(26);
+        let mut height = s(26) + self.ai_project_steps_height(hdc, entry, width);
         let (answer, thinking) = ai::visible_answer(&entry.text);
         if !answer.is_empty() {
             height += self.snippet_height(
@@ -1044,17 +1053,225 @@ impl App {
                 (answer, entry.revision),
                 width,
             );
-        } else if thinking || self.ai_receiving(last) {
+        } else if (thinking || self.ai_receiving(last)) && !entry.asking {
             height += line_height;
         }
         if let Some(error) = &entry.error {
             unsafe { SelectObject(hdc, self.ui_font) };
             height += s(6) + self.wrap_text(hdc, error, width).len() as i32 * line_height;
         }
+        if let Some(note) = &entry.note {
+            unsafe { SelectObject(hdc, self.ui_font) };
+            height += s(6) + self.wrap_text(hdc, note, width).len() as i32 * line_height;
+        }
         if !answer.is_empty() && !self.ai_receiving(last) {
             height += s(28);
         }
         height
+    }
+
+    // The permission card for a panel `width` wide: its title, its text's
+    // lines, its buttons (placed from the card's inner left and the top of
+    // the button area, wrapping when they don't fit) and its height.
+    fn ai_permission_layout(&self, hdc: HDC, width: i32) -> PermissionLayout {
+        let s = |value: i32| self.scale(value);
+        let (title, text) = self.ai_permission_text();
+        unsafe { SelectObject(hdc, self.small_font) };
+        let lines = self.wrap_text(hdc, &text, width - s(24));
+        let small = self.text_height(hdc) + s(3);
+        unsafe { SelectObject(hdc, self.ui_font) };
+        let title_height = self.text_height(hdc) + s(4);
+        let room = width - s(24);
+        let (mut x, mut y) = (0, 0);
+        let mut buttons = Vec::new();
+        for (label, answer, primary) in [
+            ("Allow for This Chat", Permission::ForChat, true),
+            ("Just This Once", Permission::Once, false),
+            ("Don't Allow", Permission::Deny, false),
+        ] {
+            let w = self.text_width(hdc, label) + s(20);
+            if x > 0 && x + w > room {
+                x = 0;
+                y += s(32);
+            }
+            buttons.push((
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x + w,
+                    bottom: y + s(26),
+                },
+                label,
+                answer,
+                primary,
+            ));
+            x += w + s(6);
+        }
+        let buttons_height = y + s(26);
+        let height =
+            s(10) + title_height + lines.len() as i32 * small + s(10) + buttons_height + s(10);
+        PermissionLayout {
+            title,
+            lines,
+            buttons,
+            height,
+        }
+    }
+
+    // An answer's steps (one 22 px line each) and permission card.
+    fn ai_project_steps_height(&self, hdc: HDC, entry: &ChatEntry, width: i32) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let mut height = entry.steps.len() as i32 * s(22);
+        if !entry.steps.is_empty() {
+            height += s(8);
+        }
+        if entry.asking {
+            height += self.ai_permission_layout(hdc, width).height + s(10);
+        }
+        height
+    }
+
+    // Paints an answer's steps and permission card from `top`; returns
+    // where the answer's text starts.
+    fn paint_ai_project_steps(
+        &self,
+        hdc: HDC,
+        entry: &ChatEntry,
+        bounds: RECT,
+        top: i32,
+        clip: RECT,
+    ) -> i32 {
+        let s = |value: i32| self.scale(value);
+        let mut y = top;
+        let row = s(22);
+        unsafe { SelectObject(hdc, self.small_font) };
+        let text_height = self.text_height(hdc);
+        for step in &entry.steps {
+            let rect = RECT {
+                left: bounds.left,
+                top: y,
+                right: bounds.right,
+                bottom: y + row,
+            };
+            Self::fill(
+                hdc,
+                RECT {
+                    left: rect.left,
+                    top: rect.top + s(3),
+                    right: rect.left + s(2),
+                    bottom: rect.bottom - s(3),
+                },
+                if step.error {
+                    self.theme.warning
+                } else {
+                    self.theme.edge
+                },
+            );
+            let color = if step.error {
+                blend(self.theme.warning, self.theme.text, 0.3)
+            } else if step.opened.is_some() {
+                blend(self.theme.blue, self.theme.text, 0.35)
+            } else {
+                self.theme.muted
+            };
+            self.label_ellipsis(
+                hdc,
+                &step.summary,
+                rect.left + s(11),
+                (rect.top + rect.bottom - text_height) / 2,
+                color,
+                RECT {
+                    left: rect.left,
+                    right: rect.right,
+                    ..clip
+                },
+            );
+            if let Some((path, line)) = &step.opened
+                && rect.bottom > clip.top
+                && rect.top < clip.bottom
+            {
+                self.ai
+                    .hits
+                    .borrow_mut()
+                    .steps
+                    .push((rect, path.clone(), *line));
+            }
+            y += row;
+        }
+        if !entry.steps.is_empty() {
+            y += s(8);
+        }
+        unsafe { SelectObject(hdc, self.ui_font) };
+        if entry.asking {
+            let width = bounds.right - bounds.left;
+            let PermissionLayout {
+                title,
+                lines,
+                buttons,
+                height,
+            } = self.ai_permission_layout(hdc, width);
+            let card = RECT {
+                left: bounds.left,
+                top: y,
+                right: bounds.right,
+                bottom: y + height,
+            };
+            self.panel_card(
+                hdc,
+                card,
+                s(8),
+                blend(self.theme.sidebar_bg, self.theme.blue, 0.4),
+                blend(self.theme.sidebar_bg, self.theme.blue, 0.06),
+            );
+            let inner_left = card.left + s(12);
+            let mut ty = card.top + s(10);
+            let text_clip = RECT {
+                left: card.left,
+                right: card.right - s(12),
+                ..clip
+            };
+            Self::label(hdc, &title, inner_left, ty, self.theme.text, text_clip);
+            ty += self.text_height(hdc) + s(4);
+            unsafe { SelectObject(hdc, self.small_font) };
+            let small = self.text_height(hdc) + s(3);
+            for line in &lines {
+                Self::label(hdc, line, inner_left, ty, self.theme.muted, text_clip);
+                ty += small;
+            }
+            unsafe { SelectObject(hdc, self.ui_font) };
+            let button_top = ty + s(10);
+            let mut hits = Vec::new();
+            for (place, label, answer, primary) in buttons {
+                let button = RECT {
+                    left: inner_left + place.left,
+                    top: button_top + place.top,
+                    right: inner_left + place.right,
+                    bottom: button_top + place.bottom,
+                };
+                if primary {
+                    Self::rounded_fill(hdc, button, s(4), self.theme.violet);
+                } else {
+                    self.panel_card(hdc, button, s(4), self.theme.edge, self.theme.editor_bg);
+                }
+                let color = if primary {
+                    ui(255, 255, 255)
+                } else {
+                    self.theme.text
+                };
+                self.label_mid(
+                    hdc,
+                    label,
+                    button.left + s(10),
+                    (button.top + button.bottom) / 2,
+                    color,
+                    button,
+                );
+                hits.push((button, answer));
+            }
+            self.ai.hits.borrow_mut().permission = hits;
+            y = card.bottom + s(10);
+        }
+        y
     }
 
     // Paints entry `index` of the conversation within `bounds`.
@@ -1124,6 +1341,7 @@ impl App {
             },
         );
         let mut y = bounds.top + s(26);
+        y = self.paint_ai_project_steps(hdc, entry, bounds, y, clip);
         let (answer, thinking) = ai::visible_answer(&entry.text);
         let visible = |rect: &RECT| rect.bottom > clip.top && rect.top < clip.bottom;
         if !answer.is_empty() {
@@ -1139,7 +1357,7 @@ impl App {
                 self.paint_ai_code_toolbars(hdc, index, entry, (bounds.left, y), clip);
             }
             y += height;
-        } else if thinking || self.ai_receiving(last) {
+        } else if (thinking || self.ai_receiving(last)) && !entry.asking {
             Self::label(
                 hdc,
                 "Thinking\u{2026}",
@@ -1168,6 +1386,20 @@ impl App {
                 y + s(6),
                 line_height,
                 color,
+            );
+        }
+        if let Some(note) = &entry.note {
+            y = self.paint_wrapped(
+                hdc,
+                note,
+                RECT {
+                    left: bounds.left,
+                    right: bounds.right,
+                    ..clip
+                },
+                y + s(6),
+                line_height,
+                self.theme.muted,
             );
         }
         if !answer.is_empty() && !self.ai_receiving(last) {

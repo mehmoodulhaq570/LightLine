@@ -120,7 +120,7 @@ Two crates in one package.
 | File watching | `watcher.rs` | `ReadDirectoryChangesW`, one per watched folder |
 | Extensions | `extensions/` (`zed_registry`, `installer`, `zed_manifest`), `color_theme.rs`, `icon_theme.rs` | See §6 |
 | Markdown | `markdown.rs`, `image_cache.rs` | Blocks for the rendered preview; opt-in web image cache |
-| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…), plus Claude through Anthropic's Messages API (`is_anthropic`: `x-api-key`, `anthropic-version`, `/v1/messages`, its own SSE events; `ANTHROPIC_API_KEY`) |
+| AI | `ai.rs`, `credentials.rs` | OpenAI-compatible HTTP chat (Ollama by default; OpenAI, OpenRouter, Groq…), plus Claude through Anthropic's Messages API (`is_anthropic`: `x-api-key`, `anthropic-version`, `/v1/messages`, its own SSE events; `ANTHROPIC_API_KEY`). Project tools in `ai_tools.rs` (search, list_files, read_file, problems; readable = `workspace_files` minus secrets) run through `ai::chat_with_tools` in both protocols (Claude's thinking blocks are sent back unchanged); the UI side (permission card, step lines) is `windows_app/ai_project.rs`, attachments `windows_app/ai_attach.rs` |
 | Process lifetime | `jobs.rs` | Kill-on-close job object: every child process dies with LightLine |
 | Clipboard | `clipboard.rs` | |
 
@@ -241,7 +241,7 @@ Settings keys:
 - **Editor:** `fontFamily`, `fontSize`, `tabSize`, `insertSpaces`, `wordWrap`, `autoClosePairs`, `autoIndent`, `smoothScrolling`, `parseLimitKb`.
 - **Formatting:** `formatOnSave`, `prettierEnabled`.
 - **Visual aids:** `animations`, `inlayHints`, `occurrencesHighlight`, `stickyScroll`, `bracketMatching`, `indentGuides`, `showMinimap`, `bracketPairColorization`, `gitBlame`, `codeLens`.
-- **Other:** `localHistory`, `colorTheme`, `aiEndpoint`, `aiModel`, `markdownLoadRemoteImages`, `terminalDefaultProfile`.
+- **Other:** `localHistory`, `colorTheme`, `aiEndpoint`, `aiModel`, `aiProjectAccess`, `markdownLoadRemoteImages`, `terminalDefaultProfile`.
 
 **Adding a setting means editing `settings.rs` in five places:** the struct field, `Default`, parsing, serializing, and the `OWN_KEYS` list. Document it in the settings table in `docs/USER_GUIDE.md`.
 

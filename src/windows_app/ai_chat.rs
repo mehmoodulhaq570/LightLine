@@ -41,6 +41,15 @@ enum AiEvent {
     Models(Result<Vec<String>, String>),
     Text(u64, String),
     Done(u64, Result<(), String>),
+    /// A tool call the model made, done (ai_project.rs).
+    Step(u64, super::ai_project::AiStep),
+    /// The model wants to look through the project: the worker waits for
+    /// the answer on this sender.
+    Ask(u64, Sender<super::ai_project::Permission>),
+    /// A line under the answer, e.g. that the model can't use tools.
+    Note(u64, String),
+    /// This model refused tools; it isn't offered them again.
+    ToolsRefused(String),
     /// The provider card's check: its generation and the models found.
     Provider(u64, Result<Vec<String>, String>),
 }
@@ -124,6 +133,12 @@ pub(super) struct ChatEntry {
     pub(super) context: Option<String>,
     /// The files sent with a question, as chips.
     pub(super) chips: Vec<super::ai_attach::Chip>,
+    /// An answer's look through the project: one line per tool call.
+    pub(super) steps: Vec<super::ai_project::AiStep>,
+    /// The permission card shows in this answer.
+    pub(super) asking: bool,
+    /// A muted line under the answer.
+    pub(super) note: Option<String>,
     target: Option<AiTarget>,
     /// Why an answer ended early.
     pub(super) error: Option<String>,
@@ -140,6 +155,9 @@ impl ChatEntry {
             prompt,
             context: None,
             chips: Vec::new(),
+            steps: Vec::new(),
+            asking: false,
+            note: None,
             target: None,
             error: None,
             revision: 0,
@@ -181,6 +199,10 @@ pub(super) struct AiHits {
     pub(super) mentions: Vec<(RECT, PathBuf)>,
     /// The ✕ on each attached file's chip, by its index.
     pub(super) chip_close: Vec<(RECT, usize)>,
+    /// The permission card's buttons.
+    pub(super) permission: Vec<(RECT, super::ai_project::Permission)>,
+    /// "Read" lines, with the file and line each opens.
+    pub(super) steps: Vec<(RECT, PathBuf, usize)>,
 }
 
 pub(super) struct AiChat {
@@ -193,6 +215,12 @@ pub(super) struct AiChat {
     /// change to the box.
     pub(super) mention_selected: usize,
     pub(super) mention_dismissed: bool,
+    /// "Allow for This Chat" was chosen; a new chat asks again.
+    pub(super) chat_allowed: bool,
+    /// The question waiting on the permission card, and where its answer goes.
+    pub(super) permission: Option<(u64, Sender<super::ai_project::Permission>)>,
+    /// Models that refused tools this session.
+    pub(super) tools_refused: std::collections::HashSet<String>,
     /// Whether the message box has keyboard focus.
     pub(super) focused: bool,
     /// How far the conversation is scrolled, in pixels from its top.
@@ -231,6 +259,9 @@ impl AiChat {
             attachments: Vec::new(),
             mention_selected: 0,
             mention_dismissed: false,
+            chat_allowed: false,
+            permission: None,
+            tools_refused: Default::default(),
             focused: false,
             scroll: Cell::new(0),
             follow: Cell::new(true),
@@ -520,9 +551,40 @@ impl App {
                         entry.revision += 1;
                     }
                 }
+                AiEvent::Step(id, step) => {
+                    if self.ai_current(id)
+                        && let Some(entry) = self.ai.entries.last_mut()
+                    {
+                        entry.asking = false;
+                        entry.steps.push(step);
+                    }
+                }
+                AiEvent::Ask(id, reply) => {
+                    if self.ai_current(id)
+                        && let Some(entry) = self.ai.entries.last_mut()
+                    {
+                        entry.asking = true;
+                        self.ai.permission = Some((id, reply));
+                        self.ai.follow.set(true);
+                    }
+                }
+                AiEvent::Note(id, note) => {
+                    if self.ai_current(id)
+                        && let Some(entry) = self.ai.entries.last_mut()
+                    {
+                        entry.note = Some(note);
+                    }
+                }
+                AiEvent::ToolsRefused(model) => {
+                    self.ai.tools_refused.insert(model);
+                }
                 AiEvent::Done(id, result) => {
                     if self.ai_current(id) {
                         self.ai.request = None;
+                        self.ai.permission = None;
+                        if let Some(entry) = self.ai.entries.last_mut() {
+                            entry.asking = false;
+                        }
                         if let (Err(mut error), Some(entry)) = (result, self.ai.entries.last_mut())
                         {
                             if error.contains("API key") {
@@ -883,6 +945,10 @@ impl App {
         }
         history.reverse();
         let mut messages = vec![Message::new(Role::System, SYSTEM_PROMPT)];
+        let access = self.ai_project_access(&model);
+        if let Some(access) = &access {
+            messages.push(Message::new(Role::System, access.instructions));
+        }
         messages.extend(history);
         messages.push(Message::new(Role::User, prompt.clone()));
 
@@ -908,24 +974,106 @@ impl App {
         let tx = self.ai.tx.clone();
         let hwnd_value = hwnd as isize;
         std::thread::spawn(move || {
+            use super::ai_project::{AiStep, Permission};
             let wake = move || unsafe {
                 PostMessageW(hwnd_value as HWND, AI_EVENT_MESSAGE, 0, 0);
             };
-            let mut pending = String::new();
-            let mut flushed = Instant::now();
-            // An empty `text` is stream_chat saying the answer has paused:
-            // whatever is held then goes out instead of waiting for more.
-            let result = ai::stream_chat(&server, &model, &messages, &cancel, |text| {
-                pending.push_str(text);
-                if !pending.is_empty() && flushed.elapsed() >= ANSWER_FLUSH {
-                    let _ = tx.send(AiEvent::Text(id, std::mem::take(&mut pending)));
+            let pending = RefCell::new(String::new());
+            let flushed = Cell::new(Instant::now());
+            // What's held goes out now: before a step's line, and at the end.
+            let flush = || {
+                let text = std::mem::take(&mut *pending.borrow_mut());
+                if !text.is_empty() {
+                    let _ = tx.send(AiEvent::Text(id, text));
                     wake();
-                    flushed = Instant::now();
                 }
-            });
-            if !pending.is_empty() {
-                let _ = tx.send(AiEvent::Text(id, pending));
-            }
+                flushed.set(Instant::now());
+            };
+            // An empty `text` is the stream saying the answer has paused:
+            // whatever is held then goes out instead of waiting for more.
+            let on_text = |text: &str| {
+                pending.borrow_mut().push_str(text);
+                if !pending.borrow().is_empty() && flushed.get().elapsed() >= ANSWER_FLUSH {
+                    flush();
+                }
+            };
+            let result = match access {
+                None => ai::stream_chat(&server, &model, &messages, &cancel, on_text),
+                Some(access) => {
+                    let tools = lightline::ai_tools::definitions();
+                    let mut allowed = access.allowed.then_some(true);
+                    let run_tool = |call: &ai::ToolCall| {
+                        flush();
+                        if allowed.is_none() {
+                            let (reply_tx, reply) = mpsc::channel();
+                            let _ = tx.send(AiEvent::Ask(id, reply_tx));
+                            wake();
+                            let answer = loop {
+                                if cancel.load(Ordering::Relaxed) {
+                                    break Permission::Deny;
+                                }
+                                match reply.recv_timeout(Duration::from_millis(100)) {
+                                    Ok(answer) => break answer,
+                                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                        break Permission::Deny;
+                                    }
+                                }
+                            };
+                            allowed = Some(answer != Permission::Deny);
+                        }
+                        let step = if allowed == Some(true) {
+                            let input = call.input.clone().unwrap_or_default();
+                            let outcome = access.project.run(&call.name, &input, &cancel);
+                            let step = AiStep {
+                                summary: outcome.summary,
+                                error: outcome.is_error,
+                                opened: outcome.opened,
+                            };
+                            (
+                                step,
+                                ai::ToolReply {
+                                    content: outcome.content,
+                                    is_error: outcome.is_error,
+                                },
+                            )
+                        } else {
+                            (
+                                AiStep {
+                                    summary: "Not allowed to look through the project".into(),
+                                    error: true,
+                                    opened: None,
+                                },
+                                ai::ToolReply {
+                                    content: "The user didn't allow looking through the project \
+                                              for this question. Answer without it, and suggest \
+                                              attaching files with @ if the answer needs them."
+                                        .into(),
+                                    is_error: true,
+                                },
+                            )
+                        };
+                        let _ = tx.send(AiEvent::Step(id, step.0));
+                        wake();
+                        step.1
+                    };
+                    ai::chat_with_tools(
+                        &server, &model, &messages, &tools, &cancel, on_text, run_tool,
+                    )
+                    .map(|ended| {
+                        if ended.tools_refused {
+                            let _ = tx.send(AiEvent::ToolsRefused(model.clone()));
+                            let _ = tx.send(AiEvent::Note(
+                                id,
+                                "This model can't look through the project; attach files with \
+                                 @ instead."
+                                    .into(),
+                            ));
+                        }
+                    })
+                }
+            };
+            flush();
             let _ = tx.send(AiEvent::Done(id, result));
             wake();
         });
@@ -936,8 +1084,11 @@ impl App {
     pub(super) fn ai_stop(&mut self, hwnd: HWND) {
         if let Some((_, cancel)) = self.ai.request.take() {
             cancel.store(true, Ordering::Relaxed);
+            // A worker waiting on the permission card stops waiting.
+            self.ai.permission = None;
             if let Some(entry) = self.ai.entries.last_mut() {
                 entry.error = Some("Stopped".into());
+                entry.asking = false;
             }
         }
         unsafe { InvalidateRect(hwnd, null(), 0) };
@@ -946,6 +1097,7 @@ impl App {
     pub(super) fn ai_new_chat(&mut self, hwnd: HWND) {
         self.ai_stop(hwnd);
         self.ai.entries.clear();
+        self.ai.chat_allowed = false;
         self.ai.scroll.set(0);
         self.ai.follow.set(true);
         self.focus_ai_input();
@@ -1087,7 +1239,11 @@ impl App {
                 return;
             }
         }
-        if let Some((_, path)) = hits.mentions.iter().find(|(rect, _)| inside(rect)) {
+        if let Some((_, answer)) = hits.permission.iter().find(|(rect, _)| inside(rect)) {
+            self.ai_answer_permission(hwnd, *answer);
+        } else if let Some((_, path, line)) = hits.steps.iter().find(|(rect, ..)| inside(rect)) {
+            self.ai_open_step(hwnd, path.clone(), *line);
+        } else if let Some((_, path)) = hits.mentions.iter().find(|(rect, _)| inside(rect)) {
             self.ai_accept_mention(hwnd, Some(path.clone()));
             self.focus_ai_input();
         } else if let Some((_, index)) = hits.chip_close.iter().find(|(rect, _)| inside(rect)) {
