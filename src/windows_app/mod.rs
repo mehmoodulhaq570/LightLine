@@ -103,6 +103,7 @@ pub use window::run;
 
 mod color_theme_adapter;
 mod icons;
+mod own_icons;
 mod theme;
 mod theme_picker;
 use theme::{Theme, label_on, themed, ui};

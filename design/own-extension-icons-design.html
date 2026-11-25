@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Icons for LightLine's Own Extensions</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine Midnight (theme.rs::default_dark) */
+    --side: #081020; --edge: #182f52; --field: #0c1930; --select: #1a3065;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --green: #34d399; --amber: #f5b85f;
+    --violet: #ae6df2; --orange: #f59150; --install: #1272c4; --hover: #0e1a33; --line2: #b9c5d8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 8px; }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  p { max-width: 860px; }
+  p.lead { color: var(--label); margin: 0 0 22px; }
+  ul { padding-left: 20px; margin: 0; max-width: 860px; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; max-width: 960px; }
+  .rec { color: var(--green); font-weight: 600; }
+  .status { display: inline-block; font-size: 12px; color: var(--amber); border: 1px solid #5a4520; background: #1d160a; border-radius: 4px; padding: 0 7px; margin-left: 6px; vertical-align: 3px; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  /* The two icons large, on a stage split like the theme pack itself. */
+  .stage { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--edge-page); border-radius: 10px; overflow: hidden; max-width: 960px; }
+  .stage > div { padding: 30px 20px 22px; display: flex; gap: 40px; justify-content: center; align-items: flex-end; }
+  .stage .day { background: #f3f6fb; color: #1e293b; }
+  .stage .night { background: #081020; }
+  .stage figure { margin: 0; text-align: center; font-size: 13px; }
+  .stage figcaption { margin-top: 8px; }
+
+  /* Extensions panel crops at real size (sidebar 286 px). */
+  .frames { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; }
+  figure { margin: 0; }
+  .frames figcaption { font-weight: 600; margin-bottom: 6px; }
+  .frames figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; max-width: 286px; }
+  .panel { width: 286px; height: 352px; overflow: hidden; background: var(--side); border: 1px solid var(--edge-page); border-radius: 8px; font-size: 13px; color: var(--text); }
+  .panel.light { --side: #f3f6fb; --edge: #d3dce9; --text: #1e293b; --muted: #5f6d84; --line2: #3e4c63; --blue: #0a7fc2; --select: #dbe7f7; --hover: #e3ebf7; --field: #ffffff; --violet: #7c3aed; --orange: #c2410c; --green: #15803d; }
+  .ph { height: 35px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; letter-spacing: .05em; color: var(--muted); }
+  .ph .ic { margin-left: auto; display: flex; gap: 12px; }
+  .hd { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+  .hd .chev { width: 12px; font-size: 10px; text-align: center; }
+  .hd .n { background: var(--edge); color: var(--text); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 400; min-width: 18px; text-align: center; }
+  .ext { height: 62px; position: relative; }
+  .ext .icon { position: absolute; left: 20px; top: 10px; width: 36px; height: 36px; }
+  .ext .mono { position: absolute; left: 20px; top: 10px; width: 36px; height: 36px; border-radius: 6px; display: grid; place-items: center; font-weight: 700; font-size: 15px; }
+  .ext .l1 { position: absolute; left: 66px; top: 5px; right: 10px; white-space: nowrap; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+  .ext .l1 b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l1 .v { color: var(--muted); font-size: 11.5px; flex: none; }
+  .ext .l2 { position: absolute; left: 66px; top: 24px; right: 10px; color: var(--line2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3 { position: absolute; left: 66px; top: 40px; right: 70px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+  .ext .l3 i { font-style: normal; }
+  .ext .btn { position: absolute; right: 10px; top: 41px; height: 18px; padding: 0 9px; border-radius: 3px; background: var(--install); color: #fff; font-size: 11.5px; display: flex; align-items: center; }
+  .ext .tick { position: absolute; right: 14px; top: 39px; color: var(--green); font-size: 14px; }
+  .badge { flex: none; font-size: 10.5px; font-weight: 600; color: var(--blue); border: 1px solid color-mix(in srgb, var(--blue) 45%, var(--side)); background: color-mix(in srgb, var(--blue) 12%, var(--side)); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+  .new { outline: 1px dashed rgba(52, 211, 153, .6); outline-offset: -1px; }
+
+  /* Sizes and options */
+  .sizes { display: flex; gap: 34px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
+  .sizes figure { text-align: center; font-size: 12.5px; color: var(--muted); }
+  .sizes figcaption { margin-top: 6px; }
+  .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 760px; margin-top: 10px; }
+  @media (max-width: 640px) { .options { grid-template-columns: 1fr; } .stage { grid-template-columns: 1fr; } }
+  .option { border: 1px solid var(--edge-page); border-radius: 8px; padding: 14px 16px; background: #060d1c; }
+  .option .pair { display: flex; gap: 16px; align-items: center; margin-bottom: 10px; }
+  .option b { display: block; color: #fff; }
+  .option p { margin: 4px 0 0; font-size: 13px; color: var(--label); }
+  .option.chosen { border-color: #2f6b55; }
+  .option .tag { font-size: 12px; color: var(--green); font-weight: 600; }
+  .family { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 10px; }
+  .family figure { text-align: center; font-size: 12.5px; color: var(--muted); width: 92px; }
+  .family figcaption { margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<!-- The icons, as LightLine would draw them: a 36 x 36 view box, rasterized
+     once at the size shown. Gradient ids are shared by every use. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2c1ba6"/><stop offset="1" stop-color="#0a136b"/>
+    </linearGradient>
+    <linearGradient id="g-edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c084fc"/><stop offset="1" stop-color="#4f8dff"/>
+    </linearGradient>
+    <linearGradient id="g-bolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbe2ff"/><stop offset=".55" stop-color="#c9b8ff"/><stop offset="1" stop-color="#7fd4ff"/>
+    </linearGradient>
+    <linearGradient id="g-neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e3c4ff"/><stop offset="1" stop-color="#8cc8ff"/>
+    </linearGradient>
+    <clipPath id="c-tile"><rect x="1" y="1" width="34" height="34" rx="8"/></clipPath>
+
+    <!-- LightLine Themes, option A: the bolt is the seam between Daylight and Contrast. -->
+    <symbol id="ic-themes" viewBox="0 0 36 36">
+      <g clip-path="url(#c-tile)">
+        <rect width="36" height="36" fill="#000"/>
+        <path d="M0 0H22L13 36H0Z" fill="#f3f6fb"/>
+        <rect x="4.5" y="8" width="9" height="2.2" rx="1.1" fill="#1e293b"/>
+        <rect x="4.5" y="12.5" width="6" height="2.2" rx="1.1" fill="#0a7fc2"/>
+        <rect x="4.5" y="17" width="4" height="2.2" rx="1.1" fill="#7c3aed"/>
+        <rect x="23" y="21.5" width="8.5" height="2.2" rx="1.1" fill="#4cc9ff"/>
+        <rect x="23" y="26" width="5.5" height="2.2" rx="1.1" fill="#ffffff"/>
+      </g>
+      <path d="M21 4L10 19.2H17L14 32L26 15.8H19Z" fill="none" stroke="#a855f7" stroke-opacity=".55" stroke-width="3.4" stroke-linejoin="round"/>
+      <path d="M21 4L10 19.2H17L14 32L26 15.8H19Z" fill="url(#g-bolt)" stroke="#24127e" stroke-width="1.2" stroke-linejoin="round"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+
+    <!-- LightLine Themes, option B: two little windows, light and dark, on the brand tile. -->
+    <symbol id="ic-themes-b" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <rect x="5" y="6" width="17" height="14" rx="2.5" fill="#f3f6fb"/>
+      <rect x="8" y="10" width="8" height="1.8" rx=".9" fill="#1e293b"/>
+      <rect x="8" y="13.6" width="5" height="1.8" rx=".9" fill="#0a7fc2"/>
+      <rect x="14" y="15" width="17" height="14" rx="2.5" fill="#000" stroke="#6b88b8" stroke-width="1"/>
+      <rect x="17" y="19.5" width="8" height="1.8" rx=".9" fill="#4cc9ff"/>
+      <rect x="17" y="23.1" width="5" height="1.8" rx=".9" fill="#fff"/>
+      <path d="M28.5 4.5L24 11H27L25.6 16L30.5 9.4H27.4Z" fill="url(#g-bolt)" stroke="#24127e" stroke-width=".9" stroke-linejoin="round"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+
+    <!-- C and C++ Snippets, option A: braces around the bolt. -->
+    <symbol id="ic-snippets" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <g fill="none" stroke="url(#g-neon)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12.5 8.5C9.8 8.5 10 10.5 10 13V15.4C10 17 9 18 7.6 18C9 18 10 19 10 20.6V23C10 25.5 9.8 27.5 12.5 27.5"/>
+        <path d="M23.5 8.5C26.2 8.5 26 10.5 26 13V15.4C26 17 27 18 28.4 18C27 18 26 19 26 20.6V23C26 25.5 26.2 27.5 23.5 27.5"/>
+      </g>
+      <path d="M19.8 10.5L14.2 18.9H17.7L16.3 25.6L21.9 17H18.4Z" fill="none" stroke="#a855f7" stroke-opacity=".6" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M19.8 10.5L14.2 18.9H17.7L16.3 25.6L21.9 17H18.4Z" fill="url(#g-bolt)"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+
+    <!-- C and C++ Snippets, option B: a block of code with a tab stop waiting to be filled. -->
+    <symbol id="ic-snippets-b" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <rect x="6.5" y="9" width="13" height="2.4" rx="1.2" fill="#e3c4ff"/>
+      <rect x="10.5" y="16.3" width="5" height="2.4" rx="1.2" fill="#c9d6f0"/>
+      <rect x="17.5" y="14.5" width="12" height="6" rx="1.5" fill="none" stroke="#7fd4ff" stroke-width="1.3" stroke-dasharray="2.2 1.6"/>
+      <rect x="6.5" y="23.6" width="5" height="2.4" rx="1.2" fill="#e3c4ff"/>
+      <path d="M27.5 22.5L23.6 28.2H26.1L25.1 32.5L29.2 26.6H26.7Z" fill="url(#g-bolt)" stroke="#24127e" stroke-width=".8" stroke-linejoin="round"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+
+    <!-- The same family for kinds LightLine might publish later. -->
+    <symbol id="ic-icons" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <path d="M7 12.5C7 11.1 8.1 10 9.5 10H14.4L16.8 12.6H26.5C27.9 12.6 29 13.7 29 15.1V24.5C29 25.9 27.9 27 26.5 27H9.5C8.1 27 7 25.9 7 24.5Z" fill="none" stroke="url(#g-neon)" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M19.4 14.6L15.4 20.6H17.9L16.9 25L20.9 19H18.4Z" fill="url(#g-bolt)"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+    <symbol id="ic-language" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <g fill="none" stroke="url(#g-neon)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 11.5L6.5 18L12 24.5"/><path d="M24 11.5L29.5 18L24 24.5"/>
+      </g>
+      <path d="M20.3 9.5L14.4 19H18.1L16.4 27L22.4 17.2H18.6Z" fill="url(#g-bolt)"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+    <symbol id="ic-checker" viewBox="0 0 36 36">
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="url(#g-tile)"/>
+      <path d="M8.5 18.5L14.5 24.5L27.5 11.5" fill="none" stroke="url(#g-neon)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M28.6 18.5L25 24H27.3L26.4 28L30 22.6H27.7Z" fill="url(#g-bolt)"/>
+      <rect x="1" y="1" width="34" height="34" rx="8" fill="none" stroke="url(#g-edge)" stroke-width="1.6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="page">
+
+<h1>Icons for LightLine's Own Extensions <span class="status">Approved with all recommendations 2026-11-25; built</span></h1>
+<p class="lead">Today LightLine Themes shows a plain <b>L</b> before it's installed, and C and C++ Snippets always shows <b>LC</b>. These are the same letter tiles any unknown extension gets. Proposed: each gets an icon drawn from the LightLine mark (the indigo tile, its violet-to-blue edge and the bolt), so our own extensions are recognizably ours, before and after they're installed.</p>
+
+<div class="stage">
+  <div class="day">
+    <figure><svg width="144" height="144"><use href="#ic-themes"/></svg><figcaption>LightLine Themes</figcaption></figure>
+    <figure><svg width="144" height="144"><use href="#ic-snippets"/></svg><figcaption>C and C++ Snippets</figcaption></figure>
+  </div>
+  <div class="night">
+    <figure><svg width="144" height="144"><use href="#ic-themes"/></svg><figcaption>LightLine Themes</figcaption></figure>
+    <figure><svg width="144" height="144"><use href="#ic-snippets"/></svg><figcaption>C and C++ Snippets</figcaption></figure>
+  </div>
+</div>
+<p class="muted">Shown at 4× on LightLine Daylight's and LightLine Midnight's sidebar colors. <b>LightLine Themes</b> is split by its own bolt: the Daylight half on one side, the Contrast half on the other. <b>C and C++ Snippets</b> puts the bolt between braces, for code that appears at once.</p>
+
+<h2>In the Extensions panel</h2>
+<div class="frames">
+  <figure>
+    <figcaption>Today<span>Letter tiles, the same treatment as any unknown extension from the Zed registry.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">10</span></div>
+      <div class="ext"><div class="mono" style="background:#1d2a4c;border:1px solid #2b4677;color:#9cc0ff">L</div><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+      <div class="ext"><div class="mono" style="background:#2d1c2c;border:1px solid #533150;color:#f0a6c8">LC</div><div class="l1"><b>C and C++ Snippets</b><span class="badge">LightLine</span></div><div class="l2">main, for, struct, class, include guards and more</div><div class="l3">LightLine · <i style="color:var(--orange)">Snippets</i></div><div class="btn">Install</div></div>
+      <div class="ext"><div class="mono" style="background:#14262a;border:1px solid #1f4a48;color:#7ee0cf">C</div><div class="l1"><b>Catppuccin</b><span class="v">0.2.27</span><span class="badge">LightLine</span></div><div class="l2">Soothing pastel themes: Latte, Frappé, Macchiato…</div><div class="l3">Catppuccin · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+      <div class="ext"><div class="mono" style="background:#1a2235;border:1px solid #2a3a5c;color:#a9bde0">OD</div><div class="l1"><b>One Dark Pro</b><span class="v">0.0.11</span><span class="badge">LightLine</span></div><div class="l2">A port of VS Code's One Dark Pro</div><div class="l3">MordFustang21 · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed, Midnight<span>Our two extensions carry the mark, so they stand apart from the registry's letter tiles beside them.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">10</span></div>
+      <div class="ext"><svg class="icon new" width="36" height="36"><use href="#ic-themes"/></svg><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+      <div class="ext"><svg class="icon new" width="36" height="36"><use href="#ic-snippets"/></svg><div class="l1"><b>C and C++ Snippets</b><span class="badge">LightLine</span></div><div class="l2">main, for, struct, class, include guards and more</div><div class="l3">LightLine · <i style="color:var(--orange)">Snippets</i></div><div class="btn">Install</div></div>
+      <div class="ext"><div class="mono" style="background:#14262a;border:1px solid #1f4a48;color:#7ee0cf">C</div><div class="l1"><b>Catppuccin</b><span class="v">0.2.27</span><span class="badge">LightLine</span></div><div class="l2">Soothing pastel themes: Latte, Frappé, Macchiato…</div><div class="l3">Catppuccin · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+      <div class="ext"><div class="mono" style="background:#1a2235;border:1px solid #2a3a5c;color:#a9bde0">OD</div><div class="l1"><b>One Dark Pro</b><span class="v">0.0.11</span><span class="badge">LightLine</span></div><div class="l2">A port of VS Code's One Dark Pro</div><div class="l3">MordFustang21 · <i style="color:var(--violet)">Color theme</i></div><div class="btn">Install</div></div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed, Daylight, installed<span>The same icons once installed and in a light theme. The tile keeps its own colors, as the app icon does in the taskbar.</span></figcaption>
+    <div class="panel light">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">3</span></div>
+      <div class="ext"><svg class="icon new" width="36" height="36"><use href="#ic-themes"/></svg><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · <i style="color:var(--violet)">Color theme</i></div><div class="tick">✓</div></div>
+      <div class="ext"><svg class="icon new" width="36" height="36"><use href="#ic-snippets"/></svg><div class="l1"><b>C and C++ Snippets</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">main, for, struct, class, include guards and more</div><div class="l3">LightLine · <i style="color:var(--orange)">Snippets</i></div><div class="tick">✓</div></div>
+      <div class="ext"><div class="mono" style="background:#f8e9f0;border:1px solid #e6c3d3;color:#9d2d62">D</div><div class="l1"><b>Dracula</b><span class="v">1.1.2</span><span class="badge">LightLine</span></div><div class="l2">The official Dracula themes, dark and light</div><div class="l3">Dracula · <i style="color:var(--violet)">Color theme</i></div><div class="tick">✓</div></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">7</span></div>
+    </div>
+  </figure>
+</div>
+<p class="muted">Dracula is drawn here as a letter tile only to keep the crop simple; in LightLine it shows its own colors. Dashed green marks what's new.</p>
+
+<h2>At the sizes LightLine draws them</h2>
+<p>A row's icon is 36 logical pixels, so 36, 45 or 72 real pixels at 100%, 125% and 200%. Each size is drawn from the SVG at that exact size, never stretched.</p>
+<div class="sizes">
+  <figure><svg width="36" height="36"><use href="#ic-themes"/></svg><figcaption>36 px</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-themes"/></svg><figcaption>45 px</figcaption></figure>
+  <figure><svg width="72" height="72"><use href="#ic-themes"/></svg><figcaption>72 px</figcaption></figure>
+  <figure><svg width="36" height="36"><use href="#ic-snippets"/></svg><figcaption>36 px</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-snippets"/></svg><figcaption>45 px</figcaption></figure>
+  <figure><svg width="72" height="72"><use href="#ic-snippets"/></svg><figcaption>72 px</figcaption></figure>
+</div>
+
+<h2>Options</h2>
+<div class="options">
+  <div class="option chosen">
+    <div class="pair"><svg width="72" height="72"><use href="#ic-themes"/></svg><svg width="36" height="36"><use href="#ic-themes"/></svg></div>
+    <span class="tag">Recommended</span>
+    <b>Themes A: split by the bolt</b>
+    <p>One tile, half Daylight and half Contrast, with the bolt as the seam. It says "two themes, from LightLine" at a glance, and the halves use the themes' real colors.</p>
+  </div>
+  <div class="option">
+    <div class="pair"><svg width="72" height="72"><use href="#ic-themes-b"/></svg><svg width="36" height="36"><use href="#ic-themes-b"/></svg></div>
+    <b>Themes B: two windows</b>
+    <p>A light and a dark window on the indigo tile, with a small bolt. More literal; at 36 px the windows' code lines are only a pixel or two tall.</p>
+  </div>
+  <div class="option chosen">
+    <div class="pair"><svg width="72" height="72"><use href="#ic-snippets"/></svg><svg width="36" height="36"><use href="#ic-snippets"/></svg></div>
+    <span class="tag">Recommended</span>
+    <b>Snippets A: braces around the bolt</b>
+    <p>Code in an instant. The braces read as C at once, and the bolt keeps it in the LightLine family.</p>
+  </div>
+  <div class="option">
+    <div class="pair"><svg width="72" height="72"><use href="#ic-snippets-b"/></svg><svg width="36" height="36"><use href="#ic-snippets-b"/></svg></div>
+    <b>Snippets B: a tab stop</b>
+    <p>A small block of code with a dashed placeholder, the part of a snippet <code>Tab</code> moves to. Closer to how snippets work, but quieter as an icon.</p>
+  </div>
+</div>
+
+<h2>The same family for later</h2>
+<p>When LightLine publishes another extension, it gets the tile for its kind without new art, until it earns its own. A second snippet pack would share the braces until it gets its own.</p>
+<div class="family">
+  <figure><svg width="45" height="45"><use href="#ic-themes"/></svg><figcaption>Color theme</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-snippets"/></svg><figcaption>Snippets</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-icons"/></svg><figcaption>Icon theme</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-language"/></svg><figcaption>Language</figcaption></figure>
+  <figure><svg width="45" height="45"><use href="#ic-checker"/></svg><figcaption>Checker</figcaption></figure>
+</div>
+
+<h2>How it's built</h2>
+<ul>
+  <li><b>Where the art lives:</b> each icon is an SVG of about 1.5 KB built into LightLine, beside the file-type icons. It's there before anything is downloaded, offline too, and needs no change to the extensions themselves (Zed's format has no icon).</li>
+  <li><b>Which rows get it:</b> an entry LightLine's list says LightLine publishes (<code>publisher = "LightLine"</code>, ids starting <code>lightline-</code>) gets its own icon, or its kind's when it has none. It wins over the color swatch the theme pack shows today once installed.</li>
+  <li><b>How it's drawn:</b> through the icon atlas, like the file icons: rasterized once at the exact size shown, then copied with <code>AlphaBlend</code>. No icon handles, nothing per frame.</li>
+  <li><b>Checks:</b> a test renders every one at 36, 45 and 72 px and checks it isn't empty; live, the panel in Midnight, Daylight and Contrast against these crops, with the repaint check.</li>
+  <li><b>Docs:</b> a line in <code>CHANGELOG.md</code>; the icons also go in lightline-extensions' READMEs.</li>
+</ul>
+
+<h2>Speed</h2>
+<table>
+  <tr><th>Measure</th><th>Effect</th></tr>
+  <tr><td>Startup, idle, typing</td><td>None. The icons are only drawn when the Extensions panel is open.</td></tr>
+  <tr><td>Opening Extensions</td><td>Two small SVGs rasterized once, well under a millisecond, then reused; the letter tiles they replace cost about the same.</td></tr>
+  <tr><td>Size of LightLine</td><td>About 3 KB more for the two icons (8 KB with the family of five).</td></tr>
+</table>
+
+<h2>Decisions for you</h2>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Options</th><th>Recommendation</th></tr>
+  <tr><td>LightLine Themes</td><td><b>A: split by the bolt</b> · B: two windows</td><td class="rec">A. It reads at 36 px and shows both themes in their own colors.</td></tr>
+  <tr><td>C and C++ Snippets</td><td><b>A: braces around the bolt</b> · B: a tab stop</td><td class="rec">A. Braces say C at a glance; B is quieter at row size.</td></tr>
+  <tr><td>Future own extensions</td><td><b>The kind's family tile until one is drawn</b> · a letter tile until one is drawn</td><td class="rec">The family tile, so everything we publish looks like ours from day one. The three extra tiles are drawn now.</td></tr>
+  <tr><td>After the theme pack is installed</td><td><b>Keep our icon</b> · switch to the color swatch other themes get</td><td class="rec">Keep our icon. It already shows both themes' colors, and the row shouldn't change look on install.</td></tr>
+</table></div>
+
+</div>
+</body>
+</html>

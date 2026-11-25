@@ -342,6 +342,7 @@ enum AtlasKey {
     Glyph(DebugGlyph, u32),
     Builtin(BuiltinIcon),
     Themed(PathBuf),
+    Own(super::own_icons::OwnIcon),
 }
 
 // Where a rasterized icon sits: which page, at which corner.
@@ -688,6 +689,21 @@ impl IconSet {
         })
     }
 
+    /// Draws the tile of an extension LightLine publishes, `size` pixels
+    /// square at (x, y).
+    pub(super) fn draw_own(
+        &self,
+        hdc: HDC,
+        icon: super::own_icons::OwnIcon,
+        x: i32,
+        y: i32,
+        size: i32,
+    ) -> bool {
+        self.draw_atlas(hdc, AtlasKey::Own(icon), (x, y), size, || {
+            Some(icon.svg().into_bytes())
+        })
+    }
+
     /// Draws an SVG file (an icon theme's own folder icon, say) from the
     /// atlas, `size` pixels square at (x, y).
     pub(super) fn draw_svg_file(
@@ -796,6 +812,26 @@ impl Drop for IconSet {
 #[cfg(test)]
 mod icon_tests {
     use super::*;
+
+    // Each of LightLine's own extension tiles draws, at 100%, 125% and 200%,
+    // with its indigo or its two halves filling the corners' inside.
+    #[test]
+    fn own_extension_tiles_rasterize_at_every_scale() {
+        for icon in super::super::own_icons::OwnIcon::ALL {
+            for size in [36, 45, 72] {
+                let pixels = IconSet::rasterize(icon.svg().as_bytes(), size)
+                    .unwrap_or_else(|| panic!("{icon:?} at {size}"));
+                let at = |x: i32, y: i32| {
+                    let index = ((y * size + x) * 4) as usize;
+                    &pixels[index..index + 4]
+                };
+                // Opaque in the middle of the left edge's inside, clear in
+                // the very corner (the tile is rounded).
+                assert_eq!(at(size / 8, size / 2)[3], 255, "{icon:?} at {size}");
+                assert_eq!(at(0, 0)[3], 0, "{icon:?} at {size}");
+            }
+        }
+    }
 
     #[test]
     fn every_debug_glyph_is_valid_svg() {
