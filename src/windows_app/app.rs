@@ -322,9 +322,15 @@ pub(super) struct Extension {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) publisher: String,
+    // The version an install gets: the list's for an extension it pins,
+    // else the Zed registry's.
     pub(super) version: String,
+    // The version on this PC, from its extension.toml (the scan); empty
+    // when it isn't installed.
+    pub(super) installed_version: String,
     pub(super) description: String,
     pub(super) installed: bool,
+    // Installing, or updating when `installed` too.
     pub(super) installing: bool,
     // What an installed registry extension turned out to be, and the icon
     // made from its files (extensions_panel.rs scans them); None until then.
@@ -339,6 +345,17 @@ pub(super) struct Extension {
     // folder the list pins, for an extension that isn't in the Zed
     // registry; None installs the Zed registry's pin.
     pub(super) repository: Option<(String, String, Option<String>)>,
+}
+
+/// Update All while it runs: the updates start together and the installer
+/// takes them one at a time.
+#[derive(Debug, Default)]
+pub(super) struct ExtensionUpdateBatch {
+    /// The ids not finished yet.
+    pub(super) pending: Vec<String>,
+    pub(super) total: usize,
+    /// The name of each one that failed, and why.
+    pub(super) failed: Vec<(String, String)>,
 }
 
 /// An installed extension's icon, made from its own files: Zed extensions
@@ -375,6 +392,27 @@ impl Extension {
         match self.id.as_str() {
             "prettier" => ExtensionCategory::Formatter,
             _ => self.kind.unwrap_or(ExtensionCategory::Unknown),
+        }
+    }
+
+    /// Installed, and the list or the Zed registry pins a newer version
+    /// than the one on this PC. A new commit without a new version isn't
+    /// an update.
+    pub(super) fn has_update(&self) -> bool {
+        self.installed
+            && self.id != "prettier"
+            && !self.version.is_empty()
+            && !self.installed_version.is_empty()
+            && lightline::extensions::lightline_list::newer(&self.version, &self.installed_version)
+    }
+
+    /// What its row shows as the version: the one on this PC once it's
+    /// installed, else the one an install would get.
+    pub(super) fn shown_version(&self) -> &str {
+        if self.installed && !self.installed_version.is_empty() {
+            &self.installed_version
+        } else {
+            &self.version
         }
     }
 }
@@ -1246,6 +1284,16 @@ pub(super) struct App {
     pub(super) extensions_search_active: bool,
     pub(super) zed_registry_loaded: bool,
     pub(super) zed_registry_loading: bool,
+    // Update All in progress: the ids still updating, how many it started
+    // with, and the ones that failed with why.
+    pub(super) extension_update_batch: Option<ExtensionUpdateBatch>,
+    // The two lists (Zed's and LightLine's) still downloading, and whether
+    // to say what updates there are once they and the scan are in: Some(true)
+    // after Check for Updates (which also says "up to date"), Some(false)
+    // after the panel opens (only when there are some).
+    pub(super) extension_lists_pending: u8,
+    pub(super) extension_updates_report: Option<bool>,
+    pub(super) extension_scan_pending: bool,
     // Whether the installed extensions have been scanned since startup (the
     // first time the Extensions panel opens).
     pub(super) extensions_scanned: bool,
@@ -1867,6 +1915,10 @@ impl App {
             extensions_filter: ExtensionsFilter::All,
             extensions_query: String::new(),
             zed_registry_loaded: false,
+            extension_update_batch: None,
+            extension_lists_pending: 0,
+            extension_updates_report: None,
+            extension_scan_pending: false,
             zed_registry_loading: false,
             extensions_scanned: false,
             debug: None,
@@ -1913,16 +1965,25 @@ impl App {
         if self.zed_registry_loaded || self.zed_registry_loading {
             return;
         }
+        // Updates found on opening the panel are said once, quietly.
+        self.extension_updates_report.get_or_insert(false);
+        self.load_extension_lists(false);
+    }
+
+    /// Downloads Zed's registry and LightLine's list on workers; `fresh`
+    /// skips copies from the last 10 minutes.
+    pub(super) fn load_extension_lists(&mut self, fresh: bool) {
         self.zed_registry_loading = true;
+        self.extension_lists_pending = 2;
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
-            let result = lightline::extensions::zed_registry::list_ids();
+            let result = lightline::extensions::zed_registry::list_ids(fresh);
             tx.send(WorkerMessage::ZedRegistryList(result));
         });
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
             tx.send(WorkerMessage::ExtensionList(
-                lightline::extensions::lightline_list::fetch(),
+                lightline::extensions::lightline_list::fetch(fresh),
             ));
         });
     }
@@ -1963,6 +2024,7 @@ impl App {
                     return;
                 }
                 self.extensions[idx].installed = false;
+                self.extensions[idx].installed_version.clear();
                 self.extensions[idx].icon = None;
                 if registry_id == "material-icon-theme" {
                     self.icons = IconSet::new(self.dpi, self.zoom);
@@ -1987,16 +2049,35 @@ impl App {
                 self.refresh(hwnd);
                 return;
             }
-            self.extensions[idx].installing = true;
-            let name = self.extensions[idx].name.clone();
-            let pinned = self.extensions[idx].repository.clone();
-            self.status = if pinned.is_some() {
-                format!("Installing {name}...")
-            } else {
-                format!("Resolving {name} from the Zed registry...")
-            };
+            self.start_extension_install(hwnd, idx);
+            return;
+        }
+        // Prettier: unrelated to the Zed registry, detected via PATH probing.
+        self.toggle_prettier(hwnd, idx);
+    }
+
+    /// Installs the extension at `idx`, or updates it when it's installed:
+    /// the same staged download, checks, backup and swap either way.
+    pub(super) fn start_extension_install(&mut self, hwnd: HWND, idx: usize) {
+        let ext = &mut self.extensions[idx];
+        if ext.installing || ext.id == "prettier" {
+            return;
+        }
+        ext.installing = true;
+        let registry_id = ext.id.clone();
+        let name = ext.name.clone();
+        let pinned = ext.repository.clone();
+        let status = if ext.installed {
+            format!("Updating {name} to {}...", ext.version)
+        } else if pinned.is_some() {
+            format!("Installing {name}...")
+        } else {
+            format!("Resolving {name} from the Zed registry...")
+        };
+        self.status = status;
+        {
             let tx = self.worker_tx.clone();
-            let worker_id = id.to_string();
+            let worker_id = registry_id.clone();
             std::thread::spawn(move || {
                 // The list's own pin needs no lookup; anything else is the
                 // commit the Zed registry pins.
@@ -2061,9 +2142,12 @@ impl App {
                 tx.send(WorkerMessage::ZedExtensionInstalled(worker_id, outcome));
             });
             self.refresh(hwnd);
-            return;
         }
-        // Prettier: unrelated to the Zed registry, detected via PATH probing.
+    }
+
+    /// Prettier isn't downloaded: Install looks for it and Turn Off is a
+    /// preference.
+    fn toggle_prettier(&mut self, hwnd: HWND, idx: usize) {
         {
             if self.extensions[idx].installed {
                 // Turning this off is just a preference flip: LightLine never

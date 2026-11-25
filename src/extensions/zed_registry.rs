@@ -73,8 +73,13 @@ pub fn resolve(id: &str) -> Result<ResolvedExtension, String> {
 }
 
 /// Lists every id (and its version) in the registry, for the Extensions
-/// panel's search.
-pub fn list_ids() -> Result<Vec<(String, String)>, String> {
+/// panel's search and its updates. `fresh` downloads the registry again
+/// instead of reusing one from the last 10 minutes (Check for Updates);
+/// installs then use that copy too.
+pub fn list_ids(fresh: bool) -> Result<Vec<(String, String)>, String> {
+    if fresh && let Ok(mut list) = LIST.lock() {
+        *list = None;
+    }
     let mut ids: Vec<(String, String)> = registry()?
         .into_iter()
         .map(|(id, entry)| (id, entry.version))
@@ -83,8 +88,10 @@ pub fn list_ids() -> Result<Vec<(String, String)>, String> {
     Ok(ids)
 }
 
+// The last registry downloaded, reused for `LIST_REUSE`.
+static LIST: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+
 fn registry() -> Result<HashMap<String, RegistryEntry>, String> {
-    static LIST: Mutex<Option<(Instant, String)>> = Mutex::new(None);
     let cached = LIST
         .lock()
         .ok()
@@ -203,7 +210,7 @@ mod tests {
     #[test]
     #[ignore = "hits the real network; run explicitly with --ignored"]
     fn lists_hundreds_of_real_ids_including_material_icon_theme() {
-        let ids = list_ids().expect("should list from the live registry");
+        let ids = list_ids(false).expect("should list from the live registry");
         assert!(
             ids.len() > 100,
             "expected hundreds of real registry entries, got {}",

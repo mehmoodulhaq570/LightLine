@@ -668,4 +668,109 @@ mod tests {
         }
         fs::remove_dir_all(dir).unwrap();
     }
+
+    // The Extensions panel's Update is an install over the installed copy:
+    // the new version replaces it, a theme keeps its variant's name (which
+    // is how the theme in use is applied again), and a failed update leaves
+    // the version that was there.
+    #[test]
+    fn an_update_replaces_the_installed_copy_or_leaves_it_alone() {
+        if !crate::workflow::command_available("git") {
+            return;
+        }
+        let dir = fixture("update");
+        let repo = dir.join("repo");
+        let run = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        let write = |path: &str, text: &str| {
+            let file = repo.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, text).unwrap();
+        };
+        let commit = |message: &str| {
+            run(&["add", "-A"]);
+            run(&[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-q",
+                "-m",
+                message,
+            ]);
+            let head = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&head.stdout).trim().to_owned()
+        };
+        let version = |version: &str, background: &str| {
+            write(
+                "themes/one/extension.toml",
+                &format!("id = \"one\"\nname = \"One\"\nversion = \"{version}\"\n"),
+            );
+            write(
+                "themes/one/themes/one.json",
+                &format!(
+                    r##"{{"name": "One", "themes": [{{"name": "One Dark", "appearance": "dark",
+                    "style": {{"editor.background": "{background}"}}}}]}}"##
+                ),
+            );
+        };
+        fs::create_dir_all(&repo).unwrap();
+        run(&["init", "-q"]);
+        run(&["config", "uploadpack.allowFilter", "true"]);
+        version("1.0.0", "#000000");
+        let first = commit("1.0.0");
+        version("1.1.0", "#102030");
+        let second = commit("1.1.0");
+        write("themes/one/themes/one.json", "broken");
+        let broken = commit("broken");
+
+        let extensions = dir.join("extensions");
+        let url = repo.display().to_string();
+        let installed_version = || {
+            crate::extensions::zed_manifest::Manifest::load(&extensions.join("one"))
+                .unwrap()
+                .version
+        };
+        let background = || {
+            let themes = crate::color_theme::installed(&extensions);
+            let (id, theme) = themes
+                .iter()
+                .find(|(_, theme)| theme.name == "One Dark")
+                .expect("the variant keeps its name");
+            assert_eq!(id, "one");
+            let color = theme.style_color("editor.background").unwrap();
+            (color.r, color.g, color.b)
+        };
+        install_in(&extensions, "one", &url, &first, Some("themes/one")).unwrap();
+        assert_eq!(installed_version(), "1.0.0");
+        assert_eq!(background(), (0, 0, 0));
+
+        install_in(&extensions, "one", &url, &second, Some("themes/one")).unwrap();
+        assert_eq!(installed_version(), "1.1.0");
+        assert_eq!(background(), (0x10, 0x20, 0x30));
+
+        // A broken theme file, and a commit that isn't there.
+        for commit in [broken.as_str(), "0123456789012345678901234567890123456789"] {
+            assert!(install_in(&extensions, "one", &url, commit, Some("themes/one")).is_err());
+            assert_eq!(installed_version(), "1.1.0");
+            assert_eq!(background(), (0x10, 0x20, 0x30));
+            for leftover in [".staging-one", ".backup-one", ".download-one"] {
+                assert!(!extensions.join(leftover).exists(), "{leftover}");
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

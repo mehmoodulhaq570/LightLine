@@ -1010,6 +1010,7 @@ impl App {
                 }
                 WorkerMessage::ZedRegistryList(result) => {
                     self.zed_registry_loading = false;
+                    self.extension_lists_pending = self.extension_lists_pending.saturating_sub(1);
                     match result {
                         Ok(entries) => {
                             self.zed_registry_loaded = true;
@@ -1017,7 +1018,8 @@ impl App {
                                 if let Some(ext) =
                                     self.extensions.iter_mut().find(|ext| ext.id == id)
                                 {
-                                    // One the list pins keeps the list's version.
+                                    // One the list pins keeps the list's
+                                    // version; the installed one is kept apart.
                                     if ext.repository.is_none() {
                                         ext.version = version;
                                     }
@@ -1036,15 +1038,24 @@ impl App {
                             }
                         }
                         Err(error) => {
+                            // Said instead of what updates there are.
+                            self.extension_updates_report = None;
                             self.status =
                                 format!("Could not reach the Zed extension registry: {error}");
                         }
                     }
+                    self.report_extension_updates();
+                    unsafe { InvalidateRect(hwnd, null(), 0) };
                 }
                 WorkerMessage::ExtensionList(result) => {
+                    self.extension_lists_pending = self.extension_lists_pending.saturating_sub(1);
                     self.apply_extension_list(hwnd, result);
+                    self.report_extension_updates();
                 }
                 WorkerMessage::ZedExtensionInstalled(id, result) => {
+                    if self.extension_updated(hwnd, &id, &result) {
+                        continue;
+                    }
                     let registry_id = id.clone();
                     if let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) {
                         ext.installing = false;

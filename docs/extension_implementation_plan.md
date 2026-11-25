@@ -303,6 +303,33 @@ installs both from GitHub (folder only), and
 `a_folder_of_zeds_own_repository_downloads_alone` fetches Zed's `html`
 folder alone (about 35 s, mostly Zed's trees).
 
+### Phase 3d — Updating installed extensions (built 2026-11-25)
+
+Design `design/extension-updates-design.html`, all recommendations approved:
+look for updates only when the user opens Extensions or chooses Check for
+Updates (which refetches both lists, skipping the 10-minute reuse); show them
+on installed rows (`installed → new` and **Update**) and in the INSTALLED
+header, with **Update all** there (two or more) and **Update All (n)** in the
+··· menu; only a newer version number is an update (`lightline_list::newer`),
+never a new commit alone; a language whose grammar is loaded is tried, and
+if Windows holds its folder the old copy stays with *Restart LightLine, then
+update X*.
+
+- `Extension::installed_version` (from the scan) is kept apart from
+  `version` (what an install gets: the list's pin, else the Zed registry's).
+  This also fixed rows that showed the registry's version as installed.
+- An update is an install over the installed copy (`start_extension_install`):
+  staged download, checks, backup, swap, rollback. `extension_updated` then
+  re-applies the theme in use by its variant name, reloads icons and
+  languages, forgets snippets and restarts checkers. Update All starts every
+  update; the installer's lock takes them one at a time, with one status line.
+
+Verified: `an_update_replaces_the_installed_copy_or_leaves_it_alone` (a local
+fixture repository at 1.0.0, 1.1.0 and a broken commit); live, with LightLine
+Themes, the C snippets and Dracula installed at lowered versions: the rows,
+header, menu and status lines match the mock-up, the Contrast theme stays in
+use through its update, and the repaint check finds 0 stale pixels.
+
 ### Phase 4 — Generalize the adapter pattern
 
 Each new supported Zed extension *type* gets its own adapter, not a special case

@@ -155,14 +155,16 @@ pub fn problems(text: &str) -> Vec<String> {
 }
 
 /// Downloads the latest list from the repository. Called on a worker when
-/// the Extensions panel opens, alongside the Zed registry list.
-pub fn fetch() -> Result<Vec<Entry>, String> {
+/// the Extensions panel opens, alongside the Zed registry list. A list
+/// downloaded in the last 10 minutes is reused; `fresh` downloads it again
+/// (Check for Updates).
+pub fn fetch(fresh: bool) -> Result<Vec<Entry>, String> {
     static LIST: Mutex<Option<(Instant, String)>> = Mutex::new(None);
     let cached = LIST
         .lock()
         .ok()
         .and_then(|list| list.clone())
-        .filter(|(fetched, _)| fetched.elapsed() < LIST_REUSE)
+        .filter(|(fetched, _)| !fresh && fetched.elapsed() < LIST_REUSE)
         .map(|(_, text)| text);
     let text = match cached {
         Some(text) => text,
@@ -289,9 +291,9 @@ fn valid_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte))
 }
 
-// Whether version `wanted` is newer than `have` ("0.13.0" > "0.12.2").
-// Anything after a `-` (a pre-release tag) is ignored.
-fn newer(wanted: &str, have: &str) -> bool {
+/// Whether version `wanted` is newer than `have` ("0.13.0" > "0.12.2",
+/// "1.10.0" > "1.9.2"). Anything after a `-` (a pre-release tag) is ignored.
+pub fn newer(wanted: &str, have: &str) -> bool {
     let numbers = |text: &str| -> Vec<u64> {
         text.split('-')
             .next()

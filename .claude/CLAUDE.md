@@ -263,6 +263,7 @@ If the library needs a setting globally, push it in at load and on reload throug
   3. Move it into place, keeping a backup and rolling back on failure.
 
   This needs `git` on PATH. Installs are serialized with an exclusive lock file.
+- **Updates** are installs over the installed copy (`start_extension_install`). `Extension::installed_version` (the scan, from `extension.toml`) is kept apart from `version` (what an install gets: the list's pin, else the Zed registry's); `has_update` compares them with `lightline_list::newer`, so only a version bump is an update. Updates are looked for only when the panel opens or on Check for Updates (`list_ids(true)` / `fetch(true)` skip the 10-minute reuse); `extension_updated` re-applies the theme in use and reloads what the extension feeds.
 - **What works today:**
   - icon themes (e.g. Material Icon Theme) and color themes (e.g. Dracula, Catppuccin);
   - language extensions: the Tree-sitter grammar is built with the PC's C compiler (`extensions/language.rs`), and declared servers start only from PATH (`language_servers.rs`);
