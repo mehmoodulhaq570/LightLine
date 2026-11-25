@@ -95,11 +95,13 @@ impl App {
 
     // Breakpoints from every open tab whose file `keep` accepts, in the
     // zero-based form LaunchRequest takes.
+    // Plain paths: lldb never binds a breakpoint given canonicalize()'s
+    // `\\?\` form, so a Rust program ran straight past it.
     fn debug_breakpoints(&self, keep: impl Fn(&Path) -> bool) -> Vec<(PathBuf, Vec<u32>)> {
         self.tabs
             .iter()
             .filter_map(|tab| {
-                let path = tab.document.path.clone()?;
+                let path = PathBuf::from(display_path(tab.document.path.as_deref()?));
                 let breakpoints = tab.document.breakpoints();
                 let lines: Vec<u32> = breakpoints.iter().map(|&l| l as u32).collect();
                 (!lines.is_empty() && keep(&path)).then_some((path, lines))
@@ -165,11 +167,7 @@ impl App {
         // Plain paths: canonicalize()'s \\?\ prefix would reach the program's
         // __file__ and the command shown in the Output tab.
         let plain = |path: &Path| PathBuf::from(display_path(path));
-        let breakpoints = self
-            .debug_breakpoints(is_python_path)
-            .into_iter()
-            .map(|(path, lines)| (plain(&path), lines))
-            .collect();
+        let breakpoints = self.debug_breakpoints(is_python_path);
         self.debug_state = DebugState {
             status: "Starting...".into(),
             config: Some(DebugConfig::PythonFile),
@@ -235,9 +233,9 @@ impl App {
                     hwnd,
                     DebugLaunchRequest {
                         adapter: DebugAdapter::Lldb,
-                        program,
+                        program: PathBuf::from(display_path(&program)),
                         args: Vec::new(),
-                        cwd: root,
+                        cwd: PathBuf::from(display_path(&root)),
                         breakpoints,
                     },
                 );

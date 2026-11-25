@@ -509,23 +509,15 @@ fn run_adapter(
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
                     if !success {
-                        let text = message
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("request failed");
+                        let text = failure_reason(&message);
                         if matches!(kind, PendingKind::Initialize | PendingKind::Launch) {
                             failure = Some(text.to_string());
                             break 'running;
                         }
                         if matches!(kind, PendingKind::Evaluate) {
-                            // The reason is often only in the error's format.
-                            let reason = message
-                                .pointer("/body/error/format")
-                                .and_then(Value::as_str)
-                                .unwrap_or(text);
                             emit(
                                 Event::Evaluated {
-                                    result: Err(reason.to_string()),
+                                    result: Err(text.to_string()),
                                 },
                                 &events,
                                 &wake,
@@ -912,6 +904,18 @@ fn run_adapter(
     }
 }
 
+// Why a request failed. Adapters often give the reason only in the error's
+// format (lldb-dap: "could not find 'lldb-server.exe'..."), with no
+// `message` at all.
+fn failure_reason(response: &Value) -> &str {
+    response
+        .pointer("/body/error/format")
+        .or_else(|| response.get("message"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or("request failed")
+}
+
 fn launch_arguments(request: &LaunchRequest) -> Value {
     match &request.adapter {
         Adapter::Lldb => json!({
@@ -1034,6 +1038,21 @@ fn read_packet(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn a_failed_request_says_why() {
+        // lldb-dap 23 without lldb-server.exe beside it.
+        let lldb = json!({"type": "response", "success": false, "body": {"error": {
+            "format": "could not find 'lldb-server.exe'. Please ensure it is properly installed and available in your PATH",
+            "id": 3}}});
+        assert!(failure_reason(&lldb).starts_with("could not find 'lldb-server.exe'"));
+        let plain = json!({"success": false, "message": "launch failed"});
+        assert_eq!(failure_reason(&plain), "launch failed");
+        assert_eq!(
+            failure_reason(&json!({"success": false, "message": " "})),
+            "request failed"
+        );
+    }
 
     // LIGHTLINE_TEST_PYTHON picks the interpreter; otherwise the first
     // `python` on PATH. Either way it must be able to import debugpy.
