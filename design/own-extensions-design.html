@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightLine's Own Extensions</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs::default_dark) */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --sky: #38bdf8; --teal: #2dd4bf;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78; --orange: #f59150;
+    --install: #1272c4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 8px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--label); text-transform: uppercase; letter-spacing: .04em; }
+  p { max-width: 900px; }
+  p.lead { color: var(--label); margin: 0 0 18px; }
+  ul { padding-left: 20px; margin: 0; max-width: 900px; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  pre { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0a142a; border: 1px solid var(--edge-page); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; max-width: 900px; }
+  pre .c { color: var(--muted); } pre .k { color: var(--blue); } pre .s { color: var(--green); } pre .h { color: var(--amber); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; max-width: 960px; }
+  .rec { color: var(--green); font-weight: 600; }
+  .status { display: inline-block; font-size: 12px; color: var(--amber); border: 1px solid #5a4520; background: #1d160a; border-radius: 4px; padding: 0 7px; margin-left: 6px; vertical-align: 3px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(255,255,255,.25); }
+
+  /* ---------- Extensions panel crop at real size (sidebar 286 px) ---------- */
+  .frames { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-weight: 600; margin-bottom: 6px; }
+  figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; max-width: 340px; }
+  .panel { width: 286px; height: 560px; overflow: hidden; background: var(--side); border: 1px solid var(--edge-page); border-radius: 8px; font-size: 13px; position: relative; }
+  .ph { height: 35px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; letter-spacing: .05em; color: var(--label); }
+  .ph .ic { margin-left: auto; display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+  .search { margin: 4px 12px 0; height: 28px; border: 1px solid var(--edge); background: var(--field); border-radius: 5px; display: flex; align-items: center; padding: 0 8px; gap: 8px; color: var(--muted); }
+  .search.on { border-color: var(--blue); color: var(--text); }
+  .search .q { flex: 1; }
+  .chips { display: flex; gap: 4px; margin: 6px 12px 0; }
+  .chip { height: 22px; border: 1px solid var(--edge); border-radius: 11px; padding: 0 9px; display: flex; align-items: center; color: var(--muted); font-size: 12px; }
+  .chip.on { border-color: var(--blue); background: var(--select); color: var(--text); }
+  .div { height: 1px; background: var(--edge); margin: 4px 0 3px; }
+  .hd { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; font-size: 11.5px; font-weight: 600; color: #a9b7cd; }
+  .hd .chev { width: 12px; color: var(--muted); font-size: 10px; text-align: center; }
+  .hd .n { background: var(--edge); color: var(--text); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 400; min-width: 18px; text-align: center; }
+  .hd .note { margin-left: auto; color: var(--muted); font-weight: 400; }
+  .note-row { height: 22px; padding-left: 20px; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 10px; }
+  .ext { height: 62px; position: relative; }
+  .ext.hot { background: #0e1a33; }
+  .ext .icon { position: absolute; left: 20px; top: 10px; width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; font-weight: 700; font-size: 15px; color: #0b1222; }
+  .ext .l1 { position: absolute; left: 66px; top: 5px; right: 10px; white-space: nowrap; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+  .ext .l1 b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l1 .v { color: var(--muted); font-size: 11.5px; flex: none; }
+  .ext .l2 { position: absolute; left: 66px; top: 24px; right: 10px; color: #b9c5d8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3 { position: absolute; left: 66px; top: 40px; right: 70px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .btn { position: absolute; right: 10px; top: 41px; height: 18px; padding: 0 9px; border-radius: 3px; background: var(--install); color: #fff; font-size: 11.5px; display: flex; align-items: center; }
+  .badge { flex: none; font-size: 10.5px; font-weight: 600; color: var(--blue); border: 1px solid #2b4c84; background: #0d1d3b; border-radius: 3px; padding: 0 4px; line-height: 15px; }
+  .new { outline: 1px dashed rgba(52, 211, 153, .55); outline-offset: -1px; }
+
+  /* ---------- Editor previews: one per theme variant ---------- */
+  .eds { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; }
+  .ed { width: 344px; border-radius: 8px; overflow: hidden; background: var(--e-shell); border: 1px solid var(--e-cardedge); font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 19px; color: var(--e-text); }
+  .ed .tabs { height: 30px; display: flex; align-items: stretch; background: var(--e-tab); border-bottom: 1px solid var(--e-edge); font-family: "Segoe UI", system-ui, sans-serif; font-size: 12px; }
+  .ed .tab { padding: 0 12px; display: flex; align-items: center; color: var(--e-muted); border-right: 1px solid var(--e-edge); }
+  .ed .tab.on { background: var(--e-bg); color: var(--e-text); box-shadow: inset 0 2px 0 var(--e-sky); }
+  .ed .code { background: var(--e-bg); padding: 6px 0; }
+  .ed .ln { display: flex; white-space: pre; }
+  .ed .ln.cur { background: var(--e-line); }
+  .ed .g { width: 34px; flex: none; text-align: right; padding-right: 10px; color: var(--e-lineno); }
+  .ed .cur .g { color: var(--e-text); }
+  .ed .k { color: var(--e-keyword); } .ed .s { color: var(--e-string); } .ed .t { color: var(--e-type); }
+  .ed .n { color: var(--e-number); } .ed .f { color: var(--e-function); } .ed .m { color: var(--e-macro); }
+  .ed .c { color: var(--e-comment); font-style: italic; } .ed .o { color: var(--e-operator); }
+  .ed .sel { background: var(--e-select); }
+  .ed .warn { text-decoration: underline wavy var(--e-warning); text-underline-offset: 3px; }
+  .ed .caret { display: inline-block; width: 2px; height: 15px; background: var(--e-cursor); vertical-align: -3px; margin: 0 -1px; }
+  .ed .bar { height: 22px; display: flex; align-items: center; gap: 14px; padding: 0 10px; background: var(--e-status); border-top: 1px solid var(--e-edge); color: var(--e-muted); font-family: "Segoe UI", system-ui, sans-serif; font-size: 11.5px; }
+  .ed .bar .w { color: var(--e-warning); }
+  .ed .bar .r { margin-left: auto; }
+  .midnight { --e-shell:#050a16; --e-cardedge:#1b3052; --e-bg:#070e1d; --e-tab:#081122; --e-status:#070e1d; --e-line:#0e1f3d; --e-select:#1a3065; --e-edge:#182f52;
+    --e-text:#e2e8f0; --e-muted:#7e92b2; --e-sky:#38bdf8; --e-keyword:#5297ff; --e-string:#34d399; --e-type:#2dd4bf; --e-number:#f8b482; --e-function:#dcd282;
+    --e-macro:#8b5cf6; --e-comment:#7e92b2; --e-operator:#c8c8dc; --e-cursor:#5297ff; --e-lineno:#7e92b2; --e-warning:#f5b85f; }
+  .daylight { --e-shell:#e9eef6; --e-cardedge:#c9d4e4; --e-bg:#ffffff; --e-tab:#f3f6fb; --e-status:#f3f6fb; --e-line:#f1f5fc; --e-select:#cfe0fc; --e-edge:#d3dce9;
+    --e-text:#1e293b; --e-muted:#5f6d84; --e-sky:#0a7fc2; --e-keyword:#1f5fd1; --e-string:#18794e; --e-type:#0b7470; --e-number:#a14a0b; --e-function:#765800;
+    --e-macro:#6d3fd8; --e-comment:#5f6d84; --e-operator:#475569; --e-cursor:#1f5fd1; --e-lineno:#7b889c; --e-warning:#935700; }
+  .contrast { --e-shell:#000000; --e-cardedge:#6b88b8; --e-bg:#000000; --e-tab:#000000; --e-status:#000000; --e-line:#13233d; --e-select:#1f4aa0; --e-edge:#6b88b8;
+    --e-text:#ffffff; --e-muted:#b8c4d6; --e-sky:#4cc9ff; --e-keyword:#79b4ff; --e-string:#5ff0a8; --e-type:#4ee6d2; --e-number:#ffb98a; --e-function:#ffe680;
+    --e-macro:#b99bff; --e-comment:#b8c4d6; --e-operator:#e6e9f2; --e-cursor:#ffffff; --e-lineno:#9aa8bd; --e-warning:#ffcc66; }
+
+  /* ---------- Completion popup crop ---------- */
+  .cmp { width: 344px; border-radius: 8px; overflow: hidden; border: 1px solid var(--edge-page); background: var(--editor); font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 19px; }
+  .cmp .ln { display: flex; white-space: pre; }
+  .cmp .g { width: 34px; text-align: right; padding-right: 10px; color: var(--muted); }
+  .pop { margin: 0 0 6px 44px; width: 280px; background: #0b1730; border: 1px solid #27467a; border-radius: 6px; font-family: "Segoe UI", system-ui, sans-serif; font-size: 12.5px; overflow: hidden; }
+  .pop .row { height: 22px; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+  .pop .row.on { background: var(--select); }
+  .pop .kind { width: 16px; height: 16px; border-radius: 3px; display: grid; place-items: center; font-size: 10px; color: #0b1222; background: var(--amber); flex: none; }
+  .pop .p { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
+  .pop .d { margin-left: auto; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+
+  /* flow */
+  .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin: 10px 0 6px; max-width: 960px; }
+  .step { flex: 1 1 200px; border: 1px solid var(--edge-page); border-radius: 8px; padding: 10px 12px; background: #0a142a; font-size: 13px; }
+  .step b { display: block; color: #fff; margin-bottom: 4px; }
+  .step .when { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>LightLine's Own Extensions <span class="status">Approved with all recommendations 2026-11-25; built</span></h1>
+<p class="lead">Phase 3c of <code>docs/extension_implementation_plan.md</code>. The repository now exists, empty: <a href="https://github.com/mehmoodulhaq570/lightline-extensions" style="color:var(--sky)">mehmoodulhaq570/lightline-extensions</a> (public, so LightLine can fetch from it). This page proposes what goes in it first, how it's laid out and checked, and the one LightLine change needed to install from it. Panel crops are drawn at real size in the default dark theme, and dashed green outlines mark what's new. The open choices are in <b>Decisions for you</b> at the end.</p>
+
+<h2>Where the gaps are</h2>
+<ul>
+  <li><b>LightLine has one theme of its own, LightLine Midnight, and it's dark.</b> There's no light theme and no high-contrast theme unless you install someone else's. Windows users with light mode or low vision have nothing made for LightLine.</li>
+  <li><b>Zed's registry has no C or C++ snippet pack.</b> It has Python, Rust, Go, JavaScript, TypeScript and React packs, all already on LightLine's list or available to it. C and C++ are LightLine run languages, with ▶ Run beside <code>main</code>, and they have nothing.</li>
+  <li>Everything else LightLine can install (icon themes, checkers, language grammars) is well covered by Zed's registry, or needs work that isn't about content. LightLine already draws its own built-in file icons, for example.</li>
+</ul>
+<p>So the first two extensions fill those two gaps. Neither one runs code, so neither needs WASM.</p>
+
+<h2>What the user sees</h2>
+<div class="frames">
+  <figure>
+    <figcaption>Extensions panel, opened<span>Both appear at the top of RECOMMENDED with the <span class="badge">LightLine</span> badge and <b>LightLine</b> as publisher. Installing works like any other entry. The panel can't tell they come from one repository.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search"><span>⌕</span><span class="q">Search extensions</span><span>⏷</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Snippets</span><span class="chip">Checkers</span></div>
+      <div class="div"></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">1</span></div>
+      <div class="ext"><div class="icon" style="background:#f5b85f">M</div><div class="l1"><b>Material Icon Theme</b><span class="v">1.3.1</span><span class="badge">LightLine</span></div><div class="l2">Material Design icons for files and folders</div><div class="l3">Zed Industries · Icon theme</div></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">10</span></div>
+      <div class="ext new hot"><div class="icon" style="background:linear-gradient(135deg,#ffffff 0 50%,#000000 50% 100%);border:1px solid #6b88b8"></div><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · Color theme</div><div class="btn">Install</div></div>
+      <div class="ext new"><div class="icon" style="background:#5297ff;color:#fff">C</div><div class="l1"><b>C and C++ Snippets</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">main, for, struct, class, include guards and more</div><div class="l3">LightLine · Snippets</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula</b><span class="v">1.1.2</span><span class="badge">LightLine</span></div><div class="l2">The official Dracula themes, dark and light</div><div class="l3">Dracula · Color theme</div><div class="btn">Install</div></div>
+      <div class="ext"><div class="icon" style="background:#cba6f7">C</div><div class="l1"><b>Catppuccin</b><span class="v">0.2.9</span><span class="badge">LightLine</span></div><div class="l2">Soothing pastel themes: Latte, Frappé, Macchiato…</div><div class="l3">Catppuccin · Color theme</div><div class="btn">Install</div></div>
+      <div class="note-row">6 more: scroll, or search the list and Zed's</div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>C and C++ Snippets, in use<span>Type a prefix and press <code>Ctrl+Space</code>, exactly as with today's snippet packs: read on a worker the first time, offered in the completion list, Tab between the placeholders.</span></figcaption>
+    <div class="cmp">
+      <div style="padding:6px 0">
+        <div class="ln"><span class="g">1</span><span><span style="color:var(--violet)">#include</span> <span style="color:var(--green)">&lt;stdio.h&gt;</span></span></div>
+        <div class="ln"><span class="g">2</span><span> </span></div>
+        <div class="ln" style="background:#0e1f3d"><span class="g" style="color:var(--text)">3</span><span>mai<span style="display:inline-block;width:2px;height:15px;background:var(--blue);vertical-align:-3px"></span></span></div>
+        <div class="pop new">
+          <div class="row on"><span class="kind">{}</span><span class="p">main</span><span class="d">int main(void) { … }</span></div>
+          <div class="row"><span class="kind">{}</span><span class="p">maina</span><span class="d">int main(argc, argv)</span></div>
+          <div class="row"><span class="kind">{}</span><span class="p">malloc</span><span class="d">malloc with a NULL check</span></div>
+        </div>
+        <div class="ln"><span class="g">4</span><span> </span></div>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:13px;max-width:344px;margin-top:8px">The popup is a sketch. The real one is today's completion list, unchanged.</p>
+  </figure>
+</div>
+
+<h2>Extension 1 · LightLine Themes</h2>
+<p>A color theme extension with two variants built from Midnight's palette, so LightLine's chrome keeps the same feel in each. After install they're listed in the color theme picker like any other installed theme. Midnight stays built in and isn't in the pack (see the decisions).</p>
+<div class="eds">
+  <figure>
+    <figcaption>Midnight <span>Built in today, shown for reference.</span></figcaption>
+    <div class="ed midnight">
+      <div class="tabs"><div class="tab on">sum.c</div><div class="tab">Makefile</div></div>
+      <div class="code">
+        <div class="ln"><span class="g">1</span><span><span class="m">#include</span> <span class="s">&lt;stdio.h&gt;</span></span></div>
+        <div class="ln"><span class="g">2</span><span><span class="m">#include</span> <span class="s">&lt;stdlib.h&gt;</span></span></div>
+        <div class="ln"><span class="g">3</span><span> </span></div>
+        <div class="ln"><span class="g">4</span><span class="c">/* Sums the numbers it's given. */</span></div>
+        <div class="ln"><span class="g">5</span><span><span class="k">typedef struct</span> { <span class="k">int</span> count; <span class="k">double</span> total; } <span class="t">Sum</span>;</span></div>
+        <div class="ln"><span class="g">6</span><span> </span></div>
+        <div class="ln"><span class="g">7</span><span><span class="k">int</span> <span class="f">main</span>(<span class="k">int</span> argc, <span class="k">char</span> <span class="o">**</span>argv) {</span></div>
+        <div class="ln"><span class="g">8</span><span>    <span class="t">Sum</span> s <span class="o">=</span> {<span class="n">0</span>, <span class="n">0.0</span>};</span></div>
+        <div class="ln cur"><span class="g">9</span><span>    <span class="k">for</span> (<span class="k">int</span> i <span class="o">=</span> <span class="n">1</span>; i <span class="o">&lt;</span> <span class="sel">argc</span>; i<span class="o">++</span>) {<span class="caret"></span></span></div>
+        <div class="ln"><span class="g">10</span><span>        s.total <span class="o">+=</span> <span class="f warn">atof</span>(argv[i]);</span></div>
+        <div class="ln"><span class="g">11</span><span>        s.count<span class="o">++</span>;</span></div>
+        <div class="ln"><span class="g">12</span><span>    }</span></div>
+        <div class="ln"><span class="g">13</span><span>    <span class="f">printf</span>(<span class="s">"%d, %.2f\n"</span>, s.count, s.total);</span></div>
+        <div class="ln"><span class="g">14</span><span>    <span class="k">return</span> <span class="m">EXIT_SUCCESS</span>;</span></div>
+        <div class="ln"><span class="g">15</span><span>}</span></div>
+      </div>
+      <div class="bar"><span>⑂ main</span><span class="w">⚠ 1</span><span class="r">Ln 9, Col 28 · C</span></div>
+    </div>
+  </figure>
+  <figure>
+    <figcaption>Daylight <span class="new" style="display:inline">New.</span><span>Light. White editor, cool grey chrome, the same hues darkened until they read on white.</span></figcaption>
+    <div class="ed daylight">
+      <div class="tabs"><div class="tab on">sum.c</div><div class="tab">Makefile</div></div>
+      <div class="code">
+        <div class="ln"><span class="g">1</span><span><span class="m">#include</span> <span class="s">&lt;stdio.h&gt;</span></span></div>
+        <div class="ln"><span class="g">2</span><span><span class="m">#include</span> <span class="s">&lt;stdlib.h&gt;</span></span></div>
+        <div class="ln"><span class="g">3</span><span> </span></div>
+        <div class="ln"><span class="g">4</span><span class="c">/* Sums the numbers it's given. */</span></div>
+        <div class="ln"><span class="g">5</span><span><span class="k">typedef struct</span> { <span class="k">int</span> count; <span class="k">double</span> total; } <span class="t">Sum</span>;</span></div>
+        <div class="ln"><span class="g">6</span><span> </span></div>
+        <div class="ln"><span class="g">7</span><span><span class="k">int</span> <span class="f">main</span>(<span class="k">int</span> argc, <span class="k">char</span> <span class="o">**</span>argv) {</span></div>
+        <div class="ln"><span class="g">8</span><span>    <span class="t">Sum</span> s <span class="o">=</span> {<span class="n">0</span>, <span class="n">0.0</span>};</span></div>
+        <div class="ln cur"><span class="g">9</span><span>    <span class="k">for</span> (<span class="k">int</span> i <span class="o">=</span> <span class="n">1</span>; i <span class="o">&lt;</span> <span class="sel">argc</span>; i<span class="o">++</span>) {<span class="caret"></span></span></div>
+        <div class="ln"><span class="g">10</span><span>        s.total <span class="o">+=</span> <span class="f warn">atof</span>(argv[i]);</span></div>
+        <div class="ln"><span class="g">11</span><span>        s.count<span class="o">++</span>;</span></div>
+        <div class="ln"><span class="g">12</span><span>    }</span></div>
+        <div class="ln"><span class="g">13</span><span>    <span class="f">printf</span>(<span class="s">"%d, %.2f\n"</span>, s.count, s.total);</span></div>
+        <div class="ln"><span class="g">14</span><span>    <span class="k">return</span> <span class="m">EXIT_SUCCESS</span>;</span></div>
+        <div class="ln"><span class="g">15</span><span>}</span></div>
+      </div>
+      <div class="bar"><span>⑂ main</span><span class="w">⚠ 1</span><span class="r">Ln 9, Col 28 · C</span></div>
+    </div>
+  </figure>
+  <figure>
+    <figcaption>Contrast <span class="new" style="display:inline">New.</span><span>High contrast, dark. Black background, white text, bright edges, and a blue-tinted caret line.</span></figcaption>
+    <div class="ed contrast">
+      <div class="tabs"><div class="tab on">sum.c</div><div class="tab">Makefile</div></div>
+      <div class="code">
+        <div class="ln"><span class="g">1</span><span><span class="m">#include</span> <span class="s">&lt;stdio.h&gt;</span></span></div>
+        <div class="ln"><span class="g">2</span><span><span class="m">#include</span> <span class="s">&lt;stdlib.h&gt;</span></span></div>
+        <div class="ln"><span class="g">3</span><span> </span></div>
+        <div class="ln"><span class="g">4</span><span class="c">/* Sums the numbers it's given. */</span></div>
+        <div class="ln"><span class="g">5</span><span><span class="k">typedef struct</span> { <span class="k">int</span> count; <span class="k">double</span> total; } <span class="t">Sum</span>;</span></div>
+        <div class="ln"><span class="g">6</span><span> </span></div>
+        <div class="ln"><span class="g">7</span><span><span class="k">int</span> <span class="f">main</span>(<span class="k">int</span> argc, <span class="k">char</span> <span class="o">**</span>argv) {</span></div>
+        <div class="ln"><span class="g">8</span><span>    <span class="t">Sum</span> s <span class="o">=</span> {<span class="n">0</span>, <span class="n">0.0</span>};</span></div>
+        <div class="ln cur"><span class="g">9</span><span>    <span class="k">for</span> (<span class="k">int</span> i <span class="o">=</span> <span class="n">1</span>; i <span class="o">&lt;</span> <span class="sel">argc</span>; i<span class="o">++</span>) {<span class="caret"></span></span></div>
+        <div class="ln"><span class="g">10</span><span>        s.total <span class="o">+=</span> <span class="f warn">atof</span>(argv[i]);</span></div>
+        <div class="ln"><span class="g">11</span><span>        s.count<span class="o">++</span>;</span></div>
+        <div class="ln"><span class="g">12</span><span>    }</span></div>
+        <div class="ln"><span class="g">13</span><span>    <span class="f">printf</span>(<span class="s">"%d, %.2f\n"</span>, s.count, s.total);</span></div>
+        <div class="ln"><span class="g">14</span><span>    <span class="k">return</span> <span class="m">EXIT_SUCCESS</span>;</span></div>
+        <div class="ln"><span class="g">15</span><span>}</span></div>
+      </div>
+      <div class="bar"><span>⑂ main</span><span class="w">⚠ 1</span><span class="r">Ln 9, Col 28 · C</span></div>
+    </div>
+  </figure>
+</div>
+
+<h3>Contrast, measured (WCAG ratio against the editor background)</h3>
+<div class="tablewrap"><table class="num">
+  <tr><th>Role</th><th>Midnight (today)</th><th>Daylight</th><th>Contrast</th></tr>
+  <tr><td>Text</td><td>15.6</td><td><span class="sw" style="background:#1e293b"></span>14.6</td><td><span class="sw" style="background:#ffffff"></span>21.0</td></tr>
+  <tr><td>Keyword</td><td>6.6</td><td><span class="sw" style="background:#1f5fd1"></span>5.8</td><td><span class="sw" style="background:#79b4ff"></span>9.8</td></tr>
+  <tr><td>String</td><td>10.0</td><td><span class="sw" style="background:#18794e"></span>5.4</td><td><span class="sw" style="background:#5ff0a8"></span>14.5</td></tr>
+  <tr><td>Type</td><td>10.4</td><td><span class="sw" style="background:#0b7470"></span>5.6</td><td><span class="sw" style="background:#4ee6d2"></span>13.6</td></tr>
+  <tr><td>Number</td><td>10.9</td><td><span class="sw" style="background:#a14a0b"></span>6.0</td><td><span class="sw" style="background:#ffb98a"></span>12.6</td></tr>
+  <tr><td>Function</td><td>12.5</td><td><span class="sw" style="background:#765800"></span>6.6</td><td><span class="sw" style="background:#ffe680"></span>16.9</td></tr>
+  <tr><td>Macro</td><td><b style="color:var(--amber)">4.6</b></td><td><span class="sw" style="background:#6d3fd8"></span>6.3</td><td><span class="sw" style="background:#b99bff"></span>9.2</td></tr>
+  <tr><td>Comment</td><td>6.1</td><td><span class="sw" style="background:#5f6d84"></span>5.2</td><td><span class="sw" style="background:#b8c4d6"></span>11.9</td></tr>
+  <tr><td>Error / warning</td><td>6.8 / 10.9</td><td><span class="sw" style="background:#c42b3c"></span>5.6 / <span class="sw" style="background:#935700"></span>5.8</td><td><span class="sw" style="background:#ff7a85"></span>8.4 / <span class="sw" style="background:#ffcc66"></span>14.1</td></tr>
+  <tr><td>Line numbers</td><td>6.1</td><td><span class="sw" style="background:#7b889c"></span>3.6</td><td><span class="sw" style="background:#9aa8bd"></span>8.7</td></tr>
+</table></div>
+<p>Daylight keeps every code color at 4.5:1 or above (WCAG AA), including on the caret line, where the lowest is comments at 4.8. Its line numbers are deliberately quieter, at 3.6, which is above the 3:1 minimum for non-text UI. Contrast keeps every role at 7:1 or above (AAA). The repository's CI checks these ratios, so a later color change can't quietly drop below them. Midnight's macro color, 4.6, is the closest to the line today and isn't part of this work.</p>
+
+<h3>The theme file (Zed's format, as today's installed themes)</h3>
+<pre><span class="c">// themes/lightline-themes/themes/lightline.json</span>
+{
+  <span class="k">"$schema"</span>: <span class="s">"https://zed.dev/schema/themes/v0.2.0.json"</span>,
+  <span class="k">"name"</span>: <span class="s">"LightLine Themes"</span>, <span class="k">"author"</span>: <span class="s">"LightLine"</span>,
+  <span class="k">"themes"</span>: [
+    { <span class="k">"name"</span>: <span class="s">"LightLine Daylight"</span>, <span class="k">"appearance"</span>: <span class="s">"light"</span>,
+      <span class="k">"style"</span>: { <span class="k">"editor.background"</span>: <span class="s">"#ffffff"</span>, <span class="k">"editor.foreground"</span>: <span class="s">"#1e293b"</span>, <span class="c">…</span>
+                 <span class="k">"syntax"</span>: { <span class="k">"keyword"</span>: { <span class="k">"color"</span>: <span class="s">"#1f5fd1"</span> }, <span class="c">…</span> } } },
+    { <span class="k">"name"</span>: <span class="s">"LightLine Contrast"</span>, <span class="k">"appearance"</span>: <span class="s">"dark"</span>, <span class="c">…</span> }
+  ]
+}</pre>
+<p>Only Zed keys that <code>color_theme_adapter</code> already maps are used, so nothing in LightLine's theme code changes. Every role is set explicitly rather than derived, so the chrome looks exactly like these previews. The live check compares a capture against them.</p>
+
+<h2>Extension 2 · C and C++ Snippets</h2>
+<p>One pack with two files, <code>snippets/c.json</code> and <code>snippets/c++.json</code> (Zed's language names; LightLine already maps <code>.c .h</code> and <code>.cpp .hpp .cc</code> to them). VS Code's snippet format, as for every pack LightLine reads. About 20 each, chosen for what people type in a run-it-now C or C++ file:</p>
+<div class="tablewrap"><table>
+  <tr><th>C (<code>.c</code>, <code>.h</code>)</th><th>C++ (<code>.cpp</code>, <code>.hpp</code>, <code>.cc</code>)</th></tr>
+  <tr><td><code>main</code> <code>maina</code> (argc/argv) <code>inc</code> <code>incl</code> (local) <code>guard</code> (include guard) <code>func</code> <code>if</code> <code>ife</code> <code>for</code> <code>fori</code> <code>while</code> <code>do</code> <code>switch</code> <code>struct</code> <code>tstruct</code> (typedef) <code>enum</code> <code>printf</code> <code>scanf</code> <code>malloc</code> (NULL check) <code>fopen</code> (error check)</td>
+      <td><code>main</code> <code>maina</code> <code>inc</code> <code>once</code> (<code>#pragma once</code>) <code>ns</code> <code>class</code> <code>struct</code> <code>forr</code> (range for) <code>fori</code> <code>if</code> <code>ife</code> <code>cout</code> <code>cin</code> <code>vec</code> <code>map</code> <code>uptr</code> (<code>make_unique</code>) <code>lambda</code> <code>tmpl</code> (template) <code>try</code> <code>test</code> (a minimal <code>assert</code> check)</td></tr>
+</table></div>
+<p>House style: indentation written as <code>\t</code> (the format's convention), placeholders in the order you'd fill them, <code>$0</code> at the natural end, and no <code>using namespace std;</code>. The live check confirms how a <code>\t</code> body comes out with <code>insertSpaces</code> on and off before the pack is published.</p>
+
+<h2>The repository</h2>
+<pre>lightline-extensions/
+  README.md                         <span class="c">what's here, one screenshot per extension, how to install (from LightLine)</span>
+  CONTRIBUTING.md                   <span class="c">adding or changing an extension, what's reviewed</span>
+  LICENSE                           <span class="c">MIT, like LightLine</span>
+  themes/
+    lightline-themes/
+      extension.toml
+      themes/lightline.json
+      README.md                     <span class="c">screenshots of both variants</span>
+  snippets/
+    lightline-c-snippets/
+      extension.toml
+      snippets/c.json
+      snippets/c++.json
+  template/
+    color-theme/  snippets/         <span class="c">copy one to start a new extension</span>
+  scripts/check.py                  <span class="c">the checks below; Python standard library only</span>
+  .github/workflows/check.yml       <span class="c">runs check.py on every push and PR</span></pre>
+<pre><span class="c"># snippets/lightline-c-snippets/extension.toml</span>
+<span class="k">id</span> = <span class="s">"lightline-c-snippets"</span>            <span class="c"># = the folder name, as everywhere in LightLine</span>
+<span class="k">name</span> = <span class="s">"C and C++ Snippets"</span>
+<span class="k">version</span> = <span class="s">"1.0.0"</span>
+<span class="k">schema_version</span> = <span class="s">1</span>
+<span class="k">authors</span> = [<span class="s">"LightLine"</span>]
+<span class="k">description</span> = <span class="s">"main, for, struct, class, include guards and more"</span>
+<span class="k">repository</span> = <span class="s">"https://github.com/mehmoodulhaq570/lightline-extensions"</span>
+<span class="k">snippets</span> = [<span class="s">"snippets/c.json"</span>, <span class="s">"snippets/c++.json"</span>]</pre>
+<ul>
+  <li><b>Folders by kind, each extension in Zed's own format.</b> Any of them can be submitted to Zed's registry later with <code>path = "themes/lightline-themes"</code>, without moving anything.</li>
+  <li><b>Ids start with <code>lightline-</code>.</b> No Zed registry id does today, so ours can never collide with one, and it's obvious whose they are.</li>
+  <li><b>Each extension has its own version.</b> Changing one extension doesn't touch the others' versions.</li>
+</ul>
+
+<h2>How LightLine installs one</h2>
+<p>LightLine's list gets an optional <code>path</code>. An entry with one installs only that folder, and everything after the download stays exactly as today.</p>
+<pre><span class="c"># registry/extensions.toml (LightLine repo)</span>
+<span class="h">[[extension]]</span>
+<span class="k">id</span> = <span class="s">"lightline-themes"</span>
+<span class="k">repository</span> = <span class="s">"https://github.com/mehmoodulhaq570/lightline-extensions.git"</span>
+<span class="k">path</span> = <span class="s">"themes/lightline-themes"</span>      <span class="c"># new: relative, "/" only, no "..", no drive</span>
+<span class="k">commit</span> = <span class="s">"&lt;40 hex&gt;"</span>
+<span class="k">version</span> = <span class="s">"1.0.0"</span>
+<span class="k">kind</span> = <span class="s">"color-theme"</span>
+<span class="k">name</span> = <span class="s">"LightLine Themes"</span>
+<span class="k">description</span> = <span class="s">"Daylight and Contrast, made to match Midnight"</span>
+<span class="k">publisher</span> = <span class="s">"LightLine"</span>
+<span class="k">recommended</span> = <span class="k">true</span>
+<span class="k">requires</span> = <span class="s">"0.13.0"</span>                   <span class="c"># older builds don't know "path": hide it from them</span></pre>
+<div class="flow">
+  <div class="step"><b>1 · Fetch only the folder</b><code>git init</code>, <code>sparse-checkout set --no-cone /themes/lightline-themes/</code>, <code>fetch --depth 1 --filter=blob:none</code> of the pinned commit, <code>checkout</code>. <div class="when">Only that folder's files are downloaded, a few tens of KB. Needs git 2.27 or later; an older git gets a clear error naming the version.</div></div>
+  <div class="step"><b>2 · Check, as today</b><code>validate_download</code> runs on <code>staging/&lt;path&gt;</code>: manifest id matches, theme JSON or snippet files are valid. <div class="when">A wrong <code>kind</code> or a broken file is refused before anything is moved.</div></div>
+  <div class="step"><b>3 · Promote, as today</b>The folder moves into <code>%APPDATA%\LightLine\extensions\lightline-themes</code>, with backup, rollback and the exclusive lock unchanged. <div class="when">The installed copy looks exactly like a whole-repo install, so nothing else in LightLine knows the difference.</div></div>
+</div>
+<p>The same change lets Zed registry entries with a <code>path</code> install, which <code>zed_registry::check_installable</code> refuses today. That includes Zed's own <code>html</code>, <code>glsl</code> and <code>proto</code>, which live inside its very large main repository. Their kinds still have to be ones LightLine supports. This is a side benefit, not a goal of this work.</p>
+
+<h2>Keeping it trustworthy</h2>
+<ul>
+  <li><b><code>scripts/check.py</code> in the extensions repository</b>, run by CI on every push and PR (Python's standard library only: <code>tomllib</code>, <code>json</code>):
+    <ul>
+      <li>every <code>extension.toml</code> parses; the id equals its folder name, starts with <code>lightline-</code> and is unique; the version is <code>x.y.z</code>;</li>
+      <li>every file it names exists; theme and snippet files are valid JSON;</li>
+      <li>themes: each variant has a name, an <code>appearance</code>, and every role LightLine reads; text and syntax colors meet the ratios above (4.5:1 for light, 7:1 for contrast);</li>
+      <li>snippets: each has a prefix and body; no prefix appears twice in a file; placeholders are well formed.</li>
+    </ul></li>
+  <li><b>In LightLine</b>:
+    <ul>
+      <li>a unit test with a local fixture repository holding two extensions in subfolders (install one, check only its files arrive);</li>
+      <li><code>path</code> validation tests, lenient in <code>parse</code> and strict in <code>problems</code>;</li>
+      <li>the existing ignored test, <code>cargo test --lib lightline_list -- --ignored</code>, which installs every list entry, now including these two from the real repository.</li>
+    </ul></li>
+  <li><b>Pinned commits only</b>, as for every list entry. A change to an extension reaches users only through a LightLine PR that moves its <code>commit</code>. Because LightLine fetches the list from <code>main</code> when the panel opens, that doesn't need a LightLine release.</li>
+</ul>
+
+<h2>Changing an extension later</h2>
+<div class="flow">
+  <div class="step"><b>1 · Edit</b>Change the files and bump <code>version</code> in that extension's <code>extension.toml</code>. PR to <code>lightline-extensions</code>; CI runs <code>check.py</code>.</div>
+  <div class="step"><b>2 · Pin</b>A one-line PR to LightLine moving the entry's <code>commit</code> and <code>version</code>. LightLine's CI checks the list; run the ignored install test before merging.</div>
+  <div class="step"><b>3 · Reach users</b>The next time someone opens Extensions, the fetched list shows the new version. <div class="when">Installed copies don't update themselves: LightLine has no Update button yet (see the decisions).</div></div>
+</div>
+
+<h2>Speed and privacy</h2>
+<table>
+  <tr><th>Measure</th><th>Effect</th></tr>
+  <tr><td>Startup, idle</td><td>None. Nothing new runs until the user installs something. Installed, a theme is applied exactly like any other installed theme. A snippet pack is read on the first <code>Ctrl+Space</code> in its language, as today.</td></tr>
+  <tr><td>Typing, scrolling, painting</td><td>Not touched. Themes change colors only, through the roles LightLine already paints.</td></tr>
+  <tr><td>Install</td><td>Faster than a whole-repo install: only the extension's folder is downloaded, not the other extensions beside it.</td></tr>
+  <tr><td>Privacy</td><td>Unchanged. The network is used only when the user opens Extensions or presses Install, and only to GitHub, as today.</td></tr>
+</table>
+
+<h2>Work involved</h2>
+<ul>
+  <li><b>In <code>lightline-extensions</code></b> (pushed straight to its <code>main</code>, since it's new and empty): README, CONTRIBUTING, LICENSE, the two extensions, the templates, <code>check.py</code> and its workflow.</li>
+  <li><b>One LightLine PR</b>:
+    <ul>
+      <li><code>path</code> in <code>lightline_list.rs</code>;</li>
+      <li>the sparse fetch in <code>installer.rs</code>, plus <code>zed_registry</code> no longer refusing a <code>path</code>;</li>
+      <li>the two list entries;</li>
+      <li>tests;</li>
+      <li>docs: <code>USER_GUIDE.md</code>, <code>CONTRIBUTING.md</code>, the plan's Phase 3c, the README feature line, and <code>CHANGELOG.md</code> (Added: <b>LightLine Daylight and Contrast themes</b>, <b>C and C++ snippets</b>).</li>
+    </ul></li>
+  <li>Then the usual loop: a live check of the installed themes against the previews above (hidden window, captured), a snippet inserted in a <code>.c</code> and a <code>.cpp</code> file, merge, and a re-check on <code>main</code>.</li>
+</ul>
+
+<h2>Decisions for you</h2>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Options</th><th>Recommendation</th></tr>
+  <tr><td>First extensions</td><td><b>Themes pack + C/C++ snippets</b> · themes only · snippets only · something else</td><td class="rec">Both. They fill the two real gaps, need no new LightLine features beyond <code>path</code>, and exercise both data kinds end to end.</td></tr>
+  <tr><td>Where the light theme lives</td><td><b>Extension now</b> · built into the exe</td><td class="rec">Extension now. It proves the pipeline, and it's easy to build in later, for example to follow Windows light mode automatically, if people use it.</td></tr>
+  <tr><td>Midnight in the pack too?</td><td><b>No</b> · yes</td><td class="rec">No. It's built in, and a second “LightLine Midnight” would appear twice in the theme picker. Add it only if we submit the pack to Zed.</td></tr>
+  <tr><td>Theme variant names</td><td><b>Daylight + Contrast</b> · Light + High Contrast · other</td><td class="rec">Daylight + Contrast. They pair with “Midnight”, and the picker shows them as “LightLine Daylight” and “LightLine Contrast”.</td></tr>
+  <tr><td>Ids</td><td><b><code>lightline-</code> prefix</b> · plain names</td><td class="rec">Prefix. No collisions with Zed's ids, ever.</td></tr>
+  <tr><td>License</td><td><b>MIT</b> · other</td><td class="rec">MIT, the same as LightLine.</td></tr>
+  <tr><td>Repository checks</td><td><b>Python stdlib script</b> · a Rust tool · none</td><td class="rec">Python. It runs on a stock CI runner in seconds, with no build.</td></tr>
+  <tr><td>Submit to Zed's registry</td><td>Now · <b>later</b> · never</td><td class="rec">Later, once they've been used in LightLine for a release. The layout already allows it.</td></tr>
+  <tr><td>Updating installed extensions</td><td>In this PR · <b>a small PR right after</b> · not yet</td><td class="rec">Right after. An <b>Update</b> button when the list's version is newer than the installed one also helps every Zed entry, so it deserves its own PR and mock-up crop.</td></tr>
+  <tr><td>Which release</td><td><b>v0.13.0, together with what's already in Unreleased</b> · release v0.13.0 first, this in v0.14.0</td><td class="rec">v0.13.0 together: one speed check, one release. If you'd rather ship what's ready now, the entries just say <code>requires = "0.14.0"</code> instead.</td></tr>
+</table></div>
+
+</div>
+</body>
+</html>

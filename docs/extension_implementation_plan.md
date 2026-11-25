@@ -228,7 +228,7 @@ tested with LightLine, still without a server or a database of our own:
   `src/extensions/lightline_list.rs`, `windows_app/extensions_panel.rs`
   (`merge_extension_list`). Mock-up: `design/extension-list-design.html`.
 
-### Phase 3c — Our own extensions, in one repository (planned 2026-11-24, not started)
+### Phase 3c — Our own extensions, in one repository (planned 2026-11-24, built 2026-11-25)
 
 LightLine's own extensions live in **one repository**, `lightline-extensions`
 (under `mehmoodulhaq570` for now; moving it to an organization later is fine,
@@ -267,12 +267,14 @@ repository, so extension changes don't ride along with editor releases.
    entries, e.g. `path = "themes/lightline-dark"`. `lightline_list::parse`
    checks it's relative, uses `/`, and has no `..` or drive (strict in
    `problems`, the CI test).
-2. `installer.rs` (`fetch_commit`): with a `path`, download only that folder:
-   `git fetch --depth 1 --filter=blob:none <url> <commit>`, then
-   `git sparse-checkout set --no-cone /<path>/` and `git checkout`; then check
-   and promote `staging/<path>` exactly as a whole repository today
-   (validate, staging, backup, rollback, lock). Needs git 2.27+; an older git
-   gets a clear error. Without a `path`, nothing changes.
+2. `installer.rs` (`fetch_folder`): with a `path`, download only that folder
+   into `.download-<id>`: `git init`, the partial-clone settings and
+   `core.sparseCheckout` written with `git config`, `/<path>/` written to
+   `.git/info/sparse-checkout` (not `git sparse-checkout`, whose options
+   changed between git versions), `git fetch --depth 1 --filter=blob:none
+   origin <commit>`, `git checkout FETCH_HEAD`. The folder then becomes
+   `.staging-<id>` and is validated and promoted exactly as a whole
+   repository (backup, rollback, lock). Without a `path`, nothing changes.
 3. The same change lets Zed registry entries with a `path` install
    (`zed_registry::check_installable` refuses them today; Zed's own `html`,
    `glsl`, `proto` are inside its huge main repository, which is why the
@@ -283,14 +285,23 @@ repository, so extension changes don't ride along with editor releases.
 5. Docs: `USER_GUIDE.md` (Extensions), `CONTRIBUTING.md` (how to add an
    extension to the new repository), this section, `CHANGELOG.md`.
 
-**Open questions for the next session:**
+**Decided 2026-11-25** (design `design/own-extensions-design.html`, all
+recommendations approved):
 
-- Which extensions to make first: LightLine's own color themes as an
-  installable pack, snippet packs for the languages LightLine runs (Python,
-  Rust, Go, JS/TS, C), or something new.
-- Whether to write a design page (`design/own-extensions-design.html`) first,
-  as for earlier features.
-- Whether any planned extension needs WASM (it would wait for §6's runtime).
+- First extensions: `lightline-themes` (LightLine Daylight + LightLine
+  Contrast; Midnight stays built in) and `lightline-c-snippets` (C and C++,
+  which Zed's registry lacks). The theme pack is first in the list.
+- Ids start with `lightline-`; MIT license; `scripts/check.py` (Python
+  standard library) in CI; submitting to Zed's registry waits until they've
+  shipped in a LightLine release.
+- Neither needs WASM.
+- Next: an **Update** button when the list's version is newer than the
+  installed one (helps every pinned entry), as its own PR.
+
+Verified: the ignored `every_listed_extension_installs_and_is_its_kind`
+installs both from GitHub (folder only), and
+`a_folder_of_zeds_own_repository_downloads_alone` fetches Zed's `html`
+folder alone (about 35 s, mostly Zed's trees).
 
 ### Phase 4 — Generalize the adapter pattern
 

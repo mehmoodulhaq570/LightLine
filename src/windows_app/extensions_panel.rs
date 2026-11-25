@@ -844,12 +844,13 @@ fn merge_extension_list(
             url,
             commit,
             version,
+            path,
         } = entry.source
         {
             if !ext.installed {
                 ext.version = version;
             }
-            ext.repository = Some((url, commit));
+            ext.repository = Some((url, commit, path));
         }
     }
 }
@@ -1049,7 +1050,8 @@ mod tests {
             own.repository,
             Some((
                 "https://github.com/someone/own.git".into(),
-                "92f46057151693648bd3acac1e0c138696f34433".into()
+                "92f46057151693648bd3acac1e0c138696f34433".into(),
+                None
             ))
         );
 

@@ -1056,6 +1056,7 @@ commit = "a2861e88a730287a60c11ea9299c033c7d076e30"
             "jsonx",
             &extension_repo.display().to_string(),
             &extension_commit,
+            None,
         )
         .unwrap();
         assert!(library_path(&installed, "json").is_file());

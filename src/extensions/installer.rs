@@ -47,6 +47,23 @@ fn validate_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `path` names a folder inside a repository that is safe to hand
+/// to git and to join onto a local folder: relative, `/`-separated, with
+/// only plain names (no `.`, `..`, drive, `\` or `:`).
+pub fn valid_folder_path(path: &str) -> bool {
+    path.len() <= 256
+        && !path.is_empty()
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && !part.starts_with('-')
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+        })
+}
+
 fn validate_download(dir: &Path, id: &str) -> Result<(), String> {
     let manifest = super::zed_manifest::Manifest::load(dir).ok_or("Invalid extension.toml")?;
     if manifest.id != id || manifest.name.trim().is_empty() || manifest.version.trim().is_empty() {
@@ -108,13 +125,20 @@ fn promote(staging: &Path, target: &Path, backup: &Path) -> Result<(), String> {
 use std::process::Command;
 
 /// Installs `git_url` at `commit` into `<extensions_dir>/<id>`, replacing
-/// anything already there. Returns the installed extension's directory.
-pub fn install(id: &str, git_url: &str, commit: &str) -> Result<PathBuf, String> {
+/// anything already there. With a `folder`, the extension is that folder of
+/// the repository, and only it is downloaded. Returns the installed
+/// extension's directory.
+pub fn install(
+    id: &str,
+    git_url: &str,
+    commit: &str,
+    folder: Option<&str>,
+) -> Result<PathBuf, String> {
     validate_id(id)?;
     let _guard = INSTALL_LOCK.lock().map_err(|e| e.to_string())?;
     let dir =
         crate::workflow::extensions_dir().ok_or("could not determine the extensions directory")?;
-    install_in(&dir, id, git_url, commit)
+    install_in(&dir, id, git_url, commit, folder)
 }
 
 pub(crate) fn install_in(
@@ -122,8 +146,12 @@ pub(crate) fn install_in(
     id: &str,
     git_url: &str,
     commit: &str,
+    folder: Option<&str>,
 ) -> Result<PathBuf, String> {
     validate_id(id)?;
+    if folder.is_some_and(|folder| !valid_folder_path(folder)) {
+        return Err("Invalid extension folder".into());
+    }
     let target = dir.join(id);
     if !crate::workflow::command_available("git") {
         return Err("git was not found on PATH".into());
@@ -147,6 +175,11 @@ pub(crate) fn install_in(
         .map_err(|e| format!("Another update may be running: {e}"))?;
     let staging = dir.join(format!(".staging-{id}"));
     let backup = dir.join(format!(".backup-{id}"));
+    // The whole sparse checkout, when only a folder of it is the extension.
+    let download = dir.join(format!(".download-{id}"));
+    if download.exists() {
+        std::fs::remove_dir_all(&download).map_err(|e| e.to_string())?;
+    }
     if backup.exists() && !target.exists() {
         std::fs::rename(&backup, &target)
             .map_err(|e| format!("Could not restore previous extension: {e}"))?;
@@ -161,7 +194,18 @@ pub(crate) fn install_in(
         ));
     }
     let result = (|| {
-        fetch_commit(&staging, git_url, commit)?;
+        match folder {
+            Some(folder) => {
+                fetch_folder(&download, git_url, commit, folder)?;
+                let inside = download.join(folder);
+                if !inside.join("extension.toml").is_file() {
+                    return Err(format!("{folder} isn't an extension at {commit}"));
+                }
+                std::fs::rename(&inside, &staging).map_err(|e| e.to_string())?;
+                std::fs::remove_dir_all(&download).map_err(|e| e.to_string())?;
+            }
+            None => fetch_commit(&staging, git_url, commit)?,
+        }
         // A language's grammar is its own repository, built here so a
         // failed build leaves the installed copy alone.
         if super::language::is_language_extension(&staging) {
@@ -173,28 +217,93 @@ pub(crate) fn install_in(
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(&download);
     }
     result
+}
+
+// Runs git with `args`, without a console window, inside the job that ends
+// with LightLine.
+fn git(args: &[&std::ffi::OsStr], failure: impl FnOnce() -> String) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let status =
+        crate::jobs::status(&mut command).map_err(|error| format!("could not run git: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(failure())
+    }
+}
+
+// Only `folder` of `git_url` at `commit`, checked out under `root`: a
+// shallow, blob-less fetch of the commit, then a sparse checkout, so the
+// other folders' files are never downloaded. The sparse-checkout file and
+// partial-clone settings are written directly rather than through `git
+// sparse-checkout`, whose options changed between git versions.
+fn fetch_folder(root: &Path, git_url: &str, commit: &str, folder: &str) -> Result<(), String> {
+    let failed = || format!("could not download {folder} of {git_url} at {commit}");
+    let at = root.as_os_str();
+    let config = |key: &str, value: &str| {
+        git(
+            &[
+                "-C".as_ref(),
+                at,
+                "config".as_ref(),
+                key.as_ref(),
+                value.as_ref(),
+            ],
+            failed,
+        )
+    };
+    git(&["init".as_ref(), "-q".as_ref(), at], failed)?;
+    config("remote.origin.url", git_url)?;
+    config("remote.origin.promisor", "true")?;
+    config("remote.origin.partialclonefilter", "blob:none")?;
+    config("extensions.partialClone", "origin")?;
+    config("core.sparseCheckout", "true")?;
+    let info = root.join(".git").join("info");
+    std::fs::create_dir_all(&info).map_err(|e| e.to_string())?;
+    std::fs::write(info.join("sparse-checkout"), format!("/{folder}/\n"))
+        .map_err(|e| e.to_string())?;
+    git(
+        &[
+            "-C".as_ref(),
+            at,
+            "fetch".as_ref(),
+            "-q".as_ref(),
+            "--depth".as_ref(),
+            "1".as_ref(),
+            "--filter=blob:none".as_ref(),
+            "origin".as_ref(),
+            commit.as_ref(),
+        ],
+        failed,
+    )?;
+    git(
+        &[
+            "-C".as_ref(),
+            at,
+            "-c".as_ref(),
+            "advice.detachedHead=false".as_ref(),
+            "checkout".as_ref(),
+            "-q".as_ref(),
+            "FETCH_HEAD".as_ref(),
+        ],
+        failed,
+    )
 }
 
 // Exactly `commit` of `git_url` into `folder`, with no other history: the
 // version the registry pins, whatever the repository's branches say now.
 fn fetch_commit(folder: &Path, git_url: &str, commit: &str) -> Result<(), String> {
-    let git = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
-        let mut command = Command::new("git");
-        command.args(args);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let status = crate::jobs::status(&mut command)
-            .map_err(|error| format!("could not run git: {error}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("could not download {git_url} at {commit}"))
-        }
+    let git = |args: &[&std::ffi::OsStr]| {
+        git(args, || format!("could not download {git_url} at {commit}"))
     };
     let folder = folder.as_os_str();
     git(&["init".as_ref(), "-q".as_ref(), folder])?;
@@ -336,7 +445,14 @@ mod tests {
     fn installs_exactly_the_commit_the_registry_pins() {
         let resolved = crate::extensions::zed_registry::resolve("dracula").unwrap();
         let dir = fixture("pinned");
-        let installed = install_in(&dir, "dracula", &resolved.git_url, &resolved.commit).unwrap();
+        let installed = install_in(
+            &dir,
+            "dracula",
+            &resolved.git_url,
+            &resolved.commit,
+            resolved.path.as_deref(),
+        )
+        .unwrap();
         assert!(installed.join("extension.toml").is_file());
         let head = Command::new("git")
             .arg("-C")
@@ -351,6 +467,27 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    // Zed's html extension lives inside Zed's own (very large) repository:
+    // only its folder may be downloaded.
+    #[test]
+    #[ignore = "hits the real network; run explicitly with --ignored"]
+    fn a_folder_of_zeds_own_repository_downloads_alone() {
+        let resolved = crate::extensions::zed_registry::resolve("html").unwrap();
+        let folder = resolved.path.clone().expect("html has a path");
+        let dir = fixture("zed-folder");
+        let started = std::time::Instant::now();
+        fetch_folder(&dir, &resolved.git_url, &resolved.commit, &folder).unwrap();
+        eprintln!("{folder} in {:.1} s", started.elapsed().as_secs_f32());
+        assert!(dir.join(&folder).join("extension.toml").is_file());
+        let top: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != ".git")
+            .collect();
+        assert_eq!(top, [folder.split('/').next().unwrap()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     #[ignore = "hits the real network; run explicitly with --ignored"]
     fn real_snippet_packs_install_and_offer_their_snippets() {
@@ -359,7 +496,14 @@ mod tests {
         // One file for one language, and one file per language in folders.
         for id in ["fastapi-snippets", "comment-block-snippets"] {
             let resolved = crate::extensions::zed_registry::resolve(id).unwrap();
-            let installed = install_in(&dir, id, &resolved.git_url, &resolved.commit).unwrap();
+            let installed = install_in(
+                &dir,
+                id,
+                &resolved.git_url,
+                &resolved.commit,
+                resolved.path.as_deref(),
+            )
+            .unwrap();
             assert!(snippets::validate(&installed).unwrap() > 0, "{id}");
         }
         assert_eq!(
@@ -400,13 +544,128 @@ mod tests {
                 &dir,
                 "theme",
                 dir.join("missing-repository").to_str().unwrap(),
-                "0123456789012345678901234567890123456789"
+                "0123456789012345678901234567890123456789",
+                None,
             )
             .is_err()
         );
         assert_eq!(fs::read_to_string(target.join("version")).unwrap(), "old");
         assert!(!dir.join(".staging-theme").exists());
         assert!(!dir.join(".backup-theme").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn folder_paths_cannot_escape_the_repository() {
+        for path in [
+            "",
+            "/themes/a",
+            "themes/",
+            "themes//a",
+            "./themes",
+            "themes/../..",
+            "..",
+            "C:/themes",
+            "themes\\a",
+            "themes/a b",
+            "-c/x",
+            "themes/a:b",
+        ] {
+            assert!(!valid_folder_path(path), "{path}");
+        }
+        for path in ["themes/lightline-themes", "extensions/html", "a", "a_b/c.d"] {
+            assert!(valid_folder_path(path), "{path}");
+        }
+        let dir = fixture("bad-folder");
+        let error = install_in(&dir, "theme", "https://github.com/a/b", "a", Some("../x"));
+        assert_eq!(error.unwrap_err(), "Invalid extension folder");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // A repository holding several extensions in folders, as
+    // lightline-extensions does: installing one brings only its files.
+    #[test]
+    fn one_folder_of_a_repository_installs_alone() {
+        if !crate::workflow::command_available("git") {
+            return;
+        }
+        let dir = fixture("folder");
+        let repo = dir.join("repo");
+        let theme = r##"{"name": "T", "themes": [{"name": "T Light", "appearance": "light",
+            "style": {"editor.background": "#ffffff"}}]}"##;
+        for (path, text) in [
+            (
+                "themes/one/extension.toml",
+                "id = \"one\"\nname = \"One\"\nversion = \"1.0.0\"\n",
+            ),
+            ("themes/one/themes/one.json", theme),
+            (
+                "themes/two/extension.toml",
+                "id = \"two\"\nname = \"Two\"\nversion = \"1.0.0\"\n",
+            ),
+            ("themes/two/themes/two.json", theme),
+            ("README.md", "not part of any extension\n"),
+        ] {
+            let file = repo.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, text).unwrap();
+        }
+        let run = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        run(&["init", "-q"]);
+        run(&["config", "uploadpack.allowFilter", "true"]);
+        run(&["add", "."]);
+        run(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "two themes",
+        ]);
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let commit = String::from_utf8_lossy(&head.stdout).trim().to_owned();
+        let extensions = dir.join("extensions");
+        let url = repo.display().to_string();
+
+        let installed = install_in(&extensions, "one", &url, &commit, Some("themes/one")).unwrap();
+        assert_eq!(installed, extensions.join("one"));
+        let mut files: Vec<String> = fs::read_dir(&installed)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        assert_eq!(files, ["extension.toml", "themes"]);
+        let mut left: Vec<String> = fs::read_dir(&extensions)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.ends_with(".lock"))
+            .collect();
+        left.sort();
+        assert_eq!(left, ["one"], "no download or staging folder is left");
+
+        // A folder that isn't there, or holds another extension, changes
+        // nothing.
+        for (id, folder) in [("one", "themes/three"), ("one", "themes/two")] {
+            assert!(install_in(&extensions, id, &url, &commit, Some(folder)).is_err());
+            assert!(installed.join("themes/one.json").is_file());
+            assert!(!extensions.join(format!(".download-{id}")).exists());
+            assert!(!extensions.join(format!(".staging-{id}")).exists());
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -13,13 +13,45 @@
 #   from = "zed"           a Zed registry extension, installed at the commit
 #                          Zed's registry pins (it updates when Zed's does)
 #   repository + commit    an extension in its own GitHub repository, in
-#   + version              Zed's format, installed at exactly this commit
+#   + version              Zed's format, installed at exactly this commit;
+#   (+ path)               with a path, that folder of the repository is the
+#                          extension and only it is downloaded
 #   builtin = true         part of LightLine itself (Prettier)
 #
+# LightLine's own extensions live in one repository,
+# github.com/mehmoodulhaq570/lightline-extensions, each in its own folder.
+#
 # kind: color-theme, icon-theme, language, snippets, checker or formatter.
-# requires = "0.13.0" hides an entry from older LightLine releases.
+# requires = "0.13.0" hides an entry from older LightLine releases (needed for
+# a path: older ones don't know it).
 
 format = 1
+
+[[extension]]
+id = "lightline-themes"
+repository = "https://github.com/mehmoodulhaq570/lightline-extensions.git"
+path = "themes/lightline-themes"
+commit = "5a88eac2bf36e295cdfcab2c0bc714f30b4d5bdd"
+version = "1.0.0"
+kind = "color-theme"
+name = "LightLine Themes"
+description = "Daylight and Contrast, made to match Midnight"
+publisher = "LightLine"
+recommended = true
+requires = "0.13.0"
+
+[[extension]]
+id = "lightline-c-snippets"
+repository = "https://github.com/mehmoodulhaq570/lightline-extensions.git"
+path = "snippets/lightline-c-snippets"
+commit = "5a88eac2bf36e295cdfcab2c0bc714f30b4d5bdd"
+version = "1.0.0"
+kind = "snippets"
+name = "C and C++ Snippets"
+description = "main, for, struct, class, include guards and more"
+publisher = "LightLine"
+recommended = true
+requires = "0.13.0"
 
 [[extension]]
 id = "prettier"
