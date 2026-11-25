@@ -27,16 +27,15 @@ struct RegistryEntry {
     path: Option<String>,
 }
 
-// Only whole-repository extensions can be installed: a `path` entry would
-// mean downloading the containing repository (for Zed's own, a very large
-// download) just to fail validation at its root.
+// An entry with a `path` is that folder of its repository, and only the
+// folder is downloaded (a few live inside Zed's own, very large,
+// repository). The path is handed to git, so it must be a plain one.
 fn check_installable(id: &str, entry: &RegistryEntry) -> Result<(), String> {
     match &entry.path {
-        Some(_) => Err(format!(
-            "\"{id}\" is part of the Zed editor's own repository, so LightLine can't install it \
-             (LightLine can only use icon-theme and color-theme extensions right now)"
+        Some(path) if !super::installer::valid_folder_path(path) => Err(format!(
+            "the registry gives \"{id}\" a folder LightLine won't download: {path}"
         )),
-        None => Ok(()),
+        _ => Ok(()),
     }
 }
 
@@ -47,6 +46,9 @@ pub struct ResolvedExtension {
     pub git_url: String,
     /// The commit the registry pins: what gets installed.
     pub commit: String,
+    /// The extension's folder in the repository, when it isn't the whole
+    /// repository.
+    pub path: Option<String>,
 }
 
 /// Looks up `id` in the live registry and resolves it to a repository and
@@ -66,6 +68,7 @@ pub fn resolve(id: &str) -> Result<ResolvedExtension, String> {
         version: entry.version.clone(),
         git_url,
         commit,
+        path: entry.path.clone(),
     })
 }
 
@@ -157,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn extensions_inside_another_repository_are_refused_before_downloading() {
+    fn extensions_inside_another_repository_need_a_plain_folder() {
         let registry: HashMap<String, RegistryEntry> = toml::from_str(
             r#"
             [html]
@@ -168,12 +171,18 @@ mod tests {
             [dracula]
             submodule = "extensions/dracula"
             version = "1.1.2"
+
+            [sneaky]
+            submodule = "extensions/zed"
+            path = "../../outside"
+            version = "1.0.0"
             "#,
         )
         .unwrap();
-        let refused = check_installable("html", &registry["html"]).unwrap_err();
-        assert!(refused.contains("Zed editor's own repository"), "{refused}");
+        assert!(check_installable("html", &registry["html"]).is_ok());
         assert!(check_installable("dracula", &registry["dracula"]).is_ok());
+        let refused = check_installable("sneaky", &registry["sneaky"]).unwrap_err();
+        assert!(refused.contains("../../outside"), "{refused}");
     }
 
     // Live network tests, same spirit as the LSP live tests: skipped by

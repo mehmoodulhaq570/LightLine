@@ -35,7 +35,7 @@ fn the_lua_extension_brings_its_comments_brackets_indentation_and_server() {
             (resolved.git_url, resolved.commit)
         }
     };
-    let dir = installer::install("lua", &git_url, &commit).expect("installs");
+    let dir = installer::install("lua", &git_url, &commit, None).expect("installs");
     assert!(dir.join("grammars").is_dir());
     language::reload();
 

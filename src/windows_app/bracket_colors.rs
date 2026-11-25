@@ -224,10 +224,13 @@ impl App {
             && matches!(&tab.syntax, Some(syntax) if !matches!(syntax, Syntax::Markdown(_)))
     }
 
-    /// The three colors nested brackets cycle through.
+    /// The three colors nested brackets cycle through. A light theme gets
+    /// VS Code's light colors as they are: they're made for a light
+    /// background already, and rebuilding them as if they were midnight
+    /// shades (`ui`) washes them out.
     pub(super) fn bracket_palette(&self) -> [u32; 3] {
         if self.theme.is_light() {
-            [ui(4, 49, 250), ui(49, 147, 49), ui(123, 56, 20)]
+            [rgb(4, 49, 250), rgb(49, 147, 49), rgb(123, 56, 20)]
         } else {
             [ui(255, 215, 0), ui(218, 112, 214), ui(23, 159, 255)]
         }

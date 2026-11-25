@@ -335,9 +335,10 @@ pub(super) struct Extension {
     pub(super) listed: Option<usize>,
     // Shown under RECOMMENDED.
     pub(super) recommended: bool,
-    // The repository and commit the list pins, for an extension that isn't
-    // in the Zed registry; None installs the Zed registry's pin.
-    pub(super) repository: Option<(String, String)>,
+    // The repository, commit and (for one of several in a repository) the
+    // folder the list pins, for an extension that isn't in the Zed
+    // registry; None installs the Zed registry's pin.
+    pub(super) repository: Option<(String, String, Option<String>)>,
 }
 
 /// An installed extension's icon, made from its own files: Zed extensions
@@ -2002,14 +2003,15 @@ impl App {
                 let source = match pinned {
                     Some(pinned) => Ok(pinned),
                     None => lightline::extensions::zed_registry::resolve(&registry_id)
-                        .map(|resolved| (resolved.git_url, resolved.commit)),
+                        .map(|resolved| (resolved.git_url, resolved.commit, resolved.path)),
                 };
                 let outcome = source.and_then(
-                    |(git_url, commit)| {
+                    |(git_url, commit, folder)| {
                         let dir = lightline::extensions::installer::install(
                             &registry_id,
                             &git_url,
                             &commit,
+                            folder.as_deref(),
                         )?;
                         if lightline::extensions::language::is_language_extension(&dir) {
                             // Already validated before it was moved into place.

@@ -55,11 +55,13 @@ impl Kind {
 pub enum Source {
     /// The Zed registry's entry with the same id, at the commit it pins.
     Zed,
-    /// Its own repository, at exactly this commit.
+    /// Its own repository, at exactly this commit; with a `path`, that
+    /// folder of it (lightline-extensions holds several extensions).
     Repository {
         url: String,
         commit: String,
         version: String,
+        path: Option<String>,
     },
     /// Part of LightLine (Prettier): nothing to download.
     BuiltIn,
@@ -103,6 +105,8 @@ struct RawEntry {
     commit: Option<String>,
     #[serde(default)]
     version: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     builtin: bool,
     #[serde(default)]
@@ -225,6 +229,9 @@ fn entry(raw: &RawEntry, version: Option<&str>) -> Result<Entry, String> {
     {
         return Err(format!("needs LightLine {requires}"));
     }
+    if raw.path.is_some() && raw.repository.is_none() {
+        return Err("path goes only with repository + commit".into());
+    }
     let source = match (raw.from.as_deref(), raw.repository.as_deref(), raw.builtin) {
         (Some("zed"), None, false) => Source::Zed,
         (None, Some(url), false) => {
@@ -237,10 +244,20 @@ fn entry(raw: &RawEntry, version: Option<&str>) -> Result<Entry, String> {
             if !full_commit {
                 return Err("commit must be a full 40-character commit id".into());
             }
+            if let Some(path) = &raw.path
+                && !super::installer::valid_folder_path(path)
+            {
+                return Err(
+                    "path must be a folder like themes/lightline-themes: relative, with /, \
+                     no . or .."
+                        .into(),
+                );
+            }
             Source::Repository {
                 url: url.to_owned(),
                 commit: commit.to_ascii_lowercase(),
                 version: raw.version.clone().unwrap_or_default(),
+                path: raw.path.clone(),
             }
         }
         (None, None, true) if raw.id == "prettier" && kind == Kind::Formatter => Source::BuiltIn,
@@ -341,6 +358,7 @@ mod tests {
                 url: "https://github.com/someone/alpha.git".into(),
                 commit: "92f46057151693648bd3acac1e0c138696f34433".into(),
                 version: "1.2.0".into(),
+                path: None,
             }
         );
         assert!(entries[1].recommended && !entries[0].recommended);
@@ -406,6 +424,16 @@ mod tests {
             "repository = \"https://github.com/a/b\"\ncommit = \"--upload-pack=x\"".to_owned(),
             "repository = \"https://github.com/a/b\"\ncommit = \"main\"".to_owned(),
             format!("from = \"zed\"\nrepository = \"https://github.com/a/b\"\ncommit = \"{good}\""),
+            "from = \"zed\"\npath = \"themes/x\"".to_owned(),
+            format!(
+                "repository = \"https://github.com/a/b\"\ncommit = \"{good}\"\npath = \"../x\""
+            ),
+            format!(
+                "repository = \"https://github.com/a/b\"\ncommit = \"{good}\"\npath = \"/themes/x\""
+            ),
+            format!(
+                "repository = \"https://github.com/a/b\"\ncommit = \"{good}\"\npath = \"themes\\\\x\""
+            ),
             "from = \"npm\"".to_owned(),
             "builtin = true".to_owned(),
             String::new(),
@@ -418,6 +446,15 @@ mod tests {
             "repository = \"https://github.com/a/b\"\ncommit = \"{good}\""
         ));
         assert_eq!(problems(&fine), Vec::<String>::new());
+        let folder = with(&format!(
+            "repository = \"https://github.com/a/b\"\ncommit = \"{good}\"\n\
+             path = \"themes/lightline-themes\""
+        ));
+        assert_eq!(problems(&folder), Vec::<String>::new());
+        assert!(matches!(
+            &parse_for(&folder, None).unwrap()[0].source,
+            Source::Repository { path: Some(path), .. } if path == "themes/lightline-themes"
+        ));
     }
 
     #[test]
@@ -478,18 +515,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("lightline-list-{}", std::process::id()));
         let mut failures = Vec::new();
         for entry in parse_for(BUILT_IN, None).unwrap() {
-            let (url, commit) = match &entry.source {
+            let (url, commit, path) = match &entry.source {
                 Source::BuiltIn => continue,
                 Source::Zed => match zed_registry::resolve(&entry.id) {
-                    Ok(resolved) => (resolved.git_url, resolved.commit),
+                    Ok(resolved) => (resolved.git_url, resolved.commit, resolved.path),
                     Err(error) => {
                         failures.push(format!("{}: {error}", entry.id));
                         continue;
                     }
                 },
-                Source::Repository { url, commit, .. } => (url.clone(), commit.clone()),
+                Source::Repository {
+                    url, commit, path, ..
+                } => (url.clone(), commit.clone(), path.clone()),
             };
-            let folder = match installer::install_in(&dir, &entry.id, &url, &commit) {
+            let installed = installer::install_in(&dir, &entry.id, &url, &commit, path.as_deref());
+            let folder = match installed {
                 Ok(folder) => folder,
                 Err(error) => {
                     failures.push(format!("{}: {error}", entry.id));

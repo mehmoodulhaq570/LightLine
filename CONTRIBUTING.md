@@ -185,6 +185,16 @@ version = "1.0.0"
 
 Updating it means another pull request that changes `commit` and `version`. `requires = "0.13.0"` hides an entry from LightLine releases older than the one it needs.
 
+An extension that is one folder of a larger repository adds `path`, and only that folder is downloaded:
+
+```toml
+path = "themes/lightline-themes"   # relative, with /, no . or ..
+```
+
+LightLine's own extensions are all in one repository this way, [lightline-extensions](https://github.com/mehmoodulhaq570/lightline-extensions). To add or change one, open a pull request there first; its CONTRIBUTING.md and `scripts/check.py` say what's checked. Then open a pull request here that adds the entry or moves its `commit`. Older LightLine releases don't know `path`, so such an entry needs `requires = "0.13.0"` or later.
+
+Before merging a change to the list, run `cargo test --lib lightline_list -- --ignored`, which installs every entry.
+
 Before opening the pull request, run:
 
 ```powershell
