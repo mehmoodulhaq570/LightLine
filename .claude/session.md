@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-24 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-24, night)" at the end: it has the current state and the planned next steps.**
+Updated: 2026-11-25 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-25)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -672,3 +672,41 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 - Open: which extensions first (own color themes as a pack? snippet packs for the run languages?), whether to do a design page first, whether any need WASM.
 
 **Watch:** D: has under 1 GB free (debug `target` ~2 GB; `target/release` was cleaned). Free space before the next build-heavy session.
+
+## Where things stand (2026-11-25)
+
+**Merged to `main`** (squash-merged, CI green on x64 and ARM64):
+
+- #117 `fcb0210`: LightLine's own extensions (LightLine Themes, C and C++ Snippets) in `lightline-extensions`, installed by folder.
+- #118 `7668a73`: **Update** button for installed extensions (design `design/extension-updates-design.html`).
+- #119 `1e9435e`: own icons for LightLine's extensions (`windows_app/own_icons.rs`, design `design/own-extension-icons-design.html`). The same SVGs are in lightline-extensions' `icons/` (`ece9c4b`), built from the consts in `own_icons.rs`; re-export them if the art changes.
+- #120 `b97f6d4`: a clear status message when GitHub's 60-an-hour API limit for Zed registry lookups is used up (`zed_registry::rate_limit_message`).
+
+**Open:** #121 (`fix/rust-debug-breakpoints`, CI green, ready to merge):
+- Rust breakpoints were never hit: lldb doesn't bind `\\?\` paths, so `debug_breakpoints` now returns plain paths.
+- Adapter errors showed only "request failed": `debug::failure_reason` now reads `body.error.format`.
+- USER_GUIDE now says which LLDB files are needed.
+- This notes update is on that branch.
+
+**Environment:**
+- **LLDB installed.**
+  - Source: LLVM 23.1.5's MSI, hash checked, extracted without admin to `C:\Users\mehmo\Tools\llvm-23.1.5`.
+  - `lldb-dap.exe`, `lldb-server.exe` and `liblldb.dll` are copied to `C:\Users\mehmo\Tools\lldb`, which is on the user PATH. No Python DLL was needed.
+  - Rust debugging was checked live: it pauses on the breakpoint and shows locals and the call stack, and F10 steps.
+  - The full extract and the 640 MB MSI in `Tools\llvm-download` can be deleted to free C:.
+- **Claude provider:** tested live on 2026-11-24 with the key in Credential Manager. Nothing is pending there.
+- **Pushing lightline-extensions:** plain git has no credentials for it. Use `git -c credential.helper= -c "credential.helper=!gh auth git-credential" push origin main`.
+- **A separate Claude Code session in VS Code** sometimes runs the maintainer's Solar FYP training (`train_tabular.py --models rf`). It uses every core, and then local tests with timeouts fail: debugpy, Prettier, and the AI stream test `a_server_that_goes_quiet_can_still_be_stopped`. CI decides in that case. Never touch that process.
+
+**Unreleased** holds everything since v0.12.0, including the AI work, our own extensions, updates, icons and today's fixes. The maintainer wants one bigger release later: **don't release until asked**.
+
+**Next (agreed 2026-11-25), in order:**
+1. **Extension list pass, design page first.**
+   - Test about 8–10 Zed registry extensions in LightLine:
+     - snippet packs `javascript-snippets`, `typescript-snippets`, `html-snippets`, `markdown-snippets`;
+     - languages `powershell`, `toml`, `sql`, `dockerfile`, `lua`.
+   - Add those that work to `registry/extensions.toml`. Run `cargo test --lib lightline_list`, plus `-- --ignored`.
+   - Build **PowerShell Snippets** as our third extension (the registry has none). It gets the `OwnIcon::Snippets` tile automatically.
+2. **WASM extensions:** a design page first. Weigh the runtime's size and startup cost: it must load lazily, and the exe must stay small.
+
+**Watch:** D: has about 1.9 GB free.
