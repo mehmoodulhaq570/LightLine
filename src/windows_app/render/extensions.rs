@@ -1,8 +1,8 @@
 use super::super::app::{Extension, ExtensionCategory, ExtensionIcon};
-use super::super::extensions_panel::monogram;
 use super::super::extensions_panel::{
     EXTENSION_INDENT, ExtensionRow, ExtensionsButton, ExtensionsHot, ExtensionsLayout,
 };
+use super::super::extensions_panel::{monogram, updates_label};
 use super::super::*;
 use super::blend;
 
@@ -223,6 +223,7 @@ impl App {
                 section,
                 count,
                 note,
+                updates,
             } => {
                 let collapsed = self.extension_sections_collapsed[section.slot()];
                 self.chevron(hdc, rect.left + s(12), middle, !collapsed);
@@ -254,7 +255,20 @@ impl App {
                     self.theme.text,
                     pill,
                 );
-                if !note.is_empty() {
+                if *updates > 0 {
+                    // "2 updates · Update all", in blue, ending where
+                    // `update_all_link` says the link is.
+                    let label = updates_label(*updates);
+                    let width = self.text_width(hdc, &label);
+                    self.label_mid(
+                        hdc,
+                        &label,
+                        limit.right - width,
+                        middle,
+                        self.theme.blue,
+                        rect,
+                    );
+                } else if !note.is_empty() {
                     let width = self.text_width(hdc, note);
                     self.label_mid(
                         hdc,
@@ -375,17 +389,34 @@ impl App {
             unsafe { SelectObject(hdc, self.small_font) };
             self.text_width(hdc, "LightLine") + s(8)
         });
-        let version_width = if ext.version.is_empty() {
+        // The version on this PC; with an update, "1.0.0 → " and the new
+        // one in blue.
+        let shown = ext.shown_version();
+        let update = ext.has_update();
+        let arrow = if update {
+            format!("{shown} \u{2192} ")
+        } else {
+            String::new()
+        };
+        let version_width = if shown.is_empty() {
             0
         } else {
             unsafe { SelectObject(hdc, self.small_font) };
-            self.text_width(hdc, &ext.version)
+            if update {
+                self.text_width(hdc, &arrow) + self.text_width(hdc, &ext.version)
+            } else {
+                self.text_width(hdc, shown)
+            }
         };
         unsafe { SelectObject(hdc, self.ui_font) };
         let room = limit.right - text_left;
         let natural = self.text_width(hdc, title);
+        // With an update, the versions are what the row is about: the badge
+        // gives way instead when all three don't fit.
+        let badge =
+            badge.filter(|badge| !update || natural + s(6) + version_width + s(6) + badge <= room);
         let (title_width, show_version) = match badge {
-            None => (natural.min(room - s(40)), true),
+            None => (natural.min(room - (version_width + s(12)).max(s(40))), true),
             Some(badge) => {
                 let with_version = room - badge - s(6) - version_width - s(6);
                 if natural <= with_version || with_version >= room * 6 / 10 {
@@ -409,15 +440,22 @@ impl App {
         unsafe { SelectObject(hdc, self.small_font) };
         let small_top = |n: i32| line(n) + s(1);
         let mut x = text_left + title_width + s(6);
-        if show_version && !ext.version.is_empty() {
-            self.label_ellipsis(
-                hdc,
-                &ext.version,
-                x,
-                small_top(0) + s(1),
-                self.theme.muted,
-                limit,
-            );
+        if show_version && !shown.is_empty() {
+            let version_top = small_top(0) + s(1);
+            if update {
+                self.label_ellipsis(hdc, &arrow, x, version_top, self.theme.muted, limit);
+                let new_left = x + self.text_width(hdc, &arrow);
+                self.label_ellipsis(
+                    hdc,
+                    &ext.version,
+                    new_left,
+                    version_top,
+                    self.theme.blue,
+                    limit,
+                );
+            } else {
+                self.label_ellipsis(hdc, shown, x, version_top, self.theme.muted, limit);
+            }
             x += version_width + s(6);
         }
         if let Some(width) = badge {
@@ -505,7 +543,7 @@ impl App {
                 self.theme.blue,
                 action,
             );
-        } else if !ext.installed {
+        } else if !ext.installed || update {
             Self::rounded_fill(hdc, action, s(3), ui(18, 114, 196));
             self.label_mid(
                 hdc,

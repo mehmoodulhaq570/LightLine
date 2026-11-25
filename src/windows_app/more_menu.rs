@@ -46,6 +46,7 @@ enum MoreAction {
     ExtensionsShowInstalled,
     ExtensionsShowRecommended,
     ExtensionsCheckUpdates,
+    ExtensionsUpdateAll,
     ExtensionsOpenFolder,
 }
 
@@ -103,12 +104,17 @@ impl App {
                 ];
             }
             Some(MenuAnchor::Extensions(_)) => {
-                return vec![
+                let mut actions = vec![
                     MoreAction::ExtensionsShowInstalled,
                     MoreAction::ExtensionsShowRecommended,
                     MoreAction::ExtensionsCheckUpdates,
-                    MoreAction::ExtensionsOpenFolder,
                 ];
+                // Only when there's something to update.
+                if !self.extension_updates(false).is_empty() {
+                    actions.push(MoreAction::ExtensionsUpdateAll);
+                }
+                actions.push(MoreAction::ExtensionsOpenFolder);
+                return actions;
             }
             Some(MenuAnchor::Debug(DebugMenu::Header, _)) => {
                 return vec![
@@ -175,6 +181,8 @@ impl App {
             MoreAction::ExtensionsShowInstalled => ("Show Installed", ""),
             MoreAction::ExtensionsShowRecommended => ("Show Recommended", ""),
             MoreAction::ExtensionsCheckUpdates => ("Check for Updates", ""),
+            // With its count added when painted.
+            MoreAction::ExtensionsUpdateAll => ("Update All", ""),
             MoreAction::ExtensionsOpenFolder => ("Open Extensions Folder", ""),
             MoreAction::DebugStart => ("Start Debugging", "F5"),
             MoreAction::DebugSelect => ("Select Configuration...", ""),
@@ -409,6 +417,10 @@ impl App {
                 self.show_extensions_section(hwnd, ExtensionsSection::Recommended)
             }
             MoreAction::ExtensionsCheckUpdates => self.check_extension_updates(),
+            MoreAction::ExtensionsUpdateAll => {
+                let updates = self.extension_updates(false);
+                self.update_extensions(hwnd, updates);
+            }
             MoreAction::ExtensionsOpenFolder => self.open_extensions_folder(),
             MoreAction::DebugStart => self.start_debug_session(hwnd),
             MoreAction::DebugSelect => self.show_debug_config_menu(hwnd),
@@ -447,6 +459,13 @@ impl App {
                 Self::rounded_fill(hdc, *row, s(6), self.theme.select_bg);
             }
             let (label, shortcut) = self.more_label(*action);
+            let counted;
+            let label = if *action == MoreAction::ExtensionsUpdateAll {
+                counted = format!("{label} ({})", self.extension_updates(false).len());
+                counted.as_str()
+            } else {
+                label
+            };
             let middle = (row.top + row.bottom) / 2;
             let shortcut_left = row.right - s(10) - self.text_width(hdc, shortcut);
             self.label_mid(

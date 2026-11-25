@@ -2,7 +2,10 @@
 // (design/extensions-design.html). Painting is in render/extensions.rs; both
 // use `extensions_layout` and `extension_rows`, so what's drawn is clicked.
 
-use super::app::{Extension, ExtensionCategory, ExtensionIcon, ScannedExtension};
+use super::app::{
+    Extension, ExtensionCategory, ExtensionIcon, ExtensionInstallKind, ExtensionUpdateBatch,
+    ScannedExtension,
+};
 use super::render::blend;
 use super::*;
 
@@ -75,6 +78,9 @@ pub(super) enum ExtensionRow {
         count: usize,
         /// Right-aligned and dimmed: "3 results", "Themes".
         note: String,
+        /// INSTALLED: how many of its rows have an update, said in blue
+        /// instead of the note.
+        updates: usize,
     },
     /// An extension, by its index in `App::extensions`.
     Extension(usize),
@@ -107,8 +113,10 @@ pub(super) enum ExtensionsHit {
     Button(ExtensionsButton),
     Search,
     Header(ExtensionsSection),
-    /// Install, Uninstall or (Prettier) turn off.
+    /// Install, Update, Uninstall or (Prettier) turn off.
     Action(usize),
+    /// The INSTALLED header's "Update all".
+    UpdateAll,
     ColorTheme,
     Nothing,
 }
@@ -229,6 +237,7 @@ impl App {
                     section: ExtensionsSection::Listed,
                     count: listed.len(),
                     note: "tested".into(),
+                    updates: 0,
                 });
                 if !collapsed(ExtensionsSection::Listed) {
                     rows.extend(listed.into_iter().map(ExtensionRow::Extension));
@@ -238,6 +247,7 @@ impl App {
                 section: ExtensionsSection::Marketplace,
                 count: matches.len(),
                 note: "not tested".into(),
+                updates: 0,
             });
             if !collapsed(ExtensionsSection::Marketplace) {
                 if self.zed_registry_loading {
@@ -279,6 +289,10 @@ impl App {
             section: ExtensionsSection::Installed,
             count: installed.len(),
             note: note.clone(),
+            updates: installed
+                .iter()
+                .filter(|&&index| self.extensions[index].has_update())
+                .count(),
         });
         if !collapsed(ExtensionsSection::Installed) {
             if installed.is_empty() {
@@ -307,6 +321,7 @@ impl App {
             section: ExtensionsSection::Recommended,
             count: recommended.len(),
             note,
+            updates: 0,
         });
         if !collapsed(ExtensionsSection::Recommended) {
             if recommended.is_empty() {
@@ -321,6 +336,7 @@ impl App {
             section: ExtensionsSection::InUse,
             count: 3,
             note: String::new(),
+            updates: 0,
         });
         if !collapsed(ExtensionsSection::InUse) {
             rows.extend((0..3).map(ExtensionRow::InUse));
@@ -399,11 +415,15 @@ impl App {
         let label = if ext.installing {
             if ext.id == "prettier" {
                 "Checking\u{2026}"
+            } else if ext.installed {
+                "Updating\u{2026}"
             } else {
                 "Installing\u{2026}"
             }
         } else if !ext.installed {
             "Install"
+        } else if ext.has_update() {
+            "Update"
         } else if !hot {
             ""
         } else if ext.id == "prettier" {
@@ -451,7 +471,16 @@ impl App {
             return ExtensionsHit::Nothing;
         };
         match &rows[index] {
-            ExtensionRow::Header { section, .. } => ExtensionsHit::Header(*section),
+            ExtensionRow::Header {
+                section, updates, ..
+            } => {
+                let link = self.with_ui_dc(None, |hdc| self.update_all_link(hdc, rect, *updates));
+                if link.is_some_and(|link| contains(&link, x, y)) {
+                    ExtensionsHit::UpdateAll
+                } else {
+                    ExtensionsHit::Header(*section)
+                }
+            }
             ExtensionRow::Extension(ext) => {
                 let (button, _) =
                     self.with_ui_dc(None, |hdc| self.extension_action(hdc, rect, *ext, true));
@@ -580,10 +609,20 @@ impl App {
                 self.extension_sections_collapsed[slot] = !self.extension_sections_collapsed[slot];
             }
             ExtensionsHit::Action(index) => {
-                if let Some(id) = self.extensions.get(index).map(|ext| ext.id.clone()) {
+                let update = self
+                    .extensions
+                    .get(index)
+                    .is_some_and(Extension::has_update);
+                if update {
+                    self.update_extensions(hwnd, vec![index]);
+                } else if let Some(id) = self.extensions.get(index).map(|ext| ext.id.clone()) {
                     self.toggle_extension(hwnd, &id);
                 }
                 self.forget_extensions_hot_row(hwnd);
+            }
+            ExtensionsHit::UpdateAll => {
+                let updates = self.extension_updates(true);
+                self.update_extensions(hwnd, updates);
             }
             ExtensionsHit::ColorTheme => {
                 let layout = self.extensions_layout(self.scale(RAIL), self.sidebar_right(), None);
@@ -648,13 +687,180 @@ impl App {
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
 
-    /// Re-read the registry list (versions, new extensions).
+    /// Check for Updates (and the header's refresh): downloads Zed's
+    /// registry and LightLine's list again, skipping the copies kept for 10
+    /// minutes, and says what updates there are once both are in.
     pub(super) fn check_extension_updates(&mut self) {
-        if !self.zed_registry_loading {
-            self.zed_registry_loaded = false;
-            self.status = "Checking the Zed registry...".into();
-            self.ensure_zed_registry_loaded();
+        self.read_extension_list();
+        if self.zed_registry_loading {
+            return;
         }
+        self.extension_updates_report = Some(true);
+        self.status = "Checking for extension updates...".into();
+        if !self.extensions_scanned {
+            self.scan_installed_extensions();
+        }
+        self.load_extension_lists(true);
+    }
+
+    /// The installed extensions with an update, in the panel's order;
+    /// `filtered` keeps only those the filter chip shows (the INSTALLED
+    /// header's count).
+    pub(super) fn extension_updates(&self, filtered: bool) -> Vec<usize> {
+        self.extensions
+            .iter()
+            .enumerate()
+            .filter(|(_, ext)| {
+                ext.has_update() && (!filtered || self.extension_matches_filter(ext))
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Update and Update All: each update starts on its own worker and the
+    /// installer takes them one at a time. Several share one status line.
+    pub(super) fn update_extensions(&mut self, hwnd: HWND, indices: Vec<usize>) {
+        let indices: Vec<usize> = indices
+            .into_iter()
+            .filter(|&index| {
+                self.extensions
+                    .get(index)
+                    .is_some_and(|ext| ext.has_update() && !ext.installing)
+            })
+            .collect();
+        if let [index] = indices[..]
+            && self.extension_update_batch.is_none()
+        {
+            self.start_extension_install(hwnd, index);
+            return;
+        }
+        if indices.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = indices
+            .iter()
+            .map(|&index| self.extensions[index].id.clone())
+            .collect();
+        for index in indices {
+            self.start_extension_install(hwnd, index);
+        }
+        let batch = self
+            .extension_update_batch
+            .get_or_insert_with(ExtensionUpdateBatch::default);
+        batch.total += ids.len();
+        batch.pending.extend(ids);
+        self.status = update_batch_status(batch);
+        self.refresh(hwnd);
+    }
+
+    /// Takes in a finished update. False when `id` was an install, which
+    /// the caller handles. After an update, whatever the extension was
+    /// doing picks up again: the theme in use is applied again, icons and
+    /// languages reload, snippets are read again and checkers restart.
+    pub(super) fn extension_updated(
+        &mut self,
+        hwnd: HWND,
+        id: &str,
+        result: &Result<ExtensionInstallKind, String>,
+    ) -> bool {
+        let Some(ext) = self.extensions.iter_mut().find(|ext| ext.id == id) else {
+            return false;
+        };
+        if !(ext.installing && ext.installed) {
+            return false;
+        }
+        ext.installing = false;
+        let name = ext.name.clone();
+        let version = ext.version.clone();
+        let language = ext.kind == Some(ExtensionCategory::Language);
+        let mut status = match result {
+            Ok(_) => format!("{name} updated to {version}"),
+            // Windows keeps a loaded grammar's folder from being moved; the
+            // old copy is still there and still works.
+            Err(error) if language && held_by_windows(error) => {
+                format!("{name} is in use. Restart LightLine, then update {name}")
+            }
+            Err(error) => format!("Could not update {name}: {error}"),
+        };
+        if let Ok(kind) = result {
+            self.forget_snippets();
+            match kind {
+                ExtensionInstallKind::IconTheme if id == "material-icon-theme" => {
+                    self.icons = IconSet::new(self.dpi, self.zoom);
+                }
+                ExtensionInstallKind::ColorTheme(_)
+                    if self.active_color_theme.as_deref() == Some(id) =>
+                {
+                    // The same variant, by name, in its new colors.
+                    let wanted = self.settings.color_theme.clone().unwrap_or_default();
+                    self.set_color_theme(hwnd, Some(wanted.clone()));
+                    if self.active_color_theme.is_none() {
+                        status = format!(
+                            "{status}. \"{wanted}\" isn't in it any more, so {} is in use",
+                            super::theme_picker::DEFAULT_THEME_NAME
+                        );
+                    }
+                }
+                ExtensionInstallKind::Languages { .. } => self.reload_extension_languages(),
+                ExtensionInstallKind::Tools(_) => self.restart_tools(),
+                _ => {}
+            }
+        }
+        if let Some(batch) = &mut self.extension_update_batch
+            && let Some(place) = batch.pending.iter().position(|pending| pending == id)
+        {
+            batch.pending.remove(place);
+            if result.is_err() {
+                batch.failed.push((name, status));
+            }
+            status = update_batch_status(batch);
+            if batch.pending.is_empty() {
+                self.extension_update_batch = None;
+            }
+        }
+        self.status = status;
+        self.scan_installed_extensions();
+        self.refresh(hwnd);
+        unsafe { InvalidateRect(hwnd, null(), 0) };
+        true
+    }
+
+    /// Says what updates there are, once both lists and the scan are in,
+    /// if the panel's opening or Check for Updates asked.
+    pub(super) fn report_extension_updates(&mut self) {
+        let Some(asked) = self.extension_updates_report else {
+            return;
+        };
+        if self.extension_lists_pending > 0 || self.extension_scan_pending {
+            return;
+        }
+        self.extension_updates_report = None;
+        let names: Vec<&str> = self
+            .extension_updates(false)
+            .into_iter()
+            .map(|index| self.extensions[index].name.as_str())
+            .collect();
+        let status = match names.len() {
+            0 if asked => "Extensions are up to date".to_owned(),
+            0 => return,
+            1 => format!("1 extension update: {}", names[0]),
+            count => format!("{count} extension updates: {}", names.join(", ")),
+        };
+        self.status = status;
+    }
+
+    /// Where the INSTALLED header's "Update all" is, with two or more
+    /// updates: the end of its right-hand label.
+    pub(super) fn update_all_link(&self, hdc: HDC, rect: RECT, updates: usize) -> Option<RECT> {
+        if updates < 2 {
+            return None;
+        }
+        let right = rect.right - self.scale(10);
+        Some(RECT {
+            left: right - self.text_width(hdc, UPDATE_ALL),
+            right,
+            ..rect
+        })
     }
 
     /// The ··· menu's Show Installed / Show Recommended: clears the search
@@ -691,6 +897,7 @@ impl App {
         let Some(dir) = workflow::extensions_dir() else {
             return;
         };
+        self.extension_scan_pending = true;
         let tx = self.worker_tx.clone();
         std::thread::spawn(move || {
             tx.send(WorkerMessage::ExtensionsScanned(scan_installed(&dir)));
@@ -709,6 +916,7 @@ impl App {
                 && !found.contains(&ext.id.as_str())
             {
                 ext.installed = false;
+                ext.installed_version.clear();
                 ext.icon = None;
             }
         }
@@ -717,7 +925,9 @@ impl App {
                 ext.installed = true;
                 ext.kind = Some(item.kind);
                 ext.icon = item.icon;
-                ext.version = item.version;
+                // Kept apart from the version an install would get, which
+                // the lists give.
+                ext.installed_version = item.version;
                 // A registry entry's placeholder text gives way to its own;
                 // LightLine's list keeps the words it wrote for LightLine.
                 if ext.listed.is_none() {
@@ -732,7 +942,7 @@ impl App {
                 id: item.id,
                 name: item.name,
                 publisher: "Zed registry".into(),
-                version: item.version,
+                installed_version: item.version,
                 description: item.description.unwrap_or_default(),
                 installed: true,
                 kind: Some(item.kind),
@@ -740,6 +950,8 @@ impl App {
                 ..Extension::default()
             });
         }
+        self.extension_scan_pending = false;
+        self.report_extension_updates();
         self.forget_extensions_hot_row(hwnd);
         unsafe { InvalidateRect(hwnd, null(), 0) };
     }
@@ -847,9 +1059,8 @@ fn merge_extension_list(
             path,
         } = entry.source
         {
-            if !ext.installed {
-                ext.version = version;
-            }
+            // What an install or update gets; the installed one is apart.
+            ext.version = version;
             ext.repository = Some((url, commit, path));
         }
     }
@@ -949,6 +1160,46 @@ fn extension_kind_and_icon(folder: &Path) -> (ExtensionCategory, Option<Extensio
     (ExtensionCategory::Unknown, None)
 }
 
+const UPDATE_ALL: &str = "Update all";
+
+/// The INSTALLED header's right-hand label: "1 update", or with more,
+/// "2 updates · Update all".
+pub(super) fn updates_label(updates: usize) -> String {
+    match updates {
+        0 => String::new(),
+        1 => "1 update".to_owned(),
+        count => format!("{count} updates \u{00b7} {UPDATE_ALL}"),
+    }
+}
+
+/// Update All's status line: which one it's on, then how it went.
+fn update_batch_status(batch: &ExtensionUpdateBatch) -> String {
+    let total = batch.total;
+    if !batch.pending.is_empty() {
+        let on = total - batch.pending.len() + 1;
+        return format!("Updating {total} extensions ({on} of {total})...");
+    }
+    match batch.failed.as_slice() {
+        [] => format!("{total} extensions updated"),
+        [(_, why), rest @ ..] => {
+            let more = match rest.len() {
+                0 => String::new(),
+                count => format!(" ({count} more could not be updated)"),
+            };
+            format!(
+                "Updated {} of {total} extensions. {why}{more}",
+                total - batch.failed.len()
+            )
+        }
+    }
+}
+
+// Whether `error` is Windows refusing to move a folder because a file in
+// it is open (access denied, or a sharing violation).
+fn held_by_windows(error: &str) -> bool {
+    error.contains("(os error 5)") || error.contains("(os error 32)")
+}
+
 /// A monogram for an extension without an icon: the first letters of its
 /// id's words ("tokyo-night" -> "TN"; one word gives one letter), leaving
 /// out "theme", "themes" and "zed", and which of eight hues it gets (the
@@ -988,7 +1239,10 @@ pub(super) fn monogram(id: &str) -> (String, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Extension, ExtensionCategory, merge_extension_list, monogram};
+    use super::{
+        Extension, ExtensionCategory, ExtensionUpdateBatch, held_by_windows, merge_extension_list,
+        monogram, update_batch_status, updates_label,
+    };
     use lightline::extensions::lightline_list;
 
     #[test]
@@ -1063,6 +1317,95 @@ mod tests {
             (None, false)
         );
         assert_eq!(extensions[2].listed, Some(1));
+    }
+
+    #[test]
+    fn an_installed_extension_has_an_update_only_when_a_newer_version_is_pinned() {
+        let installed = |id: &str, have: &str| Extension {
+            id: id.into(),
+            installed: true,
+            installed_version: have.into(),
+            ..Extension::default()
+        };
+        let mut extensions = vec![
+            installed("own", "1.0.0"),
+            installed("same", "1.1.0"),
+            installed("older", "2.0.0"),
+            installed("zed-theme", "1.9.2"),
+            installed("unknown", "0.1.0"),
+            Extension {
+                id: "not-installed".into(),
+                ..Extension::default()
+            },
+        ];
+        let pin = |id: &str, version: &str| {
+            format!(
+                "[[extension]]\nid = \"{id}\"\nrepository = \"https://github.com/someone/{id}.git\"\n\
+                 commit = \"92f46057151693648bd3acac1e0c138696f34433\"\nversion = \"{version}\"\n\
+                 kind = \"color-theme\"\nname = \"{id}\"\n"
+            )
+        };
+        let list = format!(
+            "format = 1\n{}{}{}{}[[extension]]\nid = \"zed-theme\"\nfrom = \"zed\"\n\
+             kind = \"color-theme\"\nname = \"Zed Theme\"\n",
+            pin("own", "1.1.0"),
+            pin("same", "1.1.0"),
+            pin("older", "1.5.0"),
+            pin("not-installed", "3.0.0"),
+        );
+        merge_extension_list(&mut extensions, lightline_list::parse(&list).unwrap());
+        // The Zed registry's version, as poll_workers sets it for an entry
+        // the list doesn't pin: compared by number, 1.10 after 1.9.
+        extensions[3].version = "1.10.0".into();
+        let updates: Vec<&str> = extensions
+            .iter()
+            .filter(|ext| ext.has_update())
+            .map(|ext| ext.id.as_str())
+            .collect();
+        assert_eq!(updates, ["own", "zed-theme"]);
+        // The row shows the version on this PC, never the one offered.
+        assert_eq!(extensions[0].shown_version(), "1.0.0");
+        assert_eq!(extensions[0].version, "1.1.0");
+        assert_eq!(extensions[2].shown_version(), "2.0.0");
+        assert_eq!(extensions[5].shown_version(), "3.0.0");
+        // Prettier is found, not downloaded: nothing to update.
+        let prettier = Extension {
+            version: "9.0.0".into(),
+            ..installed("prettier", "1.0.0")
+        };
+        assert!(!prettier.has_update());
+    }
+
+    #[test]
+    fn the_header_and_status_line_say_how_updates_go() {
+        assert_eq!(updates_label(0), "");
+        assert_eq!(updates_label(1), "1 update");
+        assert_eq!(updates_label(3), "3 updates \u{00b7} Update all");
+        let mut batch = ExtensionUpdateBatch {
+            pending: vec!["a".into(), "b".into()],
+            total: 2,
+            failed: Vec::new(),
+        };
+        assert_eq!(
+            update_batch_status(&batch),
+            "Updating 2 extensions (1 of 2)..."
+        );
+        batch.pending.remove(0);
+        assert_eq!(
+            update_batch_status(&batch),
+            "Updating 2 extensions (2 of 2)..."
+        );
+        batch.pending.clear();
+        assert_eq!(update_batch_status(&batch), "2 extensions updated");
+        batch
+            .failed
+            .push(("Lua".into(), "Could not update Lua: offline".into()));
+        assert_eq!(
+            update_batch_status(&batch),
+            "Updated 1 of 2 extensions. Could not update Lua: offline"
+        );
+        assert!(held_by_windows("Access is denied. (os error 5)"));
+        assert!(!held_by_windows("could not reach github.com"));
     }
 
     #[test]

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Updating Installed Extensions</title>
+<style>
+  :root {
+    --page: #02060f; --edge-page: #182f52; --label: #9fb0cc;
+    /* LightLine's default dark theme (theme.rs::default_dark) */
+    --title: #081122; --rail: #070d1b; --editor: #070e1d; --side: #081020;
+    --active: #111f3b; --select: #1a3065; --edge: #182f52; --field: #0c1930;
+    --text: #e2e8f0; --muted: #7e92b2; --blue: #5297ff; --sky: #38bdf8; --teal: #2dd4bf;
+    --violet: #8b5cf6; --green: #34d399; --amber: #f5b85f; --red: #f66e78; --orange: #f59150;
+    --install: #1272c4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 8px; }
+  p { max-width: 900px; }
+  p.lead { color: var(--label); margin: 0 0 18px; }
+  ul { padding-left: 20px; margin: 0; max-width: 900px; }
+  li { margin: 0 0 8px; }
+  li b { color: #fff; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #0c1730; padding: 1px 5px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--edge-page); vertical-align: top; }
+  th { color: var(--label); font-weight: 600; }
+  .tablewrap { overflow-x: auto; max-width: 960px; }
+  .rec { color: var(--green); font-weight: 600; }
+  .status { display: inline-block; font-size: 12px; color: var(--amber); border: 1px solid #5a4520; background: #1d160a; border-radius: 4px; padding: 0 7px; margin-left: 6px; vertical-align: 3px; }
+
+  /* ---------- Extensions panel crops at real size (sidebar 286 px) ---------- */
+  .frames { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-weight: 600; margin-bottom: 6px; }
+  figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; max-width: 286px; }
+  .panel { width: 286px; height: 430px; overflow: hidden; background: var(--side); border: 1px solid var(--edge-page); border-radius: 8px; font-size: 13px; position: relative; }
+  .ph { height: 35px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; letter-spacing: .05em; color: var(--label); }
+  .ph .ic { margin-left: auto; display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+  .search { margin: 4px 12px 0; height: 28px; border: 1px solid var(--edge); background: var(--field); border-radius: 5px; display: flex; align-items: center; padding: 0 8px; gap: 8px; color: var(--muted); }
+  .search .q { flex: 1; }
+  .chips { display: flex; gap: 4px; margin: 6px 12px 0; }
+  .chip { height: 22px; border: 1px solid var(--edge); border-radius: 11px; padding: 0 9px; display: flex; align-items: center; color: var(--muted); font-size: 12px; }
+  .chip.on { border-color: var(--blue); background: var(--select); color: var(--text); }
+  .div { height: 1px; background: var(--edge); margin: 4px 0 3px; }
+  .hd { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; font-size: 11.5px; font-weight: 600; color: #a9b7cd; }
+  .hd .chev { width: 12px; color: var(--muted); font-size: 10px; text-align: center; }
+  .hd .n { background: var(--edge); color: var(--text); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 400; min-width: 18px; text-align: center; }
+  .hd .up { margin-left: auto; color: var(--blue); font-weight: 400; }
+  .ext { height: 62px; position: relative; }
+  .ext.hot { background: #0e1a33; }
+  .ext .icon { position: absolute; left: 20px; top: 10px; width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; font-weight: 700; font-size: 15px; color: #0b1222; }
+  .ext .l1 { position: absolute; left: 66px; top: 5px; right: 10px; white-space: nowrap; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+  .ext .l1 b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l1 .v { color: var(--muted); font-size: 11.5px; flex: none; }
+  .ext .l1 .v .to { color: var(--blue); }
+  .ext .l2 { position: absolute; left: 66px; top: 24px; right: 10px; color: #b9c5d8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .l3 { position: absolute; left: 66px; top: 40px; right: 70px; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ext .btn { position: absolute; right: 10px; top: 41px; height: 18px; padding: 0 9px; border-radius: 3px; background: var(--install); color: #fff; font-size: 11.5px; display: flex; align-items: center; }
+  .ext .btn.busy { background: var(--side); border: 1px solid var(--edge); color: var(--blue); }
+  .ext .btn.ghost { background: #0e1a33; border: 1px solid var(--edge); color: var(--text); }
+  .ext .tick { position: absolute; right: 14px; top: 39px; color: var(--green); font-size: 14px; }
+  .badge { flex: none; font-size: 10.5px; font-weight: 600; color: var(--blue); border: 1px solid #2b4c84; background: #0d1d3b; border-radius: 3px; padding: 0 4px; line-height: 15px; }
+  .new { outline: 1px dashed rgba(52, 211, 153, .55); outline-offset: -1px; }
+  .wrong { outline: 1px dashed rgba(246, 110, 120, .7); outline-offset: -1px; }
+  .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 22px; border-top: 1px solid var(--edge); display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; color: var(--label); background: var(--rail); white-space: nowrap; overflow: hidden; }
+  .menu { position: absolute; right: 8px; top: 30px; width: 200px; background: #0b1730; border: 1px solid #27467a; border-radius: 6px; padding: 4px 0; font-size: 12.5px; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+  .menu div { height: 24px; display: flex; align-items: center; padding: 0 12px; }
+  .menu div.on { background: var(--select); }
+  .menu .sep { height: 1px; background: var(--edge); margin: 4px 0; padding: 0; }
+  .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin: 10px 0 6px; max-width: 960px; }
+  .step { flex: 1 1 200px; border: 1px solid var(--edge-page); border-radius: 8px; padding: 10px 12px; background: #0a142a; font-size: 13px; }
+  .step b { display: block; color: #fff; margin-bottom: 4px; }
+  .step .when { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Updating Installed Extensions <span class="status">Approved with all recommendations 2026-11-25; built</span></h1>
+<p class="lead">Follow-up to <code>design/own-extensions-design.html</code>. Today an installed extension never changes: when LightLine's list or Zed's registry pins a newer version, the panel doesn't say so and there's no way to take it short of uninstalling and installing again. Panel crops are at real size in the default dark theme. Dashed green outlines mark what's new, and the red one marks a bug in today's panel.</p>
+
+<h2>What the user sees</h2>
+<div class="frames">
+  <figure>
+    <figcaption>Today<span>Every installed extension shows a ✓. Once Zed's list arrives, an installed row shows the <i>registry's</i> version instead of the one installed. Dracula below says 1.1.2 although 1.0.4 is what's on this PC.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search"><span>⌕</span><span class="q">Search extensions</span><span>⏷</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Snippets</span><span class="chip">Checkers</span></div>
+      <div class="div"></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">3</span></div>
+      <div class="ext"><div class="icon" style="background:linear-gradient(135deg,#ffffff 0 50%,#000000 50% 100%);border:1px solid #6b88b8"></div><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0</span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · Color theme</div><div class="tick">✓</div></div>
+      <div class="ext"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula</b><span class="v wrong">1.1.2</span><span class="badge">LightLine</span></div><div class="l2">The official Dracula themes, dark and light</div><div class="l3">Dracula · Color theme</div><div class="tick">✓</div></div>
+      <div class="ext"><div class="icon" style="background:#34d399">T</div><div class="l1"><b>typos</b><span class="v">0.0.5</span><span class="badge">LightLine</span></div><div class="l2">Finds spelling mistakes in code, with few false…</div><div class="l3">Baptiste Roseau · Checker</div><div class="tick">✓</div></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">7</span></div>
+      <div class="statusbar">Ln 9, Col 37 · Spaces: 4 · UTF-8 · C</div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed: updates found<span>An installed row shows the version on this PC, and when a newer one is pinned, <code>1.0.0 → 1.1.0</code> and a blue <b>Update</b> button where the ✓ was. The header counts them; <b>Update all</b> takes every one.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="search"><span>⌕</span><span class="q">Search extensions</span><span>⏷</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Snippets</span><span class="chip">Checkers</span></div>
+      <div class="div"></div>
+      <div class="hd new"><span class="chev">▾</span>INSTALLED <span class="n">3</span><span class="up">2 updates · Update all</span></div>
+      <div class="ext new"><div class="icon" style="background:linear-gradient(135deg,#ffffff 0 50%,#000000 50% 100%);border:1px solid #6b88b8"></div><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0 → <span class="to">1.1.0</span></span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · Color theme</div><div class="btn">Update</div></div>
+      <div class="ext new"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula</b><span class="v">1.0.4 → <span class="to">1.1.2</span></span><span class="badge">LightLine</span></div><div class="l2">The official Dracula themes, dark and light</div><div class="l3">Dracula · Color theme</div><div class="btn">Update</div></div>
+      <div class="ext"><div class="icon" style="background:#34d399">T</div><div class="l1"><b>typos</b><span class="v">0.0.5</span><span class="badge">LightLine</span></div><div class="l2">Finds spelling mistakes in code, with few false…</div><div class="l3">Baptiste Roseau · Checker</div><div class="tick">✓</div></div>
+      <div class="hd"><span class="chev">▾</span>RECOMMENDED <span class="n">7</span></div>
+      <div class="statusbar">2 extension updates: LightLine Themes, Dracula</div>
+    </div>
+  </figure>
+
+  <figure>
+    <figcaption>Proposed: updating, and the ··· menu<span>While it downloads, the button says <b>Updating</b> like <b>Installing</b> does today. The ··· menu gets <b>Update All (2)</b> under Check for Updates. Pointing at an up-to-date row still turns its ✓ into <b>Uninstall</b>.</span></figcaption>
+    <div class="panel">
+      <div class="ph">EXTENSIONS <span class="ic">⟳ ···</span></div>
+      <div class="menu new"><div>Show Installed</div><div>Show Recommended</div><div class="sep"></div><div>Check for Updates</div><div class="on">Update All (1)</div><div class="sep"></div><div>Open Extensions Folder</div></div>
+      <div class="search"><span>⌕</span><span class="q">Search extensions</span><span>⏷</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Themes</span><span class="chip">Snippets</span><span class="chip">Checkers</span></div>
+      <div class="div"></div>
+      <div class="hd"><span class="chev">▾</span>INSTALLED <span class="n">3</span><span class="up">1 update</span></div>
+      <div class="ext new"><div class="icon" style="background:linear-gradient(135deg,#ffffff 0 50%,#000000 50% 100%);border:1px solid #6b88b8"></div><div class="l1"><b>LightLine Themes</b><span class="v">1.0.0 → <span class="to">1.1.0</span></span><span class="badge">LightLine</span></div><div class="l2">Daylight and Contrast, made to match Midnight</div><div class="l3">LightLine · Color theme</div><div class="btn busy">Updating</div></div>
+      <div class="ext"><div class="icon" style="background:#bd93f9">D</div><div class="l1"><b>Dracula</b><span class="v">1.1.2</span><span class="badge">LightLine</span></div><div class="l2">The official Dracula themes, dark and light</div><div class="l3">Dracula · Color theme</div><div class="tick">✓</div></div>
+      <div class="ext hot"><div class="icon" style="background:#34d399">T</div><div class="l1"><b>typos</b><span class="v">0.0.5</span><span class="badge">LightLine</span></div><div class="l2">Finds spelling mistakes in code, with few false…</div><div class="l3">Baptiste Roseau · Checker</div><div class="btn ghost">Uninstall</div></div>
+      <div class="statusbar">Updating LightLine Themes to 1.1.0...</div>
+    </div>
+  </figure>
+</div>
+<p style="color:var(--muted);font-size:13px">Versions are examples. The arrow and the new version are one short <code>ExtTextOut</code> each, drawn only on rows with an update. When the name is long, the version gives way before the badge, as it does today.</p>
+
+<h2>How it works</h2>
+<div class="flow">
+  <div class="step"><b>1 · Know both versions</b>The installed version comes from the extension's own <code>extension.toml</code> (the scan already reads it) and is kept in its own field. The available one is the list's <code>version</code> for an entry LightLine pins, otherwise the Zed registry's. <div class="when">That fixes today's row, which showed the registry's version as if it were installed.</div></div>
+  <div class="step"><b>2 · Compare when a list arrives</b>A row has an update when the available version is newer by number (<code>1.10.0</code> &gt; <code>1.9.2</code>, the comparison <code>requires</code> already uses). An older or equal one is never offered. <div class="when">On opening the panel, as today, and on <b>Check for Updates</b>, which now refetches both lists instead of reusing them for 10 minutes.</div></div>
+  <div class="step"><b>3 · Update like an install</b>The same path: staged download, checks, backup, swap, rollback on failure. Then whatever the extension was doing is picked up again. <div class="when">Update All does them one after another (installs already queue on one lock), with one status line: <i>Updating 2 extensions (1 of 2)...</i></div></div>
+</div>
+
+<h3 style="font-size:14px;color:var(--label);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px">After an update, by kind</h3>
+<div class="tablewrap"><table>
+  <tr><th>Kind</th><th>What happens</th></tr>
+  <tr><td>Color theme</td><td>If it's the theme in use, it's applied again by its variant's name, so the new colors show at once. If that variant is gone in the new version, LightLine Midnight is used and the status bar says so.</td></tr>
+  <tr><td>Icon theme</td><td>Icons are reloaded, as after an install.</td></tr>
+  <tr><td>Snippets</td><td>The cached snippets are dropped and read again on the next <code>Ctrl+Space</code>.</td></tr>
+  <tr><td>Checker</td><td>Its server restarts in the open files. A program LightLine downloaded for it is kept if the version it needs is unchanged.</td></tr>
+  <tr><td>Language</td><td>The grammar is rebuilt in the staged copy. If Windows still has the old grammar open (a file of that language was open), the swap fails, the old copy stays, and the status bar says <i>Restart LightLine, then update Lua</i>.</td></tr>
+</table></div>
+
+<h2>Speed and privacy</h2>
+<table>
+  <tr><th>Measure</th><th>Effect</th></tr>
+  <tr><td>Startup, idle</td><td>None. Nothing is checked at startup or on a timer: the network is used only when you open Extensions, press Check for Updates, or press Update.</td></tr>
+  <tr><td>Opening Extensions</td><td>When a list arrives, a version comparison for each installed extension: a handful of string splits, far below a millisecond.</td></tr>
+  <tr><td>Panel paint</td><td>Only rows with an update draw the arrow and new version; the header draws one more short label when there are updates.</td></tr>
+  <tr><td>Typing and scrolling</td><td>Not touched.</td></tr>
+</table>
+
+<h2>Work involved</h2>
+<ul>
+  <li><b>Library:</b> make <code>lightline_list::newer</code> public as the version comparison; a way to fetch both lists again on request, skipping the 10-minute reuse.</li>
+  <li><b>UI:</b>
+    <ul>
+      <li><code>Extension</code> gets an <code>installed_version</code>, filled by the scan.</li>
+      <li><code>extensions_panel.rs</code>: the update test, Update and Update All, picking up after an update, and the header's count and link.</li>
+      <li><code>render/extensions.rs</code>: the arrow, the version and the button.</li>
+      <li><code>more_menu.rs</code>: <b>Update All (n)</b>.</li>
+      <li><code>panels.rs</code>: the registry list no longer overwrites an installed version.</li>
+    </ul></li>
+  <li><b>Tests:</b>
+    <ul>
+      <li>Which rows have updates (newer, equal, older, a list pin against the Zed registry).</li>
+      <li>An update of a local fixture repository from 1.0.0 to 1.1.0 keeps the theme in use.</li>
+      <li>A failed update leaves the old copy.</li>
+      <li>Live: an older LightLine Themes installed by hand, then Update in the panel.</li>
+    </ul></li>
+  <li><b>Docs:</b> <code>USER_GUIDE.md</code> (Extensions), <code>CHANGELOG.md</code> (Added: updates; Fixed: the installed version shown).</li>
+</ul>
+
+<h2>Decisions for you</h2>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Options</th><th>Recommendation</th></tr>
+  <tr><td>When to look for updates</td><td><b>Only when you open Extensions or press Check for Updates</b> · also once a day at startup</td><td class="rec">Only when you act. That's LightLine's privacy promise (no network the user didn't ask for), and it keeps startup at no work.</td></tr>
+  <tr><td>Where updates show</td><td><b>Installed rows + the header's count</b> · also a dot on the Extensions icon in the rail</td><td class="rec">Rows and header. Updates are only known once the panel has been opened, when you're already looking at it, so a rail dot would add little.</td></tr>
+  <tr><td>Update All</td><td><b>In the header and the ··· menu</b> · menu only · none</td><td class="rec">Both. The header link shows only with two or more updates, so one update has one button.</td></tr>
+  <tr><td>A new commit without a new version</td><td><b>Not offered</b> · offer it too (LightLine would record the installed commit)</td><td class="rec">Not offered. The version is the promise: Zed's registry requires a bump for every change, and lightline-extensions' CONTRIBUTING does too.</td></tr>
+  <tr><td>Language whose grammar is in use</td><td><b>Try, and keep the old copy with a "restart first" message if Windows holds it</b> · always ask to restart</td><td class="rec">Try first. Most of the time no file of that language is open and the update just works.</td></tr>
+</table></div>
+
+</div>
+</body>
+</html>
