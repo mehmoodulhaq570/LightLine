@@ -116,15 +116,63 @@ fn fetch(url: &str) -> Result<String, String> {
     let mut response = ureq::get(url)
         .config()
         .timeout_global(Some(REQUEST_TIMEOUT))
+        .http_status_as_error(false)
         .build()
         .call()
         .map_err(|error| format!("could not reach {url}: {error}"))?;
+    let status = response.status().as_u16();
+    if status != 200 {
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        return Err(rate_limit_message(
+            status,
+            header("x-ratelimit-remaining").as_deref(),
+            header("x-ratelimit-reset").as_deref(),
+            now,
+        )
+        .unwrap_or_else(|| format!("could not reach {url}: it answered {status}")));
+    }
     response
         .body_mut()
         .with_config()
         .limit(16 * 1024 * 1024)
         .read_to_string()
         .map_err(|error| format!("could not read the response from {url}: {error}"))
+}
+
+// What to say when GitHub refuses because this network's hourly allowance
+// of API requests without an account (60) is used up: it answers 403 or
+// 429 with `x-ratelimit-remaining: 0` and when the allowance comes back
+// (`x-ratelimit-reset`, seconds since 1970). None for any other refusal.
+fn rate_limit_message(
+    status: u16,
+    remaining: Option<&str>,
+    reset: Option<&str>,
+    now: u64,
+) -> Option<String> {
+    if !matches!(status, 403 | 429) || remaining.map(str::trim) != Some("0") {
+        return None;
+    }
+    let wait = reset
+        .and_then(|reset| reset.trim().parse::<u64>().ok())
+        .map(|reset| reset.saturating_sub(now));
+    let when = match wait {
+        Some(seconds) if seconds <= 60 => "in a minute".to_owned(),
+        Some(seconds) => format!("in {} minutes", seconds.div_ceil(60)),
+        None => "within the hour".to_owned(),
+    };
+    Some(format!(
+        "GitHub's limit of 60 extension lookups an hour from this network is used up; \
+         try again {when}"
+    ))
 }
 
 // The repository and commit in GitHub's contents-API answer for a
@@ -144,6 +192,37 @@ fn parse_submodule(json: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_used_up_github_allowance_says_when_to_try_again() {
+        let now = 1_000_000;
+        let message = rate_limit_message(403, Some("0"), Some("1001021"), now).unwrap();
+        assert!(
+            message.contains("60 extension lookups an hour"),
+            "{message}"
+        );
+        assert!(message.ends_with("try again in 18 minutes"), "{message}");
+        assert!(
+            rate_limit_message(429, Some("0"), Some("1000030"), now)
+                .unwrap()
+                .ends_with("in a minute")
+        );
+        assert!(
+            rate_limit_message(403, Some("0"), None, now)
+                .unwrap()
+                .ends_with("within the hour")
+        );
+        // Any other refusal is reported as it is.
+        assert_eq!(
+            rate_limit_message(403, Some("12"), Some("1001021"), now),
+            None
+        );
+        assert_eq!(
+            rate_limit_message(404, Some("0"), Some("1001021"), now),
+            None
+        );
+        assert_eq!(rate_limit_message(403, None, None, now), None);
+    }
 
     #[test]
     fn submodule_answers_give_the_repository_and_pinned_commit() {
