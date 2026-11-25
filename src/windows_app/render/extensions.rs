@@ -3,6 +3,7 @@ use super::super::extensions_panel::{
     EXTENSION_INDENT, ExtensionRow, ExtensionsButton, ExtensionsHot, ExtensionsLayout,
 };
 use super::super::extensions_panel::{monogram, updates_label};
+use super::super::own_icons::OwnIcon;
 use super::super::*;
 use super::blend;
 
@@ -577,11 +578,20 @@ impl App {
 
     /// The extension's icon, by the same rules for every extension: a color
     /// theme shows a swatch of its colors, an icon theme its own folder, a
-    /// language its file icon, anything else a monogram. Prettier shows its
+    /// language its file icon, anything else a monogram. LightLine's own
+    /// extensions show its mark for their kind (own_icons.rs). Prettier shows its
     /// own logo (offset bars in its colors) in the same style, and Dracula and
     /// Material, known before they're installed, look as they will after.
     fn paint_extension_icon(&self, hdc: HDC, icon: RECT, ext: &Extension) {
         let s = |value: i32| self.scale(value);
+        // LightLine's own extensions carry its mark, installed or not.
+        if let Some(own) = OwnIcon::for_extension(ext)
+            && self
+                .icons
+                .draw_own(hdc, own, icon.left, icon.top, icon.right - icon.left)
+        {
+            return;
+        }
         match ext.id.as_str() {
             "prettier" => {
                 self.paint_prettier_tile(hdc, icon);
