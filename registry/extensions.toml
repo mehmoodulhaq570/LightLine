@@ -201,3 +201,78 @@ kind = "snippets"
 name = "Comment Blocks"
 description = "Boxed comment blocks in 26 languages"
 publisher = "Rami Shalhoub"
+
+[[extension]]
+id = "javascript-snippets"
+from = "zed"
+recommended = true
+kind = "snippets"
+name = "JavaScript Snippets"
+description = "Functions, classes, promises, imports and console logging"
+publisher = "seekode"
+
+[[extension]]
+id = "typescript-snippets"
+from = "zed"
+recommended = true
+kind = "snippets"
+name = "TypeScript Snippets"
+description = "Interfaces, types, generics, classes and async functions"
+publisher = "seekode"
+
+[[extension]]
+id = "html-snippets"
+from = "zed"
+kind = "snippets"
+name = "HTML Snippets"
+description = "Page skeletons, forms, tables, media and meta tags"
+publisher = "seekode"
+
+[[extension]]
+id = "markdown-snippets"
+from = "zed"
+kind = "snippets"
+name = "Markdown Snippets"
+description = "Headings, links, tables, code blocks and task lists"
+publisher = "Bobby Mannino"
+
+[[extension]]
+id = "powershell"
+from = "zed"
+kind = "language"
+name = "PowerShell"
+description = "Colors for .ps1 files; PowerShell Editor Services from PATH"
+publisher = "Thanabodee Charoenpiriyakij"
+
+[[extension]]
+id = "toml"
+from = "zed"
+recommended = true
+kind = "language"
+name = "TOML"
+description = "Colors for .toml files; Taplo from PATH"
+publisher = "Max Brunsfeld"
+
+[[extension]]
+id = "sql"
+from = "zed"
+kind = "language"
+name = "SQL"
+description = "Colors for .sql files"
+publisher = "nervenes"
+
+[[extension]]
+id = "dockerfile"
+from = "zed"
+kind = "language"
+name = "Dockerfile"
+description = "Colors for Dockerfiles; a Docker language server from PATH"
+publisher = "d1y, joshmeads"
+
+[[extension]]
+id = "lua"
+from = "zed"
+kind = "language"
+name = "Lua"
+description = "Colors for .lua files; lua-language-server from PATH"
+publisher = "Max Brunsfeld"

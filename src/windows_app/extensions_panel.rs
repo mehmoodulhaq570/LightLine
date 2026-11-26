@@ -158,7 +158,7 @@ impl App {
         let mut chips = Vec::new();
         let mut bottom = search.bottom;
         if !self.searching_extensions() {
-            let top = search.bottom + s(6);
+            let mut top = search.bottom + s(6);
             let mut x = search.left;
             let widths = self.with_ui_dc(hdc, |hdc| {
                 ExtensionsFilter::PILLS
@@ -167,6 +167,11 @@ impl App {
                     .collect::<Vec<_>>()
             });
             for width in widths {
+                // A chip that would run past the search box starts a new row.
+                if x > search.left && x + width + s(18) > search.right {
+                    x = search.left;
+                    top += s(CHIP_HEIGHT) + s(4);
+                }
                 let rect = RECT {
                     left: x,
                     top,
@@ -213,6 +218,7 @@ impl App {
                 ExtensionCategory::IconTheme | ExtensionCategory::ColorTheme
             ),
             ExtensionsFilter::Snippets => ext.category() == ExtensionCategory::Snippets,
+            ExtensionsFilter::Languages => ext.category() == ExtensionCategory::Language,
             ExtensionsFilter::Checkers => ext.category() == ExtensionCategory::Tool,
         }
     }
@@ -276,6 +282,7 @@ impl App {
             ExtensionsFilter::All => String::new(),
             ExtensionsFilter::Themes => "Themes".to_owned(),
             ExtensionsFilter::Snippets => "Snippets".to_owned(),
+            ExtensionsFilter::Languages => "Languages".to_owned(),
             ExtensionsFilter::Checkers => "Checkers".to_owned(),
         };
         let installed: Vec<usize> = self
@@ -325,9 +332,19 @@ impl App {
         });
         if !collapsed(ExtensionsSection::Recommended) {
             if recommended.is_empty() {
-                rows.push(ExtensionRow::Note(
-                    "All of them are installed. Search for more.".into(),
-                ));
+                // Empty because everything is installed, or because the
+                // list has nothing of this kind.
+                let any_installed = self.extensions.iter().any(|ext| {
+                    ext.listed.is_some()
+                        && ext.installed
+                        && (ext.recommended || !all)
+                        && self.extension_matches_filter(ext)
+                });
+                rows.push(ExtensionRow::Note(if any_installed {
+                    "All of them are installed. Search for more.".into()
+                } else {
+                    "None on LightLine's list yet. Search for more.".into()
+                }));
             }
             rows.extend(recommended.into_iter().map(ExtensionRow::Extension));
         }
