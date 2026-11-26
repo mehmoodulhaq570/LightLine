@@ -1,6 +1,6 @@
 # LightLine session handoff
 
-Updated: 2026-11-25 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-25)" at the end: it has the current state and the planned next steps.**
+Updated: 2026-11-26 (Asia/Karachi). The sections are in date order. **Start with "Where things stand (2026-11-26)" at the end: it has the current state and the planned next steps.**
 Workspace: `D:\Projects\CustomIDE`
 
 ## Completed work
@@ -682,7 +682,7 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 - #119 `1e9435e`: own icons for LightLine's extensions (`windows_app/own_icons.rs`, design `design/own-extension-icons-design.html`). The same SVGs are in lightline-extensions' `icons/` (`ece9c4b`), built from the consts in `own_icons.rs`; re-export them if the art changes.
 - #120 `b97f6d4`: a clear status message when GitHub's 60-an-hour API limit for Zed registry lookups is used up (`zed_registry::rate_limit_message`).
 
-**Open:** #121 (`fix/rust-debug-breakpoints`, CI green, ready to merge):
+**Merged later on 2026-11-25:** #121 `d9704d6` (`fix/rust-debug-breakpoints`):
 - Rust breakpoints were never hit: lldb doesn't bind `\\?\` paths, so `debug_breakpoints` now returns plain paths.
 - Adapter errors showed only "request failed": `debug::failure_reason` now reads `body.error.format`.
 - USER_GUIDE now says which LLDB files are needed.
@@ -700,7 +700,13 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 
 **Unreleased** holds everything since v0.12.0, including the AI work, our own extensions, updates, icons and today's fixes. The maintainer wants one bigger release later: **don't release until asked**.
 
-**Next (agreed 2026-11-25), in order:**
+**Next (agreed 2026-11-25), in order.** Cloud sessions are not usable: /web-setup failed, GitHub is not linked to claude.ai. Work locally.
+
+0. **PowerShell Snippets first** (plan agreed, about 30-45 min). LightLine already maps `.ps1` to `powershell.json` (`src/extensions/snippets.rs:306`).
+   - lightline-extensions: `snippets/lightline-powershell-snippets/` copied from the C one; about 20 snippets; run `scripts/check.py`; push with the maintainer's OK.
+   - LightLine branch: `registry/extensions.toml` entry with `path`, CHANGELOG, `cargo test --lib lightline_list` and `-- --ignored`; `cargo clean --profile dev` first (D: 1.6 GB).
+   - Live check: `.ps1`, Ctrl+Space, one screenshot.
+
 1. **Extension list pass, design page first.**
    - Test about 8–10 Zed registry extensions in LightLine:
      - snippet packs `javascript-snippets`, `typescript-snippets`, `html-snippets`, `markdown-snippets`;
@@ -710,3 +716,15 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 2. **WASM extensions:** a design page first. Weigh the runtime's size and startup cost: it must load lazily, and the exe must stay small.
 
 **Watch:** D: has about 1.9 GB free.
+
+## Where things stand (2026-11-26)
+
+**PowerShell Snippets: done, not yet committed in LightLine.**
+- lightline-extensions `5ebe5c4` (pushed): `snippets/lightline-powershell-snippets/`, 25 snippets, `$` escaped as `\$`; README row and icon (copy of the C pack's snippet icon).
+- LightLine branch `feat/powershell-snippets` (uncommitted): `registry/extensions.toml` entry pinned to `5ebe5c4`, recommended; `.psm1` maps to `powershell` too (`snippets.rs`); CHANGELOG bullet, and the list counts are now nineteen tested / eleven recommended.
+- Tested: `check.py`; all 25 expanded through `snippets::parse` + `lsp::expand_snippet`; `cargo test --lib lightline_list -- --include-ignored` (8 pass, installs from GitHub); fmt and clippy clean; live: `.ps1`, `afu` + Ctrl+Space offers `~ afunc`.
+- Waiting on the maintainer: commit and PR.
+
+**Next, the maintainer's order (2026-11-26):**
+1. Extension list pass: test the data-only Zed extensions (snippet packs, languages listed above) and add the ones that work.
+2. Extensions that need more: design page framed as **adapters first, WASM later only if needed**, not "build WASM support".
