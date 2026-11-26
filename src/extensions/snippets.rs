@@ -303,7 +303,7 @@ pub fn language_keys(path: Option<&Path>, extension_language: Option<&str>) -> V
         Some("astro") => &["astro"],
         Some("sql") => &["sql"],
         Some("txt" | "text") => &["plain text"],
-        Some("ps1") => &["powershell"],
+        Some("ps1" | "psm1") => &["powershell"],
         _ => &[],
     };
     names.iter().map(|name| name.to_string()).collect()

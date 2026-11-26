@@ -54,6 +54,19 @@ recommended = true
 requires = "0.13.0"
 
 [[extension]]
+id = "lightline-powershell-snippets"
+repository = "https://github.com/mehmoodulhaq570/lightline-extensions.git"
+path = "snippets/lightline-powershell-snippets"
+commit = "5ebe5c4fca7784329cc240cb07754e7b5bff046e"
+version = "1.0.0"
+kind = "snippets"
+name = "PowerShell Snippets"
+description = "Functions, param blocks, try/catch, pipelines and more"
+publisher = "LightLine"
+recommended = true
+requires = "0.13.0"
+
+[[extension]]
 id = "prettier"
 builtin = true
 kind = "formatter"
