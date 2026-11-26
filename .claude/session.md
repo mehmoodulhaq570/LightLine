@@ -728,3 +728,13 @@ Overall order: inline errors → snippet packs → tool extensions from PATH →
 **Next, the maintainer's order (2026-11-26):**
 1. Extension list pass: test the data-only Zed extensions (snippet packs, languages listed above) and add the ones that work.
 2. Extensions that need more: design page framed as **adapters first, WASM later only if needed**, not "build WASM support".
+
+**Extension list pass (2026-11-26), branch `feat/extension-list-pass`, uncommitted.**
+- Added to `registry/extensions.toml` (not recommended yet): snippets `javascript-snippets` (143), `typescript-snippets` (204), `html-snippets` (116), `markdown-snippets` (61); languages `powershell`, `toml`, `sql`, `dockerfile`, `lua`.
+- Tested: `cargo test --lib lightline_list -- --include-ignored` installs all 28 (grammars built with the local C compiler, queries compile); a temporary test colored a real sample file of each language (keywords, strings, numbers, comments) and read its comment style. Removed afterwards.
+- Recommended (my pick, maintainer left it to me): javascript-snippets, typescript-snippets, toml. Now 28 tested / 14 recommended.
+- New **Languages** chip (`ExtensionsFilter::Languages`); chips wrap onto a second row when they don't fit (`extensions_panel.rs` layout). CHANGELOG list bullet, USER_GUIDE and README updated.
+- fmt, clippy, full `cargo test` pass. Live: chips wrap 3+2 at default width; Languages filter works. It showed 0 entries because the panel reads the newer list from GitHub `main`, which doesn't have them until merged. An empty filter now says "None on LightLine's list yet" instead of "All of them are installed" when nothing of that kind is installed.
+- Committed and PR opened (maintainer's OK, 2026-11-26).
+
+**Next:** step 2, the design page for extensions that need more (adapters first, WASM later only if needed). Start it after `/clear`.

@@ -274,16 +274,18 @@ pub(super) enum ExtensionsFilter {
     All,
     Themes,
     Snippets,
+    Languages,
     Checkers,
 }
 
 impl ExtensionsFilter {
     // The Marketplace filter pills: label and unscaled width, shared by the
     // painter and the click handler so the two can't drift apart.
-    pub(super) const PILLS: [(ExtensionsFilter, &'static str, i32); 4] = [
+    pub(super) const PILLS: [(ExtensionsFilter, &'static str, i32); 5] = [
         (ExtensionsFilter::All, "All", 36),
         (ExtensionsFilter::Themes, "Themes", 60),
         (ExtensionsFilter::Snippets, "Snippets", 68),
+        (ExtensionsFilter::Languages, "Languages", 78),
         (ExtensionsFilter::Checkers, "Checkers", 73),
     ];
 }
